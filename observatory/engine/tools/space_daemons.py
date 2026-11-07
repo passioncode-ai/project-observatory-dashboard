@@ -18,9 +18,17 @@ site-packages out of its module path and ignores every PYTHON* variable, so no m
 account planted is imported as root. `apply` and `remove` refuse to run without it (`not-isolated`).
 
 Root must never run a file the space's account can write, so this script is not run from the engine's
-folder. The administrator installs a root-owned copy once, from the verified release:
+folder. The administrator installs a root-owned copy once, from the release downloaded and verified in
+the administrator's OWN account, never copied from the space account's folders:
 
-    sudo install -o root -g wheel -m 0755 <this file from the verified release> /usr/local/libexec/observatory-space-daemons
+    gh release download vX.Y.Z -R passioncode-ai/project-observatory-dashboard -p 'SHA256SUMS*' -p '*.whl'
+    shasum -a 256 -c SHA256SUMS --ignore-missing
+    gpg --verify SHA256SUMS.asc SHA256SUMS
+    unzip -p project_observatory-X.Y.Z-py3-none-any.whl observatory/engine/tools/space_daemons.py > space_daemons.py
+    sudo install -d -o root -g wheel -m 0755 /usr/local/libexec
+    sudo install -o root -g wheel -m 0755 space_daemons.py /usr/local/libexec/observatory-space-daemons
+
+`--version` prints the version and this file's sha256 for information; the verification is above.
 
 `apply` and `remove` refuse to run from a copy that is not owned by root, is writable by group or
 others, is a symbolic link, or sits in a folder anyone but root can write. `plan`, `status` and
@@ -28,7 +36,7 @@ others, is a symbolic link, or sits in a folder anyone but root can write. `plan
 the script's folder is not searched for modules, and the folder must still be root's alone before the
 copy goes in, which the administrator checks (`ls -ld /usr/local /usr/local/libexec`).
 
-    space_daemons.py --version                       the version and the sha256 of this file
+    space_daemons.py --version                       the version and the sha256 of this file (information)
     space_daemons.py plan   --user NAME [--from background|staged] [--label L ...] [--json]
     space_daemons.py apply  --user NAME [--label L ...] [--json]          (root)
     space_daemons.py remove --user NAME --label L [--json]                (root)
@@ -93,6 +101,8 @@ INSTALLED_COPY = "/usr/local/libexec/observatory-space-daemons"
 INSTALLED_COMMAND = "/usr/bin/python3 -I " + INSTALLED_COPY
 LAUNCHCTL = "/bin/launchctl"
 CHMOD = "/bin/chmod"
+LS = "/bin/ls"
+SYSTEM_DAEMONS_DIR = "System/Library/LaunchDaemons"
 LOGS_DIR = "Library/Logs/ProjectObservatory"
 #: The one ACL entry the account's log folder carries: read, inherited by every log inside.
 LOG_ACL = "%s allow list,search,read,readattr,readextattr,readsecurity,file_inherit,directory_inherit"
@@ -110,11 +120,17 @@ TEST_ROOT = "OBSERVATORY_SPACE_DAEMONS_TEST_ROOT"
 TEST_HOME = "OBSERVATORY_SPACE_DAEMONS_TEST_HOME"
 TEST_LAUNCHCTL = "OBSERVATORY_SPACE_DAEMONS_TEST_LAUNCHCTL"
 
-LABEL_SHAPE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+#: The label rule `apply` and the engine's headless `machine-move cutover` share (always `fullmatch`):
+#: letters and digits, then . _ @ - (Homebrew's `homebrew.mxcl.postgresql@14` among them), at most 128.
+LABEL_SHAPE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._@-]{0,127}")
+#: Every integer a daemon carries fits launchd's 32-bit fields.
+INT_MAX = 2 ** 31 - 1
 PROCESS_TYPES = ("Background", "Standard", "Adaptive", "Interactive")
 CALENDAR_KEYS = ("Minute", "Hour", "Day", "Weekday", "Month")
 KEEPALIVE_BOOLS = ("SuccessfulExit", "Crashed", "AfterInitialDemand")
-KEEPALIVE_DICTS = ("OtherJobEnabled", "PathState")
+#: PathState only, its paths inside the account's home. OtherJobEnabled is refused: it would tie this
+#: daemon to another account's or the system's jobs.
+KEEPALIVE_PATHS = ("PathState",)
 #: Keys copied from an agent definition. Everything else (UserName, GroupName, InitGroups, Umask,
 #: SessionCreate, LaunchEvents, MachServices, Sockets, WatchPaths, QueueDirectories, RootDirectory,
 #: resource limits, ...) is refused: in the system domain they would act with root's reach.
@@ -198,12 +214,21 @@ class System(object):
 
     def command(self, argv):
         """ARGV through the runner: (exit code, last line of its error); 127 when it could not start."""
+        code, _out, tail = self.output(argv)
+        return code, tail
+
+    def output(self, argv):
+        """ARGV through the runner: (exit code, its output, last line of its error)."""
         try:
             p = self.runner(list(argv), capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
         except (OSError, subprocess.SubprocessError) as exc:
-            return 127, type(exc).__name__
+            return 127, "", type(exc).__name__
         tail = ((p.stderr or "").strip().splitlines() or [""])[-1][:200]
-        return p.returncode, tail
+        return p.returncode, p.stdout or "", tail
+
+    def label_dirs(self):
+        """The folders whose plists hold the system domain's labels."""
+        return [self.daemons_dir(), os.path.join(self.root, SYSTEM_DAEMONS_DIR)]
 
     def loaded(self, label):
         return self.run(["print", "system/" + label])[0] == 0
@@ -487,21 +512,38 @@ def _check_path(key, value, account):
     return []
 
 
-def _check_keepalive(value):
+def _check_keepalive(value, account):
+    """The problems of a KeepAlive value: a bool, or a dict of the simple conditions, PathState's paths
+    inside the account's home."""
     if isinstance(value, bool):
-        return True
+        return []
     if not isinstance(value, dict):
-        return False
+        return [_problem("bad_value", "KeepAlive")]
+    problems = []
     for k, v in value.items():
         if k in KEEPALIVE_BOOLS:
             if not isinstance(v, bool):
-                return False
-        elif k in KEEPALIVE_DICTS:
+                problems.append(_problem("bad_value", "KeepAlive." + k))
+        elif k in KEEPALIVE_PATHS:
             if not _str_dict(v, bool):
-                return False
+                problems.append(_problem("bad_value", "KeepAlive." + k))
+            else:
+                for path in sorted(v):
+                    problems.extend(_check_path("KeepAlive.PathState", path, account))
         else:
-            return False
-    return True
+            problems.append(_problem("keepalive_condition_not_allowed", k))
+    return problems
+
+
+def _int_problems(value, where):
+    """Every integer inside VALUE outside 0..2**31-1, named by where it sits."""
+    if isinstance(value, dict):
+        return [p for k, v in sorted(value.items(), key=lambda kv: str(kv[0])) for p in _int_problems(v, where + "." + str(k))]
+    if isinstance(value, list):
+        return [p for i, v in enumerate(value) for p in _int_problems(v, "%s[%d]" % (where, i))]
+    if _is_int(value) and not 0 <= value <= INT_MAX:
+        return [_problem("integer_out_of_range", "%s is outside 0..%d" % (where, INT_MAX))]
+    return []
 
 
 def _check_calendar(value):
@@ -525,8 +567,8 @@ def validate(doc, file_name, account, log_dir=None):
         if key not in ALLOWED_KEYS:
             problems.append(_problem("key_not_allowed", key))
     label = doc.get("Label")
-    if not isinstance(label, str) or not LABEL_SHAPE.match(label):
-        problems.append(_problem("label_shape", "letters, digits, then . _ - (at most 128)"))
+    if not isinstance(label, str) or not LABEL_SHAPE.fullmatch(label):
+        problems.append(_problem("label_shape", "letters and digits, then . _ @ - (at most 128)"))
     else:
         if file_name != label + ".plist":
             problems.append(_problem("file_name", "the file is %s, the label asks for %s.plist" % (file_name, label)))
@@ -544,7 +586,6 @@ def validate(doc, file_name, account, log_dir=None):
         "RunAtLoad": lambda v: isinstance(v, bool),
         "LowPriorityIO": lambda v: isinstance(v, bool),
         "AbandonProcessGroup": lambda v: isinstance(v, bool),
-        "KeepAlive": _check_keepalive,
         "StartInterval": lambda v: _is_int(v) and v > 0,
         "ThrottleInterval": lambda v: _is_int(v) and v >= 0,
         "ExitTimeOut": lambda v: _is_int(v) and v >= 0,
@@ -557,16 +598,36 @@ def validate(doc, file_name, account, log_dir=None):
     for key, ok in sorted(checks.items()):
         if key in doc and not ok(doc[key]):
             problems.append(_problem("bad_value", key))
+    if "KeepAlive" in doc:
+        problems.extend(_check_keepalive(doc["KeepAlive"], account))
+    env = doc.get("EnvironmentVariables")
+    if isinstance(env, dict):
+        for name in sorted(k for k in env if isinstance(k, str) and k.upper().startswith("DYLD_")):
+            problems.append(_problem("dyld_variable", name))
     for key in PATH_KEYS:
         if key in doc:
             problems.extend(_check_path(key, doc[key], account))
+    problems.extend(_int_problems(doc, "definition"))
     if problems:
         return problems, None
-    return [], daemon_plist(doc, account, log_dir)
+    daemon = daemon_plist(doc, account, log_dir)
+    try:
+        # What plan calls ok must be writable: a control character or an integer the format refuses
+        # fails here, not in the middle of apply.
+        plistlib.dumps(daemon, fmt=plistlib.FMT_XML, sort_keys=True)
+    except Exception as exc:  # plistlib raises ValueError, TypeError or OverflowError
+        return [_problem("not_writable_as_plist", "%s: %s" % (type(exc).__name__, exc))], None
+    return [], daemon
 
 
 def default_log_dir(user):
     return os.path.join("/", LOGS_DIR, user)
+
+
+def log_paths(log_dir, label):
+    """The one place the log layout is decided: (StandardOutPath, StandardErrorPath) of LABEL's daemon in
+    the account's root-owned LOG_DIR. Change the scheme here and nowhere else."""
+    return os.path.join(log_dir, label + ".out.log"), os.path.join(log_dir, label + ".err.log")
 
 
 def daemon_plist(doc, account, log_dir=None):
@@ -574,8 +635,7 @@ def daemon_plist(doc, account, log_dir=None):
     root-owned LOG_DIR (the definition's own log paths are ignored)."""
     daemon = dict((k, v) for k, v in doc.items() if k in ALLOWED_KEYS and k not in DROPPED_KEYS)
     log_dir = log_dir or default_log_dir(account.name)
-    daemon["StandardOutPath"] = os.path.join(log_dir, doc["Label"] + ".out.log")
-    daemon["StandardErrorPath"] = os.path.join(log_dir, doc["Label"] + ".err.log")
+    daemon["StandardOutPath"], daemon["StandardErrorPath"] = log_paths(log_dir, doc["Label"])
     env = dict(doc.get("EnvironmentVariables") or {})
     env.update({"HOME": account.home, "USER": account.name, "LOGNAME": account.name})
     daemon["EnvironmentVariables"] = env
@@ -694,10 +754,13 @@ def _require_root(system, verb, account_name):
                                 "not-isolated")
     problems = system.self_check()
     if problems:
-        raise SpaceDaemonsError("%s runs only from the root-owned copy: %s. Install it once with `sudo install "
-                                "-o root -g wheel -m 0755 <space_daemons.py from the verified release> %s` and run "
-                                "`sudo %s %s ...`" % (verb, "; ".join(problems), INSTALLED_COPY, INSTALLED_COMMAND,
-                                                     verb), "not-root-owned-copy")
+        raise SpaceDaemonsError("%s runs only from the root-owned copy: %s. Install it once from the release, "
+                                "downloaded and verified in your own account (gh release download, shasum -a 256 -c "
+                                "SHA256SUMS --ignore-missing, gpg --verify SHA256SUMS.asc SHA256SUMS, unzip -p the "
+                                "wheel's observatory/engine/tools/space_daemons.py), then `sudo install -o root -g "
+                                "wheel -m 0755 space_daemons.py %s` and run `sudo %s %s ...`"
+                                % (verb, "; ".join(problems), INSTALLED_COPY, INSTALLED_COMMAND, verb),
+                                "not-root-owned-copy")
 
 
 def _check_root_dir(path, system, mode=None):
@@ -735,12 +798,74 @@ def ensure_log_dir(system, account):
             system.set_owner(path)
         os.chmod(path, mode)
         _check_root_dir(path, system, mode)
+    # Only our entry: any ACL already on either folder (someone's +a) is cleared first, then checked.
+    for path in (base, user_dir):
+        code, tail = system.command([system.chmod, "-N", path])
+        if code != 0:
+            raise SpaceDaemonsError("the ACL of %s could not be cleared (chmod -N: exit %d %s); nothing was installed"
+                                    % (path, code, tail), "log-folder")
     code, tail = system.command([system.chmod, "+a", LOG_ACL % account.name, user_dir])
     if code != 0:
         raise SpaceDaemonsError("the account's read access to %s could not be added (chmod +a: exit %d %s); nothing "
                                 "was installed" % (user_dir, code, tail), "log-folder")
+    for path, expected in ((base, []), (user_dir, ["user:%s allow" % account.name])):
+        found = _acl_entries(system, path)
+        if found is None or len(found) != len(expected) or not all(
+                f.startswith(e) for f, e in zip(found, expected)):
+            raise SpaceDaemonsError("the ACL of %s is not the one entry this tool sets (%s); nothing was installed"
+                                    % (path, "; ".join(found or ["unreadable"])), "log-folder")
+    _check_root_dir(base, system, 0o755)
     _check_root_dir(user_dir, system, 0o700)
     return user_dir
+
+
+def _acl_entries(system, path):
+    """The ACL entries of PATH as `ls -lde` prints them ("user:NAME allow ..."), or None when unreadable."""
+    code, out, _tail = system.output([LS, "-lde", path])
+    if code != 0:
+        return None
+    entries = []
+    for line in out.splitlines():
+        m = re.match(r"^\s*\d+:\s+(.*)$", line)
+        if m:
+            entries.append(m.group(1).strip())
+    return entries
+
+
+def label_holders(system):
+    """{label: [plist paths]} of every plist in /Library/LaunchDaemons and /System/Library/LaunchDaemons.
+    A plist that does not read, or is too large, is ignored."""
+    holders = {}
+    for folder in system.label_dirs():
+        try:
+            names = sorted(os.listdir(folder))
+        except OSError:
+            continue
+        for name in names:
+            if not name.endswith(".plist"):
+                continue
+            path = os.path.join(folder, name)
+            try:
+                if not os.path.isfile(path) or os.path.getsize(path) > 1024 * 1024:
+                    continue
+                with open(path, "rb") as stream:
+                    doc = plistlib.load(stream)
+            except Exception:  # an unreadable plist holds no label we can see
+                continue
+            if isinstance(doc, dict) and isinstance(doc.get("Label"), str):
+                holders.setdefault(doc["Label"], []).append(path)
+    return holders
+
+
+def _plist_label(path):
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(path, flags)
+        with os.fdopen(fd, "rb") as stream:
+            doc = plistlib.loads(stream.read(1024 * 1024))
+    except Exception:  # not a plist, or a link
+        return None
+    return doc.get("Label") if isinstance(doc, dict) else None
 
 
 def _file_sha(path):
@@ -766,7 +891,7 @@ def plan(account, source="background", labels=None, system=None):
             "from": source, "folder": folder, "definitions": defs, "not_found": missing}
 
 
-def _install_one(system, account, definition, entries):
+def _install_one(system, account, definition, entries, holders=None):
     """Write and load one daemon; on a failure put back what was there. Answers its outcome."""
     label = definition["label"]
     target = system.daemon_path(label)
@@ -781,6 +906,12 @@ def _install_one(system, account, definition, entries):
         result.update(outcome="refused", problems=[_problem(
             "loaded-in-gui", "gui/%d/%s is loaded; unload the agent first" % (account.uid, label))])
         return result
+    # The system domain's label namespace: a label any other daemon plist carries is someone else's.
+    holders = label_holders(system) if holders is None else holders
+    taken = [p for p in holders.get(label, []) if not (p == target and entry is not None)]
+    if taken:
+        result.update(outcome="refused", problems=[_problem("label_taken", "already the label of " + ", ".join(taken))])
+        return result
     previous = None
     if os.path.lexists(target):
         if os.path.islink(target) or not os.path.isfile(target):
@@ -793,7 +924,8 @@ def _install_one(system, account, definition, entries):
         current = _file_sha(target)
         if current != entry.get("writtenSha256"):
             result.update(outcome="refused", problems=[_problem(
-                "changed_since_written", "%s differs from what this tool wrote" % target)])
+                "changed_since_written", "%s differs from what this tool wrote; `remove` it, then apply again"
+                % target)])
             return result
         with open(target, "rb") as stream:
             previous = stream.read()
@@ -802,13 +934,20 @@ def _install_one(system, account, definition, entries):
             "label_taken", "system/%s is loaded and this tool did not load it" % label)])
         return result
     data = plistlib.dumps(definition["daemon"], fmt=plistlib.FMT_XML, sort_keys=True)
-    _ensure_system_dir(system.daemons_dir(), system)
-    write_atomic(target, data, system)
     new_entry = {"label": label, "user": account.name, "uid": account.uid, "source": definition["file"],
                  "sourceSha256": definition["source_sha256"], "written": target,
                  "writtenSha256": _sha256_bytes(data), "at": _now()}
     others = [e for e in entries if e["label"] != label]
+    # The registry first: a crash between the two writes leaves an entry whose plist is missing (apply
+    # writes it again, remove cleans it, status says `missing`), never a daemon nobody recorded.
     write_registry(system, others + [new_entry])
+    try:
+        _ensure_system_dir(system.daemons_dir(), system)
+        write_atomic(target, data, system)
+    except Exception as exc:
+        write_registry(system, others + ([entry] if entry is not None else []))
+        result.update(outcome="failed", problems=[_problem("write_failed", "%s: %s" % (type(exc).__name__, exc))])
+        return result
 
     def put_back(problem):
         if previous is not None:
@@ -856,12 +995,17 @@ def apply(system, account, labels=None):
         entries = read_registry(system)
         if any(not d["problems"] for d in defs):
             ensure_log_dir(system, account)
+        holders = label_holders(system)
         for definition in defs:
             if definition["problems"]:
                 results.append({"label": definition["label"], "file": definition["file"], "outcome": "skipped",
                                 "problems": definition["problems"]})
                 continue
-            results.append(_install_one(system, account, definition, entries))
+            try:
+                results.append(_install_one(system, account, definition, entries, holders))
+            except Exception as exc:  # one definition's failure never stops the others
+                results.append({"label": definition["label"], "file": definition["file"], "outcome": "failed",
+                                "problems": [_problem("failed", "%s: %s" % (type(exc).__name__, exc))]})
     return {"tool": "space-daemons", "version": SPACE_DAEMONS_VERSION, "user": account.name, "uid": account.uid,
             "folder": folder, "logs": logs, "results": results,
             "ok": all(r["outcome"] == "loaded" for r in results)}
@@ -882,6 +1026,12 @@ def remove(system, account, label):
                         "problems": [_problem("bootout_failed", ("exit %d %s" % (code, tail)).strip())], "ok": False}
         target = system.daemon_path(label)
         if os.path.lexists(target):
+            if not os.path.islink(target) and _file_sha(target) != mine[0].get("writtenSha256") \
+                    and _plist_label(target) != label:
+                raise SpaceDaemonsError("%s is neither what this tool wrote nor a daemon labelled %s: it is left "
+                                        "alone; move it aside by hand" % (target, label), "not-ours")
+            if os.path.islink(target):
+                raise SpaceDaemonsError("%s is a link: it is left alone" % target, "not-ours")
             os.unlink(target)
         write_registry(system, [e for e in entries if e["label"] != label])
     return {"label": label, "user": account.name, "outcome": "removed", "ok": True}
@@ -894,9 +1044,10 @@ def status(system, account):
             continue
         target = system.daemon_path(entry["label"])
         sha = _file_sha(target)
+        matches = sha is not None and sha == entry.get("writtenSha256")
         rows.append({"label": entry["label"], "uid": entry.get("uid"), "at": entry.get("at"),
-                     "daemon": target, "present": sha is not None,
-                     "matches": sha is not None and sha == entry.get("writtenSha256"),
+                     "daemon": target, "present": sha is not None, "matches": matches,
+                     "state": "missing" if sha is None else ("as-written" if matches else "changed"),
                      "loaded": system.loaded(entry["label"])})
     return {"tool": "space-daemons", "version": SPACE_DAEMONS_VERSION, "user": account.name,
             "registry": system.registry_path(), "daemons": rows}
@@ -918,7 +1069,8 @@ def parser():
                                              "that run as that account (UserName), never as root",
                                  epilog="apply and remove run as root, only in isolated mode, from the root-owned "
                                         "copy: sudo %s apply --user ACCOUNT --label LABEL" % INSTALLED_COMMAND)
-    ap.add_argument("--version", action="store_true", help="the version and the sha256 of this file")
+    ap.add_argument("--version", action="store_true", help="the version and the sha256 of this file (information "
+                                                              "only; verify the release's SHA256SUMS and signature)")
     sub = ap.add_subparsers(dest="command")
     p = sub.add_parser("plan", help="what apply would write, for each definition; loads nothing")
     p.add_argument("--user", required=True)
@@ -962,8 +1114,7 @@ def _render(command, result):
     else:
         lines.append("%d daemon(s) of %s in %s" % (len(result["daemons"]), result["user"], result["registry"]))
         for d in result["daemons"]:
-            lines.append("  %s  %s, %s" % (d["label"], "loaded" if d["loaded"] else "not loaded",
-                                          "as written" if d["matches"] else "changed or missing"))
+            lines.append("  %s  %s, %s" % (d["label"], "loaded" if d["loaded"] else "not loaded", d["state"]))
     return "\n".join(lines)
 
 

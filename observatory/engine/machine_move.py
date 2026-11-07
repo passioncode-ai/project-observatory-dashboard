@@ -162,6 +162,23 @@ def account_name(uid: int) -> str:
         return os.environ.get("USER") or "ACCOUNT"
 
 
+#: How an administrator gets the root-owned copy: from the release, downloaded and verified from their OWN
+#: account, never copied from this account's folders (which this account could have changed).
+INSTALL_STEPS = (
+    "gh release download vX.Y.Z -R passioncode-ai/project-observatory-dashboard -p 'SHA256SUMS*' -p '*.whl'",
+    "shasum -a 256 -c SHA256SUMS --ignore-missing && gpg --verify SHA256SUMS.asc SHA256SUMS",
+    "unzip -p project_observatory-X.Y.Z-py3-none-any.whl observatory/engine/tools/space_daemons.py > space_daemons.py",
+    "sudo install -d -o root -g wheel -m 0755 /usr/local/libexec",
+    f"sudo install -o root -g wheel -m 0755 space_daemons.py {SPACE_DAEMONS_COPY}",
+)
+
+
+def install_steps() -> list[str]:
+    """The once-per-computer steps, run by an administrator in their own account (OBS-361)."""
+    return ["once per computer, by an administrator in their OWN account (never from this account's folders): "
+            + "; then ".join(INSTALL_STEPS)]
+
+
 def root_step(verb: str, label: str, uid: int) -> str:
     """The administrator's command for LABEL: isolated mode (`-I`), so root imports nothing the account wrote."""
     return f"sudo /usr/bin/python3 -I {SPACE_DAEMONS_COPY} {verb} --user {account_name(uid)} --label {label}"
@@ -270,6 +287,11 @@ def cutover(label: str, home: Path, *, runner=subprocess.run, platform: str = sy
                 f"this account has no GUI session, so {label} can run here only as a system daemon, and the "
                 f"administrator's tool reads {default}, not XDG_DATA_HOME ({mi.data_dir(home)}): a custom "
                 "XDG_DATA_HOME is not supported for such an account yet (OBS-361); nothing moved")
+        if live is not None and (staged is not None or background is not None):
+            other = staged if staged is not None else background
+            raise MachineMoveError(f"{label} is defined twice here: {live} and {other}; one job runs once, so move "
+                                   "one of them aside first; nothing moved")
+        _check_as_root_will(staged or live or background, home, uid)
     if not (confirm or ask_left)(label, me):
         raise MachineMoveError(f"not confirmed: nothing moved. Run `full machine-move leave {label} --to {me}` on "
                                "the other machine first")
@@ -308,6 +330,41 @@ def cutover(label: str, home: Path, *, runner=subprocess.run, platform: str = sy
                      f"--to {me}  (stops it there, so it never runs on both)"]}
 
 
+def _space_account(home: Path, uid: int):
+    sd = _space_daemons_module()
+    name, gid, group = account_name(uid), os.getgid() if hasattr(os, "getgid") else 0, "staff"
+    try:
+        import grp
+        import pwd
+        entry = pwd.getpwuid(uid)
+        gid = entry.pw_gid
+        group = grp.getgrgid(gid).gr_name
+    except (ImportError, KeyError):
+        pass
+    return sd.Account(name, uid, gid, group, str(home))
+
+
+def _check_as_root_will(path: Path, home: Path, uid: int) -> None:
+    """The administrator's `apply` rules (space_daemons.validate) on this definition, before anything moves:
+    a job root would refuse never waits for root. Its folder rules are root's alone and checked there."""
+    sd = _space_daemons_module()
+    if path.is_symlink() or not path.is_file():
+        raise MachineMoveError(f"{path} is a link or not a file: root reads only a regular file; nothing moved")
+    try:
+        doc = plistlib.loads(path.read_bytes())
+    except (OSError, ValueError, plistlib.InvalidFileException, xml.parsers.expat.ExpatError) as exc:
+        raise MachineMoveError(f"{path} is not a plist ({type(exc).__name__}); nothing moved") from None
+    if not isinstance(doc, dict):
+        raise MachineMoveError(f"{path} is not a plist dictionary; nothing moved")
+    label = doc.get("Label")
+    name = f"{label}.plist" if isinstance(label, str) else path.name
+    problems, _daemon = sd.validate(doc, name, _space_account(home, uid))
+    if problems:
+        named = ", ".join(p["code"] + (f" ({p['detail']})" if p["detail"] else "") for p in problems)
+        raise MachineMoveError(f"the administrator's tool would refuse {path}: {named}. It stays where it was; "
+                               "fix the definition and run cutover again")
+
+
 def _cutover_to_background(label: str, home: Path, runner, uid: int, me: str, source: Path | None,
                            background: Path | None) -> dict:
     """`cutover` for an account with no GUI session (OBS-361): the definition goes to the background
@@ -318,7 +375,8 @@ def _cutover_to_background(label: str, home: Path, runner, uid: int, me: str, so
         target = background
     else:
         mi.ensure_private_dir(folder, home)
-        target = folder / source.name
+        # Named <Label>.plist, the only name root's tool accepts for it.
+        target = folder / f"{mi.job_label(source)}.plist"
         if os.path.lexists(target):
             if target.is_file() and source.is_file() and target.read_bytes() == source.read_bytes():
                 source.unlink()
@@ -342,11 +400,9 @@ def _cutover_to_background(label: str, home: Path, runner, uid: int, me: str, so
     if running:
         result["next"] = [leave_step]
     else:
-        result["human_steps"] = [
-            f"an administrator, once per job: {step}  (this account has no GUI session, so the job runs as a "
-            "system daemon with UserName set to this account, never as root, and starts again after a reboot)",
-            f"once per computer, before that: sudo install -o root -g wheel -m 0755 <tools/space_daemons.py "
-            f"from the verified release> {SPACE_DAEMONS_COPY}"]
+        result["human_steps"] = install_steps() + [
+            f"then, once per job: {step}  (this account has no GUI session, so the job runs as a system daemon "
+            "with UserName set to this account, never as root, and starts again after a reboot)"]
         result["next"] = [step, leave_step]
     return result
 
@@ -364,13 +420,14 @@ def leave(label: str, to: str, home: Path, *, runner=subprocess.run, platform: s
     if to == me:
         raise MachineMoveError("--to names this machine; run `leave` on the machine the job leaves")
     staging, folder = mi.staging_dir(home, system), job_folder(home, system)
+    if system == "launchd" and _space_entry(label, uid) is not None:
+        # Root registered it as a system daemon of this account (OBS-361), loaded or not: only root's `remove`
+        # takes it out of launchd's reach, sandbox or not.
+        raise MachineMoveError(f"{label} is registered by root as a system daemon of this account, which only root "
+                               f"removes: {root_step('remove', label, uid)}, then run leave again; nothing moved")
     live = _find(folder, system, label)
     if live is None and system == "launchd":
-        # A job of an account with no GUI session (OBS-361): root's daemon must be unloaded by root first.
         live = _find(mi.background_dir(home), system, label)
-        if live is not None and _commands_allowed() and _system_daemon_loaded(runner, label, uid):
-            raise MachineMoveError(f"{label} runs here as a system daemon of this account, which only root stops: "
-                                   f"{root_step('remove', label, uid)}, then run leave again; nothing moved")
     stopped = "skipped: OBSERVATORY_SYSTEM_SETUP=0"
     if live is not None:
         if _commands_allowed():

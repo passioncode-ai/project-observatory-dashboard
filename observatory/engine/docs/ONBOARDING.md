@@ -2793,13 +2793,21 @@ That command writes the job to `/Library/LaunchDaemons/LABEL.plist` with `UserNa
 set to the account (launchd.plist(5): they apply only in the system domain), so it runs as that
 account, never as root, and starts again after a reboot with nobody logged in. Root never runs a file
 the account can write, so the administrator first installs a root-owned copy once per computer, from
-a release they verified (the wheel's `tools/space_daemons.py`; `--version` prints
-its sha256, which matches that file's `export_sha256` in the release's `SOURCE-INVENTORY.json`):
+the release itself, downloaded and verified in the administrator's OWN account (never copied from the
+space account's folders, which that account could have changed), with the release's version for
+`X.Y.Z`:
 
 ```sh
+gh release download vX.Y.Z -R passioncode-ai/project-observatory-dashboard -p 'SHA256SUMS*' -p '*.whl'
+shasum -a 256 -c SHA256SUMS --ignore-missing          # the wheel matches the release's sums
+gpg --verify SHA256SUMS.asc SHA256SUMS                # the sums carry the release's signature
+unzip -p project_observatory-X.Y.Z-py3-none-any.whl tools/space_daemons.py > space_daemons.py
+sudo install -d -o root -g wheel -m 0755 /usr/local/libexec
 sudo install -o root -g wheel -m 0755 space_daemons.py /usr/local/libexec/observatory-space-daemons
-/usr/local/libexec/observatory-space-daemons --version     # the version and the sha256 to compare
 ```
+
+`observatory-space-daemons --version` prints the version and the file's sha256 for information only:
+the verification is the two lines above.
 
 The `-I` in the command is required: in isolated mode Python leaves the script's folder and the user's
 site-packages out of its module path and ignores every `PYTHON*` variable, so nothing the account
@@ -2811,18 +2819,26 @@ in folders only root can write). Still check the folder before the copy goes in 
 background|staged] [--json]` shows what `apply` would write for each plist and why one is refused,
 and loads nothing; `status --user ACCOUNT` lists the daemons it wrote, loaded or not, and whether the
 file is still as written. A plist is refused, never partly installed, unless it keeps to the allowed
-keys (`Label`, `ProgramArguments`, `Program`, `EnvironmentVariables`, `WorkingDirectory`, `RunAtLoad`,
-`KeepAlive`, `StartInterval`, `StartCalendarInterval`, `StandardOutPath`, `StandardErrorPath`,
+keys (`Label`, `ProgramArguments`, `Program`, `EnvironmentVariables` without `DYLD_*`, `WorkingDirectory`, `RunAtLoad`,
+`KeepAlive` (a bool, or `SuccessfulExit`, `Crashed`, `AfterInitialDemand`, and `PathState` with paths
+inside the home; not `OtherJobEnabled`), `StartInterval`, `StartCalendarInterval`, `StandardOutPath`, `StandardErrorPath`,
 `ThrottleInterval`, `ProcessType`, `Nice` of 0 or more, `LowPriorityIO`, `ExitTimeOut`,
 `AbandonProcessGroup`; `LimitLoadToSessionType` is dropped), its program is owned by root or the
-account in folders nobody else can write, and its `WorkingDirectory` stays inside the account's home.
+account in folders nobody else can write, its `WorkingDirectory` stays inside the account's home,
+every integer fits 0 to 2147483647, and the daemon it would become writes as a plist. Its label is
+letters and digits, then `. _ @ -` (at most 128; `com.apple.` refused), carried by no other plist in
+`/Library/LaunchDaemons` or `/System/Library/LaunchDaemons`; `cutover` checks the same rules before it
+moves anything (it names each problem and leaves the plist where it was) and names the moved file
+`LABEL.plist`, and refuses when the job is defined both in `~/Library/LaunchAgents` and in staging or
+the background folder.
 **Logs** go to a folder root owns, never where the plist said: launchd may open
 `StandardOutPath` and `StandardErrorPath` with root's rights, and a link in a folder the account
 controls could make root write elsewhere. The daemon writes
 `/Library/Logs/ProjectObservatory/ACCOUNT/LABEL.out.log` and `LABEL.err.log`; `apply` makes
-`/Library/Logs/ProjectObservatory` root:wheel 0755 and `ACCOUNT` in it root:wheel 0700 with one
-inherited ACL entry that lets the account read (`/bin/chmod +a "ACCOUNT allow
-list,search,read,readattr,readextattr,readsecurity,file_inherit,directory_inherit"`), and refuses,
+`/Library/Logs/ProjectObservatory` root:wheel 0755 and `ACCOUNT` in it root:wheel 0700, clears any ACL
+on both (`/bin/chmod -N`), adds one inherited entry that lets the account read (`/bin/chmod +a "ACCOUNT
+allow list,search,read,readattr,readextattr,readsecurity,file_inherit,directory_inherit"`), checks that
+only that entry is there, and refuses,
 installing nothing, when such a folder exists as a link or is not root's. `plan` notes `logs-moved`
 for a plist that named its own log paths. A file in
 `/Library/LaunchDaemons` the tool did not write is never replaced: what it wrote is recorded in
@@ -2831,8 +2847,12 @@ without root; its format is in COMPATIBILITY.md). One copy only: a label already
 the account's GUI domain (`loaded-in-gui`), or held by another account's entry, is refused. Once root loaded the job, a
 second `cutover` answers `"state": "complete"`, and `machine-move show` lists it under `background`
 as `loaded` (`registered` when root wrote it and it is not loaded, `waiting-for-root` before).
-`leave` refuses while that daemon runs and names `sudo ... remove --user ACCOUNT --label LABEL`;
-after it, `leave` stages the plist from the background folder as usual. Root cannot see the account's
+`leave` refuses while root's registry names the job for this account, loaded or not, and names `sudo
+... remove --user ACCOUNT --label LABEL`; after it, `leave` stages the plist from the background folder
+as usual. `apply` writes the registry entry before the plist, so a crash between the two leaves an
+entry whose plist is missing: `apply` writes it again, `remove` cleans it, `status` shows it as
+`missing`. `remove` deletes only a file whose bytes are what it wrote or whose label is the job's. One
+definition that fails in `apply` is reported as `failed` with its error, and the others go on. Root cannot see the account's
 `XDG_DATA_HOME`, so `cutover` refuses, before moving anything, in such an account with a custom one.
 
 **The placement file**, `${XDG_DATA_HOME:-~/.local/share}/project-observatory/placement.json`,

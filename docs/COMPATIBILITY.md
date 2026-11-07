@@ -397,11 +397,33 @@ definition `apply` read and `sourceSha256` its bytes' SHA-256; `written` the abs
 the file is replaced whole (written to a temporary file, synced, renamed). A reader treats a missing file as no
 entries, and a different `schema` as a format it does not know. A field is added only under a new schema name.
 
+**Installing the copy.** An administrator downloads the release in their OWN account and verifies it there, never
+copying the file from the space account's folders: `gh release download vX.Y.Z -R
+passioncode-ai/project-observatory-dashboard -p 'SHA256SUMS*' -p '*.whl'`, `shasum -a 256 -c SHA256SUMS
+--ignore-missing`, `gpg --verify SHA256SUMS.asc SHA256SUMS`, `unzip -p project_observatory-X.Y.Z-py3-none-any.whl
+observatory/engine/tools/space_daemons.py > space_daemons.py`, `sudo install -d -o root -g wheel -m 0755
+/usr/local/libexec`, `sudo install -o root -g wheel -m 0755 space_daemons.py
+/usr/local/libexec/observatory-space-daemons`. `--version` is information only. `machine-move cutover` names the
+same steps in `human_steps`.
+
 **Accepted residual.** The program and `WorkingDirectory` are checked when `apply` runs, and launchd uses them
 later. The program runs as the account, so a program swapped after the check gives the account only what it already
-has, and the account changing its own program is expected (it is the account's job); the program must be owned by
-root or the account, in folders nobody else can write, so no third account can swap it. The log paths, which launchd
-may open with root's rights, are root's own folder and not the account's to change.
+has, and the account changing its own program is expected. Only `ProgramArguments[0]` is checked (owned by root or
+the account, in folders only root or the account can write): an interpreter that runs a script elsewhere inherits
+that script's folder permissions, which this tool does not read. The log paths, which launchd may open with root's
+rights, are root's own folder and not the account's to change; their layout is decided in one function
+(`space_daemons.log_paths`).
+
+**Rules added in review.** A label is letters and digits, then `. _ @ -` (at most 128), the same rule the engine's
+headless `cutover` applies before it moves anything; a label any plist in `/Library/LaunchDaemons` or
+`/System/Library/LaunchDaemons` carries is refused (`label_taken`) unless it is this tool's own file for the same
+account. `KeepAlive.PathState` paths stay inside the home, `KeepAlive.OtherJobEnabled` and `DYLD_*` variables are
+refused, every integer fits 0..2147483647, and a definition whose daemon would not write as a plist is refused in
+`plan` (`not_writable_as_plist`). `apply` writes the registry entry before the plist (an entry whose plist is
+missing is written again by `apply`, cleaned by `remove`, shown `missing` by `status`), reports one definition's
+error as `failed` and goes on, and clears both log folders' ACLs before adding its one entry. `remove` deletes only
+a file whose sha256 is `writtenSha256` or whose label is the entry's. `leave` refuses while the registry names the
+job for this account, loaded or not.
 
 One copy only: `apply` refuses a label loaded as an agent in that account's own GUI domain (`launchctl print
 gui/<uid>/<label>` exit 0, problem `loaded-in-gui`), and a label another account's entry holds

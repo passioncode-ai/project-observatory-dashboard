@@ -1736,8 +1736,15 @@ class HeadlessSpace(Base):
         self.assertEqual((result['state'], result['load'], result['domain']),
                          ('waiting-for-root', 'waiting-for-root', 'system'))
         self.assertEqual(result['next'][0], step)
-        self.assertIn(step, result['human_steps'][0])
-        self.assertIn('sudo install -o root -g wheel -m 0755', result['human_steps'][1])
+        install = result['human_steps'][0]
+        for part in ("gh release download vX.Y.Z -R passioncode-ai/project-observatory-dashboard -p 'SHA256SUMS*' "
+                     "-p '*.whl'", 'shasum -a 256 -c SHA256SUMS --ignore-missing',
+                     'gpg --verify SHA256SUMS.asc SHA256SUMS', 'unzip -p project_observatory-X.Y.Z-py3-none-any.whl '
+                     'observatory/engine/tools/space_daemons.py', 'sudo install -d -o root -g wheel -m 0755 '
+                     '/usr/local/libexec', 'sudo install -o root -g wheel -m 0755 space_daemons.py '
+                     '/usr/local/libexec/observatory-space-daemons', 'OWN account'):
+            self.assertIn(part, install)
+        self.assertIn(step, result['human_steps'][1])
         self.assertTrue(result['was_elsewhere'])
         self.assertEqual(MI.read_placement(self.home)['elsewhere'], [], 'placed here, as a cutover that loads')
         self.assertEqual(MM.show(self.home, platform='darwin', runner=run, uid=self.UID)['background'],
@@ -1767,6 +1774,68 @@ class HeadlessSpace(Base):
         result = self.cutover(Launchd(system={JOB_LABEL}))
         self.assertEqual(result['state'], 'waiting-for-root')
 
+    def test_leave_is_refused_while_registered_even_unloaded_and_in_a_sandbox(self):
+        self.stage()
+        self.cutover(Launchd())
+        self.register()
+        for sandbox in ('1', '0'):
+            with self.subTest(sandbox=sandbox), patch.dict(os.environ, {'OBSERVATORY_SYSTEM_SETUP': sandbox}), \
+                    self.assertRaisesRegex(MM.MachineMoveError, 'registered by root'):
+                MM.leave(JOB_LABEL, BETA, self.home, runner=Launchd(), platform='darwin', uid=self.UID)
+        self.assertTrue((MI.background_dir(self.home) / f'{JOB_LABEL}.plist').is_file())
+
+    def test_cutover_refuses_what_root_would_refuse_and_moves_nothing(self):
+        import plistlib
+        folder = MI.staging_dir(self.home)
+        folder.mkdir(parents=True)
+        staged = folder / f'{JOB_LABEL}.plist'
+        staged.write_bytes(plistlib.dumps({'Label': JOB_LABEL, 'ProgramArguments': ['/usr/bin/true'],
+                                           'Sockets': {'Listener': {'SockServiceName': '80'}}}))
+        MI.place_elsewhere([{'label': JOB_LABEL, 'placedOn': BETA}], self.home)
+        with self.assertRaisesRegex(MM.MachineMoveError, 'would refuse .*key_not_allowed \\(Sockets\\)'):
+            self.cutover(Launchd())
+        self.assertTrue(staged.is_file(), 'it stays where it was')
+        self.assertFalse(MI.background_dir(self.home).exists())
+        self.assertEqual([e['label'] for e in MI.read_placement(self.home)['elsewhere']], [JOB_LABEL])
+        colon = 'org.example:job'
+        (folder / f'{colon}.plist').write_bytes(plistlib.dumps({'Label': colon, 'ProgramArguments': ['/usr/bin/true']}))
+        with self.assertRaisesRegex(MM.MachineMoveError, 'label_shape'):
+            MM.cutover(colon, self.home, runner=Launchd(), platform='darwin', uid=self.UID, confirm=YES)
+
+    def test_a_homebrew_label_moves_and_is_named_after_its_label(self):
+        import plistlib
+        label = 'homebrew.mxcl.postgresql@14'
+        folder = MI.staging_dir(self.home)
+        folder.mkdir(parents=True)
+        (folder / 'postgres.plist').write_bytes(plistlib.dumps({'Label': label, 'ProgramArguments': ['/usr/bin/true']}))
+        result = MM.cutover(label, self.home, runner=Launchd(), platform='darwin', uid=self.UID, confirm=YES)
+        self.assertEqual(result['state'], 'waiting-for-root')
+        self.assertEqual(result['definition'], str(MI.background_dir(self.home) / f'{label}.plist'))
+        self.assertEqual(sorted(p.name for p in MI.background_dir(self.home).iterdir()), [f'{label}.plist'])
+
+    def test_a_job_defined_twice_is_refused_with_both_files_named(self):
+        staged = self.stage()
+        live = self.home / 'Library/LaunchAgents' / staged.name
+        live.parent.mkdir(parents=True)
+        live.write_bytes(self.plist())
+        with self.assertRaises(MM.MachineMoveError) as caught:
+            self.cutover(Launchd())
+        self.assertIn(str(live), str(caught.exception))
+        self.assertIn(str(staged), str(caught.exception))
+        self.assertTrue(staged.is_file() and live.is_file())
+
+    def test_other_answers_of_print_gui_keep_the_agent_path(self):
+        for code in (113, 125):
+            with self.subTest(code=code):
+                staged = self.stage()
+                run = Launchd(gui=code)
+                result = self.cutover(run)
+                live = self.home / 'Library/LaunchAgents' / staged.name
+                self.assertTrue(live.is_file())
+                self.assertIn(['launchctl', 'bootstrap', f'gui/{self.UID}', str(live)], run.calls)
+                self.assertNotIn('state', result)
+                live.unlink()
+
     def test_with_a_gui_session_cutover_is_unchanged(self):
         staged = self.stage()
         run = Launchd(gui=0)
@@ -1790,12 +1859,13 @@ class HeadlessSpace(Base):
         self.register()
         run = Launchd(system={JOB_LABEL})
         self.cutover(run)
-        with self.assertRaisesRegex(MM.MachineMoveError, 'only root stops: sudo /usr/bin/python3 -I '
+        with self.assertRaisesRegex(MM.MachineMoveError, 'only root removes: sudo /usr/bin/python3 -I '
                                     '/usr/local/libexec/observatory-space-daemons remove --user space '
                                     f'--label {JOB_LABEL}'):
             MM.leave(JOB_LABEL, BETA, self.home, runner=run, platform='darwin', uid=self.UID)
         self.assertTrue((MI.background_dir(self.home) / f'{JOB_LABEL}.plist').is_file(), 'nothing moved')
-        run.system.clear()  # root ran `remove`
+        run.system.clear()  # root ran `remove`: unloaded, and out of the registry
+        (self.sysroot / 'Library/Application Support/ProjectObservatory/space-daemons.json').unlink()
         result = MM.leave(JOB_LABEL, BETA, self.home, runner=run, platform='darwin', uid=self.UID)
         self.assertEqual(result['stop'], 'stopped')
         self.assertFalse((MI.background_dir(self.home) / f'{JOB_LABEL}.plist').exists())

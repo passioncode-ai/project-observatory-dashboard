@@ -42,12 +42,32 @@ class Launchctl:
 
     def __init__(self, loaded=(), codes=None, agents=()):
         self.calls, self.loaded, self.codes, self.agents = [], set(loaded), dict(codes or {}), set(agents)
+        #: path -> ACL entries as `ls -lde` prints them; `stray` is an entry someone else left on every folder.
+        self.acl, self.stray = {}, None
 
     def __call__(self, argv, **kw):
-        if os.path.basename(argv[0]) == "chmod":
+        tool = os.path.basename(argv[0])
+        if tool == "chmod":
             self.calls.append(["chmod"] + list(argv[1:]))
-            code = self.codes.get("chmod", 0)
+            code = self.codes.get("chmod " + argv[1], self.codes.get("chmod", 0))
+            if code == 0:
+                path = argv[-1]
+                current = self.acl.setdefault(path, [self.stray] if self.stray else [])
+                if argv[1] == "-N":
+                    current[:] = []
+                elif argv[1] == "+a":
+                    name, rest = argv[2].split(" ", 1)
+                    entry = "user:%s %s" % (name, rest.replace(",read,", ","))
+                    if entry not in current:
+                        current.append(entry)
             return subprocess.CompletedProcess(argv, code, "", "synthetic refusal" if code else "")
+        if tool == "ls":
+            self.calls.append(["ls"] + list(argv[1:]))
+            path = argv[-1]
+            entries = self.acl.get(path, [self.stray] if self.stray else [])
+            out = "drwx------+ 2 root wheel 64 Nov 7 00:00 %s\n" % path + "".join(
+                " %d: %s\n" % (i, e) for i, e in enumerate(entries))
+            return subprocess.CompletedProcess(argv, 0, out, "")
         self.calls.append(list(argv[1:]))
         verb = argv[1]
         if verb == "print" and argv[2].startswith("gui/"):
@@ -198,7 +218,7 @@ class Rules(Base):
         log = str(self.home / "job.log")
         codes, daemon = self.problems(
             Program=ROOT_OWNED_PROGRAM, EnvironmentVariables={"A": "b"}, WorkingDirectory=str(self.home),
-            RunAtLoad=True, KeepAlive={"SuccessfulExit": False, "OtherJobEnabled": {"org.example.other": True}},
+            RunAtLoad=True, KeepAlive={"SuccessfulExit": False, "PathState": {str(self.home / "ready"): True}},
             StartInterval=300, StartCalendarInterval=[{"Hour": 3, "Minute": 0}], StandardOutPath=log,
             StandardErrorPath=log, ThrottleInterval=10, ProcessType="Background", Nice=5, LowPriorityIO=True,
             ExitTimeOut=30, AbandonProcessGroup=True, LimitLoadToSessionType=["Aqua", "Background"])
@@ -216,12 +236,44 @@ class Rules(Base):
 
     def test_values_of_the_wrong_shape_are_refused(self):
         for key, value in (("Nice", -1), ("Nice", 21), ("StartInterval", 0), ("StartInterval", True),
-                           ("ProcessType", "Root"), ("KeepAlive", {"Foo": True}), ("KeepAlive", "yes"),
+                           ("ProcessType", "Root"), ("KeepAlive", "yes"),
                            ("StartCalendarInterval", {"Second": 1}), ("StartCalendarInterval", []),
                            ("EnvironmentVariables", {"A": 1}), ("RunAtLoad", "yes"), ("ExitTimeOut", -1),
                            ("LimitLoadToSessionType", 3)):
             with self.subTest(key=key, value=value):
-                self.assertEqual(self.problems(**{key: value})[0], ["bad_value"])
+                codes = self.problems(**{key: value})[0]
+                self.assertIn("bad_value", codes)
+                self.assertTrue(set(codes) <= {"bad_value", "integer_out_of_range"}, codes)
+
+    def test_the_label_rule_is_the_engines_shared_one(self):
+        for label, ok in (("homebrew.mxcl.postgresql@14", True), ("org.example.agent-2_b", True),
+                          ("org.example:x", False), ("org/example", False), ("a" * 129, False)):
+            with self.subTest(label=label):
+                found, _ = sd.validate({"Label": label, "ProgramArguments": [ROOT_OWNED_PROGRAM]}, f"{label}.plist",
+                                       self.account)
+                self.assertEqual("label_shape" not in [p["code"] for p in found], ok)
+
+    def test_keepalive_paths_stay_home_and_other_jobs_are_refused(self):
+        self.assertEqual(self.problems(KeepAlive={"PathState": {"/etc/ready": True}})[0], ["path_outside_home"])
+        self.assertEqual(self.problems(KeepAlive={"OtherJobEnabled": {"org.example.other": True}})[0],
+                         ["keepalive_condition_not_allowed"])
+        self.assertEqual(self.problems(KeepAlive={"Foo": True})[0], ["keepalive_condition_not_allowed"])
+        self.assertEqual(self.problems(KeepAlive={"PathState": {str(self.home / "ready"): False}})[0], [])
+
+    def test_dyld_variables_are_refused(self):
+        self.assertEqual(self.problems(EnvironmentVariables={"DYLD_INSERT_LIBRARIES": "/x.dylib"})[0],
+                         ["dyld_variable"])
+        self.assertEqual(self.problems(EnvironmentVariables={"dyld_library_path": "/x"})[0], ["dyld_variable"])
+
+    def test_every_integer_fits_32_bits(self):
+        self.assertEqual(self.problems(StartInterval=2 ** 64)[0], ["integer_out_of_range"])
+        self.assertEqual(self.problems(StartCalendarInterval={"Hour": 2 ** 31})[0], ["integer_out_of_range"])
+        self.assertEqual(self.problems(StartInterval=2 ** 31 - 1)[0], [])
+
+    def test_what_plan_calls_ok_writes_as_a_plist(self):
+        codes, daemon = self.problems(EnvironmentVariables={"A": "escape\x1b"})
+        self.assertEqual(codes, ["not_writable_as_plist"])
+        self.assertIsNone(daemon)
 
     def test_the_label(self):
         for label, code in (("bad label!", "label_shape"), (".hidden", "label_shape"), ("x" * 129, "label_shape"),
@@ -307,6 +359,20 @@ class Reading(Base):
         by = {d["label"]: d for d in sd.plan(self.account, system=self.system())["definitions"]}
         self.assertEqual((by[LABEL]["notes"], by["org.example.quiet"]["notes"]), (["logs-moved"], []))
         self.assertEqual(by[LABEL]["daemon"]["StandardOutPath"], str(self.logs() / f"{LABEL}.out.log"))
+
+    def test_a_plist_with_a_control_character_is_refused_by_plan(self):
+        path = self.folder / f"{LABEL}.plist"
+        path.write_bytes(plistlib.dumps({"Label": LABEL, "ProgramArguments": [ROOT_OWNED_PROGRAM],
+                                         "EnvironmentVariables": {"A": "escape\x1b"}}, fmt=plistlib.FMT_BINARY))
+        path.chmod(0o644)
+        path2 = self.folder / "org.example.big-int.plist"
+        path2.write_bytes(plistlib.dumps({"Label": "org.example.big-int", "ProgramArguments": [ROOT_OWNED_PROGRAM],
+                                          "StartInterval": 2 ** 63}, fmt=plistlib.FMT_BINARY))
+        path2.chmod(0o644)
+        by = {d["label"]: d["verdict"] for d in sd.plan(self.account)["definitions"]}
+        self.assertEqual(by, {LABEL: ["not_writable_as_plist"], "org.example.big-int": ["integer_out_of_range"]})
+        result = sd.apply(self.system(), self.account)
+        self.assertEqual([r["outcome"] for r in result["results"]], ["skipped", "skipped"])
 
     def test_plan_reads_the_staged_folder_on_request(self):
         staged = Path(self.account.staged_dir())
@@ -452,9 +518,120 @@ class Applying(Base):
 
     def test_a_failed_acl_is_refused_and_nothing_installed(self):
         self.define()
-        self.launchctl.codes["chmod"] = 1
+        self.launchctl.codes["chmod +a"] = 1
         with self.assertRaisesRegex(sd.SpaceDaemonsError, "read access"):
             sd.apply(self.system(), self.account)
+        self.assertFalse(self.daemon().exists())
+        self.launchctl.codes = {"chmod -N": 1}
+        with self.assertRaisesRegex(sd.SpaceDaemonsError, "could not be cleared"):
+            sd.apply(self.system(), self.account)
+        self.assertFalse(self.daemon().exists())
+
+    def test_a_stray_acl_entry_is_cleared_and_only_ours_remains(self):
+        self.define()
+        self.launchctl.stray = "group:everyone allow write"
+        self.assertTrue(sd.apply(self.system(), self.account)["ok"])
+        logs = self.logs()
+        self.assertEqual(self.launchctl.acl[str(logs.parent)], [])
+        self.assertEqual([e.split(" ")[0] for e in self.launchctl.acl[str(logs)]], ["user:space"])
+        n = [c for c in self.launchctl.calls if c[:2] == ["chmod", "-N"]]
+        self.assertEqual([c[2] for c in n], [str(logs.parent), str(logs)])
+        self.assertLess(self.launchctl.calls.index(["chmod", "-N", str(logs)]),
+                        [i for i, c in enumerate(self.launchctl.calls) if c[:2] == ["chmod", "+a"]][0])
+
+    def test_an_acl_that_is_not_only_ours_after_the_change_is_refused(self):
+        self.define()
+        original = self.launchctl.__call__
+
+        def ls_with_extra(argv, **kw):
+            answer = original(argv, **kw)
+            if os.path.basename(argv[0]) == "ls":
+                answer = subprocess.CompletedProcess(argv, 0, answer.stdout + " 9: group:staff allow write\n", "")
+            return answer
+        system = self.system()
+        system.runner = ls_with_extra
+        with self.assertRaisesRegex(sd.SpaceDaemonsError, "not the one entry"):
+            sd.apply(system, self.account)
+        self.assertFalse(self.daemon().exists())
+
+    def test_a_label_another_daemon_plist_carries_is_refused(self):
+        self.define()
+        for folder in (self.sysroot / sd.DAEMONS_DIR, self.sysroot / sd.SYSTEM_DAEMONS_DIR):
+            with self.subTest(folder=folder):
+                folder.mkdir(parents=True, exist_ok=True)
+                other = folder / "org.example.someone-else.plist"
+                other.write_bytes(plistlib.dumps({"Label": LABEL, "ProgramArguments": ["/bin/sh"]}))
+                (folder / "junk.plist").write_bytes(b"not a plist")
+                result = sd.apply(self.system(), self.account)
+                self.assertEqual(result["results"][0]["problems"][0]["code"], "label_taken")
+                self.assertIn(str(other), result["results"][0]["problems"][0]["detail"])
+                self.assertFalse(self.daemon().exists())
+                other.unlink()
+        self.assertTrue(sd.apply(self.system(), self.account)["ok"], "an unreadable plist holds no label")
+        self.assertTrue(sd.apply(self.system(), self.account)["ok"], "our own file for this account is ours")
+
+    def test_one_failing_definition_never_stops_the_others(self):
+        self.define()
+        self.define({"Label": "org.example.second", "ProgramArguments": [ROOT_OWNED_PROGRAM]})
+        real = sd._install_one
+
+        def boom(system, account, definition, entries, holders=None):
+            if definition["label"] == LABEL:
+                raise RuntimeError("synthetic")
+            return real(system, account, definition, entries, holders)
+        with mock.patch.object(sd, "_install_one", boom):
+            result = sd.apply(self.system(), self.account)
+        by = {r["label"]: r for r in result["results"]}
+        self.assertEqual(by[LABEL]["outcome"], "failed")
+        self.assertEqual(by[LABEL]["problems"][0]["detail"], "RuntimeError: synthetic")
+        self.assertEqual(by["org.example.second"]["outcome"], "loaded")
+
+    def test_a_write_that_fails_is_failed_not_a_traceback(self):
+        self.define()
+        real = sd.write_atomic
+
+        def failing(path, data, system, mode=0o644):
+            if path.endswith(".plist"):
+                raise OSError(28, "No space left on device")
+            return real(path, data, system, mode)
+        with mock.patch.object(sd, "write_atomic", failing):
+            result = sd.apply(self.system(), self.account)
+        self.assertEqual(result["results"][0]["outcome"], "failed")
+        self.assertIn("OSError", result["results"][0]["problems"][0]["detail"])
+        self.assertEqual(self.registry()["entries"], [], "the entry written first is taken back")
+
+    def test_the_registry_entry_is_written_before_the_plist(self):
+        self.define()
+        order, real = [], sd.write_atomic
+
+        def recording(path, data, system, mode=0o644):
+            order.append(os.path.basename(path))
+            return real(path, data, system, mode)
+        with mock.patch.object(sd, "write_atomic", recording):
+            sd.apply(self.system(), self.account)
+        self.assertEqual(order, [sd.REGISTRY_NAME, f"{LABEL}.plist"])
+
+    def test_an_entry_whose_plist_is_missing(self):
+        self.define()
+        sd.apply(self.system(), self.account)
+        self.daemon().unlink()
+        rows = sd.status(self.system(euid=501), self.account)["daemons"]
+        self.assertEqual([r["state"] for r in rows], ["missing"])
+        self.assertTrue(sd.apply(self.system(), self.account)["ok"], "apply writes it again")
+        self.assertTrue(self.daemon().is_file())
+        self.daemon().unlink()
+        self.assertEqual(sd.remove(self.system(), self.account, LABEL)["outcome"], "removed")
+        self.assertEqual(self.registry()["entries"], [], "remove cleans the entry")
+
+    def test_remove_deletes_only_what_it_wrote_or_a_daemon_of_that_label(self):
+        self.define()
+        sd.apply(self.system(), self.account)
+        self.daemon().write_bytes(plistlib.dumps({"Label": "org.example.unrelated"}))
+        with self.assertRaisesRegex(sd.SpaceDaemonsError, "neither what this tool wrote"):
+            sd.remove(self.system(), self.account, LABEL)
+        self.assertTrue(self.daemon().is_file())
+        self.daemon().write_bytes(plistlib.dumps({"Label": LABEL, "ProgramArguments": ["/bin/sh"]}))
+        self.assertEqual(sd.remove(self.system(), self.account, LABEL)["outcome"], "removed")
         self.assertFalse(self.daemon().exists())
 
     def test_apply_and_remove_refuse_outside_isolated_mode(self):
