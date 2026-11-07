@@ -82,8 +82,10 @@ addresses are `unknown` (`several-rows`), never a guess.
   hidden one and are `unknown`. `server_end` reads the server's ACCEPTED socket, which exists only
   once the server has called `accept()`; a client that asks right after `connect()` usually comes
   first, so on this path only `server_end` reads again, briefly (for ACCEPT_WAIT_SECONDS), until
-  the accepted socket shows in one of this uid's processes. Every libproc read of one question
-  shares one deadline, TIMEOUT_SECONDS from the question's start. This is the
+  the accepted socket shows in one of this uid's processes. The libproc reads of one `peer` or
+  `server_end` question share one deadline, TIMEOUT_SECONDS from the question's start (the accept
+  wait included); `listener` gives its libproc read TIMEOUT_SECONDS of its own, and the first read
+  in a process also calibrates the layout under a deadline of its own. This is the
   darwin counterpart of the Linux listener rule below, and it differs because a listener
   inference cannot see root's listeners here (EPERM), while an accepted socket in our own process
   is the stronger proof. The `socket_fdinfo` layout is checked once per process like the sysctl
@@ -244,8 +246,9 @@ def _address(addr) -> tuple[str, int]:
 
 def _posix_uid() -> int | None:
     """This process's uid, or None where the OS has none (Windows compares SIDs instead). The one
-    place this module reads it: this file is vendored without its project's OS layer, so the uid
-    is read here, once, on the POSIX paths only (an engine boundary test names this function)."""
+    place this module reads it for a decision: this file is vendored without its project's OS layer,
+    so the uid is read here, on the POSIX paths only (an engine boundary test names this function).
+    The libproc path also reads the effective uid, only to refuse a setuid context."""
     return os.getuid() if hasattr(os, "getuid") else None
 
 
@@ -924,7 +927,8 @@ def _owner_of(local: tuple[str, int], remote: tuple[str, int], *, server_end_of:
     (`no-socket`). A row with an inode always answers with its own uid. On a restricted macOS
     table only this uid's own sockets are seen: a socket found there is this account's, anything
     else `unknown` (`table-restricted`), and a server end not accepted yet is read again for
-    ACCEPT_WAIT_SECONDS. The libproc reads of one call share one deadline, TIMEOUT_SECONDS."""
+    ACCEPT_WAIT_SECONDS. The libproc reads of one call share one deadline, TIMEOUT_SECONDS from
+    its start (a first calibration in the process has a deadline of its own)."""
     start = time.monotonic()
     try:
         rows, how = _table(start + TIMEOUT_SECONDS)

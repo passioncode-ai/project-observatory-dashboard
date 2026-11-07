@@ -3582,8 +3582,8 @@
       "path": "peer_owner.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fd9fbe3e22d4dd099b577e01cc1ad550027711367ee811ee15efd63b80332a39",
-      "bytes": 55632
+      "export_sha256": "bf13b79d4938f8416ecb4108dec52dd9c7ef77b8f13c47af39c06ea9467f98b1",
+      "bytes": 56009
     },
     {
       "path": "plugins/README.md",
@@ -5736,8 +5736,8 @@
       "path": "tests/test_osprivacy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ac0f45f4464ccf1e1942ea0d3e214eca965784c178075501a7ea2d2ee84615b0",
-      "bytes": 14716
+      "export_sha256": "139a1b8f66b65695cd9d8942e2038052fd6bef184e0fa29633f8aac6e088af39",
+      "bytes": 14803
     },
     {
       "path": "tests/test_osproc.py",

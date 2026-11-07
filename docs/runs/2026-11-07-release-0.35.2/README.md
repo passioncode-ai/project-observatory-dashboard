@@ -43,7 +43,7 @@ process sees only its own sockets in the kernel's connection table; then tag, ve
   answers `table-restricted`, never `this-account`; `/usr/bin/python3` 3.9.6 imports and runs it on both.
 - Its medium findings (M1 the weaker proof documented, M2 two tests that pin the uid selector and a failed calibration)
   and low findings L1 (refuse a setuid context), L2 (one deadline per question) and L3 (restricted means no row of
-  another uid) are fixed at `cde87e39`; a confirming round checks them. L4 (several processes skip `expect_pid`), L5
+  another uid) are fixed at `cde87e39`. The confirming round there passed: 135 tests OK; eight mutations (the uid selector, the calibration ignored or skipped, the setuid refusal removed, the old restricted rule, either deadline dropped) each turn one test red; live again on both computers. Its two low points were wording, fixed on the release branch: the docstrings now say the libproc path also reads the effective uid (only to refuse a setuid context), and that `listener` and a first calibration each have a deadline of their own. L4 (several processes skip `expect_pid`), L5
   (root with `SO_REUSEPORT` and the exact-bind rule) and L6 (non-`TableUnreadable` ctypes errors; one transient
   calibration failure disables libproc for the process) are filed after the pause.
 - On the release branch: the root release suites, `tools/sync_engine_docs.py --check`, `tools/check_backlog.py`,
