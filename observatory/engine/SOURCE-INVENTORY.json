@@ -544,7 +544,7 @@
     {
       "path": "configuration.py",
       "source_sha256": "69575bf4b71bf590301f5dde7f87c26e19be4c96ed0f93647897a20c14574202",
-      "export_sha256": "fc5ee88b8c53dd8dfa5b9c2176e08e6d0496b456feb7e6efcd14336bafbc885c",
+      "export_sha256": "e0d5f9d99f95f727c31600366764468c35eb154de736b180c5b4ca64cb6a6e15",
       "bytes": 17513,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
@@ -947,15 +947,15 @@
     {
       "path": "docs/CLI-COMPATIBILITY.md",
       "source_sha256": "4ec1878cbc8ff9d68bd37a6e9902d3c50180b91093a4c20d59230b41de4a29c2",
-      "export_sha256": "dfaa3ee5aace90831e7671a2ff8433083bb161a19adfb068ffe4765ce5f2fc05",
+      "export_sha256": "4083dc3fdc617ddf369865a5569d4ab8cb48b6b0fa84f63289f4e91da3587d36",
       "bytes": 15780,
       "upstream_modified": true
     },
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "298bfa31dca0b73984795f1c94daf3bb32cf047a73c7f78c83951622b4b4ef03",
-      "bytes": 86793,
+      "export_sha256": "ffea2c9521bcc6514cb0f3411c31b1a3a86d8d0d4a5d3bbeb858ec0ead0b6e7d",
+      "bytes": 86757,
       "upstream_modified": true
     },
     {

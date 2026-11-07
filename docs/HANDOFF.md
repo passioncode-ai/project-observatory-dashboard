@@ -17,6 +17,13 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-11-07: release 0.35.0](runs/2026-11-07-release-0.35.0/README.md): engine 0.35.0 (`observatory-log` stays
+0.30.0): jobs of a macOS account with nobody signed in run as system daemons the administrator installs (OBS-361 part
+1, #458; space daemons 1.1.0, #459), and on Linux `peer_owner` 1.2.0 no longer misreads a connection the server has not
+accepted yet (#460).
+
+Next: tag `v0.35.0`, verify and install (receipts in the record).
+
 [2026-11-06: release 0.34.0](runs/2026-11-06-release-0.34.0/README.md): engine 0.34.0 (`observatory-log` stays
 0.30.0): another OS account's loopback connection refused (OBS-355 part 1, #451), an external secret store carried
 encrypted (OBS-350 part 1, #453), home-relative paths and another computer's passphrase (OBS-347, OBS-348, #446), one
