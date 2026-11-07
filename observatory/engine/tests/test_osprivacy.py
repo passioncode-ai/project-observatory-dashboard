@@ -269,6 +269,10 @@ class Boundary(unittest.TestCase):
     #: POSIX paths (Windows compares SIDs), and `tests/test_peer_owner.py` pins that it is the only
     #: place. Allowed for the uid read only, never for a mode or ownership decision.
     STANDALONE_UID = {"peer_owner.py"}
+    #: The administrator's root-side installer for a space with nobody logged in (OBS-361). It runs
+    #: only on macOS, as root, under `/usr/bin/python3 -I`, from a root-owned copy, so it may not
+    #: import the engine and decides opens, modes and owners itself (`tests/test_space_daemons.py`).
+    MACOS_ROOT_STANDALONE = {"tools/space_daemons.py"}
     FLAGS = re.compile(r"os\.O_(NOFOLLOW|DIRECTORY|NONBLOCK)\b|getattr\(os,\s*['\"]O_|\bos\.open\(")
     MODES = re.compile(r"st_mode\s*&\s*0o0[0-7][0-7]\b|S_IMODE\([^)]*\)\s*&\s*0o0|\bmode\s*&\s*0o0[0-7][0-7]\b|\bst_uid\b")
 
@@ -289,18 +293,18 @@ class Boundary(unittest.TestCase):
     def test_every_open_goes_through_osprivacy(self):
         # O_NOFOLLOW, O_DIRECTORY and O_NONBLOCK do not exist on Windows, and os.open there
         # opens in text mode.
-        self.assertEqual(self.offenders(self.FLAGS), [])
+        self.assertEqual(self.offenders(self.FLAGS, self.MACOS_ROOT_STANDALONE), [])
 
     def test_every_privacy_decision_goes_through_osprivacy(self):
         # Windows keeps no mode bits and no uid: a check of either is a refusal there.
-        self.assertEqual(self.offenders(self.MODES, self.MACOS_ONLY), [])
+        self.assertEqual(self.offenders(self.MODES, self.MACOS_ONLY | self.MACOS_ROOT_STANDALONE), [])
 
     def test_every_terminal_question_goes_through_osprivacy(self):
         # `sys.stdin.isatty()` is true for NUL on Windows: an operator-only gate asks `is_terminal` (OBS-279).
         self.assertEqual(self.offenders(re.compile(r"(?<!`)\bsys\.stdin\.isatty\(")), [])
 
     def test_the_uid_is_read_only_on_the_macos_paths(self):
-        self.assertEqual(self.offenders(re.compile(r"\bos\.getuid\(\)"), self.MACOS_ONLY | self.STANDALONE_UID), [])
+        self.assertEqual(self.offenders(re.compile(r"\bos\.getuid\(\)"), self.MACOS_ONLY | self.STANDALONE_UID | self.MACOS_ROOT_STANDALONE), [])
 
 
 if __name__ == "__main__":

@@ -5729,15 +5729,15 @@
       "path": "tests/test_oslocks.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "51ce201e6bc8df7c1ec6155dae2fc6604c7446c0aac0f778b3d8bc271312e01d",
-      "bytes": 6256
+      "export_sha256": "8262db32dd02a3cd8428cc4d817b8d5394bec66e34048fa7322a4f1e950cc378",
+      "bytes": 6551
     },
     {
       "path": "tests/test_osprivacy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "49cb4c246dd3cbae20c5bd7707bc623b4fcb57a52a426d781868882ec9c40244",
-      "bytes": 14276
+      "export_sha256": "ac0f45f4464ccf1e1942ea0d3e214eca965784c178075501a7ea2d2ee84615b0",
+      "bytes": 14716
     },
     {
       "path": "tests/test_osproc.py",
