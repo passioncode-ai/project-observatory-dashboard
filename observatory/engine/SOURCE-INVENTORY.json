@@ -954,8 +954,8 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "4bcb3ea739d79bc9aae4d2c8047ebad6a7a9e78ddda8db6c6c11dc790dc15cd5",
-      "bytes": 86874,
+      "export_sha256": "2387143a48d832cdd6d5c077301760c6889e2712be3c167c014346b4622ac2c8",
+      "bytes": 86885,
       "upstream_modified": true
     },
     {
@@ -968,8 +968,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "22c0099e54082d8ae8f4adb5d68ff7c88ee60c3c75252d51fac4dfaf54bb93b8",
-      "bytes": 201068,
+      "export_sha256": "9e71fa2af317a033237ade5ffbf45f92c5f917f1ca9e559219bf577c5452b674",
+      "bytes": 201186,
       "upstream_modified": true
     },
     {
@@ -3160,8 +3160,8 @@
       "path": "machine_move.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fc6879cfeb31f4528bbc7dec71c4fff60a93508d57a2ed002548be09836b1507",
-      "bytes": 71749
+      "export_sha256": "7b9b90dbba322753633ff85f5cf63f3ccbf786bb18b12b2889a615275ae854af",
+      "bytes": 71942
     },
     {
       "path": "machine_view.py",
