@@ -117,6 +117,13 @@ class Pure(unittest.TestCase):
         digest = hashlib.sha256(TOOL.read_bytes()).hexdigest()
         self.assertEqual(out.stdout.split()[:4], ["space-daemons", sd.SPACE_DAEMONS_VERSION, "sha256", digest])
 
+    def test_the_pinned_release_key_is_the_engines(self):
+        import release_signature
+        self.assertEqual(sd.RELEASE_KEY_FINGERPRINT, release_signature.PINNED[0]["fingerprint"])
+        text = TOOL.read_text(encoding="utf-8")
+        self.assertIn('grep -q "VALIDSIG %s"' % sd.RELEASE_KEY_FINGERPRINT, text)
+        self.assertNotRegex(text, r"gpg --verify SHA256SUMS\.asc SHA256SUMS\s*$", "never a bare gpg --verify")
+
     def test_version_names_the_file_and_its_sha256(self):
         line = sd.version_line()
         self.assertIn(hashlib.sha256(TOOL.read_bytes()).hexdigest(), line)
@@ -570,6 +577,22 @@ class Applying(Base):
         self.assertTrue(sd.apply(self.system(), self.account)["ok"], "an unreadable plist holds no label")
         self.assertTrue(sd.apply(self.system(), self.account)["ok"], "our own file for this account is ours")
 
+    def test_an_acl_line_it_cannot_parse_is_a_refusal(self):
+        self.define()
+        original = self.launchctl.__call__
+
+        def garbled(argv, **kw):
+            answer = original(argv, **kw)
+            if os.path.basename(argv[0]) == "ls" and argv[-1].endswith("ProjectObservatory"):
+                answer = subprocess.CompletedProcess(argv, 0, answer.stdout + " 0: something new\n", "")
+            return answer
+        system = self.system()
+        system.runner = garbled
+        with self.assertRaisesRegex(sd.SpaceDaemonsError, "unreadable"):
+            sd.apply(system, self.account)
+        self.assertFalse(self.daemon().exists())
+        self.assertIsNone(sd._acl_entries(system, str(self.logs().parent)))
+
     def test_one_failing_definition_never_stops_the_others(self):
         self.define()
         self.define({"Label": "org.example.second", "ProgramArguments": [ROOT_OWNED_PROGRAM]})
@@ -627,9 +650,13 @@ class Applying(Base):
         self.define()
         sd.apply(self.system(), self.account)
         self.daemon().write_bytes(plistlib.dumps({"Label": "org.example.unrelated"}))
+        before = len(self.launchctl.calls)
         with self.assertRaisesRegex(sd.SpaceDaemonsError, "neither what this tool wrote"):
             sd.remove(self.system(), self.account, LABEL)
         self.assertTrue(self.daemon().is_file())
+        self.assertNotIn(["bootout", f"system/{LABEL}"], self.launchctl.calls[before:],
+                         "the check comes first: a refusal leaves the daemon running")
+        self.assertIn(LABEL, self.launchctl.loaded)
         self.daemon().write_bytes(plistlib.dumps({"Label": LABEL, "ProgramArguments": ["/bin/sh"]}))
         self.assertEqual(sd.remove(self.system(), self.account, LABEL)["outcome"], "removed")
         self.assertFalse(self.daemon().exists())

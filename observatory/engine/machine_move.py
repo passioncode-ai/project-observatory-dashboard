@@ -162,21 +162,40 @@ def account_name(uid: int) -> str:
         return os.environ.get("USER") or "ACCOUNT"
 
 
-#: How an administrator gets the root-owned copy: from the release, downloaded and verified from their OWN
-#: account, never copied from this account's folders (which this account could have changed).
-INSTALL_STEPS = (
-    "gh release download vX.Y.Z -R passioncode-ai/project-observatory-dashboard -p 'SHA256SUMS*' -p '*.whl'",
-    "shasum -a 256 -c SHA256SUMS --ignore-missing && gpg --verify SHA256SUMS.asc SHA256SUMS",
-    "unzip -p project_observatory-X.Y.Z-py3-none-any.whl observatory/engine/tools/space_daemons.py > space_daemons.py",
-    "sudo install -d -o root -g wheel -m 0755 /usr/local/libexec",
-    f"sudo install -o root -g wheel -m 0755 space_daemons.py {SPACE_DAEMONS_COPY}",
-)
+RELEASES = "https://github.com/passioncode-ai/project-observatory-dashboard/releases/download/vX.Y.Z"
+#: Where the organization's release key is published (public), beside its release-signing README.
+RELEASE_KEY_URL = ("https://raw.githubusercontent.com/passioncode-ai/.github/main/release-signing/"
+                   "passioncode-release-signing.asc")
+
+
+def release_key_fingerprint() -> str:
+    """The pinned release key, from release_signature.PINNED: the one `full update` checks."""
+    import release_signature
+    return release_signature.PINNED[0]["fingerprint"]
 
 
 def install_steps() -> list[str]:
-    """The once-per-computer steps, run by an administrator in their own account (OBS-361)."""
-    return ["once per computer, by an administrator in their OWN account (never from this account's folders): "
-            + "; then ".join(INSTALL_STEPS)]
+    """How an administrator gets the root-owned copy, once per computer (OBS-361): from the release,
+    downloaded and verified in their OWN account, never copied from this account's folders (which this
+    account could have changed). The signature is checked against the pinned key, never any key gpg holds."""
+    fp = release_key_fingerprint()
+    return [
+        "once per computer, an administrator in their OWN account (never from this account's folders): "
+        "gh release download vX.Y.Z -R passioncode-ai/project-observatory-dashboard -p 'SHA256SUMS*' -p '*.whl'  "
+        f"(without gh: curl -LO {RELEASES}/SHA256SUMS, the same for SHA256SUMS.asc and "
+        "project_observatory-X.Y.Z-py3-none-any.whl)",
+        "shasum -a 256 -c SHA256SUMS --ignore-missing",
+        f"curl -LO {RELEASE_KEY_URL} && gpg --import passioncode-release-signing.asc  (gpg is not on macOS by "
+        "default: brew install gnupg)",
+        f"gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS | grep -q \"VALIDSIG {fp}\"  (or, without gpg, "
+        "with the administrator's own Observatory install: python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); "
+        "import release_signature as r; sys.exit(r.verify(open(\"SHA256SUMS\", \"rb\").read(), "
+        f"open(\"SHA256SUMS.asc\").read()) != sys.argv[2])' \"$(project-observatory full-path)\" {fp})",
+        "unzip -p project_observatory-X.Y.Z-py3-none-any.whl observatory/engine/tools/space_daemons.py > "
+        "space_daemons.py",
+        "sudo install -d -o root -g wheel -m 0755 /usr/local/libexec",
+        f"sudo install -o root -g wheel -m 0755 space_daemons.py {SPACE_DAEMONS_COPY}",
+    ]
 
 
 def root_step(verb: str, label: str, uid: int) -> str:

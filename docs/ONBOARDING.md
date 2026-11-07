@@ -2799,15 +2799,29 @@ space account's folders, which that account could have changed), with the releas
 
 ```sh
 gh release download vX.Y.Z -R passioncode-ai/project-observatory-dashboard -p 'SHA256SUMS*' -p '*.whl'
+#   without gh: curl -LO https://github.com/passioncode-ai/project-observatory-dashboard/releases/download/vX.Y.Z/SHA256SUMS
+#   and the same for SHA256SUMS.asc and project_observatory-X.Y.Z-py3-none-any.whl
 shasum -a 256 -c SHA256SUMS --ignore-missing          # the wheel matches the release's sums
-gpg --verify SHA256SUMS.asc SHA256SUMS                # the sums carry the release's signature
+curl -LO https://raw.githubusercontent.com/passioncode-ai/.github/main/release-signing/passioncode-release-signing.asc
+gpg --import passioncode-release-signing.asc          # gpg is not on macOS by default: brew install gnupg
+gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS | grep -q "VALIDSIG 63B30DC324BD697487AA31944FAFB8AEC803B6A7" && echo signed
 unzip -p project_observatory-X.Y.Z-py3-none-any.whl observatory/engine/tools/space_daemons.py > space_daemons.py
 sudo install -d -o root -g wheel -m 0755 /usr/local/libexec
 sudo install -o root -g wheel -m 0755 space_daemons.py /usr/local/libexec/observatory-space-daemons
 ```
 
+The signature is checked against the organization's pinned release key, the same fingerprint
+`full update` checks (`release_signature.py`, `PINNED`; the key is published in the organization's
+[release-signing](https://github.com/passioncode-ai/.github/tree/main/release-signing) folder): a bare
+`gpg --verify` would accept any key in the keyring. Without gpg, the administrator's own Observatory
+install checks the same pinned key:
+
+```sh
+python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import release_signature as r; sys.exit(r.verify(open("SHA256SUMS", "rb").read(), open("SHA256SUMS.asc").read()) != sys.argv[2])' "$(project-observatory full-path)" 63B30DC324BD697487AA31944FAFB8AEC803B6A7 && echo signed
+```
+
 `observatory-space-daemons --version` prints the version and the file's sha256 for information only:
-the verification is the two lines above.
+the verification is the lines above. `machine-move cutover` names the same steps in `human_steps`.
 
 The `-I` in the command is required: in isolated mode Python leaves the script's folder and the user's
 site-packages out of its module path and ignores every `PYTHON*` variable, so nothing the account

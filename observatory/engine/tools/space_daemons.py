@@ -22,8 +22,16 @@ folder. The administrator installs a root-owned copy once, from the release down
 the administrator's OWN account, never copied from the space account's folders:
 
     gh release download vX.Y.Z -R passioncode-ai/project-observatory-dashboard -p 'SHA256SUMS*' -p '*.whl'
+      (without gh: curl -LO https://github.com/passioncode-ai/project-observatory-dashboard/releases/download/vX.Y.Z/ASSET
+       for SHA256SUMS, SHA256SUMS.asc and project_observatory-X.Y.Z-py3-none-any.whl)
     shasum -a 256 -c SHA256SUMS --ignore-missing
-    gpg --verify SHA256SUMS.asc SHA256SUMS
+    curl -LO https://raw.githubusercontent.com/passioncode-ai/.github/main/release-signing/passioncode-release-signing.asc
+    gpg --import passioncode-release-signing.asc     (gpg is not on macOS by default: brew install gnupg)
+    gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS | grep -q "VALIDSIG 63B30DC324BD697487AA31944FAFB8AEC803B6A7"
+      (without gpg, the administrator's own Observatory install checks the same pinned key:
+       python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import release_signature as r;
+       sys.exit(r.verify(open("SHA256SUMS", "rb").read(), open("SHA256SUMS.asc").read()) != sys.argv[2])'
+       "$(project-observatory full-path)" 63B30DC324BD697487AA31944FAFB8AEC803B6A7)
     unzip -p project_observatory-X.Y.Z-py3-none-any.whl observatory/engine/tools/space_daemons.py > space_daemons.py
     sudo install -d -o root -g wheel -m 0755 /usr/local/libexec
     sudo install -o root -g wheel -m 0755 space_daemons.py /usr/local/libexec/observatory-space-daemons
@@ -96,12 +104,19 @@ DAEMONS_DIR = "Library/LaunchDaemons"
 REGISTRY_DIR = "Library/Application Support/ProjectObservatory"
 REGISTRY_NAME = "space-daemons.json"
 INSTALLED_COPY = "/usr/local/libexec/observatory-space-daemons"
+#: The organization's release key, pinned: the engine's `release_signature.PINNED` holds the same one (a
+#: test keeps the two equal); this standalone tool imports nothing from the engine, so it is written here.
+RELEASE_KEY_FINGERPRINT = "63B30DC324BD697487AA31944FAFB8AEC803B6A7"
+RELEASE_KEY_URL = ("https://raw.githubusercontent.com/passioncode-ai/.github/main/release-signing/"
+                   "passioncode-release-signing.asc")
 #: The only way root runs the copy: isolated mode, so nothing from the script's folder, the user's
 #: site-packages or a PYTHON* variable is imported or honoured.
 INSTALLED_COMMAND = "/usr/bin/python3 -I " + INSTALLED_COPY
 LAUNCHCTL = "/bin/launchctl"
 CHMOD = "/bin/chmod"
 LS = "/bin/ls"
+#: One ACL entry as `ls -lde` prints it: " 0: user:NAME [inherited ]allow|deny PERMISSIONS".
+ACL_LINE = re.compile(r"^\s*\d+:\s+((?:user|group):\S+ (?:inherited )?(?:allow|deny) \S+)\s*$")
 SYSTEM_DAEMONS_DIR = "System/Library/LaunchDaemons"
 LOGS_DIR = "Library/Logs/ProjectObservatory"
 #: The one ACL entry the account's log folder carries: read, inherited by every log inside.
@@ -755,12 +770,14 @@ def _require_root(system, verb, account_name):
     problems = system.self_check()
     if problems:
         raise SpaceDaemonsError("%s runs only from the root-owned copy: %s. Install it once from the release, "
-                                "downloaded and verified in your own account (gh release download, shasum -a 256 -c "
-                                "SHA256SUMS --ignore-missing, gpg --verify SHA256SUMS.asc SHA256SUMS, unzip -p the "
-                                "wheel's observatory/engine/tools/space_daemons.py), then `sudo install -o root -g "
-                                "wheel -m 0755 space_daemons.py %s` and run `sudo %s %s ...`"
-                                % (verb, "; ".join(problems), INSTALLED_COPY, INSTALLED_COMMAND, verb),
-                                "not-root-owned-copy")
+                                "downloaded and verified in your own account: gh release download (or curl -LO), "
+                                "shasum -a 256 -c SHA256SUMS --ignore-missing, the release key from %s imported "
+                                "(gpg is not on macOS by default), `gpg --status-fd 1 --verify SHA256SUMS.asc "
+                                "SHA256SUMS | grep -q \"VALIDSIG %s\"`, unzip -p the wheel's "
+                                "observatory/engine/tools/space_daemons.py; then `sudo install -o root -g wheel -m 0755 "
+                                "space_daemons.py %s` and run `sudo %s %s ...`"
+                                % (verb, "; ".join(problems), RELEASE_KEY_URL, RELEASE_KEY_FINGERPRINT, INSTALLED_COPY,
+                                   INSTALLED_COMMAND, verb), "not-root-owned-copy")
 
 
 def _check_root_dir(path, system, mode=None):
@@ -826,9 +843,12 @@ def _acl_entries(system, path):
         return None
     entries = []
     for line in out.splitlines():
-        m = re.match(r"^\s*\d+:\s+(.*)$", line)
-        if m:
-            entries.append(m.group(1).strip())
+        if not re.match(r"^\s*\d+:", line):
+            continue
+        m = ACL_LINE.match(line)
+        if not m:
+            return None  # an entry this does not understand: fail closed, never "no entries"
+        entries.append(m.group(1).strip())
     return entries
 
 
@@ -1019,19 +1039,20 @@ def remove(system, account, label):
         if not mine:
             raise SpaceDaemonsError("the registry names no daemon %s of %s: this tool removes only what it wrote "
                                     "(`status --user %s` lists them)" % (label, account.name, account.name))
+        target = system.daemon_path(label)
+        # Ours or nothing, checked before anything stops: a refusal leaves the daemon running as it was.
+        if os.path.lexists(target):
+            if os.path.islink(target):
+                raise SpaceDaemonsError("%s is a link: it is left alone" % target, "not-ours")
+            if _file_sha(target) != mine[0].get("writtenSha256") and _plist_label(target) != label:
+                raise SpaceDaemonsError("%s is neither what this tool wrote nor a daemon labelled %s: it is left "
+                                        "alone; move it aside by hand" % (target, label), "not-ours")
         if system.loaded(label):
             code, tail = system.run(["bootout", "system/" + label])
             if code != 0 and system.loaded(label):
                 return {"label": label, "user": account.name, "outcome": "failed",
                         "problems": [_problem("bootout_failed", ("exit %d %s" % (code, tail)).strip())], "ok": False}
-        target = system.daemon_path(label)
         if os.path.lexists(target):
-            if not os.path.islink(target) and _file_sha(target) != mine[0].get("writtenSha256") \
-                    and _plist_label(target) != label:
-                raise SpaceDaemonsError("%s is neither what this tool wrote nor a daemon labelled %s: it is left "
-                                        "alone; move it aside by hand" % (target, label), "not-ours")
-            if os.path.islink(target):
-                raise SpaceDaemonsError("%s is a link: it is left alone" % target, "not-ours")
             os.unlink(target)
         write_registry(system, [e for e in entries if e["label"] != label])
     return {"label": label, "user": account.name, "outcome": "removed", "ok": True}

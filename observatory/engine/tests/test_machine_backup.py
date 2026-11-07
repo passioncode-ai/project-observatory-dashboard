@@ -1736,15 +1736,18 @@ class HeadlessSpace(Base):
         self.assertEqual((result['state'], result['load'], result['domain']),
                          ('waiting-for-root', 'waiting-for-root', 'system'))
         self.assertEqual(result['next'][0], step)
-        install = result['human_steps'][0]
+        install = '\n'.join(result['human_steps'][:-1])
+        self.assertEqual(result['human_steps'][:-1], MM.install_steps())
         for part in ("gh release download vX.Y.Z -R passioncode-ai/project-observatory-dashboard -p 'SHA256SUMS*' "
-                     "-p '*.whl'", 'shasum -a 256 -c SHA256SUMS --ignore-missing',
-                     'gpg --verify SHA256SUMS.asc SHA256SUMS', 'unzip -p project_observatory-X.Y.Z-py3-none-any.whl '
-                     'observatory/engine/tools/space_daemons.py', 'sudo install -d -o root -g wheel -m 0755 '
-                     '/usr/local/libexec', 'sudo install -o root -g wheel -m 0755 space_daemons.py '
-                     '/usr/local/libexec/observatory-space-daemons', 'OWN account'):
+                     "-p '*.whl'", 'curl -LO https://github.com/passioncode-ai/project-observatory-dashboard/releases/'
+                     'download/vX.Y.Z/SHA256SUMS', 'shasum -a 256 -c SHA256SUMS --ignore-missing',
+                     'passioncode-release-signing.asc', 'gpg is not on macOS by default',
+                     'unzip -p project_observatory-X.Y.Z-py3-none-any.whl observatory/engine/tools/space_daemons.py',
+                     'sudo install -d -o root -g wheel -m 0755 /usr/local/libexec',
+                     'sudo install -o root -g wheel -m 0755 space_daemons.py '
+                     '/usr/local/libexec/observatory-space-daemons', 'OWN account', 'project-observatory full-path'):
             self.assertIn(part, install)
-        self.assertIn(step, result['human_steps'][1])
+        self.assertIn(step, result['human_steps'][-1])
         self.assertTrue(result['was_elsewhere'])
         self.assertEqual(MI.read_placement(self.home)['elsewhere'], [], 'placed here, as a cutover that loads')
         self.assertEqual(MM.show(self.home, platform='darwin', runner=run, uid=self.UID)['background'],
@@ -1752,6 +1755,14 @@ class HeadlessSpace(Base):
         self.assertEqual(MM.defined_jobs(self.home, 'darwin'), ([JOB_LABEL], None))
         with patch.object(MM.osprivacy, 'account', return_value=str(self.UID)):
             self.assertEqual(MM._space_evidence(self.home, 'darwin'), [f'{JOB_LABEL} waits for root: {step}'])
+
+    def test_the_install_steps_pin_the_engines_release_key(self):
+        import release_signature
+        fingerprint = release_signature.PINNED[0]['fingerprint']
+        self.assertEqual(MM.release_key_fingerprint(), fingerprint)
+        steps = '\n'.join(MM.install_steps())
+        self.assertIn(f'gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS | grep -q "VALIDSIG {fingerprint}"', steps)
+        self.assertNotRegex(steps, r'gpg --verify SHA256SUMS\.asc SHA256SUMS(?! \|)', 'never a bare gpg --verify')
 
     def test_once_root_loaded_it_cutover_and_show_say_it_runs(self):
         self.stage()

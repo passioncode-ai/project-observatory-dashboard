@@ -1164,7 +1164,9 @@ answering "could not find domain", moves the plist into `~/.local/share/project-
 and answers `state: waiting-for-root` with the one command an administrator runs:
 `sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL` (after
 installing that root-owned copy once from the release, downloaded with `gh release download` and verified with
-`shasum -a 256 -c` and `gpg --verify` in the administrator's own account, never copied from the space's folders). The job then runs as a system daemon with `UserName`
+`shasum -a 256 -c` and the signature against the pinned release key (`gpg --status-fd 1 --verify` matched to its
+`VALIDSIG` fingerprint, or `release_signature.verify` from the administrator's own install) in the administrator's
+own account, never copied from the space's folders). The job then runs as a system daemon with `UserName`
 set to the account, never as root, and starts again after every reboot with nobody logged in. A second `cutover`
 answers `state: complete`; `machine-move show` lists it under `background` as `loaded`.
 

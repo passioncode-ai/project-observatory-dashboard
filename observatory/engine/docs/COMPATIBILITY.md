@@ -399,12 +399,19 @@ entries, and a different `schema` as a format it does not know. A field is added
 
 **Installing the copy.** An administrator downloads the release in their OWN account and verifies it there, never
 copying the file from the space account's folders: `gh release download vX.Y.Z -R
-passioncode-ai/project-observatory-dashboard -p 'SHA256SUMS*' -p '*.whl'`, `shasum -a 256 -c SHA256SUMS
---ignore-missing`, `gpg --verify SHA256SUMS.asc SHA256SUMS`, `unzip -p project_observatory-X.Y.Z-py3-none-any.whl
-tools/space_daemons.py > space_daemons.py`, `sudo install -d -o root -g wheel -m 0755
-/usr/local/libexec`, `sudo install -o root -g wheel -m 0755 space_daemons.py
+passioncode-ai/project-observatory-dashboard -p 'SHA256SUMS*' -p '*.whl'` (or `curl -LO
+https://github.com/passioncode-ai/project-observatory-dashboard/releases/download/vX.Y.Z/<asset>` for `SHA256SUMS`,
+`SHA256SUMS.asc` and the wheel), `shasum -a 256 -c SHA256SUMS --ignore-missing`, the organization's release key
+imported from `https://raw.githubusercontent.com/passioncode-ai/.github/main/release-signing/passioncode-release-signing.asc`
+(gpg is not on macOS by default), then `gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS | grep -q "VALIDSIG
+63B30DC324BD697487AA31944FAFB8AEC803B6A7"`: the pinned fingerprint of `release_signature.PINNED`, which `full update`
+checks, because a bare `gpg --verify` accepts any key in the keyring. Without gpg, the administrator's own
+Observatory install checks the same key with `release_signature.verify` (the one-liner is in ONBOARDING). Then `unzip
+-p project_observatory-X.Y.Z-py3-none-any.whl tools/space_daemons.py > space_daemons.py`, `sudo
+install -d -o root -g wheel -m 0755 /usr/local/libexec`, `sudo install -o root -g wheel -m 0755 space_daemons.py
 /usr/local/libexec/observatory-space-daemons`. `--version` is information only. `machine-move cutover` names the
-same steps in `human_steps`.
+same steps in `human_steps`; `remove` checks the file is its own before it stops the daemon, and an ACL line
+`ls -lde` prints that the tool cannot parse is a refusal, never "no entries".
 
 **Accepted residual.** The program and `WorkingDirectory` are checked when `apply` runs, and launchd uses them
 later. The program runs as the account, so a program swapped after the check gives the account only what it already
