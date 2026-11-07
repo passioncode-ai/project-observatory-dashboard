@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The application release is **0.35.2**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
+The application release is **0.35.3**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
 
 ## SQLite runtime prerequisite
 
@@ -362,6 +362,14 @@ several processes hold it); anything else answers `unknown` with reason `table-r
 refuses as before. `listener(port)` on a restricted table answers `this-account` only for this account's exact
 `127.0.0.1` bind, else `table-restricted`, never `none`. A process whose real and effective uids differ is refused this
 path (`setuid-context`). On a full table (macOS 26 and earlier, Linux, Windows) every answer is unchanged.
+
+Since 0.35.3 (`peer_owner` 1.3.1, contract DEC-0155 RT-1) the reason has two forms: `table-restricted` alone means
+this account's sockets were read and none of them is the connection, so a caller may probe whether anything listens;
+`table-restricted: <detail>` means the proof could not be read at all (a layout that failed calibration, libproc that
+did not load, `setuid-context`), which 0.35.2 reported as `libproc: ...` or `setuid-context`. Both start with
+`table-restricted` and are refused as before. A table found restricted is remembered for 30 seconds
+(`RESTRICTED_TTL`), so later questions skip the table read; a full table clears it at once. `peer_owner.last_method()`
+names the method of the last read (`libproc` included), for a doctor to show what answered.
 
 ## Linux: a server end not accepted yet reads its listener's owner (peer_owner 1.2.0, 0.35.0)
 

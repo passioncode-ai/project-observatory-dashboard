@@ -115,7 +115,10 @@ a referer are labels at most.
     closes that with `expect_pid`. A process whose real and effective uids differ is refused this
     path (`setuid-context`). `listener` answers only for this account's exact 127.0.0.1 bind and
     never `none`; a client reads the server's accepted socket again for up to half a second, until
-    the server has called `accept()` (`peer_owner.py` 1.3.0).
+    the server has called `accept()`. Since 1.3.1 (contract DEC-0155, RT-1) the bare reason
+    `table-restricted` means this account's sockets were read and none matches, and
+    `table-restricted: <detail>` means the proof could not be read (calibration, libproc,
+    `setuid-context`); a restricted table is remembered for 30 seconds (`peer_owner.py` 1.3.1).
     - `test_foreign_and_unverified_are_refused_before_the_request_line`;
     - `test_foreign_refused_before_host_origin_and_bearer`,
       `test_x_forwarded_for_does_not_change_the_peer_address`, `test_a_websocket_is_refused`;
