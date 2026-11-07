@@ -18,6 +18,8 @@ uids are invented, and no address leaves loopback. Copy this file beside the ven
     pcblist_n(rows)           a `net.inet.tcp.pcblist_n` blob built from XNU's pack(4) layout,
                               with each socket's TCP state in its xtcpcb_n
     windows_table(rows, af)   a `GetExtendedTcpTable(TCP_TABLE_OWNER_PID_ALL)` buffer
+    socket_fdinfo(...)        one macOS `proc_pidfdinfo(PROC_PIDFDSOCKETINFO)` record (792 bytes,
+                              `sys/proc_info.h`, offsets measured with clang on macOS 26)
 
 The server in every fixture listens on 127.0.0.1:47311; this account's client is port 50001
 (pid 4300), another account's client port 50002 (pid 5200).
@@ -205,3 +207,25 @@ WINDOWS_MULTI_ROWS = [
     (("127.0.0.1", SERVER_PORT), FOREIGN_CLIENT, False, SERVER_PID),
     (FOREIGN_CLIENT, ("127.0.0.1", SERVER_PORT), False, FOREIGN_CLIENT_PID),
 ]
+
+
+def socket_fdinfo(local, remote, state: int, handle: int, *, family: int = socket.AF_INET, kind: int = 2) -> bytes:
+    """A `struct socket_fdinfo` for one socket: `soi_so` (the handle) at 160, `soi_kind` at 256
+    (SOCKINFO_TCP 2), then the `in_sockinfo` at 264: ports as ints holding a network-order port,
+    `insi_vflag` at +24, foreign and local `in4in6_addr` at +32 and +48, `tcpsi_state` at +80."""
+    blob = bytearray(792)
+    struct.pack_into("<Q", blob, 160, handle)
+    struct.pack_into("<i", blob, 256, kind)
+    ini = 264
+    struct.pack_into(">H", blob, ini, remote[1])
+    struct.pack_into(">H", blob, ini + 4, local[1])
+    if family == socket.AF_INET:
+        blob[ini + 24] = 0x1
+        for at, host in ((ini + 32, remote[0]), (ini + 48, local[0])):
+            blob[at + 12:at + 16] = socket.inet_pton(socket.AF_INET, "0.0.0.0" if host == "*" else host)
+    else:
+        blob[ini + 24] = 0x2
+        for at, host in ((ini + 32, remote[0]), (ini + 48, local[0])):
+            blob[at:at + 16] = socket.inet_pton(socket.AF_INET6, "::" if host == "*" else host)
+    struct.pack_into("<i", blob, ini + 80, state)
+    return bytes(blob)
