@@ -17,6 +17,12 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-11-07: release 0.35.1](runs/2026-11-07-release-0.35.1/README.md): engine 0.35.1 (`observatory-log` stays
+0.30.0): `machine-move cutover` also reads `launchctl print gui/<uid>` exit 125 as an account with nobody signed in
+(OBS-361 part 1), which macOS 26.6 answers there; 0.35.0 tried an agent load that launchd refused.
+
+Next: tag `v0.35.1`, verify and install (receipts in the record).
+
 [2026-11-07: release 0.35.0](runs/2026-11-07-release-0.35.0/README.md): engine 0.35.0 (`observatory-log` stays
 0.30.0): jobs of a macOS account with nobody signed in run as system daemons the administrator installs (OBS-361 part
 1, #458; space daemons 1.1.0, #459), and on Linux `peer_owner` 1.2.0 no longer misreads a connection the server has not

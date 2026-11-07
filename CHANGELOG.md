@@ -3,6 +3,23 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.35.1 (2026-11-07)
+
+A fix for 0.35.0: an account nobody has signed in to at the screen answers in a second way that it has no graphical
+session as soon as anything runs as it (an SSH login, or the jobs this release installs), and 0.35.0 did not recognise
+it, so moving its jobs to another computer failed instead of
+waiting for the administrator. Nothing needs you after installing.
+
+### Fixed
+
+- **Moving a job into an account with nobody signed in** (OBS-361 part 1, `docs/COMPATIBILITY.md` "Machine move: a
+  space with nobody logged in"). `full machine-move cutover` now treats `launchctl print gui/<uid>` exit 125 ("Domain
+  does not support specified action") like exit 112 ("could not find domain"): it moves the job to the background
+  folder and answers `waiting-for-root`. 0.35.0 read 125 as a graphical session, tried to load the job as an agent,
+  which launchd refused with the same 125, and put the definition back. Exit 112 means nothing runs as the account
+  yet; 125 that something does (its own daemons, an SSH login), so it is the usual answer of a space that already
+  works. Any other answer keeps the agent path as before.
+
 ## 0.35.0 (2026-11-07)
 
 A macOS account that nobody signs in to at the screen can now run its jobs. Such an account has no graphical session,

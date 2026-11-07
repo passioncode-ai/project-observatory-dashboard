@@ -1160,7 +1160,8 @@ Trigger: on a Mac, a second OS account (a "space") received this machine's jobs 
 and nobody ever signs in to it graphically, so it has no `gui/<uid>` launchd domain and launchd refuses its agents.
 
 Funnel: in that account, `full machine-move cutover LABEL` runs its checks as always, finds `launchctl print gui/<uid>`
-answering "could not find domain", moves the plist into `~/.local/share/project-observatory/background/LaunchAgents/`
+answering "could not find domain" (exit 112) or, once anything runs as the account, "Domain does not support
+specified action" (exit 125, since 0.35.1), moves the plist into `~/.local/share/project-observatory/background/LaunchAgents/`
 and answers `state: waiting-for-root` with the one command an administrator runs:
 `sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL` (after
 installing that root-owned copy once from the release, downloaded with `gh release download` and verified with
