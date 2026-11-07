@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import stat
 import subprocess
@@ -455,6 +456,72 @@ class Passphrase(Base):
         run, _ = self.runner([(44, "", "The specified item could not be found in the keychain.")])
         store = vault.SecretStore(runner=run, platform="darwin", which=lambda name: "/usr/bin/" + name)
         self.assertIsNone(store.get("ws-1"), "exit 44 is the one answer that means absent")
+
+    def keychain(self, *, refuses):
+        """`security` as a desktop account answers it, or as a headless one (OBS-391): no login
+        Keychain to write to, so every add fails while a lookup finds nothing (exit 44)."""
+        items, calls = {}, []
+
+        def run(argv, input=None, **kw):
+            calls.append(list(argv))
+            if argv[:2] == ["security", "find-generic-password"]:
+                label = argv[argv.index("-a") + 1]
+                if label in items:
+                    return subprocess.CompletedProcess(argv, 0, items[label] + "\n", "")
+                return subprocess.CompletedProcess(argv, 44, "", "The specified item could not be found in the keychain.")
+            if argv == ["security", "-i"]:
+                if refuses:
+                    return subprocess.CompletedProcess(argv, 50, "", "The specified keychain could not be found.")
+                label, value = re.search(r'-a "([^"]*)" .* -w (\S+)', input).groups()
+                if label in items and " -U" not in input:
+                    return subprocess.CompletedProcess(argv, 45, "", "The specified item already exists in the keychain.")
+                items[label] = value
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            raise AssertionError(argv)
+        store = vault.SecretStore(runner=run, platform="darwin", which=lambda name: "/usr/bin/" + name)
+        return store, items, calls
+
+    def fallback_file(self, label):
+        return self.base / "xdg-config" / "project-observatory" / "backup-passphrases" / label
+
+    def test_a_keychain_that_refuses_keeps_it_in_the_owner_only_file_and_says_so(self):
+        # OBS-391: a headless macOS account has no login Keychain to write to. The answer read
+        # "the login Keychain refused the backup passphrase" with kept_outside null; the copy
+        # outside the workspace goes to the owner-only file instead, and the answer names it.
+        store, items, _ = self.keychain(refuses=True)
+        out = vault.ensure_passphrase(self.home, store)
+        self.assertEqual((out["passphrase"], out["kept_outside"]), ("generated", "file"), out)
+        self.assertNotIn("warning", out)
+        self.assertNotIn("Keychain", json.dumps(out))
+        file = self.fallback_file(out["label"])
+        self.assertEqual(file.read_text().rstrip("\n"), vault.passphrase(self.home))
+        self.assertEqual(stat.S_IMODE(file.stat().st_mode), 0o600)
+        self.assertEqual(items, {})
+        again = vault.ensure_passphrase(self.home, store)
+        self.assertEqual((again["passphrase"], again["kept_outside"]), ("configured", "file"), again)
+        self.assertNotIn("warning", again)
+        # A workspace whose file was lost comes back from that copy.
+        vault.passphrase_file(self.home).unlink()
+        self.assertEqual(vault.ensure_passphrase(self.home, store)["passphrase"], "recovered")
+        self.assertEqual(vault.passphrase(self.home), file.read_text().rstrip("\n"))
+
+    def test_a_keychain_that_takes_it_is_still_named_the_keychain(self):
+        store, items, _ = self.keychain(refuses=False)
+        out = vault.ensure_passphrase(self.home, store)
+        self.assertEqual((out["passphrase"], out["kept_outside"]), ("generated", "keychain"), out)
+        self.assertNotIn("warning", out)
+        self.assertIn(out["label"], items)
+        self.assertFalse(self.fallback_file(out["label"]).exists(), "no second copy beside the Keychain's")
+        again = vault.ensure_passphrase(self.home, store)
+        self.assertEqual((again["passphrase"], again["kept_outside"]), ("configured", "keychain"), again)
+
+    def test_an_item_already_in_the_keychain_is_not_moved_to_the_file(self):
+        # Exit 45 is "already exists": a first copy never replaces one, and never goes around it.
+        run, _ = self.runner([(45, "", "The specified item already exists in the keychain.")])
+        store = vault.SecretStore(runner=run, platform="darwin", which=lambda name: "/usr/bin/" + name)
+        with self.assertRaises(vault.BackupError):
+            store.put("ws-1", "a value")
+        self.assertFalse(self.fallback_file("ws-1").exists())
 
     def test_secret_service_values_travel_on_stdin(self):
         # lookup (absent) → store → lookup

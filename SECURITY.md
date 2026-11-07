@@ -197,7 +197,9 @@ only when you turn them on:
   the copy is a generic-password item in the login Keychain, service
   "Project Observatory backups", account the workspace label, written and read with
   `security`; the value travels on stdin, never as an argument. A locked keychain can
-  show an unlock dialog when a backup or the maintenance job reaches it. Elsewhere the
+  show an unlock dialog when a backup or the maintenance job reaches it. An account
+  with no login Keychain that takes the item (a headless one) gets the owner-only file
+  below instead, and `kept_outside` reads `file`. Elsewhere the
   copy goes to the Secret Service through `secret-tool`, or, without one, to an
   owner-only file under `~/.config/project-observatory/backup-passphrases/`. A
   passphrase given through `OBSERVATORY_BACKUP_PASSPHRASE` is not copied anywhere.

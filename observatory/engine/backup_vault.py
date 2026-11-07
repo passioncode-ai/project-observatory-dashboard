@@ -367,8 +367,10 @@ class SecretStore:
     docs/runs/2026-10-05-auto-update).
 
     macOS: the login Keychain, item service "Project Observatory backups", account = the
-    workspace label. Windows: the Credential Manager, a generic credential named
-    "Project Observatory backups/<label>", kept for this account on this machine (W5).
+    workspace label; an account with no login Keychain to write to (a headless one, OBS-391)
+    keeps it in the owner-only file below instead, and says so. Windows: the Credential
+    Manager, a generic credential named "Project Observatory backups/<label>", kept for this
+    account on this machine (W5).
     Elsewhere: the Secret Service through `secret-tool`, or, without it, an owner-only file
     under ~/.config/project-observatory/backup-passphrases/.
     A value travels on stdin and is never an argument: `security -i` reads its command
@@ -385,6 +387,10 @@ class SecretStore:
         # The Windows Credential Manager, or a stand-in with read/write (the tests).
         self.credentials = credentials if credentials is not None else (
             WindowsCredentials() if self.platform == "win32" else None)
+        #: Where `get` last found each label's item: `kind()` names the store this machine
+        #: tries first, and a Keychain or keyring that did not take the copy left it in the
+        #: owner-only file (OBS-391), so an answer naming where it is kept reads this.
+        self.held_in: dict[str, str] = {}
 
     def kind(self) -> str:
         if self.platform == "darwin" and self.which("security"):
@@ -409,6 +415,9 @@ class SecretStore:
     #: `security find-generic-password` exits 44 when no such item exists; every other
     #: failure (a locked Keychain, interaction not allowed, a timeout) is NOT absence.
     KEYCHAIN_NOT_FOUND = 44
+    #: `add-generic-password` without -U exits 45 when the item already exists: a first copy
+    #: that never replaces one, so it is a refusal and never a reason to write the file.
+    KEYCHAIN_DUPLICATE = 45
 
     def _run(self, argv: list[str], data: str | None = None) -> tuple[int, str]:
         code, out, _ = self._run_full(argv, data)
@@ -431,9 +440,14 @@ class SecretStore:
             code, _ = self._run(["security", "-i"],
                                 f'add-generic-password -a "{label}" -s "{self.SERVICE}" -w {encoded}'
                                 + (" -U" if replace else "") + "\n")
-            if code != 0:
-                raise BackupError("the login Keychain refused the backup passphrase")
-            return kind
+            if code == 0:
+                return kind
+            if code == self.KEYCHAIN_DUPLICATE:
+                raise BackupError(f"the login Keychain already holds a passphrase for {label}")
+            # No login Keychain takes it (a headless account, OBS-391): the owner-only file
+            # keeps the copy outside the workspace instead, as for a keyring that does not
+            # answer (review F7), and the answer names the file, not the Keychain.
+            kind = "file"
         if kind == "credential-manager":
             target = f"{self.SERVICE}/{label}"
             if not replace and self.credentials.read(target) is not None:
@@ -477,28 +491,36 @@ class SecretStore:
         caller then generated a new passphrase and wrote it over the only copy every
         existing backup opens with."""
         label, kind = self._safe(label), self.kind()
+        self.held_in.pop(label, None)
+        keyring_error = None
         if kind == "keychain":
             code, out, err = self._run_full(["security", "find-generic-password", "-a", label,
                                              "-s", self.SERVICE, "-w"])
-            if code == self.KEYCHAIN_NOT_FOUND:
-                return None
             text = out.strip()
-            if code != 0 or not text:
-                raise BackupError(f"the login Keychain did not answer (exit {code}"
-                                  + (f", {err.strip()[:120]}" if err.strip() else "") + ")")
-            if text.startswith("hex:"):
-                try:
-                    return bytes.fromhex(text[4:]).decode("utf-8")
-                except ValueError:
-                    raise BackupError(f"the Keychain item for {label} is not a passphrase this engine wrote") from None
-            return text
+            if code == 0 and text:
+                if text.startswith("hex:"):
+                    try:
+                        text = bytes.fromhex(text[4:]).decode("utf-8")
+                    except ValueError:
+                        raise BackupError(f"the Keychain item for {label} is not a passphrase this engine wrote") from None
+                self.held_in[label] = kind
+                return text
+            # Absent from the Keychain (exit 44), or a Keychain that did not answer: `put`
+            # keeps the copy in the owner-only file when no Keychain took it (OBS-391), so
+            # the file is read before either is called absence or an error.
+            if code != self.KEYCHAIN_NOT_FOUND:
+                keyring_error = (f"the login Keychain did not answer (exit {code}"
+                                 + (f", {err.strip()[:120]}" if err.strip() else "") + ")")
         if kind == "credential-manager":
-            return self.credentials.read(f"{self.SERVICE}/{label}")
-        keyring_error = None
+            value = self.credentials.read(f"{self.SERVICE}/{label}")
+            if value is not None:
+                self.held_in[label] = kind
+            return value
         if kind == "secret-service":
             code, out, err = self._run_full(["secret-tool", "lookup", "service", self.TOOL_SERVICE,
                                              "account", label])
             if code == 0 and out.rstrip("\n"):
+                self.held_in[label] = kind
                 return out.rstrip("\n")
             # `secret-tool lookup` exits 1 with nothing on stderr when the item is absent;
             # a message means no keyring answered. `put` then fell back to the owner-only
@@ -513,6 +535,7 @@ class SecretStore:
                 raise BackupError(f"{file} is readable by others; refusing to read it")
             value = file.read_text(encoding="utf-8").rstrip("\n")
             if value:
+                self.held_in[label] = "file"
                 return value
         if keyring_error:
             raise BackupError(keyring_error)
@@ -611,7 +634,9 @@ def ensure_passphrase(base: Path, store: SecretStore | None = None) -> dict:
             _keep_previous(store, label, stored)
             kind = store.put(label, current, replace=True)
         else:
-            kind = store.kind()
+            # Where the copy IS, not the store this machine tries first: a Keychain that
+            # took nothing left it in the owner-only file (OBS-391).
+            kind = (getattr(store, "held_in", None) or {}).get(label) or store.kind()
     except (BackupError, OSError) as exc:
         return {"passphrase": state, "kept_outside": None,
                 "warning": f"the passphrase is only in {passphrase_file(base)}: {exc}"}

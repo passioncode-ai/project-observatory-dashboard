@@ -2403,7 +2403,7 @@ a deleted workspace or a reinstall can still open its backups:
 
 | Platform | Where the copy is kept |
 |---|---|
-| macOS | the login Keychain, item "Project Observatory backups", account `<home-name>-<instance>` |
+| macOS | the login Keychain, item "Project Observatory backups", account `<home-name>-<instance>`; an account with no login Keychain to write to (a headless one) keeps it in `~/.config/project-observatory/backup-passphrases/<label>` (mode 600), and the answer names `file` |
 | Linux | the Secret Service through `secret-tool`; without it, `~/.config/project-observatory/backup-passphrases/<label>` (mode 600) |
 
 The value goes to the Keychain on `security -i`'s stdin and to `secret-tool` on stdin,
