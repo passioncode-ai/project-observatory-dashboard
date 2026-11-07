@@ -238,7 +238,8 @@ class Switch(Base):
         self.assertEqual((self.home / "auto-update").read_text(), "off\n", "and never to off either")
         # A snapshot and its restore carry the switch as it was (a rollback swaps the home).
         restored = self.base / "restored home"
-        snap = workspace_upgrade.snapshot(self.home, self.base / "snap", writers_stopped=True)
+        # The rollback stage is an explicit plaintext copy, as the update takes it (OBS-389).
+        snap = workspace_upgrade.snapshot(self.home, self.base / "snap", writers_stopped=True, plaintext=True)
         workspace_upgrade.restore(Path(snap["snapshot"]), restored)
         self.assertEqual((restored / "auto-update").read_text(), "off\n")
 
