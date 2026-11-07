@@ -3174,8 +3174,8 @@
       "path": "maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f6fa5c011137ed867fb0058d857b9681d9e7a521b4343f3c9ad129b0330f4993",
-      "bytes": 116399
+      "export_sha256": "eae49fe87454fe0d19c23535a2f50cac8c97d6800d7e364cdf73cccd6901a896",
+      "bytes": 118777
     },
     {
       "path": "mcp/capability_tools.py",
@@ -5422,8 +5422,8 @@
       "path": "tests/test_maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "02c8f2dd1a31ee8341de35e2dfc5d79ee89eaa24a91d1f482960bb87b37b5df1",
-      "bytes": 154504
+      "export_sha256": "eda2898b41ff2dfdaa6701f2bc840a29bc7c558ac89909d372903e84d550ade3",
+      "bytes": 156349
     },
     {
       "path": "tests/test_manifest_urls.py",

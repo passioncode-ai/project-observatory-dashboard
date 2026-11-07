@@ -1745,6 +1745,8 @@ class Schedule(Base):
 
     def headless(self, loaded=False):
         """A schedule in an account with no GUI session (OBS-361 part 2); `loaded` is root's daemon."""
+        if not hasattr(os, "getuid"):
+            self.skipTest("the headless path is macOS's; Windows has no os.getuid")
         sched = M.LaunchdSchedule(self.home, headless=True)
         self.bootstraps = []
         self.daemon = {"loaded": loaded}
@@ -1777,13 +1779,37 @@ class Schedule(Base):
         self.assertIn(f"--label {sched.label}", out["next"][0])
         self.assertTrue(sched.installed())
 
-    def test_headless_a_copy_left_in_launchagents_is_removed(self):
+    def test_headless_the_agent_copy_stays_until_roots_daemon_runs(self):
+        # launchctl answers 125 for an ordinary account reached over SSH too: its agent loads at sign-in.
         sched = self.headless()
         sched.plist.parent.mkdir(parents=True, exist_ok=True)
-        sched.plist.write_bytes(plistlib.dumps(sched.document()))
+        sched.plist.write_bytes(plistlib.dumps({"Label": sched.label, "old": True}))
         out = sched.install()
-        self.assertFalse(sched.plist.exists(), "a sign-in at the screen would start it a second time")
+        self.assertEqual(out["agent_copy_kept"], str(sched.plist))
+        self.assertEqual(plistlib.loads(sched.plist.read_bytes()), sched.document(), "refreshed, not left stale")
+        self.daemon["loaded"] = True
+        out = sched.install()
+        self.assertFalse(sched.plist.exists(), "once root runs it, a sign-in would start it a second time")
         self.assertEqual(out["removed_agent_copy"], str(sched.plist))
+
+    def test_headless_the_hook_runs_the_pass_while_root_has_not_loaded_it(self):
+        ran = []
+        with patch.object(M, "schedule_for", lambda base: M.Schedules(self.headless(), self.headless())), \
+                patch.object(M, "run_pass", lambda base: ran.append("pass") or {"result": "ran"}), \
+                patch.object(M, "check_pass", lambda base: ran.append("check") or {"result": "ran"}), \
+                patch.object(M.backup_vault, "ensure_passphrase", lambda base, store=None: {"result": "kept"}):
+            out = M.hook(self.home)
+        self.assertEqual(out["schedule"]["result"], "waiting-for-root")
+        self.assertIn("pass", ran, "updates and backups keep running until an administrator loads the daemon")
+
+    def test_headless_status_names_roots_apply(self):
+        sched = self.headless()
+        sched.install()
+        out = M.status(self.home, schedule=M.Schedules(self.headless(), self.headless()))
+        text = " ".join(out.get("warnings", []))
+        self.assertIn("wait for an administrator", text)
+        self.assertNotIn("not scheduled on this machine yet", text)
+        self.assertIn(" apply --user ", text)
 
     def test_headless_a_loaded_daemon_with_the_same_definition_is_left_alone(self):
         sched = self.headless(loaded=True)
@@ -1808,6 +1834,7 @@ class Schedule(Base):
         self.assertIn(" remove ", out["next"][0])
         self.assertEqual(sched.status()["domain"], "system")
 
+    @unittest.skipUnless(hasattr(os, "getuid"), "space_daemons.py is a macOS tool")
     def test_headless_definition_uses_only_keys_root_accepts(self):
         sys.path.insert(0, str(ROOT / "tools"))
         try:
@@ -1818,6 +1845,7 @@ class Schedule(Base):
             doc = M.LaunchdSchedule(self.home, headless=True, job=job).document()
             self.assertLessEqual(set(doc), set(space_daemons.ALLOWED_KEYS) - set(space_daemons.DROPPED_KEYS), job)
 
+    @unittest.skipUnless(hasattr(os, "getuid"), "the session kind is asked on macOS only")
     def test_the_session_kind_is_read_from_launchctl_once(self):
         calls = []
 

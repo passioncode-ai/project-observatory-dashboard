@@ -1465,9 +1465,10 @@ class LaunchdSchedule:
         # PATH comes from whoever runs the installer, and a terminal and an agent session
         # differ: an installed job keeps the PATH it has, so the definition does not flip
         # (and get reloaded) with each caller (review F1).
-        if self.installed():
+        source = self.definition if self.definition.is_file() else self.plist
+        if source.is_file():
             try:
-                kept = (plistlib.loads(self.definition.read_bytes()).get("EnvironmentVariables") or {}).get("PATH")
+                kept = (plistlib.loads(source.read_bytes()).get("EnvironmentVariables") or {}).get("PATH")
             except (OSError, ValueError, plistlib.InvalidFileException):
                 kept = None
             if kept:
@@ -1516,6 +1517,13 @@ class LaunchdSchedule:
         self.launch.prepare_logs((f"{self.job}.log", f"{self.job}.err"), self.base / "store" / "logs")
         if self.headless():
             return self._install_background(doc)
+        import machine_move
+        if hasattr(os, "getuid") and machine_move._system_daemon_loaded(self.runner or subprocess.run, self.label,
+                                                                        os.getuid()):
+            # Root's daemon of this account runs it already (a space signed in at the screen later):
+            # loading the agent too would run every pass twice (OBS-361 part 2).
+            return {"schedule": self.kind, "label": self.label, "changed": False, "domain": "system",
+                    "load": "loaded"}
         current = plistlib.loads(self.plist.read_bytes()) if self.installed() else None
         pending = self.base / "store" / "maintenance-reload-pending"
         if current == doc and self.loaded() and (self.job != "maintain" or not pending.exists()):
@@ -1564,19 +1572,33 @@ class LaunchdSchedule:
         changed = current != doc
         if changed:
             self._write(target, doc)
-        stale = self.plist.is_file() and not self.plist.is_symlink()
-        if stale:
-            self.plist.unlink()
+        elif target.is_file() and not target.is_symlink():
+            # Root refuses a definition anyone but this account can change (space_daemons.py).
+            target.chmod(target.stat().st_mode & 0o7755 & ~0o022)
         loaded = self.loaded()
+        # launchctl also answers 125 for an ordinary account signed out at the screen but reached over SSH:
+        # its LaunchAgents copy loads at the next sign-in, so it is kept, and refreshed, until root's daemon
+        # runs; only then is it removed, so a sign-in never starts the job a second time.
+        agent_copy = self.plist.is_file() and not self.plist.is_symlink()
+        if agent_copy and loaded:
+            self.plist.unlink()
+        elif agent_copy:
+            try:
+                if plistlib.loads(self.plist.read_bytes()) != doc:
+                    self._write(self.plist, doc)
+            except (OSError, ValueError, plistlib.InvalidFileException):
+                self._write(self.plist, doc)
         out = {"schedule": self.kind, "label": self.label, "changed": changed, "domain": "system",
                "definition": str(target), "load": "loaded" if loaded else "waiting-for-root",
-               **({"removed_agent_copy": str(self.plist)} if stale else {})}
+               **({"removed_agent_copy": str(self.plist)} if agent_copy and loaded else {}),
+               **({"agent_copy_kept": str(self.plist)} if agent_copy and not loaded else {})}
         if loaded and not changed:
             return out
         # root's apply refuses a label that is already loaded: a new definition is removed, then applied.
         steps = ([machine_move.root_step("remove", self.label, uid)] if loaded else []) + [
             machine_move.root_step("apply", self.label, uid)]
         out["load"] = "waiting-for-root"
+        out["result"] = "waiting-for-root"
         out["next"] = steps
         out["human_steps"] = ["if the administrator has not installed it on this computer yet: "
                               + "; ".join(machine_move.install_steps())] + [
@@ -1611,7 +1633,13 @@ class LaunchdSchedule:
 
     def status(self) -> dict:
         out = {"kind": self.kind, "label": self.label, "installed": self.installed(), "loaded": self.loaded()}
-        return {**out, "domain": "system"} if self.headless() else out
+        if not self.headless():
+            return out
+        out["domain"] = "system"
+        if out["installed"] and not out["loaded"]:
+            import machine_move
+            out["next"] = machine_move.root_step("apply", self.label, os.getuid())
+        return out
 
 
 class SystemdSchedule:
@@ -1880,6 +1908,10 @@ def status(base: Path, *, schedule=None) -> dict:
                              "themselves: `project-observatory full maintain ensure`")
     elif sched.get("probed") is False:
         pass
+    elif not scheduled and sched.get("domain") == "system" and sched.get("installed"):
+        warn("waiting-for-root", "updates and daily backups wait for an administrator: this account has no GUI "
+                                 f"session, so its job runs as a system daemon once root loads it: {sched.get('next')}",
+             step=sched.get("next"))
     elif not scheduled:
         warn("not-scheduled", "updates and daily backups are not scheduled on this machine yet: "
                               "`project-observatory full maintain ensure`")
@@ -2129,7 +2161,9 @@ def hook(base: Path) -> dict:
     announced (OBS-333), and the check never starts or installs anything while off."""
     result = ensure(base)
     sched = result.get("schedule") or {}
-    if sched.get("result") == "unscheduled":
+    # In an account with no GUI session the job waits for root's space_daemons.py (OBS-361 part 2);
+    # until root loads it, the hook keeps running the pass, as it does where nothing is scheduled.
+    if sched.get("result") in ("unscheduled", "waiting-for-root"):
         result["pass"] = run_pass(base)
         if not auto_enabled(base):
             result["check"] = check_pass(base)
