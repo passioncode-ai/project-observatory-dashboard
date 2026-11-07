@@ -350,6 +350,92 @@ platform, so neither a machine bundle nor a workspace snapshot carries them:
 | `machine-move/peers/` | 0.31.0 | the other machine's facts (`full machine-move facts --out FILE`, schema `observatory-machine-facts/1`: `machine`, `generated_at`, `engine_version`, `platform`, `ssh[]` of `file` and `fingerprint`, `device`, `jobs[]`, `elsewhere[]`, `restore`, `omitted`), placed by the person; written whole through a temporary file and a link, never over an existing name; `full machine-move status` reads every `*.json` here | never written by the engine; a file that does not read is named in `degraded`; deleting one forgets that machine |
 | `machine-id` | 0.30.1 | a random machine id, written only where the platform has no machine identifier of its own (macOS, most Linux and Windows have one) | deleting it gives the machine a new id: bundles and snapshots it took before then read as another machine's |
 
+## Machine move: a space with nobody logged in (OBS-361 part 1, the release after 0.34.0)
+
+On macOS, `full machine-move cutover LABEL` in an account whose `launchctl print gui/<uid>` answers
+"could not find domain" (exit 112: nobody is logged in graphically) no longer tries to load an agent there,
+fails and puts the plist back. It runs the same checks, moves the plist into
+`~/.local/share/project-observatory/background/LaunchAgents/` (owner-only; group and other write bits cleared),
+removes the job from `elsewhere`, and answers with new fields: `domain` (`system`), `state` (`waiting-for-root`,
+or `complete` once root loaded it), `load` `waiting-for-root` or `loaded`, `human_steps` and `next` naming
+`sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL`. Any other
+answer of `launchctl print gui/<uid>` (0, or a code the engine does not know) keeps the earlier path and answer,
+byte for byte. Such an account with a custom `XDG_DATA_HOME` is refused before anything moves (part 1). `machine-move
+show` gains `background[]` of `label`, `file`, `daemon` (`loaded`, `registered`, `waiting-for-root`); `leave` refuses
+while root's daemon of the job runs and names `... remove --user ACCOUNT --label LABEL`; `machine-move status` counts
+the background folder's jobs as defined here (M4) and adds one evidence line for each.
+
+`tools/space_daemons.py` (`SPACE_DAEMONS_VERSION` 1.0.0) is new: standard library only, Python 3.9 (macOS's
+`/usr/bin/python3`), run by an administrator from a root-owned copy and only in Python's isolated mode,
+`sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons ...`: without `-I`, `apply` and `remove` refuse
+(`not-isolated`), so no module from the script's folder, the user's site-packages or a `PYTHON*` variable runs as
+root. A daemon's logs never go where the plist said (`plan` notes `logs-moved`): launchd may open them with root's
+rights after the check, so they go to `/Library/Logs/ProjectObservatory/<user>/<label>.out.log` and `.err.log`.
+It writes files outside any workspace:
+
+| Path | What | Older engines, removal |
+|---|---|---|
+| `~/.local/share/project-observatory/background/LaunchAgents/` | the account's launchd jobs that run as system daemons; written by `cutover`, read by root's `space_daemons.py` | an older engine neither reads nor writes it; deleting a plist deletes only that copy (root's daemon keeps running until `remove`) |
+| `/Library/LaunchDaemons/<label>.plist` | the daemon `apply` wrote: the plist's allowed keys plus `UserName`, `GroupName`, `InitGroups`, HOME, USER, LOGNAME and the two log paths below; root:wheel 0644, written atomically | `sudo ... remove --user ACCOUNT --label LABEL` unloads and deletes it; the engine never writes it |
+| `/Library/Logs/ProjectObservatory/<user>/` | the daemons' `<label>.out.log` and `<label>.err.log`; the folder root:wheel 0700 under a root:wheel 0755 `ProjectObservatory`, with one inherited ACL entry (`<user> allow list,search,read,readattr,readextattr,readsecurity,file_inherit,directory_inherit`) so the account reads its logs; `apply` refuses, installing nothing, when either folder exists as a link or is not root's. Each log file is created ahead of launchd (`O_CREAT|O_EXCL|O_NOFOLLOW`), owned by the account, mode 0600: the account reads and appends to it but cannot create, rename, link or unlink in the folder, so the file is safe whether launchd opens it as root or as the account and cannot be replaced. An existing one is kept only as a regular file with one link, owned by the account (root's is given to the account), not writable by group or others; otherwise that job is refused (`log-file`) | `remove` leaves the log files and says so; deleting the folder loses them, and the next `apply` makes it again |
+| `/Library/Application Support/ProjectObservatory/space-daemons.json` | the registry of what `apply` wrote, a stable interface (below); root:wheel 0644 in a 0755 folder; the engine only reads it | a file that is not this schema is refused by name, never replaced; deleting it makes the tool refuse to replace or remove the daemons it wrote (they keep running) |
+
+**The registry is a stable interface** that other tools (Fabric Dashboards among them) read without root. Its
+format, `observatory-space-daemons/1`, is exactly:
+
+```json
+{"schema": "observatory-space-daemons/1",
+ "entries": [{"label": "org.example.agent", "user": "space", "uid": 501,
+              "source": "/var/empty/space/.local/share/project-observatory/background/LaunchAgents/org.example.agent.plist",
+              "sourceSha256": "<hex>", "written": "/Library/LaunchDaemons/org.example.agent.plist",
+              "writtenSha256": "<hex>", "at": "2026-11-07T12:00:00Z"}]}
+```
+
+`label` is the launchd label; `user` and `uid` the account the daemon runs as; `source` the absolute path of the
+definition `apply` read and `sourceSha256` its bytes' SHA-256; `written` the absolute path of the daemon plist and
+`writtenSha256` the SHA-256 of what was written; `at` when, RFC 3339 in UTC. One entry per label, sorted by label;
+the file is replaced whole (written to a temporary file, synced, renamed). A reader treats a missing file as no
+entries, and a different `schema` as a format it does not know. A field is added only under a new schema name.
+
+**Installing the copy.** An administrator downloads the release in their OWN account and verifies it there, never
+copying the file from the space account's folders: `gh release download vX.Y.Z -R
+passioncode-ai/project-observatory-dashboard -p 'SHA256SUMS*' -p '*.whl'` (or `curl -LO
+https://github.com/passioncode-ai/project-observatory-dashboard/releases/download/vX.Y.Z/<asset>` for `SHA256SUMS`,
+`SHA256SUMS.asc` and the wheel), `shasum -a 256 -c SHA256SUMS --ignore-missing`, the organization's release key
+imported from `https://raw.githubusercontent.com/passioncode-ai/.github/main/release-signing/passioncode-release-signing.asc`
+(gpg is not on macOS by default), then `gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS | grep -q "VALIDSIG
+63B30DC324BD697487AA31944FAFB8AEC803B6A7"`: the pinned fingerprint of `release_signature.PINNED`, which `full update`
+checks, because a bare `gpg --verify` accepts any key in the keyring. Without gpg, the administrator's own
+Observatory install checks the same key with `release_signature.verify` (the one-liner is in ONBOARDING). Then `unzip
+-p project_observatory-X.Y.Z-py3-none-any.whl observatory/engine/tools/space_daemons.py > space_daemons.py`, `sudo
+install -d -o root -g wheel -m 0755 /usr/local/libexec`, `sudo install -o root -g wheel -m 0755 space_daemons.py
+/usr/local/libexec/observatory-space-daemons`. `--version` is information only. `machine-move cutover` names the
+same steps in `human_steps`; `remove` checks the file is its own before it stops the daemon, and an ACL line
+`ls -lde` prints that the tool cannot parse is a refusal, never "no entries".
+
+**Accepted residual.** The program and `WorkingDirectory` are checked when `apply` runs, and launchd uses them
+later. The program runs as the account, so a program swapped after the check gives the account only what it already
+has, and the account changing its own program is expected. Only `ProgramArguments[0]` is checked (owned by root or
+the account, in folders only root or the account can write): an interpreter that runs a script elsewhere inherits
+that script's folder permissions, which this tool does not read. The log files sit in root's own folder, created ahead
+by `apply` and owned by the account, so it does not matter whether launchd opens them as root or as the account;
+their layout is decided in one function (`space_daemons.log_paths`).
+
+**Rules added in review.** A label is letters and digits, then `. _ @ -` (at most 128), the same rule the engine's
+headless `cutover` applies before it moves anything; a label any plist in `/Library/LaunchDaemons` or
+`/System/Library/LaunchDaemons` carries is refused (`label_taken`) unless it is this tool's own file for the same
+account. `KeepAlive.PathState` paths stay inside the home, `KeepAlive.OtherJobEnabled` and `DYLD_*` variables are
+refused, every integer fits 0..2147483647, and a definition whose daemon would not write as a plist is refused in
+`plan` (`not_writable_as_plist`). `apply` writes the registry entry before the plist (an entry whose plist is
+missing is written again by `apply`, cleaned by `remove`, shown `missing` by `status`), reports one definition's
+error as `failed` and goes on, and clears both log folders' ACLs before adding its one entry. `remove` deletes only
+a file whose sha256 is `writtenSha256` or whose label is the entry's. `leave` refuses while the registry names the
+job for this account, loaded or not.
+
+One copy only: `apply` refuses a label loaded as an agent in that account's own GUI domain (`launchctl print
+gui/<uid>/<label>` exit 0, problem `loaded-in-gui`), and a label another account's entry holds
+(`owned_by_other_account`), and writes nothing for it.
+
 ## Workspace snapshot: its home, home-relative paths and another machine's passphrase (OBS-347, OBS-348, 0.34.0)
 
 Additive, with no new file, table or migration. A workspace snapshot's `manifest.json` gains `home_path`, the home

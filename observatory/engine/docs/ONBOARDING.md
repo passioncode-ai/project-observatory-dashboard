@@ -2776,6 +2776,106 @@ second machine's `elsewhere`; a load that fails puts the plist back in staging. 
 on the old machine needs nothing: on the second machine it stays staged and named as running
 elsewhere.
 
+**An account nobody logs in to** (macOS, OBS-361 part 1). An OS account with no graphical login, such
+as a second "space" on a shared computer, has no `gui/<uid>` launchd domain, and launchd refuses its
+agents even when root asks. When `launchctl print gui/<uid>` answers that the domain does not exist,
+`cutover` runs the same checks, then moves the plist into
+`~/.local/share/project-observatory/background/LaunchAgents/` (owner-only, the plist made unwritable by
+group and others) instead of `~/Library/LaunchAgents`, removes the job from `elsewhere`, and answers
+`"state": "waiting-for-root"` with `human_steps` and `next` naming the one command an administrator
+runs:
+
+```sh
+sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL
+```
+
+That command writes the job to `/Library/LaunchDaemons/LABEL.plist` with `UserName` and `GroupName`
+set to the account (launchd.plist(5): they apply only in the system domain), so it runs as that
+account, never as root, and starts again after a reboot with nobody logged in. Root never runs a file
+the account can write, so the administrator first installs a root-owned copy once per computer, from
+the release itself, downloaded and verified in the administrator's OWN account (never copied from the
+space account's folders, which that account could have changed), with the release's version for
+`X.Y.Z`:
+
+```sh
+gh release download vX.Y.Z -R passioncode-ai/project-observatory-dashboard -p 'SHA256SUMS*' -p '*.whl'
+#   without gh: curl -LO https://github.com/passioncode-ai/project-observatory-dashboard/releases/download/vX.Y.Z/SHA256SUMS
+#   and the same for SHA256SUMS.asc and project_observatory-X.Y.Z-py3-none-any.whl
+shasum -a 256 -c SHA256SUMS --ignore-missing          # the wheel matches the release's sums
+curl -LO https://raw.githubusercontent.com/passioncode-ai/.github/main/release-signing/passioncode-release-signing.asc
+gpg --import passioncode-release-signing.asc          # gpg is not on macOS by default: brew install gnupg
+gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS | grep -q "VALIDSIG 63B30DC324BD697487AA31944FAFB8AEC803B6A7" && echo signed
+unzip -p project_observatory-X.Y.Z-py3-none-any.whl tools/space_daemons.py > space_daemons.py
+sudo install -d -o root -g wheel -m 0755 /usr/local/libexec
+sudo install -o root -g wheel -m 0755 space_daemons.py /usr/local/libexec/observatory-space-daemons
+```
+
+The signature is checked against the organization's pinned release key, the same fingerprint
+`full update` checks (`release_signature.py`, `PINNED`; the key is published in the organization's
+[release-signing](https://github.com/passioncode-ai/.github/tree/main/release-signing) folder): a bare
+`gpg --verify` would accept any key in the keyring. Without gpg, the administrator's own Observatory
+install checks the same pinned key:
+
+```sh
+python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import release_signature as r; sys.exit(r.verify(open("SHA256SUMS", "rb").read(), open("SHA256SUMS.asc").read()) != sys.argv[2])' "$(project-observatory full-path)" 63B30DC324BD697487AA31944FAFB8AEC803B6A7 && echo signed
+```
+
+`observatory-space-daemons --version` prints the version and the file's sha256 for information only:
+the verification is the lines above. `machine-move cutover` names the same steps in `human_steps`.
+
+The `-I` in the command is required: in isolated mode Python leaves the script's folder and the user's
+site-packages out of its module path and ignores every `PYTHON*` variable, so nothing the account
+wrote is imported as root. `apply` and `remove` refuse without it (`not-isolated`, naming the command)
+and from a copy that is not root's alone (owned by root, not writable by group or others, not a link,
+in folders only root can write). Still check the folder before the copy goes in (`ls -ld /usr/local
+/usr/local/libexec`: owned by root, not writable by group or others); where a package manager owns
+`/usr/local`, use another root-only folder and the same command with its path. `plan --user ACCOUNT [--from
+background|staged] [--json]` shows what `apply` would write for each plist and why one is refused,
+and loads nothing; `status --user ACCOUNT` lists the daemons it wrote, loaded or not, and whether the
+file is still as written. A plist is refused, never partly installed, unless it keeps to the allowed
+keys (`Label`, `ProgramArguments`, `Program`, `EnvironmentVariables` without `DYLD_*`, `WorkingDirectory`, `RunAtLoad`,
+`KeepAlive` (a bool, or `SuccessfulExit`, `Crashed`, `AfterInitialDemand`, and `PathState` with paths
+inside the home; not `OtherJobEnabled`), `StartInterval`, `StartCalendarInterval`, `StandardOutPath`, `StandardErrorPath`,
+`ThrottleInterval`, `ProcessType`, `Nice` of 0 or more, `LowPriorityIO`, `ExitTimeOut`,
+`AbandonProcessGroup`; `LimitLoadToSessionType` is dropped), its program is owned by root or the
+account in folders nobody else can write, its `WorkingDirectory` stays inside the account's home,
+every integer fits 0 to 2147483647, and the daemon it would become writes as a plist. Its label is
+letters and digits, then `. _ @ -` (at most 128; `com.apple.` refused), carried by no other plist in
+`/Library/LaunchDaemons` or `/System/Library/LaunchDaemons`; `cutover` checks the same rules before it
+moves anything (it names each problem and leaves the plist where it was) and names the moved file
+`LABEL.plist`, and refuses when the job is defined both in `~/Library/LaunchAgents` and in staging or
+the background folder.
+**Logs** go to a folder root owns, never where the plist said: launchd may open
+`StandardOutPath` and `StandardErrorPath` with root's rights, and a link in a folder the account
+controls could make root write elsewhere. The daemon writes
+`/Library/Logs/ProjectObservatory/ACCOUNT/LABEL.out.log` and `LABEL.err.log`; `apply` makes
+`/Library/Logs/ProjectObservatory` root:wheel 0755 and `ACCOUNT` in it root:wheel 0700, clears any ACL
+on both (`/bin/chmod -N`), adds one inherited entry that lets the account read (`/bin/chmod +a "ACCOUNT
+allow list,search,read,readattr,readextattr,readsecurity,file_inherit,directory_inherit"`), checks that
+only that entry is there, and refuses,
+installing nothing, when such a folder exists as a link or is not root's. It then creates both log
+files ahead of launchd (a new file, never through a link), owned by the account, mode 0600. Inside the
+root-owned 0700 folder the account can read and append to its files but cannot create, rename, link
+or unlink anything there, so they are safe whichever credentials launchd uses to open them, and the
+account cannot replace them. A log file already there is kept only when it is a regular file with one
+link, owned by the account (or by root, then given to the account) and not writable by group or
+others; otherwise that job is refused (`log-file`) and nothing is installed for it. `remove` leaves
+the log files in place and says so. `plan` notes `logs-moved` for a plist that named its own log
+paths. A file in
+`/Library/LaunchDaemons` the tool did not write is never replaced: what it wrote is recorded in
+`/Library/Application Support/ProjectObservatory/space-daemons.json` (a stable interface, readable
+without root; its format is in COMPATIBILITY.md). One copy only: a label already loaded as an agent in
+the account's GUI domain (`loaded-in-gui`), or held by another account's entry, is refused. Once root loaded the job, a
+second `cutover` answers `"state": "complete"`, and `machine-move show` lists it under `background`
+as `loaded` (`registered` when root wrote it and it is not loaded, `waiting-for-root` before).
+`leave` refuses while root's registry names the job for this account, loaded or not, and names `sudo
+... remove --user ACCOUNT --label LABEL`; after it, `leave` stages the plist from the background folder
+as usual. `apply` writes the registry entry before the plist, so a crash between the two leaves an
+entry whose plist is missing: `apply` writes it again, `remove` cleans it, `status` shows it as
+`missing`. `remove` deletes only a file whose bytes are what it wrote or whose label is the job's. One
+definition that fails in `apply` is reported as `failed` with its error, and the others go on. Root cannot see the account's
+`XDG_DATA_HOME`, so `cutover` refuses, before moving anything, in such an account with a custom one.
+
 **The placement file**, `${XDG_DATA_HOME:-~/.local/share}/project-observatory/placement.json`,
 owner-only and written atomically, says which jobs this machine holds for another one, until the
 estate record carries placement:

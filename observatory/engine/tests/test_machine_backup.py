@@ -1658,6 +1658,232 @@ class MachineMove(Base):
         self.assertEqual(json.loads(out.getvalue())['machine'], ALPHA)
 
 
+class Launchd:
+    """A stand-in for subprocess.run for launchctl alone: `print gui/UID` answers `gui` (112 is launchctl's
+    "could not find domain"), `print gui/UID/LABEL` 113, `print system/LABEL` 0 for a label in `system`."""
+
+    def __init__(self, gui=112, system=()):
+        self.calls, self.gui, self.system = [], gui, set(system)
+
+    def __call__(self, argv, **kw):
+        self.calls.append(list(argv))
+        code = 0
+        if argv[:2] == ['launchctl', 'print']:
+            target = argv[2]
+            if target.startswith('system/'):
+                code = 0 if target[len('system/'):] in self.system else 113
+            elif target.count('/') == 1:
+                code = self.gui
+            else:
+                code = 113
+        return subprocess.CompletedProcess(argv, code, '', '')
+
+
+@unittest.skipIf(sys.platform == 'win32', 'no launchd jobs on Windows')
+class HeadlessSpace(Base):
+    """OBS-361 part 1: an account with no GUI session runs its jobs as system daemons root loads."""
+
+    UID = 501
+
+    def setUp(self):
+        super().setUp()
+        self.home = self.user
+        self.sysroot = self.base / 'system'
+        self.allow = patch.dict(os.environ, {'OBSERVATORY_SYSTEM_SETUP': '1',
+                                             'OBSERVATORY_SPACE_DAEMONS_FOR_TESTS': '1',
+                                             'OBSERVATORY_SPACE_DAEMONS_TEST_ROOT': str(self.sysroot)})
+        self.allow.start()
+        self.addCleanup(self.allow.stop)
+        name = patch.object(MM, 'account_name', return_value='space')
+        name.start()
+        self.addCleanup(name.stop)
+
+    def plist(self):
+        import plistlib
+        return plistlib.dumps({'Label': JOB_LABEL, 'ProgramArguments': ['/usr/bin/true']})
+
+    def stage(self):
+        folder = MI.staging_dir(self.home)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f'{JOB_LABEL}.plist').write_bytes(self.plist())
+        MI.place_elsewhere([{'label': JOB_LABEL, 'placedOn': BETA, 'by': 'machine-restore'}], self.home)
+        return folder / f'{JOB_LABEL}.plist'
+
+    def register(self, uid=UID, label=JOB_LABEL):
+        path = self.sysroot / 'Library/Application Support/ProjectObservatory/space-daemons.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({'schema': 'observatory-space-daemons/1', 'entries': [
+            {'label': label, 'user': 'space', 'uid': uid, 'source': '/var/empty/space/x.plist', 'sourceSha256': '0',
+             'written': f'/Library/LaunchDaemons/{label}.plist', 'writtenSha256': '0',
+             'at': '2026-11-07T00:00:00Z'}]}))
+
+    def cutover(self, run):
+        return MM.cutover(JOB_LABEL, self.home, runner=run, platform='darwin', uid=self.UID, confirm=YES)
+
+    def test_without_a_gui_session_cutover_places_the_job_and_waits_for_root(self):
+        staged = self.stage()
+        run = Launchd()
+        result = self.cutover(run)
+        background = MI.background_dir(self.home) / staged.name
+        self.assertEqual(background.read_bytes(), self.plist())
+        self.assertEqual(stat.S_IMODE(background.stat().st_mode) & 0o022, 0, 'root reads it only unwritable by others')
+        self.assertEqual(stat.S_IMODE(background.parent.stat().st_mode), 0o700)
+        self.assertFalse(staged.exists())
+        self.assertFalse((self.home / 'Library/LaunchAgents' / staged.name).exists())
+        self.assertNotIn('bootstrap', [c[1] for c in run.calls], 'no agent load is tried in a domain that is absent')
+        step = (f'sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user space '
+                f'--label {JOB_LABEL}')
+        self.assertEqual((result['state'], result['load'], result['domain']),
+                         ('waiting-for-root', 'waiting-for-root', 'system'))
+        self.assertEqual(result['next'][0], step)
+        install = '\n'.join(result['human_steps'][:-1])
+        self.assertEqual(result['human_steps'][:-1], MM.install_steps())
+        for part in ("gh release download vX.Y.Z -R passioncode-ai/project-observatory-dashboard -p 'SHA256SUMS*' "
+                     "-p '*.whl'", 'curl -LO https://github.com/passioncode-ai/project-observatory-dashboard/releases/'
+                     'download/vX.Y.Z/SHA256SUMS', 'shasum -a 256 -c SHA256SUMS --ignore-missing',
+                     'passioncode-release-signing.asc', 'gpg is not on macOS by default',
+                     'unzip -p project_observatory-X.Y.Z-py3-none-any.whl observatory/engine/tools/space_daemons.py',
+                     'sudo install -d -o root -g wheel -m 0755 /usr/local/libexec',
+                     'sudo install -o root -g wheel -m 0755 space_daemons.py '
+                     '/usr/local/libexec/observatory-space-daemons', 'OWN account', 'project-observatory full-path'):
+            self.assertIn(part, install)
+        self.assertIn(step, result['human_steps'][-1])
+        self.assertTrue(result['was_elsewhere'])
+        self.assertEqual(MI.read_placement(self.home)['elsewhere'], [], 'placed here, as a cutover that loads')
+        self.assertEqual(MM.show(self.home, platform='darwin', runner=run, uid=self.UID)['background'],
+                         [{'label': JOB_LABEL, 'file': staged.name, 'daemon': 'waiting-for-root'}])
+        self.assertEqual(MM.defined_jobs(self.home, 'darwin'), ([JOB_LABEL], None))
+        with patch.object(MM.osprivacy, 'account', return_value=str(self.UID)):
+            self.assertEqual(MM._space_evidence(self.home, 'darwin'), [f'{JOB_LABEL} waits for root: {step}'])
+
+    def test_the_install_steps_pin_the_engines_release_key(self):
+        import release_signature
+        fingerprint = release_signature.PINNED[0]['fingerprint']
+        self.assertEqual(MM.release_key_fingerprint(), fingerprint)
+        steps = '\n'.join(MM.install_steps())
+        self.assertIn(f'gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS | grep -q "VALIDSIG {fingerprint}"', steps)
+        self.assertNotRegex(steps, r'gpg --verify SHA256SUMS\.asc SHA256SUMS(?! \|)', 'never a bare gpg --verify')
+
+    def test_once_root_loaded_it_cutover_and_show_say_it_runs(self):
+        self.stage()
+        self.register()
+        run = Launchd(system={JOB_LABEL})
+        result = self.cutover(run)
+        self.assertEqual((result['state'], result['load']), ('complete', 'loaded'))
+        self.assertNotIn('human_steps', result)
+        self.assertEqual(MM.show(self.home, platform='darwin', runner=run, uid=self.UID)['background'][0]['daemon'],
+                         'loaded')
+        self.assertTrue(MM._loaded(run, 'launchd', JOB_LABEL, self.UID))
+        self.assertFalse(MM._loaded(run, 'launchd', JOB_LABEL, self.UID + 1), 'another account\'s daemon')
+        with patch.object(MM.osprivacy, 'account', return_value=str(self.UID)):
+            self.assertEqual(MM._space_evidence(self.home, 'darwin'),
+                             [f'{JOB_LABEL} runs as a system daemon of this account (registered by root)'])
+
+    def test_a_system_daemon_of_another_account_is_not_this_ones(self):
+        self.stage()
+        self.register(uid=self.UID + 1)
+        result = self.cutover(Launchd(system={JOB_LABEL}))
+        self.assertEqual(result['state'], 'waiting-for-root')
+
+    def test_leave_is_refused_while_registered_even_unloaded_and_in_a_sandbox(self):
+        self.stage()
+        self.cutover(Launchd())
+        self.register()
+        for sandbox in ('1', '0'):
+            with self.subTest(sandbox=sandbox), patch.dict(os.environ, {'OBSERVATORY_SYSTEM_SETUP': sandbox}), \
+                    self.assertRaisesRegex(MM.MachineMoveError, 'registered by root'):
+                MM.leave(JOB_LABEL, BETA, self.home, runner=Launchd(), platform='darwin', uid=self.UID)
+        self.assertTrue((MI.background_dir(self.home) / f'{JOB_LABEL}.plist').is_file())
+
+    def test_cutover_refuses_what_root_would_refuse_and_moves_nothing(self):
+        import plistlib
+        folder = MI.staging_dir(self.home)
+        folder.mkdir(parents=True)
+        staged = folder / f'{JOB_LABEL}.plist'
+        staged.write_bytes(plistlib.dumps({'Label': JOB_LABEL, 'ProgramArguments': ['/usr/bin/true'],
+                                           'Sockets': {'Listener': {'SockServiceName': '80'}}}))
+        MI.place_elsewhere([{'label': JOB_LABEL, 'placedOn': BETA}], self.home)
+        with self.assertRaisesRegex(MM.MachineMoveError, 'would refuse .*key_not_allowed \\(Sockets\\)'):
+            self.cutover(Launchd())
+        self.assertTrue(staged.is_file(), 'it stays where it was')
+        self.assertFalse(MI.background_dir(self.home).exists())
+        self.assertEqual([e['label'] for e in MI.read_placement(self.home)['elsewhere']], [JOB_LABEL])
+        colon = 'org.example:job'
+        (folder / f'{colon}.plist').write_bytes(plistlib.dumps({'Label': colon, 'ProgramArguments': ['/usr/bin/true']}))
+        with self.assertRaisesRegex(MM.MachineMoveError, 'label_shape'):
+            MM.cutover(colon, self.home, runner=Launchd(), platform='darwin', uid=self.UID, confirm=YES)
+
+    def test_a_homebrew_label_moves_and_is_named_after_its_label(self):
+        import plistlib
+        label = 'homebrew.mxcl.postgresql@14'
+        folder = MI.staging_dir(self.home)
+        folder.mkdir(parents=True)
+        (folder / 'postgres.plist').write_bytes(plistlib.dumps({'Label': label, 'ProgramArguments': ['/usr/bin/true']}))
+        result = MM.cutover(label, self.home, runner=Launchd(), platform='darwin', uid=self.UID, confirm=YES)
+        self.assertEqual(result['state'], 'waiting-for-root')
+        self.assertEqual(result['definition'], str(MI.background_dir(self.home) / f'{label}.plist'))
+        self.assertEqual(sorted(p.name for p in MI.background_dir(self.home).iterdir()), [f'{label}.plist'])
+
+    def test_a_job_defined_twice_is_refused_with_both_files_named(self):
+        staged = self.stage()
+        live = self.home / 'Library/LaunchAgents' / staged.name
+        live.parent.mkdir(parents=True)
+        live.write_bytes(self.plist())
+        with self.assertRaises(MM.MachineMoveError) as caught:
+            self.cutover(Launchd())
+        self.assertIn(str(live), str(caught.exception))
+        self.assertIn(str(staged), str(caught.exception))
+        self.assertTrue(staged.is_file() and live.is_file())
+
+    def test_other_answers_of_print_gui_keep_the_agent_path(self):
+        for code in (113, 125):
+            with self.subTest(code=code):
+                staged = self.stage()
+                run = Launchd(gui=code)
+                result = self.cutover(run)
+                live = self.home / 'Library/LaunchAgents' / staged.name
+                self.assertTrue(live.is_file())
+                self.assertIn(['launchctl', 'bootstrap', f'gui/{self.UID}', str(live)], run.calls)
+                self.assertNotIn('state', result)
+                live.unlink()
+
+    def test_with_a_gui_session_cutover_is_unchanged(self):
+        staged = self.stage()
+        run = Launchd(gui=0)
+        result = self.cutover(run)
+        live = self.home / 'Library/LaunchAgents' / staged.name
+        self.assertTrue(live.is_file())
+        self.assertIn(['launchctl', 'bootstrap', f'gui/{self.UID}', str(live)], run.calls)
+        self.assertEqual(result['load'], 'loaded')
+        self.assertNotIn('state', result)
+        self.assertFalse(MI.background_dir(self.home).exists())
+
+    def test_a_custom_xdg_data_home_is_refused_before_anything_moves(self):
+        with patch.dict(os.environ, {'XDG_DATA_HOME': str(self.base / 'xdg')}):
+            staged = self.stage()
+            with self.assertRaisesRegex(MM.MachineMoveError, 'XDG_DATA_HOME'):
+                self.cutover(Launchd())
+            self.assertTrue(staged.is_file())
+
+    def test_leave_is_refused_while_root_runs_it_then_works_from_the_background_folder(self):
+        self.stage()
+        self.register()
+        run = Launchd(system={JOB_LABEL})
+        self.cutover(run)
+        with self.assertRaisesRegex(MM.MachineMoveError, 'only root removes: sudo /usr/bin/python3 -I '
+                                    '/usr/local/libexec/observatory-space-daemons remove --user space '
+                                    f'--label {JOB_LABEL}'):
+            MM.leave(JOB_LABEL, BETA, self.home, runner=run, platform='darwin', uid=self.UID)
+        self.assertTrue((MI.background_dir(self.home) / f'{JOB_LABEL}.plist').is_file(), 'nothing moved')
+        run.system.clear()  # root ran `remove`: unloaded, and out of the registry
+        (self.sysroot / 'Library/Application Support/ProjectObservatory/space-daemons.json').unlink()
+        result = MM.leave(JOB_LABEL, BETA, self.home, runner=run, platform='darwin', uid=self.UID)
+        self.assertEqual(result['stop'], 'stopped')
+        self.assertFalse((MI.background_dir(self.home) / f'{JOB_LABEL}.plist').exists())
+        self.assertTrue((MI.staging_dir(self.home) / f'{JOB_LABEL}.plist').is_file())
+        self.assertEqual([e['placedOn'] for e in MI.read_placement(self.home)['elsewhere']], [BETA])
+
+
 def job_file(home: Path, label: str, *, disabled: bool = False) -> Path:
     """A job definition in `home`'s job folder, as launchd or systemd keeps it."""
     import plistlib

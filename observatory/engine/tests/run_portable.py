@@ -311,6 +311,9 @@ BOUNDARY += ('learning_review',)
 # OBS-355 part 1: who owns each end of a loopback connection (peer_owner.py over captured tables and a live pair),
 # and the servers refusing another OS account's connection before reading it (peer_check.py).
 BOUNDARY += ('peer_owner', 'peer_check')
+# OBS-361 part 1: the administrator's tool that runs a headless space's jobs as system daemons with UserName,
+# against a temporary system root, an injected euid and a fake launchctl.
+BOUNDARY += ('space_daemons',)
 SUITES = LEGACY + BOUNDARY
 #: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
 #: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.

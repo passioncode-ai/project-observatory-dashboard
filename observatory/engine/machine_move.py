@@ -25,6 +25,21 @@ and writes the placement file but never calls launchctl or systemctl.
         restore complete, its own SSH key and device id, the vault the same, no job on both
     on the other machine:           project-observatory full machine-move facts --out FILE
         the public facts `status` compares this machine with (see "the checklist of a move")
+
+AN ACCOUNT NOBODY LOGS IN TO (OBS-361 part 1). On macOS an account with no graphical login has no
+`gui/<uid>` domain, and `launchctl bootstrap user/<uid>` refuses agents even as root, so a job staged in
+such a "space" could never start as an agent. When `launchctl print gui/<uid>` answers that the domain does
+not exist (exit 112, "could not find domain"), `cutover` runs every check as before, then moves the
+definition into the background folder (`machine_identity.background_dir`) instead of
+~/Library/LaunchAgents and answers `waiting-for-root` with the one command an administrator runs:
+`sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL`
+(`tools/space_daemons.py`, installed once as a root-owned copy, run in Python's isolated mode). That writes the job to
+/Library/LaunchDaemons with `UserName` set to this account: it runs as this account, never as root, and
+starts again after a reboot with nobody logged in. Any other answer of `launchctl print gui/<uid>` (0, or a
+code this does not know) keeps today's path. `leave` refuses while such a daemon runs (root removes it
+first, `... remove --user ACCOUNT --label LABEL`), then works from the background folder as from
+~/Library/LaunchAgents. The registry root writes (/Library/Application Support/ProjectObservatory/
+space-daemons.json) is only read here.
 """
 from __future__ import annotations
 
@@ -97,9 +112,102 @@ def _run(runner, argv: list[str]) -> subprocess.CompletedProcess:
     return runner(argv, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
 
 
+#: `launchctl print gui/<uid>`'s exit code when the account has no GUI domain (measured on macOS 26.6:
+#: 112 "could not find domain"; 113 is a missing service, 0 a domain that exists).
+NO_DOMAIN = 112
+#: Where an administrator installs the root-owned copy of tools/space_daemons.py (OBS-361).
+SPACE_DAEMONS_COPY = "/usr/local/libexec/observatory-space-daemons"
+
+
+def gui_session(uid: int, runner) -> bool:
+    """Whether this account has a GUI launchd domain to load agents into. Only launchctl's own "no such
+    domain" answer says no: any other answer keeps the agent path, which fails and puts back as before."""
+    return _run(runner, ["launchctl", "print", f"gui/{uid}"]).returncode != NO_DOMAIN
+
+
+def _space_daemons_module():
+    tools = str(Path(__file__).resolve().parent / "tools")
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    import space_daemons
+    return space_daemons
+
+
+def _space_entry(label: str, uid: int) -> dict | None:
+    """The registry entry root wrote for LABEL of this account, read only; None when there is none or the
+    registry does not read (nothing is known to run then)."""
+    try:
+        sd = _space_daemons_module()
+        entries = sd.read_registry(sd.system_from_environment())
+    except Exception:  # an unreadable registry says nothing runs; it is root's file, never repaired here
+        return None
+    for entry in entries:
+        if entry.get("label") == label and entry.get("uid") == uid:
+            return entry
+    return None
+
+
+def _system_daemon_loaded(runner, label: str, uid: int) -> bool:
+    """LABEL runs here as a system daemon that root's space_daemons.py loaded for this account."""
+    if _space_entry(label, uid) is None:
+        return False
+    return _run(runner, ["launchctl", "print", f"system/{label}"]).returncode == 0
+
+
+def account_name(uid: int) -> str:
+    try:
+        import pwd
+        return pwd.getpwuid(uid).pw_name
+    except (ImportError, KeyError):
+        return os.environ.get("USER") or "ACCOUNT"
+
+
+RELEASES = "https://github.com/passioncode-ai/project-observatory-dashboard/releases/download/vX.Y.Z"
+#: Where the organization's release key is published (public), beside its release-signing README.
+RELEASE_KEY_URL = ("https://raw.githubusercontent.com/passioncode-ai/.github/main/release-signing/"
+                   "passioncode-release-signing.asc")
+
+
+def release_key_fingerprint() -> str:
+    """The pinned release key, from release_signature.PINNED: the one `full update` checks."""
+    import release_signature
+    return release_signature.PINNED[0]["fingerprint"]
+
+
+def install_steps() -> list[str]:
+    """How an administrator gets the root-owned copy, once per computer (OBS-361): from the release,
+    downloaded and verified in their OWN account, never copied from this account's folders (which this
+    account could have changed). The signature is checked against the pinned key, never any key gpg holds."""
+    fp = release_key_fingerprint()
+    return [
+        "once per computer, an administrator in their OWN account (never from this account's folders): "
+        "gh release download vX.Y.Z -R passioncode-ai/project-observatory-dashboard -p 'SHA256SUMS*' -p '*.whl'  "
+        f"(without gh: curl -LO {RELEASES}/SHA256SUMS, the same for SHA256SUMS.asc and "
+        "project_observatory-X.Y.Z-py3-none-any.whl)",
+        "shasum -a 256 -c SHA256SUMS --ignore-missing",
+        f"curl -LO {RELEASE_KEY_URL} && gpg --import passioncode-release-signing.asc  (gpg is not on macOS by "
+        "default: brew install gnupg)",
+        f"gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS | grep -q \"VALIDSIG {fp}\"  (or, without gpg, "
+        "with the administrator's own Observatory install: python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); "
+        "import release_signature as r; sys.exit(r.verify(open(\"SHA256SUMS\", \"rb\").read(), "
+        f"open(\"SHA256SUMS.asc\").read()) != sys.argv[2])' \"$(project-observatory full-path)\" {fp})",
+        "unzip -p project_observatory-X.Y.Z-py3-none-any.whl observatory/engine/tools/space_daemons.py > "
+        "space_daemons.py",
+        "sudo install -d -o root -g wheel -m 0755 /usr/local/libexec",
+        f"sudo install -o root -g wheel -m 0755 space_daemons.py {SPACE_DAEMONS_COPY}",
+    ]
+
+
+def root_step(verb: str, label: str, uid: int) -> str:
+    """The administrator's command for LABEL: isolated mode (`-I`), so root imports nothing the account wrote."""
+    return f"sudo /usr/bin/python3 -I {SPACE_DAEMONS_COPY} {verb} --user {account_name(uid)} --label {label}"
+
+
 def _loaded(runner, system: str, label: str, uid: int) -> bool:
     if system == "launchd":
-        return _run(runner, ["launchctl", "print", f"gui/{uid}/{label}"]).returncode == 0
+        if _run(runner, ["launchctl", "print", f"gui/{uid}/{label}"]).returncode == 0:
+            return True
+        return _system_daemon_loaded(runner, label, uid)
     return _run(runner, ["systemctl", "--user", "is-active", "--quiet", label]).returncode == 0
 
 
@@ -129,14 +237,32 @@ def _stop(runner, system: str, label: str, definition: Path, uid: int) -> None:
         raise MachineMoveError(f"{label} is still running here; it was not moved")
 
 
-def show(home: Path, *, platform: str = sys.platform) -> dict:
+def _daemon_state(runner, label: str, uid: int, *, ask: bool) -> str:
+    """`loaded` (root's daemon of this account runs), `registered` (root wrote it; not loaded, or not asked)
+    or `waiting-for-root` (nobody has run space_daemons.py apply for it)."""
+    if _space_entry(label, uid) is None:
+        return "waiting-for-root"
+    if ask and _run(runner, ["launchctl", "print", f"system/{label}"]).returncode == 0:
+        return "loaded"
+    return "registered"
+
+
+def show(home: Path, *, platform: str = sys.platform, runner=subprocess.run, uid: int | None = None) -> dict:
     system = _system(platform)
     doc = mi.read_placement(home)
     staging = mi.staging_dir(home, system)
+    background = []
+    if system == "launchd":
+        uid = int(osprivacy.account()) if uid is None else uid
+        for p in _definitions(mi.background_dir(home), system):
+            label = mi.job_label(p) if p.is_file() else p.stem
+            background.append({"label": label, "file": p.name,
+                               "daemon": _daemon_state(runner, label, uid, ask=_commands_allowed())})
     return {"machine": mi.machine_id(home), "placement": str(mi.placement_path(home)),
             "elsewhere": doc["elsewhere"], "staging": str(staging),
             "staged": [{"label": mi.job_label(p) if p.is_file() else p.stem, "file": p.name}
-                       for p in _definitions(staging, system)]}
+                       for p in _definitions(staging, system)],
+            "background": background}
 
 
 def ask_left(label: str, me: str) -> bool:
@@ -167,12 +293,29 @@ def cutover(label: str, home: Path, *, runner=subprocess.run, platform: str = sy
     staged = _find(staging, system, label)
     live = _find(folder, system, label)
     me = mi.machine_id(home)
-    if staged is None and live is None:
+    # OBS-361: an account with no GUI session cannot load an agent; its jobs run as system daemons.
+    headless = system == "launchd" and _commands_allowed() and not gui_session(uid, runner)
+    background = _find(mi.background_dir(home), system, label) if headless else None
+    if staged is None and live is None and background is None:
         raise MachineMoveError(f"no job {label} is staged here ({staging}) or defined here ({folder}); "
                                "`full machine-move show` lists the staged ones")
+    if headless:
+        default = home / ".local" / "share" / mi.FOLDER
+        if mi.data_dir(home) != default:
+            raise MachineMoveError(
+                f"this account has no GUI session, so {label} can run here only as a system daemon, and the "
+                f"administrator's tool reads {default}, not XDG_DATA_HOME ({mi.data_dir(home)}): a custom "
+                "XDG_DATA_HOME is not supported for such an account yet (OBS-361); nothing moved")
+        if live is not None and (staged is not None or background is not None):
+            other = staged if staged is not None else background
+            raise MachineMoveError(f"{label} is defined twice here: {live} and {other}; one job runs once, so move "
+                                   "one of them aside first; nothing moved")
+        _check_as_root_will(staged or live or background, home, uid)
     if not (confirm or ask_left)(label, me):
         raise MachineMoveError(f"not confirmed: nothing moved. Run `full machine-move leave {label} --to {me}` on "
                                "the other machine first")
+    if headless:
+        return _cutover_to_background(label, home, runner, uid, me, staged or live, background)
     moved_here = False
     if staged is not None:
         target = folder / staged.name
@@ -206,6 +349,83 @@ def cutover(label: str, home: Path, *, runner=subprocess.run, platform: str = sy
                      f"--to {me}  (stops it there, so it never runs on both)"]}
 
 
+def _space_account(home: Path, uid: int):
+    sd = _space_daemons_module()
+    name, gid, group = account_name(uid), os.getgid() if hasattr(os, "getgid") else 0, "staff"
+    try:
+        import grp
+        import pwd
+        entry = pwd.getpwuid(uid)
+        gid = entry.pw_gid
+        group = grp.getgrgid(gid).gr_name
+    except (ImportError, KeyError):
+        pass
+    return sd.Account(name, uid, gid, group, str(home))
+
+
+def _check_as_root_will(path: Path, home: Path, uid: int) -> None:
+    """The administrator's `apply` rules (space_daemons.validate) on this definition, before anything moves:
+    a job root would refuse never waits for root. Its folder rules are root's alone and checked there."""
+    sd = _space_daemons_module()
+    if path.is_symlink() or not path.is_file():
+        raise MachineMoveError(f"{path} is a link or not a file: root reads only a regular file; nothing moved")
+    try:
+        doc = plistlib.loads(path.read_bytes())
+    except (OSError, ValueError, plistlib.InvalidFileException, xml.parsers.expat.ExpatError) as exc:
+        raise MachineMoveError(f"{path} is not a plist ({type(exc).__name__}); nothing moved") from None
+    if not isinstance(doc, dict):
+        raise MachineMoveError(f"{path} is not a plist dictionary; nothing moved")
+    label = doc.get("Label")
+    name = f"{label}.plist" if isinstance(label, str) else path.name
+    problems, _daemon = sd.validate(doc, name, _space_account(home, uid))
+    if problems:
+        named = ", ".join(p["code"] + (f" ({p['detail']})" if p["detail"] else "") for p in problems)
+        raise MachineMoveError(f"the administrator's tool would refuse {path}: {named}. It stays where it was; "
+                               "fix the definition and run cutover again")
+
+
+def _cutover_to_background(label: str, home: Path, runner, uid: int, me: str, source: Path | None,
+                           background: Path | None) -> dict:
+    """`cutover` for an account with no GUI session (OBS-361): the definition goes to the background
+    folder, writable by this account alone, where the administrator's space_daemons.py reads it. Nothing
+    is put back on the way: the job is placed here, and runs once root loads it."""
+    folder = mi.background_dir(home)
+    if source is None:
+        target = background
+    else:
+        mi.ensure_private_dir(folder, home)
+        # Named <Label>.plist, the only name root's tool accepts for it.
+        target = folder / f"{mi.job_label(source)}.plist"
+        if os.path.lexists(target):
+            if target.is_file() and source.is_file() and target.read_bytes() == source.read_bytes():
+                source.unlink()
+            else:
+                raise MachineMoveError(f"{target} already exists and differs from {source}; move one of them aside "
+                                       "first")
+        else:
+            shutil.move(str(source), str(target))
+    if target.is_file() and not target.is_symlink():
+        # Root reads only a definition nobody but this account can change (space_daemons.py).
+        target.chmod(target.stat().st_mode & 0o7755 & ~0o022)
+    running = _system_daemon_loaded(runner, label, uid)
+    step = root_step("apply", label, uid)
+    was_elsewhere = mi.remove_elsewhere(label, home, machine=me)
+    leave_step = (f"on the machine it left, if not done yet: project-observatory full machine-move leave {label} "
+                  f"--to {me}  (stops it there, so it never runs on both)")
+    result = {"label": label, "machine": me, "definition": str(target), "domain": "system",
+              "load": "loaded" if running else "waiting-for-root",
+              "state": "complete" if running else "waiting-for-root",
+              "was_elsewhere": was_elsewhere, "placement": str(mi.placement_path(home))}
+    if running:
+        result["next"] = [leave_step]
+    else:
+        result["human_steps"] = install_steps() + [
+            f"then, once per job: {step}  (this account has no GUI session, so the job runs as a system daemon "
+            "with UserName set to this account, never as root, and starts again after a reboot)"]
+        result["next"] = [step, leave_step]
+    return result
+
+
 def leave(label: str, to: str, home: Path, *, runner=subprocess.run, platform: str = sys.platform,
           uid: int | None = None) -> dict:
     """Stop one job here, stage its definition and name it as running on machine `to`."""
@@ -219,7 +439,14 @@ def leave(label: str, to: str, home: Path, *, runner=subprocess.run, platform: s
     if to == me:
         raise MachineMoveError("--to names this machine; run `leave` on the machine the job leaves")
     staging, folder = mi.staging_dir(home, system), job_folder(home, system)
+    if system == "launchd" and _space_entry(label, uid) is not None:
+        # Root registered it as a system daemon of this account (OBS-361), loaded or not: only root's `remove`
+        # takes it out of launchd's reach, sandbox or not.
+        raise MachineMoveError(f"{label} is registered by root as a system daemon of this account, which only root "
+                               f"removes: {root_step('remove', label, uid)}, then run leave again; nothing moved")
     live = _find(folder, system, label)
+    if live is None and system == "launchd":
+        live = _find(mi.background_dir(home), system, label)
     stopped = "skipped: OBSERVATORY_SYSTEM_SETUP=0"
     if live is not None:
         if _commands_allowed():
@@ -377,15 +604,20 @@ def device_id(base: Path | None) -> tuple[str | None, str | None]:
 
 
 def defined_jobs(home: Path, platform: str = sys.platform) -> tuple[list[str] | None, str | None]:
-    """(the labels of the jobs defined in this machine's job folder, which load at the next login, or
-    None, why not). This engine's own jobs are left out: each machine installs its own."""
+    """(the labels of the jobs defined in this machine's job folder, which load at the next login, and in
+    its background folder, which root runs as system daemons of an account with no GUI session (OBS-361),
+    or None, why not). This engine's own jobs are left out: each machine installs its own."""
     try:
         system = _system(platform)
     except MachineMoveError as exc:
         return None, str(exc)
     import machine_backup
     labels = []
-    for path in _definitions(job_folder(home, system), system):
+    folders = [job_folder(home, system)]
+    if system == "launchd":
+        # A job root runs as a system daemon of this account (OBS-361) is defined here too.
+        folders.append(mi.background_dir(home))
+    for path in [p for f in folders for p in _definitions(f, system)]:
         if path.name.startswith(machine_backup.OWN_JOB_PREFIXES):
             continue
         if path.is_file() and path.suffix == ".plist":
@@ -400,6 +632,22 @@ def defined_jobs(home: Path, platform: str = sys.platform) -> tuple[list[str] | 
             continue
         labels.append(label)
     return sorted(set(labels)), None
+
+
+def _space_evidence(home: Path, platform: str) -> list[str]:
+    """One line per job in the background folder (OBS-361): registered by root as a system daemon of this
+    account, or waiting for the administrator's command. Read from root's registry; launchctl is not asked."""
+    if platform != "darwin":
+        return []
+    uid = int(osprivacy.account())
+    lines = []
+    for path in _definitions(mi.background_dir(home), "launchd"):
+        label = mi.job_label(path) if path.is_file() else path.stem
+        if _space_entry(label, uid) is not None:
+            lines.append(f"{label} runs as a system daemon of this account (registered by root)")
+        else:
+            lines.append(f"{label} waits for root: {root_step('apply', label, uid)}")
+    return lines
 
 
 def _receipt(home: Path) -> tuple[dict | None, str | None]:
@@ -874,6 +1122,7 @@ def status(home: Path, base: Path | None, *, peers: list[dict] | None = None, un
         elsewhere = {e["label"]: e for e in mi.read_placement(home)["elsewhere"]}
     except mi.MachineIdentityError as exc:
         elsewhere, jobs_problem = {}, jobs_problem or str(exc)
+    space = _space_evidence(home, platform)
     if jobs is None:
         items.append(_item("jobs", UNKNOWN, [jobs_problem or "the job folder could not be read"]))
     else:
@@ -883,16 +1132,17 @@ def status(home: Path, base: Path | None, *, peers: list[dict] | None = None, un
         for peer in fresh_jobs:
             both += [f"{label} is defined here and on {said(peer)}" for label in jobs if label in set(peer["jobs"])]
         if both:
-            items.append(_item("jobs", MISSING, both,
+            items.append(_item("jobs", MISSING, both + space,
                                ["project-observatory full machine-move leave LABEL --to MACHINE_ID  (on the machine "
                                 "the job leaves), then `machine-move cutover LABEL` on the other"]))
         elif not fresh_jobs:
             items.append(_item("jobs", UNKNOWN, [f"{len(jobs)} job(s) defined here; no facts of another machine "
-                                                 f"younger than {max_age_hours:g} hours list its jobs"], [carry]))
+                                                 f"younger than {max_age_hours:g} hours list its jobs"] + space,
+                               [carry]))
         else:
             items.append(_item("jobs", OK, [f"{len(jobs)} job(s) defined here, {len(elsewhere)} placed on another "
                                             "machine; none is defined on both"]
-                               + [f"{said(p)} defines {len(p['jobs'])}" for p in fresh_jobs]))
+                               + [f"{said(p)} defines {len(p['jobs'])}" for p in fresh_jobs] + space))
 
     counts = {s: sum(1 for i in items if i["state"] == s) for s in (OK, MISSING, UNKNOWN)}
     all_ok = counts[OK] == len(items)

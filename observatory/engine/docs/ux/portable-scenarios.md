@@ -6,7 +6,7 @@ Each OSS id is defined once, as a table row or a `### OSS-n:` heading; a heading
 `### OSS-n, in detail:`. A new scenario takes the next free id and moves this line
 (the repository's `ScenarioIds` test checks both, and that every id below it is defined or vacant).
 
-**Next free OSS id:** `OSS-101`
+**Next free OSS id:** `OSS-102`
 
 **Vacant OSS ids:** `OSS-59` (claimed by an open pull request on 2026-10-18 when the SSH-key scenarios took OSS-62; never written)
 
@@ -1153,3 +1153,47 @@ ThisMachineOnly (`test_a_rotated_kept_slot_leaves_its_archives_behind_too`,
 `test_a_mark_that_does_not_read_keeps_the_slot_here` among them);
 `tests/test_vault_digests.py` ThisMachineOnly; `tests/test_machine_backup.py` ExternalSecretStore. Status: built
 (OBS-350 part 1); the restore side waits for part 2; product outcome unobserved.
+
+### OSS-101: a job moved into an account nobody logs in to runs there, and comes back after a reboot
+
+Trigger: on a Mac, a second OS account (a "space") received this machine's jobs through a second-machine restore,
+and nobody ever signs in to it graphically, so it has no `gui/<uid>` launchd domain and launchd refuses its agents.
+
+Funnel: in that account, `full machine-move cutover LABEL` runs its checks as always, finds `launchctl print gui/<uid>`
+answering "could not find domain", moves the plist into `~/.local/share/project-observatory/background/LaunchAgents/`
+and answers `state: waiting-for-root` with the one command an administrator runs:
+`sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL` (after
+installing that root-owned copy once from the release, downloaded with `gh release download` and verified with
+`shasum -a 256 -c` and the signature against the pinned release key (`gpg --status-fd 1 --verify` matched to its
+`VALIDSIG` fingerprint, or `release_signature.verify` from the administrator's own install) in the administrator's
+own account, never copied from the space's folders). The job then runs as a system daemon with `UserName`
+set to the account, never as root, and starts again after every reboot with nobody logged in. A second `cutover`
+answers `state: complete`; `machine-move show` lists it under `background` as `loaded`.
+
+Failure paths: `cutover` refuses, naming each problem and moving nothing, a plist the administrator's tool would
+refuse, and a job defined both in `~/Library/LaunchAgents` and in staging; a plist with a key that would act with root's reach (`UserName`, `Sockets`, `MachServices`, ...), a
+program or a path someone else could change, a label under `com.apple.`, a symlinked, oversized or group-writable
+plist, or a folder others can write is refused and named by `plan` and `apply`, never partly installed; a file in
+`/Library/LaunchDaemons` the tool did not write, a label someone else loaded or any other daemon plist carries, and
+another account's daemon are never replaced; `DYLD_*` variables, `KeepAlive.OtherJobEnabled`, a `PathState` path
+outside the home, an integer outside 0..2147483647 and a daemon that would not write as a plist are refused; one
+definition's failure is `failed` and the others go on; a crash between the registry and the plist leaves an entry
+`status` shows as `missing`; a label already loaded as an agent in the account's GUI domain is refused (`loaded-in-gui`, one copy only);
+the plist's own log paths are ignored (`logs-moved`) and the logs go to root's
+`/Library/Logs/ProjectObservatory/ACCOUNT/` (0700, read ACL for the account), the two files created ahead and owned by
+the account (0600); a link, a hard link, another account's file or a folder that is not root's is refused; a failed load puts back what was there. `apply` and `remove` refuse without root, outside Python's isolated mode
+(`not-isolated`) and from a copy that is not root's alone. `leave` refuses while root's daemon runs and names the `remove` command. An account with a custom
+`XDG_DATA_HOME` is refused before anything moves (part 1).
+
+Acceptance: an account with a GUI session moves its jobs exactly as before; the engine never writes a system file and
+only reads root's registry. Coverage: `tests/test_space_daemons.py` (Rules, Reading, Accounts, Applying, CommandLine,
+Pure); `tests/test_machine_backup.py` HeadlessSpace
+(`test_without_a_gui_session_cutover_places_the_job_and_waits_for_root`,
+`test_once_root_loaded_it_cutover_and_show_say_it_runs`, `test_a_system_daemon_of_another_account_is_not_this_ones`,
+`test_with_a_gui_session_cutover_is_unchanged`, `test_a_custom_xdg_data_home_is_refused_before_anything_moves`,
+`test_leave_is_refused_while_registered_even_unloaded_and_in_a_sandbox`,
+`test_cutover_refuses_what_root_would_refuse_and_moves_nothing`, `test_a_homebrew_label_moves_and_is_named_after_its_label`,
+`test_a_job_defined_twice_is_refused_with_both_files_named`, `test_other_answers_of_print_gui_keep_the_agent_path`,
+`test_leave_is_refused_while_root_runs_it_then_works_from_the_background_folder`) and MachineMove. Status: built
+(OBS-361 part 1); the tick, server and maintenance of such an account, and a passphrase store with no login
+keychain, are later parts; product outcome unobserved.
