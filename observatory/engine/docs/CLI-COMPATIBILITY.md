@@ -94,7 +94,17 @@ workspace. Mutating backup/upgrade operations require the documented
 new locks. No command activates a scheduler while restoring.
 Since 0.4.1 `restore` also accepts an encrypted `.obsnap` file, and the default
 `workspace-backup` output is exported encrypted to the backups root when a
-passphrase is configured; an explicit `--output DIR` keeps its plaintext meaning.
+passphrase is configured; an explicit `--output DIR` keeps its plaintext meaning
+for a workspace without secrets. Since OBS-389 an explicit `--output DIR` over a
+workspace that holds secrets (a secret store inside the workspace, such as
+`secrets/`, with a file in it) is refused before anything is written (exit 2),
+naming the encrypted route (no `--output`) and the new `--plaintext` flag; with
+`--plaintext` it writes the same plaintext directory as before and the answer adds
+`"plaintext": true` and `warnings`. `--plaintext` without `--output` is refused.
+Since OBS-390 `machine-move cutover` refuses a staged launchd plist whose
+`Program`, `ProgramArguments[0]` or `WorkingDirectory` is missing on this machine
+(`staged-plist-stale`, exit 2) before anything moves; a fresh staged plist moves as
+before.
 `backups` and `backup-passphrase` are new workspace commands; nothing existing
 was renamed. Since 0.6.0 `machine` and `cleanup` are too; `cleanup` without
 `--apply` only writes the plan. `machine-backup` and `machine-restore` (OBS-157) are new workspace commands as well; `machine-restore` without `--apply`, `--packages` or `--clone` only prints the plan. Since 0.30.1 `machine-restore` takes `--second-machine` and `--same-machine` (terminal only), `restore` takes `--same-machine` (terminal only), and `machine-move` (`show`, `cutover LABEL`, `leave LABEL --to MACHINE_ID`) is a new workspace command (OBS-283, OBS-284); a bundle or snapshot from another machine, or naming none, now restores as a second machine's. Since 0.31.0 `machine-restore` also takes `--only` or `--skip` (by category, not both) and `--projects` (with `--clone`), each plan row carries `category` and the answer `categories`, and `machine-move` gains `status [--peer FILE] [--json] [--max-age-hours N]` and `facts [--out FILE]` (OBS-282, OBS-286); without the new flags a restore writes what it wrote before. Since 0.34.0 `restore` and `machine-restore` take `--passphrase-stdin` (another machine's backup passphrase, read once from a file or a pipe and stored nowhere; a terminal on stdin is refused, the prompt is the route there), and `configure sources` and `configure storage` answer `stored_as` (`home-relative` for a path under the home, stored as `~/...`, else `absolute`) (OBS-347, OBS-348). From the same release `vault-digests` gains `keep-here PROJECT ENV NAME --why TEXT` and `unkeep-here PROJECT ENV NAME`, and an encrypted snapshot carries a secret store kept outside the workspace without a new flag (OBS-350); every existing command line answers as before. Since 0.35.0 (OBS-361 part 1) `machine-move cutover` in a macOS account with no GUI session (`launchctl print gui/<uid>` exit 112, and since 0.35.1 exit 125); since 0.35.2 the loopback owner check reads a restricted macOS connection table through this account's own processes (`peer_owner` 1.3.0), with every command line unchanged moves the job to the background folder and answers with the new fields `domain`, `state` (`waiting-for-root` or `complete`), `human_steps` and `next` instead of failing; `machine-move show` gains `background[]`; `leave` refuses while root's system daemon of the job runs; an account with a GUI session answers as before. [`backup_vault.py`](../backup_vault.py) implements the root and format.
