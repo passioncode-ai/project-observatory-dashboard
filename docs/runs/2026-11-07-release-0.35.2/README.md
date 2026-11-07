@@ -50,5 +50,8 @@ process sees only its own sockets in the kernel's connection table; then tag, ve
   darwin, and on glibc `sysctlbyname` is no symbol, so ctypes raised `AttributeError` instead of `TableUnreadable`
   (the review's L6). Fixed in the module: a missing libc or libproc symbol now reads as an unreadable table, so the
   question answers `unknown`. `test_peer_owner` OK on Linux in containers with Python 3.11 and 3.13, and on macOS.
+- The second CI run failed the same two tests on Windows: `ctypes.util.find_library("c")` answers None there and
+  `ctypes.CDLL(None)` raises `TypeError`, not `OSError`. Fixed: no libc, or any load error, reads as an unreadable
+  table. Checked on macOS, on Linux (Python 3.11 container) and with `find_library` forced to None.
 - On the release branch: the root release suites, `tools/sync_engine_docs.py --check`, `tools/check_backlog.py`,
   `observatory/engine/tools/check_docs.py`, `check_paths.py` and the inventory check (results in the release PR).

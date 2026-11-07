@@ -543,9 +543,12 @@ def _run(argv: list[str]) -> str:
 
 
 def _sysctl_blob(name: bytes = b"net.inet.tcp.pcblist_n") -> bytes:
+    path = ctypes.util.find_library("c")
+    if not path:                                                     # Windows has none: unreadable
+        raise TableUnreadable("sysctl: no libc")
     try:
-        libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
-    except OSError as exc:
+        libc = ctypes.CDLL(path, use_errno=True)
+    except (OSError, TypeError) as exc:
         raise TableUnreadable(f"sysctl: libc: {type(exc).__name__}") from None
     try:
         fn = libc.sysctlbyname
@@ -613,7 +616,7 @@ def _libproc_sockets(deadline: float) -> list[tuple[int, tuple[str, int], tuple[
     cannot be read (gone, or EPERM) is skipped: it can only lose an answer, never make one."""
     try:
         lib = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
-    except OSError as exc:
+    except (OSError, TypeError) as exc:
         raise TableUnreadable(f"libproc: {type(exc).__name__}") from None
     try:
         lib.proc_listpids.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_int]
