@@ -3,6 +3,48 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.35.0 (2026-11-07)
+
+A macOS account that nobody signs in to at the screen can now run its jobs. Such an account has no graphical session,
+so launchd refuses the jobs a move to another computer staged for it, and `machine-move cutover` could not start them.
+Now cutover moves each job to the account's background folder, and the computer's administrator installs it once as a
+system daemon that runs as that account, never as root, and comes back by itself after a restart. A computer where the
+person signs in at the screen keeps working as before. Nothing needs you after installing; the administrator's
+one-time step is below. This release also fixes how, on Linux, a client checks that the server it is about to send a
+token to belongs to its own account.
+
+### Added
+
+- **Jobs of an account with nobody signed in** (OBS-361 part 1, #458, `docs/COMPATIBILITY.md` "Machine move: a space
+  with nobody logged in", `docs/ONBOARDING.md`). In an account with no graphical session, `full machine-move cutover`
+  checks the job against the same rules the administrator's tool applies, moves it into
+  `~/.local/share/project-observatory/background/LaunchAgents/` and answers `waiting-for-root` with the command for the
+  administrator. The administrator installs a root-owned copy of `tools/space_daemons.py` from a verified release once
+  (the release key fingerprint `63B30DC324BD697487AA31944FAFB8AEC803B6A7` is pinned in the steps) and runs
+  `sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user NAME`. It writes its own
+  `/Library/LaunchDaemons/<label>.plist` with the account as `UserName`, keeps its logs in
+  `/Library/Logs/ProjectObservatory/<account>/`, and records what it wrote in
+  `/Library/Application Support/ProjectObservatory/space-daemons.json` (`observatory-space-daemons/1`, a stable
+  format). `plan` and `status` need no root; `remove` takes a daemon away. `leave` refuses a job installed this way
+  until the administrator removes it.
+- **Programs from Homebrew, and more definitions accepted** (OBS-361, #459, space daemons 1.1.0). The administrator
+  may name accounts and groups that already hold root through sudo in a root-owned trust file (`trust set --owner
+  ADMIN --group admin`; only `wheel` and `admin`, and owners the system confirms are in `admin`), so programs under a
+  prefix they own pass. `Umask` and `SoftResourceLimits` are accepted, `AssociatedBundleIdentifiers` is dropped, a
+  working folder of `/` becomes the home, and XML comments that launchd accepts are read. On one real computer's staged jobs,
+  49 of 73 definitions now pass, against 29 before; the rest need their agent installed first.
+
+### Fixed
+
+- **On Linux, a client no longer misreads a server that has not accepted its connection yet** (`peer_owner` 1.2.0,
+  #460, `docs/COMPATIBILITY.md` "Linux: a server end not accepted yet reads its listener's owner"). The kernel prints
+  such a connection as root's, so a client could refuse its own service, or, running as root, send its token to
+  another account's server. Now an accepted connection decides by its own owner, and one not accepted yet by the
+  owner of the server listening on that address. Other projects that copy `peer_owner.py` were sent the new version.
+  macOS and Windows are unchanged.
+
+The plugin stays 0.30.0.
+
 ## 0.34.0 (2026-11-06)
 
 This release prepares a workspace to move to another computer and to run on a computer other accounts share. Local

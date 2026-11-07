@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The application release is **0.34.0**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
+The application release is **0.35.0**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
 
 ## SQLite runtime prerequisite
 
@@ -350,7 +350,7 @@ platform, so neither a machine bundle nor a workspace snapshot carries them:
 | `machine-move/peers/` | 0.31.0 | the other machine's facts (`full machine-move facts --out FILE`, schema `observatory-machine-facts/1`: `machine`, `generated_at`, `engine_version`, `platform`, `ssh[]` of `file` and `fingerprint`, `device`, `jobs[]`, `elsewhere[]`, `restore`, `omitted`), placed by the person; written whole through a temporary file and a link, never over an existing name; `full machine-move status` reads every `*.json` here | never written by the engine; a file that does not read is named in `degraded`; deleting one forgets that machine |
 | `machine-id` | 0.30.1 | a random machine id, written only where the platform has no machine identifier of its own (macOS, most Linux and Windows have one) | deleting it gives the machine a new id: bundles and snapshots it took before then read as another machine's |
 
-## Linux: a server end not accepted yet reads its listener's owner (peer_owner 1.2.0, the release after 0.34.0)
+## Linux: a server end not accepted yet reads its listener's owner (peer_owner 1.2.0, 0.35.0)
 
 A fix on Linux, and one rule change on every POSIX host. `/proc/net/tcp` and `tcp6` print a connection the server has
 not `accept()`ed yet with uid 0 and inode 0, because its socket has no owner until then. A client that checks the
@@ -394,7 +394,7 @@ Known limits of the Linux listener fallback, each failing closed or left as it w
   connection reads as root's (`system`), so even a client of the service's own account refuses it until the service
   accepts; once accepted, the row carries the service's uid.
 
-## Machine move: a space with nobody logged in (OBS-361 part 1, the release after 0.34.0)
+## Machine move: a space with nobody logged in (OBS-361 part 1, 0.35.0)
 
 On macOS, `full machine-move cutover LABEL` in an account whose `launchctl print gui/<uid>` answers
 "could not find domain" (exit 112: nobody is logged in graphically) no longer tries to load an agent there,
