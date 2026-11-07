@@ -3,6 +3,27 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.35.3 (2026-11-07)
+
+A follow-up to 0.35.2's security check on macOS 27. The check now says more precisely why it could not confirm a
+local connection, and on a computer that hides the connection table it answers faster. Every connection it refused
+before is still refused. Nothing needs you after installing.
+
+### Changed
+
+- **Two forms of `table-restricted`** (OBS-386, `peer_owner` 1.3.1, contract DEC-0155 RT-1, `docs/COMPATIBILITY.md`
+  "macOS 27: a restricted connection table"). The bare `table-restricted` means this account's sockets were read and
+  none is the connection; `table-restricted: <detail>` means the proof could not be read at all (calibration,
+  libproc, `setuid-context`), which 0.35.2 reported as `libproc: ...` or `setuid-context`.
+- **A restricted table is remembered for 30 seconds**, so each later question skips the table read (about 20 ms of
+  `netstat` measured on macOS 27.2); a full table clears it at once. `peer_owner.last_method()` names what answered.
+
+### Fixed
+
+- **The module's tests no longer depend on their order** (found by the project that vendors it): a test of a failed
+  calibration made the process's first sysctl calibration under patched state and left it failed for the tests after
+  it; the unreadable-table branches no longer start a calibration, and the tests save and restore every cache.
+
 ## 0.35.2 (2026-11-07)
 
 A security-check fix for macOS 27. There a process sees only its own sockets in the kernel's connection table, so the

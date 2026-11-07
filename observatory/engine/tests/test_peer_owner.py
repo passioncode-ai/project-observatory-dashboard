@@ -152,6 +152,7 @@ class Selection(unittest.TestCase):
         return mock.patch.object(P, "read_table", return_value=(P.parse_netstat(text), "netstat"))
 
     def setUp(self):
+        P._RESTRICTED_UNTIL[0] = 0.0
         self.own_uid = mock.patch.object(P.os, "getuid", return_value=F.OWN_UID, create=True)
         self.own_uid.start()
         self.ps = mock.patch.object(P, "_run", side_effect=ps_from_fixture)
@@ -159,6 +160,7 @@ class Selection(unittest.TestCase):
         P._LISTENERS.clear()
 
     def tearDown(self):
+        P._RESTRICTED_UNTIL[0] = 0.0
         self.ps.stop()
         self.own_uid.stop()
         P._LISTENERS.clear()
@@ -241,11 +243,13 @@ class LinuxListener(unittest.TestCase):
     with inode 0 answers through its listener (state 0A) (peer_owner 1.2.0)."""
 
     def setUp(self):
+        P._RESTRICTED_UNTIL[0] = 0.0
         self.uid = F.OWN_UID
         self.own_uid = mock.patch.object(P.os, "getuid", side_effect=lambda: self.uid, create=True)
         self.own_uid.start()
 
     def tearDown(self):
+        P._RESTRICTED_UNTIL[0] = 0.0
         self.own_uid.stop()
 
     def proc(self, rows):
@@ -405,6 +409,7 @@ class RestrictedMacTable(unittest.TestCase):
     `this-account` or `unknown` (`table-restricted`)."""
 
     def setUp(self):
+        P._RESTRICTED_UNTIL[0] = 0.0
         self.patches = [mock.patch.object(P.os, "getuid", return_value=F.OWN_UID, create=True),
                         mock.patch.object(P.os, "geteuid", return_value=F.OWN_UID, create=True),
                         mock.patch.object(P.os, "getpid", return_value=OWN_PID),
@@ -412,11 +417,15 @@ class RestrictedMacTable(unittest.TestCase):
                         mock.patch.object(P.time, "sleep")]
         for patch in self.patches:
             patch.start()
+        self.saved = (P._SYSCTL_OK[0], P._LIBPROC_OK[0], P._RESTRICTED_UNTIL[0], P._LAST_METHOD[0])
+        P._RESTRICTED_UNTIL[0] = 0.0
         P._LISTENERS.clear()
 
     def tearDown(self):
+        P._RESTRICTED_UNTIL[0] = 0.0
         for patch in reversed(self.patches):
             patch.stop()
+        P._SYSCTL_OK[0], P._LIBPROC_OK[0], P._RESTRICTED_UNTIL[0], P._LAST_METHOD[0] = self.saved
         P._LISTENERS.clear()
 
     def restricted(self, own, table=(), how="sysctl"):
@@ -499,7 +508,8 @@ class RestrictedMacTable(unittest.TestCase):
                                P.listener(F.SERVER_PORT)]
             self.assertEqual(calibrate.call_count, 1)
             for owner in answers:
-                self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "libproc: layout failed calibration"))
+                self.assertEqual((owner.kind, owner.reason),
+                                 (P.UNKNOWN, "table-restricted: libproc: layout failed calibration"))
         finally:
             P._LIBPROC_OK[0] = saved
 
@@ -510,8 +520,42 @@ class RestrictedMacTable(unittest.TestCase):
                 P.read_own_sockets()
             with mock.patch.object(P, "read_table", return_value=([], "sysctl")):
                 owner = P.peer(FakeSocket(SERVER, F.OWN_CLIENT))
-        self.assertEqual(str(raised.exception), "setuid-context")
-        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "setuid-context"))
+        self.assertEqual(str(raised.exception), "table-restricted: setuid-context")
+        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "table-restricted: setuid-context"))
+
+    def test_the_bare_reason_means_read_and_not_found_a_suffix_means_unreadable(self):
+        with mock.patch.object(P, "read_table", return_value=([], "sysctl")), \
+                mock.patch.object(P, "read_own_sockets", return_value=[]):
+            searched = P.server_end(FakeSocket(F.OWN_CLIENT, SERVER))
+        P._RESTRICTED_UNTIL[0] = 0.0
+        with mock.patch.object(P, "read_table", return_value=([], "sysctl")), \
+                mock.patch.object(P, "_libproc_sockets", side_effect=P.TableUnreadable("libproc: errno 1")), \
+                mock.patch.object(P, "_calibrate_libproc", return_value=True):
+            P._LIBPROC_OK[0] = None
+            unreadable = P.server_end(FakeSocket(F.OWN_CLIENT, SERVER))
+        self.assertEqual((searched.kind, searched.reason), (P.UNKNOWN, "table-restricted"))
+        self.assertEqual((unreadable.kind, unreadable.reason), (P.UNKNOWN, "table-restricted: libproc: errno 1"))
+
+    def test_a_restricted_verdict_skips_the_table_for_its_ttl_then_reads_it_again(self):
+        own = [self.row(SERVER, F.OWN_CLIENT)]
+        with mock.patch.object(P, "read_table", return_value=([], "netstat")) as table, \
+                mock.patch.object(P, "read_own_sockets", return_value=own):
+            first = P.server_end(FakeSocket(F.OWN_CLIENT, SERVER))
+            second = P.server_end(FakeSocket(F.OWN_CLIENT, SERVER))
+            self.assertEqual(table.call_count, 1, "the second question went straight to libproc")
+            P._RESTRICTED_UNTIL[0] = P.time.monotonic() - 1                 # the verdict expired
+            P.server_end(FakeSocket(F.OWN_CLIENT, SERVER))
+            self.assertEqual(table.call_count, 2)
+        self.assertEqual((first.kind, first.method, second.kind), (P.THIS_ACCOUNT, P.LIBPROC, P.THIS_ACCOUNT))
+        self.assertEqual(P.last_method(), P.LIBPROC)
+
+    def test_a_full_table_clears_the_restricted_verdict(self):
+        P._RESTRICTED_UNTIL[0] = P.time.monotonic() - 1
+        full = [P.Row(("127.0.0.1", 22), ("*", 0), True, 0, 1)]
+        with mock.patch.object(P, "read_table", return_value=(full, "sysctl")), \
+                mock.patch.object(P, "read_own_sockets", side_effect=AssertionError("libproc on a full table")):
+            P.server_end(FakeSocket(F.OWN_CLIENT, SERVER))
+        self.assertEqual((P._RESTRICTED_UNTIL[0], P.last_method()), (0.0, "sysctl"))
 
     def test_one_deadline_bounds_every_libproc_read_of_a_question(self):
         deadlines = []
@@ -607,6 +651,7 @@ class OwnConnection(unittest.TestCase):
     """The client check: refused before a byte of the request is sent."""
 
     def setUp(self):
+        P._RESTRICTED_UNTIL[0] = 0.0
         self.received = []
         outer = self
 
@@ -628,6 +673,7 @@ class OwnConnection(unittest.TestCase):
         threading.Thread(target=self.server.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
 
     def tearDown(self):
+        P._RESTRICTED_UNTIL[0] = 0.0
         self.server.shutdown()
         self.server.server_close()
 
@@ -701,6 +747,12 @@ class OwnConnection(unittest.TestCase):
 @unittest.skipUnless(sys.platform == "darwin" or sys.platform.startswith("linux"), "a POSIX socket table")
 class Live(unittest.TestCase):
     """A real loopback pair in this process: both ends are this account's, on the primary method."""
+
+    def setUp(self):
+        P._RESTRICTED_UNTIL[0] = 0.0
+
+    def tearDown(self):
+        P._RESTRICTED_UNTIL[0] = 0.0
 
     def test_both_ends_of_a_real_pair_are_this_account(self):
         listener = socket.socket()

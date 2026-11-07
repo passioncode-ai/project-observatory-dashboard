@@ -1,6 +1,6 @@
 """peer_owner: which OS account owns each end of a loopback TCP connection.
 
-    peer_owner 1.3.0. One file, Python standard library only, no imports from any other
+    peer_owner 1.3.1. One file, Python standard library only, no imports from any other
     module of its project, so another project can vendor it by commit: copy this file and
     record the commit it came from. Its tests and their fixtures live beside the engine's
     tests (`tests/test_peer_owner.py`, `tests/peer_owner_fixtures.py`).
@@ -34,7 +34,8 @@ host about to read a request) treats everything but `this-account` as a refusal,
 included: fail closed.
 
 HOW, ON EACH OS. Every read is bounded (MAX_TABLE_BYTES of table, TIMEOUT_SECONDS) and the
-answer is never cached across connections; only `listener` is cached, for LISTENER_TTL. A
+answer is never cached across connections; only `listener` is cached, for LISTENER_TTL (and on
+macOS the verdict that the table is restricted, for RESTRICTED_TTL, never an owner). A
 TIME_WAIT row is a connection already closed and is never an answer; two live rows with the same
 addresses are `unknown` (`several-rows`), never a guess.
 
@@ -66,7 +67,12 @@ addresses are `unknown` (`several-rows`), never a guess.
   `proc_pidfdinfo(PROC_PIDFDSOCKETINFO)` (`sys/proc_info.h`), the records `lsof` itself reads,
   without a subprocess. Another account's process answers EPERM and is skipped, so this path only
   ever answers `this-account` (the socket sits in one of this uid's processes) or `unknown`,
-  reason `table-restricted`; never `another-account`, `system` or `none`. The proof is weaker than
+  reason `table-restricted`; never `another-account`, `system` or `none`. Two forms of that reason
+  (DEC-0155 RT-1): the bare `table-restricted` means this uid's sockets were read and none matches
+  (a caller may then probe whether anything listens); `table-restricted: <detail>` means the proof
+  could not be read at all (a failed calibration, libproc unavailable, `setuid-context`). A table
+  found restricted is remembered for RESTRICTED_TTL, so later questions go straight to libproc;
+  `last_method()` names what answered. The proof is weaker than
   the sysctl path's `so_uid`: it is "a process of this uid holds the descriptor", not "the
   socket's credential is this uid" (`soi_stat` carries no uid). A socket another account accepted
   and passed with SCM_RIGHTS to a process of this uid that takes foreign descriptors would read as
@@ -142,7 +148,7 @@ import threading
 import time
 
 # This file's own version, for projects that copy it; not the engine's (that is configuration.VERSION).
-PEER_OWNER_VERSION = "1.3.0"
+PEER_OWNER_VERSION = "1.3.1"
 
 THIS_ACCOUNT = "this-account"
 ANOTHER_ACCOUNT = "another-account"
@@ -687,16 +693,20 @@ def read_own_sockets(deadline: float | None = None) -> list[Row]:
     """macOS, a restricted table: this uid's own TCP sockets (`own_socket_rows`), from libproc,
     once its layout passed calibration in this process, read before `deadline` (time.monotonic(),
     by default TIMEOUT_SECONDS from now). TableUnreadable with the reason; `setuid-context` when
-    the real and effective uids differ."""
-    if hasattr(os, "geteuid") and _posix_uid() != os.geteuid():
-        raise TableUnreadable("setuid-context")
-    with _LOCK:
-        if _LIBPROC_OK[0] is None:
-            _LIBPROC_OK[0] = _calibrate_libproc()
-        ok = _LIBPROC_OK[0]
-    if not ok:
-        raise TableUnreadable("libproc: layout failed calibration")
-    return own_socket_rows(_libproc_sockets(deadline or time.monotonic() + TIMEOUT_SECONDS), _posix_uid())
+    the real and effective uids differ. Every failure here is `table-restricted: <detail>` (DEC-0155
+    RT-1): the bare `table-restricted` is kept for "read, and no socket of this uid matches"."""
+    try:
+        if hasattr(os, "geteuid") and _posix_uid() != os.geteuid():
+            raise TableUnreadable("setuid-context")
+        with _LOCK:
+            if _LIBPROC_OK[0] is None:
+                _LIBPROC_OK[0] = _calibrate_libproc()
+            ok = _LIBPROC_OK[0]
+        if not ok:
+            raise TableUnreadable("libproc: layout failed calibration")
+        return own_socket_rows(_libproc_sockets(deadline or time.monotonic() + TIMEOUT_SECONDS), _posix_uid())
+    except TableUnreadable as exc:
+        raise TableUnreadable(_restricted_reason(str(exc))) from None
 
 def method() -> str:
     """The method the next read on this host uses: sysctl, netstat, proc, iphlpapi or none. On
@@ -716,11 +726,13 @@ def method() -> str:
 def read_table() -> tuple[list[Row], str]:
     """The host's TCP sockets and the method that read them; TableUnreadable with the reason."""
     how = method()
+    _LAST_METHOD[0] = how
     if how == "sysctl":
         try:
             return parse_pcblist_n(_sysctl_blob()), how
         except (TableUnreadable, struct.error, ValueError):
             how = "netstat"                                          # this read only; calibration stands
+            _LAST_METHOD[0] = how
     if how == "netstat":
         return parse_netstat(_run([NETSTAT, "-anv", "-p", "tcp"])), how
     if how == "proc":
@@ -902,21 +914,47 @@ def listener_owner(rows: list[Row], local: tuple[str, int], how: str) -> Owner:
 
 LIBPROC = "libproc"
 TABLE_RESTRICTED = "table-restricted"
+#: A restricted macOS table stays restricted for the life of a process in practice; the verdict is
+#: kept this many seconds so each question skips the table read (about 20 ms of netstat) and goes
+#: to this uid's own sockets. Bounded, so a host that stops restricting is seen again.
+RESTRICTED_TTL = 30.0
+#: time.monotonic() until which this process treats the macOS table as restricted.
+_RESTRICTED_UNTIL: list = [0.0]
+#: The method of the last read this module attempted (`last_method`).
+_LAST_METHOD: list = [None]
+
+
+def _restricted_reason(detail: str) -> str:
+    """`table-restricted: <detail>`: the proof could not be read at all. Never the bare value."""
+    return detail if detail.startswith(TABLE_RESTRICTED + ":") else f"{TABLE_RESTRICTED}: {detail}"
+
+
+def last_method() -> str | None:
+    """The method of the last read this module attempted in this process (sysctl, netstat, proc,
+    iphlpapi or libproc), for a doctor to name what actually answered; None before any read."""
+    return _LAST_METHOD[0]
 
 
 def _table(deadline: float | None = None) -> tuple[list[Row], str]:
     """`read_table`, except on macOS when the table is restricted (`restricted`) or unreadable:
     then this uid's own sockets (`read_own_sockets`), method `libproc`. TableUnreadable with the
-    reason when neither reads."""
+    reason when neither reads. A table found restricted is remembered for RESTRICTED_TTL."""
+    if sys.platform == "darwin" and time.monotonic() < _RESTRICTED_UNTIL[0]:
+        _LAST_METHOD[0] = LIBPROC
+        return read_own_sockets(deadline), LIBPROC
     try:
         rows, how = read_table()
     except TableUnreadable:
         if sys.platform != "darwin":
             raise
     else:
+        _LAST_METHOD[0] = how
         if (sys.platform != "darwin" or how not in ("sysctl", "netstat")
                 or not restricted(rows, os.getpid(), _posix_uid())):
+            _RESTRICTED_UNTIL[0] = 0.0
             return rows, how
+    _RESTRICTED_UNTIL[0] = time.monotonic() + RESTRICTED_TTL
+    _LAST_METHOD[0] = LIBPROC
     return read_own_sockets(deadline), LIBPROC
 
 
@@ -942,7 +980,7 @@ def _owner_of(local: tuple[str, int], remote: tuple[str, int], *, server_end_of:
     try:
         rows, how = _table(start + TIMEOUT_SECONDS)
     except TableUnreadable as exc:
-        return Owner(UNKNOWN, None, None, method(), str(exc))
+        return Owner(UNKNOWN, None, None, last_method() or "none", str(exc))
     found = find(rows, local, remote)
     if how == LIBPROC:
         wait, deadline = 0.005, min(start + ACCEPT_WAIT_SECONDS, start + TIMEOUT_SECONDS)
@@ -1028,7 +1066,7 @@ def listener(port: int) -> Owner:
     try:
         rows, how = _table()
     except TableUnreadable as exc:
-        owner = Owner(UNKNOWN, None, None, method(), str(exc))
+        owner = Owner(UNKNOWN, None, None, last_method() or "none", str(exc))
     else:
         found = pick_listener(rows, port)
         if how == LIBPROC:
