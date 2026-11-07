@@ -6283,8 +6283,8 @@
       "path": "tests/test_space_daemons.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2fa9af14672e73238505ae9b560557a685545cefa94f3b25cdd9f637fc99d13a",
-      "bytes": 52781
+      "export_sha256": "5c25411b7e80fd22c0013a28e5720d98536327dd31fc0656a25d281c751fc8cd",
+      "bytes": 53183
     },
     {
       "path": "tests/test_spend.py",

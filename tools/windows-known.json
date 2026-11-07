@@ -868,6 +868,8 @@
       ],
       "failing": [
         "CommandLine.test_machine_restore_reads_the_passphrase_from_stdin",
+        "ExternalSecretStore.test_a_store_no_snapshot_carries_is_not_skipped",
+        "ExternalSecretStore.test_an_include_inside_the_external_store_is_skipped_with_its_reason",
         "Refusals.test_transcripts_are_carried_only_when_asked",
         "Restore.test_a_backup_sweeps_what_a_killed_one_left",
         "Restore.test_a_conflict_is_kept_unless_overwrite_moves_it_aside",
@@ -1235,6 +1237,7 @@
         "CliTests.test_a_re_enrolled_id_never_reuses_a_policy_revision",
         "CliTests.test_enroll_verifies_the_named_path_and_records_what_starting_it_does",
         "ConfigTests.test_a_document_others_may_read_or_a_link_is_refused_whole",
+        "HTTPTests.test_guards_apply_to_well_known_and_mcp",
         "ObservabilityTests.test_obs2_the_machine_log_is_private_rotated_and_structured"
       ]
     },
@@ -1473,6 +1476,11 @@
         "silent when there is no observatory checkout",
         "the Stop hook itself says nothing to the person"
       ]
+    },
+    "space_daemons": {
+      "expect": "SKIP",
+      "row": "OBS-278",
+      "reason": "the root-side installer for a macOS space with nobody logged in (OBS-361) is macOS-only (launchd, pwd, grp, os.fchown, POSIX paths), so the suite skips as a whole on Windows"
     },
     "ssh_keys": {
       "expect": "FAIL",

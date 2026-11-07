@@ -929,5 +929,12 @@ class CommandLine(Base):
                       " ".join(out.stdout.split()))
 
 
+# The installer runs only on macOS (launchd, pwd, grp, os.fchown, POSIX paths): on Windows the whole suite
+# skips, as tools/windows-known.json records (OBS-278).
+for _name, _case in list(globals().items()):
+    if isinstance(_case, type) and issubclass(_case, unittest.TestCase):
+        globals()[_name] = unittest.skipUnless(os.name == "posix", "the space-daemons installer is macOS-only")(_case)
+
+
 if __name__ == "__main__":
     unittest.main()
