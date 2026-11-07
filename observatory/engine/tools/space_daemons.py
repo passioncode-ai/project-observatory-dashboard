@@ -1,5 +1,5 @@
 #!/usr/bin/python3
-"""Run a headless space's background jobs as system-domain daemons that run as that account (OBS-361 part 1).
+"""Run a headless space's background jobs as system-domain daemons that run as that account (OBS-361).
 
 WHY. On macOS an OS account with no graphical login has no `gui/<uid>` launchd domain, and
 `launchctl bootstrap user/<uid> PLIST` refuses agents (exit 5) even as root. So a job staged for such
@@ -49,6 +49,15 @@ copy goes in, which the administrator checks (`ls -ld /usr/local /usr/local/libe
     space_daemons.py apply  --user NAME [--label L ...] [--json]          (root)
     space_daemons.py remove --user NAME --label L [--json]                (root)
     space_daemons.py status --user NAME [--json]
+    space_daemons.py trust show [--user NAME] [--json]
+    space_daemons.py trust set --owner NAME ... --group NAME ... [--json]   (root)
+
+TRUSTED OWNERS (1.1.0). A program path normally belongs to root or the account. Where Homebrew's prefix is
+owned by the host's admin account and group-writable by `admin`, the administrator lists those in the
+root-owned trust file /Library/Application Support/ProjectObservatory/space-daemons-trust.json,
+{"schema": "observatory-space-daemons-trust/1", "owners": [...], "groups": [...]}. Only accounts that
+already hold root through sudo, and groups whose members all do, belong there. A file that is not
+root's alone is ignored with a warning; the space account itself is never trusted for its own jobs.
 
 WHAT IT READS. The account's background folder, `<home>/.local/share/project-observatory/background/
 LaunchAgents/` (`full machine-move cutover` puts a job there when the account has no GUI session), or,
@@ -101,11 +110,17 @@ try:
 except ImportError:  # Windows: the module still imports, so its pure rules can be tested there.
     fcntl = grp = pwd = None
 
-SPACE_DAEMONS_VERSION = "1.0.0"
+SPACE_DAEMONS_VERSION = "1.1.0"
 REGISTRY_SCHEMA = "observatory-space-daemons/1"
 DAEMONS_DIR = "Library/LaunchDaemons"
 REGISTRY_DIR = "Library/Application Support/ProjectObservatory"
 REGISTRY_NAME = "space-daemons.json"
+#: The optional trust file (1.1.0): accounts and groups that already hold root through sudo, whose files and
+#: folders a program path may sit in (Homebrew's prefix, owned by the host's admin and group-writable by
+#: `admin`). Root-owned, beside the registry.
+TRUST_SCHEMA = "observatory-space-daemons-trust/1"
+TRUST_NAME = "space-daemons-trust.json"
+MAX_TRUST_BYTES = 64 * 1024
 INSTALLED_COPY = "/usr/local/libexec/observatory-space-daemons"
 #: The organization's release key, pinned: the engine's `release_signature.PINNED` holds the same one (a
 #: test keeps the two equal); this standalone tool imports nothing from the engine, so it is written here.
@@ -149,15 +164,21 @@ KEEPALIVE_BOOLS = ("SuccessfulExit", "Crashed", "AfterInitialDemand")
 #: PathState only, its paths inside the account's home. OtherJobEnabled is refused: it would tie this
 #: daemon to another account's or the system's jobs.
 KEEPALIVE_PATHS = ("PathState",)
-#: Keys copied from an agent definition. Everything else (UserName, GroupName, InitGroups, Umask,
+#: Keys copied from an agent definition. Everything else (UserName, GroupName, InitGroups,
 #: SessionCreate, LaunchEvents, MachServices, Sockets, WatchPaths, QueueDirectories, RootDirectory,
-#: resource limits, ...) is refused: in the system domain they would act with root's reach.
+#: HardResourceLimits, ...) is refused: in the system domain they would act with root's reach. Umask and
+#: SoftResourceLimits (1.1.0) only narrow what the account's own process may do.
 ALLOWED_KEYS = ("Label", "ProgramArguments", "Program", "EnvironmentVariables", "WorkingDirectory",
                 "RunAtLoad", "KeepAlive", "StartInterval", "StartCalendarInterval", "StandardOutPath",
                 "StandardErrorPath", "ThrottleInterval", "ProcessType", "Nice", "LowPriorityIO", "ExitTimeOut",
-                "AbandonProcessGroup", "LimitLoadToSessionType")
-#: Allowed, and left out of the daemon: a session type does not apply in the system domain.
-DROPPED_KEYS = ("LimitLoadToSessionType",)
+                "AbandonProcessGroup", "LimitLoadToSessionType", "Umask", "SoftResourceLimits",
+                "AssociatedBundleIdentifiers")
+#: Allowed, and left out of the daemon (`plan` notes `stripped`): a session type and the bundles a job
+#: is shown under in System Settings do not apply to a system daemon of another account.
+DROPPED_KEYS = ("LimitLoadToSessionType", "AssociatedBundleIdentifiers")
+#: launchd.plist(5)'s resource limit names; each value a non-negative integer.
+RESOURCE_LIMIT_KEYS = ("Core", "CPU", "Data", "FileSize", "MemoryLock", "NumberOfFiles", "NumberOfProcesses",
+                       "ResidentSetSize", "Stack")
 #: Checked inside the home. The log paths are not: they are replaced by a root-owned folder's (LOGS).
 PATH_KEYS = ("WorkingDirectory",)
 LOG_KEYS = ("StandardOutPath", "StandardErrorPath")
@@ -186,6 +207,19 @@ class Account(object):
 
     def staged_dir(self):
         return os.path.join(self.data_dir(), *STAGED_PARTS)
+
+
+class Trust(object):
+    """What the trust file adds for one account: uids and gids whose files and folders a program path may
+    sit in, the names behind them, and the warnings of entries (or a whole file) that were not trusted."""
+
+    def __init__(self, uids=(), gids=(), owners=(), groups=(), warnings=(), path=None):
+        self.uids, self.gids = set(uids), set(gids)
+        self.owners, self.groups = list(owners), list(groups)
+        self.warnings, self.path = list(warnings), path
+
+    def as_dict(self):
+        return {"path": self.path, "owners": self.owners, "groups": self.groups, "warnings": self.warnings}
 
 
 class System(object):
@@ -224,6 +258,9 @@ class System(object):
 
     def registry_path(self):
         return os.path.join(self.registry_dir(), REGISTRY_NAME)
+
+    def trust_path(self):
+        return os.path.join(self.registry_dir(), TRUST_NAME)
 
     def log_dir(self, user):
         return os.path.join(self.root, LOGS_DIR, user)
@@ -320,16 +357,17 @@ def lookup_account(name, getpwnam=None, getgrgid=None):
 # --- the copy being run -------------------------------------------------------------------------------
 
 
-def _writable_by_others(info, allowed_uids):
-    """Whether someone other than ALLOWED_UIDS (and root's group) can change what INFO describes. A
-    world- or group-writable folder with the sticky bit lets nobody replace another owner's entry."""
+def _writable_by_others(info, allowed_uids, allowed_gids=(0,)):
+    """Whether someone other than ALLOWED_UIDS (and the ALLOWED_GIDS, root's group and the trusted ones) can
+    change what INFO describes. A world- or group-writable folder with the sticky bit lets nobody replace
+    another owner's entry."""
     mode = info.st_mode
     if info.st_uid not in allowed_uids:
         return True
     sticky = bool(mode & stat.S_ISVTX) and stat.S_ISDIR(mode)
     if mode & stat.S_IWOTH and not sticky:
         return True
-    if mode & stat.S_IWGRP and not sticky and info.st_gid != 0:
+    if mode & stat.S_IWGRP and not sticky and info.st_gid not in allowed_gids:
         return True
     return False
 
@@ -432,7 +470,7 @@ def _read_one(path, account):
         os.close(fd)
 
 
-def read_definitions(folder, account, labels=None, log_dir=None):
+def read_definitions(folder, account, labels=None, log_dir=None, trust=None):
     """Every `*.plist` in FOLDER, each with its label, file, problems and the daemon it would become, its
     logs in LOG_DIR (default the production one) and `notes` (`logs-moved` when it named its own)."""
     if not _check_folder(folder, account):
@@ -446,20 +484,14 @@ def read_definitions(folder, account, labels=None, log_dir=None):
         doc, daemon, source = None, None, None
         if data is not None:
             source = _sha256_bytes(data)
-            try:
-                doc = plistlib.loads(data)
-            except Exception:  # plistlib raises several types for a file that is not a plist.
-                problems.append(_problem("unreadable_plist"))
-            else:
-                if not isinstance(doc, dict):
-                    problems.append(_problem("not_a_dictionary"))
-                    doc = None
+            doc, code = parse_plist(data)
+            if code is not None:
+                problems.append(_problem(code))
         notes = []
         if doc is not None:
-            found, daemon = validate(doc, name, account, log_dir)
+            found, daemon = validate(doc, name, account, log_dir, trust)
             problems.extend(found)
-            if any(key in doc for key in LOG_KEYS):
-                notes.append("logs-moved")
+            notes = definition_notes(doc)
         label = doc.get("Label") if isinstance(doc, dict) and isinstance(doc.get("Label"), str) else name[:-6]
         if labels and label not in labels:
             continue
@@ -467,6 +499,150 @@ def read_definitions(folder, account, labels=None, log_dir=None):
                     "verdict": "ok" if not problems else sorted(set(p["code"] for p in problems)),
                     "problems": problems, "daemon": None if problems else daemon, "notes": notes})
     return out
+
+
+XML_COMMENT = re.compile(br"<!--.*?-->", re.DOTALL)
+
+
+def parse_plist(data):
+    """(the definition as a dict, None) or (None, a problem code) from bytes already read once from the fd.
+
+    launchd and plutil accept an XML comment holding `--` (`<!-- run with --install-launchd -->`), which XML
+    forbids and expat refuses. So an XML plist plistlib refuses is parsed once more with every comment
+    removed (non-greedy, on the bytes): a comment's text is never parsed, so nothing inside one becomes a key.
+    The daemon written is regenerated from what was parsed, never these bytes; `sourceSha256` stays the hash of
+    the original bytes. A binary plist is parsed as it is. Codes: `unreadable_plist`, `xml_comment` (a comment
+    that does not close), `not_a_dictionary`."""
+    try:
+        doc = plistlib.loads(data)
+    except Exception:  # plistlib raises several types for a file that is not a plist
+        stripped_start = data.lstrip(b"\xef\xbb\xbf \t\r\n")
+        if not stripped_start.startswith(b"<"):
+            return None, "unreadable_plist"
+        without = XML_COMMENT.sub(b"", data)
+        try:
+            doc = plistlib.loads(without)
+        except Exception:  # still not a plist
+            return None, "xml_comment" if b"<!--" in without else "unreadable_plist"
+    if not isinstance(doc, dict):
+        return None, "not_a_dictionary"
+    return doc, None
+
+
+def definition_notes(doc):
+    """What the daemon changes from the definition, so `plan` says it: `logs-moved`, `stripped` (a key
+    left out) and `working-directory-home` (a WorkingDirectory of / made the home)."""
+    notes = []
+    if any(key in doc for key in LOG_KEYS):
+        notes.append("logs-moved")
+    if any(key in doc for key in DROPPED_KEYS):
+        notes.append("stripped")
+    if doc.get("WorkingDirectory") == "/":
+        notes.append("working-directory-home")
+    return notes
+
+
+def _read_root_file(path, folder, system, max_bytes):
+    """The bytes of a file only root can change, or (None, why not): the folder and the file are real (no
+    link), owned by root, not writable by group or others, the file at most MAX_BYTES. Absent: (None, None)."""
+    try:
+        finfo = os.lstat(folder)
+    except FileNotFoundError:
+        return None, None
+    except OSError as exc:
+        return None, "%s cannot be read (%s)" % (folder, type(exc).__name__)
+    if not stat.S_ISDIR(finfo.st_mode) or finfo.st_uid != system.owner_uid or \
+            finfo.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+        return None, "%s is not a folder only root can write" % folder
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        return None, None
+    except OSError as exc:
+        return None, "%s cannot be opened without following a link (%s)" % (path, type(exc).__name__)
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            return None, "%s is not a regular file" % path
+        if info.st_uid != system.owner_uid:
+            return None, "%s is not owned by root" % path
+        if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            return None, "%s is writable by group or others" % path
+        if info.st_size > max_bytes:
+            return None, "%s is larger than %d bytes" % (path, max_bytes)
+        return os.read(fd, max_bytes + 1), None
+    finally:
+        os.close(fd)
+
+
+def read_trust(system, account=None, getpwnam=None, getgrnam=None):
+    """The trust file for ACCOUNT, read only: an absent file trusts nobody; a file that fails root's checks,
+    or does not read as the schema, is ignored with a warning, never trusted. An owner that is ACCOUNT
+    itself, or a name this computer does not know, is left out with a warning."""
+    path = system.trust_path()
+    data, why = _read_root_file(path, system.registry_dir(), system, MAX_TRUST_BYTES)
+    if data is None:
+        return Trust(warnings=["the trust file is ignored: " + why] if why else [], path=path)
+    try:
+        doc = json.loads(data.decode("utf-8"))
+    except ValueError:
+        doc = None
+    if not isinstance(doc, dict) or doc.get("schema") != TRUST_SCHEMA or not all(
+            isinstance(doc.get(k, []), list) and all(isinstance(n, str) for n in doc.get(k, []))
+            for k in ("owners", "groups")):
+        return Trust(warnings=["the trust file is ignored: %s is not a %s file" % (path, TRUST_SCHEMA)], path=path)
+    getpwnam = getpwnam or (pwd.getpwnam if pwd else None)
+    getgrnam = getgrnam or (grp.getgrnam if grp else None)
+    trust = Trust(path=path)
+    for name in doc.get("owners", []):
+        try:
+            uid = getpwnam(name).pw_uid
+        except (KeyError, TypeError):
+            trust.warnings.append("trusted owner %s is not an account on this computer: left out" % name)
+            continue
+        if account is not None and uid == account.uid:
+            trust.warnings.append("trusted owner %s is the space account itself: never trusted for its own jobs"
+                                  % name)
+            continue
+        trust.uids.add(uid)
+        trust.owners.append(name)
+    for name in doc.get("groups", []):
+        try:
+            gid = getgrnam(name).gr_gid
+        except (KeyError, TypeError):
+            trust.warnings.append("trusted group %s is not a group on this computer: left out" % name)
+            continue
+        trust.gids.add(gid)
+        trust.groups.append(name)
+    return trust
+
+
+def write_trust(system, owners, groups, getpwnam=None, getgrnam=None):
+    """Replace the trust file (root, isolated, the root-owned copy): every name must exist here."""
+    _require_root(system, "trust set", "ACCOUNT")
+    getpwnam = getpwnam or (pwd.getpwnam if pwd else None)
+    getgrnam = getgrnam or (grp.getgrnam if grp else None)
+    for name in owners:
+        try:
+            uid = getpwnam(name).pw_uid
+        except (KeyError, TypeError):
+            raise SpaceDaemonsError("no account named %r on this computer" % name, "unknown-owner")
+        if uid == 0:
+            raise SpaceDaemonsError("root is always trusted; name the admin account that holds root through sudo",
+                                    "unknown-owner")
+    for name in groups:
+        try:
+            getgrnam(name)
+        except (KeyError, TypeError):
+            raise SpaceDaemonsError("no group named %r on this computer" % name, "unknown-group")
+    doc = {"schema": TRUST_SCHEMA, "owners": sorted(set(owners)), "groups": sorted(set(groups))}
+    with _Lock(system):
+        _ensure_system_dir(system.registry_dir(), system)
+        write_atomic(system.trust_path(), (json.dumps(doc, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+                     system)
+    return {"tool": "space-daemons", "version": SPACE_DAEMONS_VERSION, "trust": system.trust_path(),
+            "owners": doc["owners"], "groups": doc["groups"], "ok": True}
 
 
 # --- the rules -------------------------------------------------------------------------------------
@@ -485,7 +661,10 @@ def _inside(path, home):
     return path == home or path.startswith(home.rstrip(os.sep) + os.sep)
 
 
-def _check_program(program, account):
+def _check_program(program, account, trust=None):
+    """The program and every folder above it (as written and resolved) belong to root, the account or a
+    trusted owner, and only those or a trusted group (or root's) can write them."""
+    trust = trust or Trust()
     problems = []
     if not os.path.isabs(program):
         return [_problem("program_not_absolute", program)]
@@ -496,10 +675,11 @@ def _check_program(program, account):
         return [_problem("program_missing", program)]
     if not stat.S_ISREG(info.st_mode):
         return [_problem("program_not_regular_file", program)]
-    allowed = (0, account.uid)
+    allowed = set([0, account.uid]) | trust.uids
+    gids = set([0]) | trust.gids
     if info.st_uid not in allowed:
         problems.append(_problem("program_owner", "%s is owned by uid %d" % (real, info.st_uid)))
-    if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+    if info.st_mode & stat.S_IWOTH or (info.st_mode & stat.S_IWGRP and info.st_gid not in gids):
         problems.append(_problem("program_writable_by_others", real))
     # Both the path as written and the file it resolves to: a link in a folder someone else can write
     # could be pointed elsewhere after this check.
@@ -513,7 +693,7 @@ def _check_program(program, account):
         except OSError:
             problems.append(_problem("program_dir_unreadable", folder))
             continue
-        if _writable_by_others(finfo, allowed):
+        if _writable_by_others(finfo, allowed, gids):
             problems.append(_problem("program_dir_writable", folder))
     return problems
 
@@ -579,9 +759,9 @@ def _check_calendar(value):
     return True
 
 
-def validate(doc, file_name, account, log_dir=None):
+def validate(doc, file_name, account, log_dir=None, trust=None):
     """(problems, daemon) for one agent definition: every problem a named code, and the daemon plist
-    only when there is none."""
+    only when there is none. TRUST (read_trust) widens the owners a program path may have."""
     problems = []
     for key in sorted(doc):
         if key not in ALLOWED_KEYS:
@@ -600,7 +780,7 @@ def validate(doc, file_name, account, log_dir=None):
     else:
         if "Program" in doc and doc["Program"] != args[0]:
             problems.append(_problem("program_mismatch", "Program differs from ProgramArguments[0]"))
-        problems.extend(_check_program(args[0], account))
+        problems.extend(_check_program(args[0], account, trust))
     checks = {
         "EnvironmentVariables": lambda v: _str_dict(v),
         "RunAtLoad": lambda v: isinstance(v, bool),
@@ -614,6 +794,11 @@ def validate(doc, file_name, account, log_dir=None):
         "Nice": lambda v: _is_int(v) and 0 <= v <= 20,
         "LimitLoadToSessionType": lambda v: isinstance(v, str) or (isinstance(v, list) and
                                                                   all(isinstance(s, str) for s in v)),
+        "AssociatedBundleIdentifiers": lambda v: isinstance(v, str) or (isinstance(v, list) and
+                                                                       all(isinstance(s, str) for s in v)),
+        "Umask": lambda v: _is_int(v) and 0 <= v <= 0o777,
+        "SoftResourceLimits": lambda v: isinstance(v, dict) and bool(v) and all(
+            k in RESOURCE_LIMIT_KEYS and _is_int(n) and n >= 0 for k, n in v.items()),
     }
     for key, ok in sorted(checks.items()):
         if key in doc and not ok(doc[key]):
@@ -625,7 +810,8 @@ def validate(doc, file_name, account, log_dir=None):
         for name in sorted(k for k in env if isinstance(k, str) and k.upper().startswith("DYLD_")):
             problems.append(_problem("dyld_variable", name))
     for key in PATH_KEYS:
-        if key in doc:
+        # A WorkingDirectory of "/" (launchd's own default) becomes the home in the daemon.
+        if key in doc and not (key == "WorkingDirectory" and doc[key] == "/"):
             problems.extend(_check_path(key, doc[key], account))
     problems.extend(_int_problems(doc, "definition"))
     if problems:
@@ -659,7 +845,8 @@ def daemon_plist(doc, account, log_dir=None):
     env = dict(doc.get("EnvironmentVariables") or {})
     env.update({"HOME": account.home, "USER": account.name, "LOGNAME": account.name})
     daemon["EnvironmentVariables"] = env
-    daemon.setdefault("WorkingDirectory", account.home)
+    if daemon.get("WorkingDirectory", "/") == "/":
+        daemon["WorkingDirectory"] = account.home
     daemon["UserName"] = account.name
     daemon["GroupName"] = account.group
     daemon["InitGroups"] = True
@@ -958,11 +1145,12 @@ def _file_sha(path):
 def plan(account, source="background", labels=None, system=None):
     folder = account.background_dir() if source == "background" else account.staged_dir()
     system = system or system_from_environment()
-    defs = read_definitions(folder, account, labels, system.log_dir(account.name))
+    trust = read_trust(system, account)
+    defs = read_definitions(folder, account, labels, system.log_dir(account.name), trust)
     found = set(d["label"] for d in defs)
     missing = [label for label in (labels or []) if label not in found]
     return {"tool": "space-daemons", "version": SPACE_DAEMONS_VERSION, "user": account.name, "uid": account.uid,
-            "from": source, "folder": folder, "definitions": defs, "not_found": missing}
+            "from": source, "folder": folder, "definitions": defs, "not_found": missing, "trust": trust.as_dict()}
 
 
 def _install_one(system, account, definition, entries, holders=None):
@@ -1069,7 +1257,8 @@ def apply(system, account, labels=None):
     _require_root(system, "apply", account.name)
     folder = account.background_dir()
     logs = system.log_dir(account.name)
-    defs = read_definitions(folder, account, labels, logs)
+    trust = read_trust(system, account)
+    defs = read_definitions(folder, account, labels, logs, trust)
     found = set(d["label"] for d in defs)
     results = [{"label": label, "outcome": "not-found", "problems": [_problem("not_found", folder)]}
                for label in (labels or []) if label not in found]
@@ -1089,7 +1278,7 @@ def apply(system, account, labels=None):
                 results.append({"label": definition["label"], "file": definition["file"], "outcome": "failed",
                                 "problems": [_problem("failed", "%s: %s" % (type(exc).__name__, exc))]})
     return {"tool": "space-daemons", "version": SPACE_DAEMONS_VERSION, "user": account.name, "uid": account.uid,
-            "folder": folder, "logs": logs, "results": results,
+            "folder": folder, "logs": logs, "results": results, "trust": trust.as_dict(),
             "ok": all(r["outcome"] == "loaded" for r in results)}
 
 
@@ -1174,11 +1363,23 @@ def parser():
     s = sub.add_parser("status", help="the daemons this tool wrote for the account, loaded or not")
     s.add_argument("--user", required=True)
     s.add_argument("--json", action="store_true")
+    t = sub.add_parser("trust", help="the accounts and groups a program path may belong to besides root: only "
+                                     "those that already hold root through sudo")
+    tsub = t.add_subparsers(dest="trust_action", required=True)
+    ts = tsub.add_parser("show", help="the trust file, what it trusts and what it leaves out")
+    ts.add_argument("--user", help="as it applies to this space account (its own name is never trusted)")
+    ts.add_argument("--json", action="store_true")
+    tw = tsub.add_parser("set", help="replace the trust file (root, from the root-owned copy)")
+    tw.add_argument("--owner", action="append", default=[], help="an account that already holds root through sudo")
+    tw.add_argument("--group", action="append", default=[], help="a group whose members all hold root (admin)")
+    tw.add_argument("--json", action="store_true")
     return ap
 
 
 def _render(command, result):
     lines = []
+    for warning in (result.get("trust") or {}).get("warnings", []) if command in ("plan", "apply") else []:
+        lines.append("warning: " + warning)
     if command == "plan":
         lines.append("%d definition(s) in %s" % (len(result["definitions"]), result["folder"]))
         for d in result["definitions"]:
@@ -1199,6 +1400,13 @@ def _render(command, result):
         lines.append("  %s  %s" % (result["label"], result["outcome"]))
         if result.get("note"):
             lines.append("  " + result["note"])
+    elif command == "trust":
+        t = result["trust"] if isinstance(result["trust"], dict) else {
+            "path": result["trust"], "owners": result["owners"], "groups": result["groups"], "warnings": []}
+        lines.append("trust file %s: owners %s; groups %s" % (t["path"], ", ".join(t["owners"]) or "none",
+                                                              ", ".join(t["groups"]) or "none"))
+        for warning in t.get("warnings", []):
+            lines.append("  warning: " + warning)
     else:
         lines.append("%d daemon(s) of %s in %s" % (len(result["daemons"]), result["user"], result["registry"]))
         for d in result["daemons"]:
@@ -1216,6 +1424,15 @@ def main(argv=None, system=None):
         return 2
     system = system or system_from_environment()
     try:
+        if args.command == "trust":
+            if args.trust_action == "set":
+                result = write_trust(system, args.owner, args.group)
+            else:
+                account = lookup_account(args.user) if args.user else None
+                result = {"tool": "space-daemons", "version": SPACE_DAEMONS_VERSION,
+                          "trust": read_trust(system, account).as_dict()}
+            print(json.dumps(result, indent=2, sort_keys=True) if args.json else _render("trust", result))
+            return 0
         account = lookup_account(args.user)
         if args.command == "plan":
             result = plan(account, args.source, args.label, system)

@@ -1185,6 +1185,14 @@ the account (0600); a link, a hard link, another account's file or a folder that
 (`not-isolated`) and from a copy that is not root's alone. `leave` refuses while root's daemon runs and names the `remove` command. An account with a custom
 `XDG_DATA_HOME` is refused before anything moves (part 1).
 
+Since space daemons 1.1.0: a program under a prefix owned by the host's admin account (Homebrew) passes once the
+administrator lists that account and its `admin` group in the root-owned trust file (`trust set`), never the space
+account itself, and a trust file that is not root's alone is ignored with a warning; `Umask` and
+`SoftResourceLimits` are kept, `AssociatedBundleIdentifiers` stripped, a `WorkingDirectory` of `/` made the home, and an
+XML comment holding `--` parsed as launchd does, with nothing inside a comment becoming a key
+(`tests/test_space_daemons.py` Trusting, Rules, Reading; `tests/test_machine_backup.py` HeadlessSpace
+`test_cutover_parses_and_trusts_as_root_will`).
+
 Acceptance: an account with a GUI session moves its jobs exactly as before; the engine never writes a system file and
 only reads root's registry. Coverage: `tests/test_space_daemons.py` (Rules, Reading, Accounts, Applying, CommandLine,
 Pure); `tests/test_machine_backup.py` HeadlessSpace

@@ -233,11 +233,12 @@ class Rules(Base):
         self.assertNotIn("LimitLoadToSessionType", daemon)
 
     def test_every_key_with_reach_in_the_system_domain_is_refused(self):
-        for key, value in (("UserName", "root"), ("GroupName", "wheel"), ("InitGroups", True), ("Umask", 0),
+        for key, value in (("UserName", "root"), ("GroupName", "wheel"), ("InitGroups", True),
                            ("SessionCreate", True), ("LaunchEvents", {}), ("MachServices", {"x": True}),
                            ("Sockets", {}), ("inetdCompatibility", {}), ("WatchPaths", ["/etc"]),
                            ("QueueDirectories", ["/tmp"]), ("RootDirectory", "/"), ("HardResourceLimits", {}),
-                           ("SoftResourceLimits", {}), ("EnableTransactions", True), ("Disabled", False)):
+                           ("HardResourceLimits", {"NumberOfFiles": 1}), ("EnableTransactions", True),
+                           ("Disabled", False)):
             with self.subTest(key=key):
                 self.assertEqual(self.problems(**{key: value})[0], ["key_not_allowed"])
 
@@ -251,6 +252,29 @@ class Rules(Base):
                 codes = self.problems(**{key: value})[0]
                 self.assertIn("bad_value", codes)
                 self.assertTrue(set(codes) <= {"bad_value", "integer_out_of_range"}, codes)
+
+    def test_umask_and_soft_resource_limits_pass_and_are_kept(self):
+        codes, daemon = self.problems(Umask=0o022, SoftResourceLimits={"NumberOfFiles": 4096, "Core": 0})
+        self.assertEqual(codes, [])
+        self.assertEqual((daemon["Umask"], daemon["SoftResourceLimits"]), (0o022, {"NumberOfFiles": 4096, "Core": 0}))
+        for key, value in (("Umask", 0o1000), ("Umask", -1), ("Umask", "022"), ("SoftResourceLimits", {"Foo": 1}),
+                           ("SoftResourceLimits", {"Core": -1}), ("SoftResourceLimits", {})):
+            with self.subTest(key=key, value=value):
+                self.assertIn("bad_value", self.problems(**{key: value})[0])
+        self.assertEqual(self.problems(HardResourceLimits={"NumberOfFiles": 1})[0], ["key_not_allowed"])
+
+    def test_associated_bundle_identifiers_are_stripped(self):
+        codes, daemon = self.problems(AssociatedBundleIdentifiers=["org.example.app"])
+        self.assertEqual(codes, [])
+        self.assertNotIn("AssociatedBundleIdentifiers", daemon)
+        self.assertEqual(sd.definition_notes({"AssociatedBundleIdentifiers": "org.example.app"}), ["stripped"])
+
+    def test_a_working_directory_of_root_becomes_the_home(self):
+        codes, daemon = self.problems(WorkingDirectory="/")
+        self.assertEqual(codes, [])
+        self.assertEqual(daemon["WorkingDirectory"], str(self.home))
+        self.assertEqual(sd.definition_notes({"WorkingDirectory": "/"}), ["working-directory-home"])
+        self.assertEqual(self.problems(WorkingDirectory="/etc")[0], ["path_outside_home"])
 
     def test_the_label_rule_is_the_engines_shared_one(self):
         for label, ok in (("homebrew.mxcl.postgresql@14", True), ("org.example.agent-2_b", True),
@@ -381,6 +405,48 @@ class Reading(Base):
         result = sd.apply(self.system(), self.account)
         self.assertEqual([r["outcome"] for r in result["results"]], ["skipped", "skipped"])
 
+    def test_plan_notes_what_the_daemon_changes(self):
+        self.define(WorkingDirectory="/", AssociatedBundleIdentifiers=["org.example.app"],
+                    StandardOutPath=str(self.home / "x.log"))
+        d = sd.plan(self.account, system=self.system())["definitions"][0]
+        self.assertEqual((d["verdict"], d["notes"]), ("ok", ["logs-moved", "stripped", "working-directory-home"]))
+
+    def write_xml(self, body, name=f"{LABEL}.plist"):
+        data = (b'<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+                b'"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>' + body +
+                b'<key>Label</key><string>' + LABEL.encode() + b'</string><key>ProgramArguments</key><array><string>'
+                + ROOT_OWNED_PROGRAM.encode() + b'</string></array></dict></plist>\n')
+        path = self.folder / name
+        path.write_bytes(data)
+        path.chmod(0o644)
+        return data
+
+    def test_an_xml_comment_holding_two_dashes_parses(self):
+        data = self.write_xml(b"<!-- run with --install-launchd -->")
+        with self.assertRaises(Exception):
+            plistlib.loads(data)  # what expat says
+        d = sd.plan(self.account)["definitions"][0]
+        self.assertEqual(d["verdict"], "ok")
+        self.assertEqual(d["source_sha256"], hashlib.sha256(data).hexdigest(), "the hash of the original bytes")
+
+    def test_a_key_inside_a_comment_is_never_parsed(self):
+        self.write_xml(b"<!-- -- <key>UserName</key><string>root</string><key>Sockets</key><dict/> -->")
+        d = sd.plan(self.account)["definitions"][0]
+        self.assertEqual(d["verdict"], "ok")
+        self.assertNotIn("Sockets", d["daemon"])
+        self.assertEqual(d["daemon"]["UserName"], "space", "the comment's UserName never reaches the daemon")
+        doc, code = sd.parse_plist(self.write_xml(b"<!-- -- <key>RunAtLoad</key><true/> -->"))
+        self.assertEqual((code, sorted(doc)), (None, ["Label", "ProgramArguments"]))
+
+    def test_a_binary_plist_is_parsed_as_it_is(self):
+        data = plistlib.dumps({"Label": LABEL, "Note": "<!-- not a comment -->"}, fmt=plistlib.FMT_BINARY)
+        self.assertEqual(sd.parse_plist(data), ({"Label": LABEL, "Note": "<!-- not a comment -->"}, None))
+        self.assertEqual(sd.parse_plist(b"\x00\x01 not a plist"), (None, "unreadable_plist"))
+
+    def test_a_comment_that_does_not_close_is_named(self):
+        self.write_xml(b"<!-- run with --install-launchd ")
+        self.assertEqual(sd.plan(self.account)["definitions"][0]["verdict"], ["xml_comment"])
+
     def test_plan_reads_the_staged_folder_on_request(self):
         staged = Path(self.account.staged_dir())
         staged.mkdir(parents=True, mode=0o700)
@@ -431,6 +497,121 @@ class Reading(Base):
             self.assertEqual(self.account.background_dir(), str(MI.background_dir(self.home)))
             self.assertEqual(self.account.staged_dir(), str(MI.staging_dir(self.home, "launchd")))
             self.assertEqual(self.account.data_dir(), str(MI.data_dir(self.home)))
+
+
+class Trusting(Base):
+    """The trust file (1.1.0): owners and groups that already hold root through sudo. The test's own uid
+    plays root (owner_uid), "hostadmin" is that uid too, and the space account is another uid."""
+
+    class Pw:
+        def __init__(self, uid):
+            self.pw_uid = uid
+
+    class Gr:
+        def __init__(self, gid):
+            self.gr_gid = gid
+
+    def setUp(self):
+        super().setUp()
+        self.space = sd.Account("space", os.getuid() + 1, os.getgid(), "staff", str(self.home))
+        self.users = {"hostadmin": os.getuid(), "space": os.getuid() + 1}
+        self.groups = {"staff": os.getgid(), "admin": os.getgid()}
+        self.program = self.home / "opt" / "bin" / "python3"
+        self.program.parent.mkdir(parents=True)
+        self.program.write_text("#!/bin/sh\n")
+        self.program.chmod(0o755)
+
+    def getpwnam(self, name):
+        if name not in self.users:
+            raise KeyError(name)
+        return self.Pw(self.users[name])
+
+    def getgrnam(self, name):
+        if name not in self.groups:
+            raise KeyError(name)
+        return self.Gr(self.groups[name])
+
+    def trust_file(self, doc, mode=0o644):
+        folder = self.sysroot / sd.REGISTRY_DIR
+        folder.mkdir(parents=True, exist_ok=True)
+        folder.chmod(0o755)
+        path = folder / sd.TRUST_NAME
+        path.write_text(json.dumps(doc) if isinstance(doc, dict) else doc)
+        path.chmod(mode)
+        return path
+
+    def trust(self, system=None, account=None):
+        return sd.read_trust(system or self.system(), account or self.space, self.getpwnam, self.getgrnam)
+
+    def codes(self, trust):
+        found, _ = sd.validate({"Label": LABEL, "ProgramArguments": [str(self.program)]}, f"{LABEL}.plist",
+                               self.space, None, trust)
+        return sorted(set(p["code"] for p in found))
+
+    def test_a_trusted_owner_passes_and_an_untrusted_one_fails(self):
+        self.assertEqual(self.codes(self.trust()), ["program_dir_writable", "program_owner"], "no trust file")
+        self.trust_file({"schema": sd.TRUST_SCHEMA, "owners": ["hostadmin"], "groups": []})
+        trust = self.trust()
+        self.assertEqual((trust.owners, trust.warnings), (["hostadmin"], []))
+        self.assertEqual(self.codes(trust), [])
+        self.trust_file({"schema": sd.TRUST_SCHEMA, "owners": ["nobody-here"], "groups": []})
+        trust = self.trust()
+        self.assertIn("not an account", trust.warnings[0])
+        self.assertEqual(self.codes(trust), ["program_dir_writable", "program_owner"])
+
+    def test_a_group_writable_folder_passes_only_for_a_listed_group(self):
+        if os.getgid() == 0:
+            self.skipTest("the test's group is root's")
+        self.program.parent.chmod(0o775)
+        self.trust_file({"schema": sd.TRUST_SCHEMA, "owners": ["hostadmin"], "groups": []})
+        self.assertEqual(self.codes(self.trust()), ["program_dir_writable"])
+        self.trust_file({"schema": sd.TRUST_SCHEMA, "owners": ["hostadmin"], "groups": ["admin"]})
+        self.assertEqual(self.codes(self.trust()), [])
+        self.program.parent.chmod(0o777)
+        self.assertEqual(self.codes(self.trust()), ["program_dir_writable"], "world-writable stays refused")
+
+    def test_a_trust_file_root_does_not_own_alone_is_ignored(self):
+        doc = {"schema": sd.TRUST_SCHEMA, "owners": ["hostadmin"], "groups": ["admin"]}
+        path = self.trust_file(doc, mode=0o664)
+        trust = self.trust()
+        self.assertEqual((trust.uids, trust.gids), (set(), set()))
+        self.assertIn("writable by group or others", trust.warnings[0])
+        path.chmod(0o644)
+        trust = self.trust(system=self.system(owner_uid=os.getuid() + 7))
+        self.assertEqual(trust.uids, set())
+        self.assertIn("ignored", trust.warnings[0])
+        real = path.with_name("real.json")
+        path.rename(real)
+        path.symlink_to(real)
+        trust = self.trust()
+        self.assertEqual(trust.uids, set())
+        self.assertIn("link", trust.warnings[0])
+        path.unlink()
+        self.trust_file('{"schema": "something-else"}')
+        self.assertIn("is not a", self.trust().warnings[0])
+        self.assertEqual(self.codes(self.trust()), ["program_dir_writable", "program_owner"])
+
+    def test_the_space_account_is_never_trusted_for_itself(self):
+        self.trust_file({"schema": sd.TRUST_SCHEMA, "owners": ["space", "hostadmin"], "groups": []})
+        trust = self.trust()
+        self.assertEqual(trust.owners, ["hostadmin"])
+        self.assertNotIn(self.space.uid, trust.uids)
+        self.assertIn("space account itself", trust.warnings[0])
+
+    def test_trust_set_writes_the_file_as_root_only(self):
+        with self.assertRaisesRegex(sd.SpaceDaemonsError, "needs root"):
+            sd.write_trust(self.system(euid=os.getuid() or 501), ["hostadmin"], [], self.getpwnam, self.getgrnam)
+        with self.assertRaisesRegex(sd.SpaceDaemonsError, "no account named"):
+            sd.write_trust(self.system(), ["ghost"], [], self.getpwnam, self.getgrnam)
+        with self.assertRaisesRegex(sd.SpaceDaemonsError, "no group named"):
+            sd.write_trust(self.system(), [], ["ghosts"], self.getpwnam, self.getgrnam)
+        result = sd.write_trust(self.system(), ["hostadmin"], ["admin"], self.getpwnam, self.getgrnam)
+        path = self.sysroot / sd.REGISTRY_DIR / sd.TRUST_NAME
+        self.assertEqual(json.loads(path.read_text()), {"schema": sd.TRUST_SCHEMA, "owners": ["hostadmin"],
+                                                        "groups": ["admin"]})
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o644)
+        self.assertTrue(result["ok"])
+        self.assertEqual(self.trust().owners, ["hostadmin"])
 
 
 class Accounts(unittest.TestCase):
@@ -921,6 +1102,16 @@ class CommandLine(Base):
                 out = self.run_tool("status", python=python)
                 self.assertEqual((out.returncode, json.loads(out.stdout)["daemons"]), (0, []))
         self.assertFalse((self.sysroot / "Library").exists(), "nothing was written")
+
+    def test_trust_show_reads_the_test_root(self):
+        folder = self.sysroot / sd.REGISTRY_DIR
+        folder.mkdir(parents=True)
+        (folder / sd.TRUST_NAME).write_text(json.dumps({"schema": sd.TRUST_SCHEMA, "owners": [], "groups": []}))
+        out = subprocess.run([sys.executable, "-I", str(TOOL), "trust", "show", "--json"], capture_output=True,
+                             text=True, timeout=60,
+                             env=dict(os.environ, **{sd.TEST_SWITCH: "1", sd.TEST_ROOT: str(self.sysroot)}))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertEqual(json.loads(out.stdout)["trust"]["path"], str(folder / sd.TRUST_NAME))
 
     def test_help_names_the_isolated_command(self):
         out = subprocess.run([sys.executable, "-I", str(TOOL), "--help"], capture_output=True, text=True, timeout=60)

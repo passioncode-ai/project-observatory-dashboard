@@ -436,6 +436,26 @@ One copy only: `apply` refuses a label loaded as an agent in that account's own 
 gui/<uid>/<label>` exit 0, problem `loaded-in-gui`), and a label another account's entry holds
 (`owned_by_other_account`), and writes nothing for it.
 
+**Space daemons 1.1.0 (OBS-361 follow-up).** Measured against 73 real definitions, 44 were refused; this widens
+what is accepted without widening what root trusts by default:
+
+- `Umask` (0 to 0777) and `SoftResourceLimits` (`Core`, `CPU`, `Data`, `FileSize`, `MemoryLock`, `NumberOfFiles`,
+  `NumberOfProcesses`, `ResidentSetSize`, `Stack`, each a non-negative integer) are allowed and kept;
+  `HardResourceLimits` stays refused; `AssociatedBundleIdentifiers` is allowed and dropped (`plan` notes `stripped`);
+  a `WorkingDirectory` of `/` becomes the home (`working-directory-home`), any other path outside the home is still
+  refused; every `DYLD_*` variable stays refused.
+- An XML comment holding `--` is parsed by removing the comments from the bytes once more (never with plutil as
+  root); nothing inside a comment becomes a key, `sourceSha256` stays the hash of the original bytes, and a comment
+  that does not close is `xml_comment`.
+- The optional trust file, a new stable format, readable without root:
+
+| Path | What | Older versions, removal |
+|---|---|---|
+| `/Library/Application Support/ProjectObservatory/space-daemons-trust.json` | `{"schema": "observatory-space-daemons-trust/1", "owners": ["<account name>", ...], "groups": ["<group name>", ...]}`: accounts and groups whose files and folders a program path may belong to besides root (a group-writable folder passes when its group is root's or listed; world-writable never unless sticky). Only accounts that already hold root through sudo belong there. Written by `trust set --owner NAME --group NAME` (root, isolated, the root-owned copy; atomically, root:wheel 0644); read with the registry's checks (no link, owner root, not writable by group or others, at most 64 KiB, in a root-only folder), and a file that fails them is ignored with a warning, never trusted. An owner that is the space account itself is left out for that account, with a warning; a name this computer does not know is left out too | 1.0.0 neither reads nor writes it; deleting it trusts nobody but root and the account again |
+
+The engine's headless `cutover` runs the same parse, the same rules and the same trust file (read-only), so it accepts
+exactly what `apply` will.
+
 ## Workspace snapshot: its home, home-relative paths and another machine's passphrase (OBS-347, OBS-348, 0.34.0)
 
 Additive, with no new file, table or migration. A workspace snapshot's `manifest.json` gains `home_path`, the home
