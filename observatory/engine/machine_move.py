@@ -310,12 +310,12 @@ def cutover(label: str, home: Path, *, runner=subprocess.run, platform: str = sy
             other = staged if staged is not None else background
             raise MachineMoveError(f"{label} is defined twice here: {live} and {other}; one job runs once, so move "
                                    "one of them aside first; nothing moved")
-        _check_as_root_will(staged or live or background, home, uid)
+        file_label = _check_as_root_will(staged or live or background, home, uid)
     if not (confirm or ask_left)(label, me):
         raise MachineMoveError(f"not confirmed: nothing moved. Run `full machine-move leave {label} --to {me}` on "
                                "the other machine first")
     if headless:
-        return _cutover_to_background(label, home, runner, uid, me, staged or live, background)
+        return _cutover_to_background(label, home, runner, uid, me, staged or live, background, file_label)
     moved_here = False
     if staged is not None:
         target = folder / staged.name
@@ -363,29 +363,36 @@ def _space_account(home: Path, uid: int):
     return sd.Account(name, uid, gid, group, str(home))
 
 
-def _check_as_root_will(path: Path, home: Path, uid: int) -> None:
-    """The administrator's `apply` rules (space_daemons.validate) on this definition, before anything moves:
-    a job root would refuse never waits for root. Its folder rules are root's alone and checked there."""
+def _check_as_root_will(path: Path, home: Path, uid: int) -> str:
+    """The administrator's `apply` rules on this definition, before anything moves: the same parse
+    (space_daemons.parse_plist, XML comments holding `--` included), the trust file read only, and
+    space_daemons.validate. A job root would refuse never waits for root. Its folder rules are root's alone
+    and checked there. Answers the definition's Label, which names the moved file."""
     sd = _space_daemons_module()
     if path.is_symlink() or not path.is_file():
         raise MachineMoveError(f"{path} is a link or not a file: root reads only a regular file; nothing moved")
     try:
-        doc = plistlib.loads(path.read_bytes())
-    except (OSError, ValueError, plistlib.InvalidFileException, xml.parsers.expat.ExpatError) as exc:
-        raise MachineMoveError(f"{path} is not a plist ({type(exc).__name__}); nothing moved") from None
-    if not isinstance(doc, dict):
-        raise MachineMoveError(f"{path} is not a plist dictionary; nothing moved")
+        data = path.read_bytes()
+    except OSError as exc:
+        raise MachineMoveError(f"{path} cannot be read ({type(exc).__name__}); nothing moved") from None
+    doc, code, detail = sd.parse_plist_detail(data)
+    if code is not None:
+        raise MachineMoveError(f"the administrator's tool would refuse {path}: {code}"
+                               + (f" ({detail})" if detail else "") + ". It stays where it was")
     label = doc.get("Label")
     name = f"{label}.plist" if isinstance(label, str) else path.name
-    problems, _daemon = sd.validate(doc, name, _space_account(home, uid))
+    account = _space_account(home, uid)
+    trust = sd.read_trust(sd.system_from_environment(), account)
+    problems, _daemon = sd.validate(doc, name, account, None, trust)
     if problems:
         named = ", ".join(p["code"] + (f" ({p['detail']})" if p["detail"] else "") for p in problems)
         raise MachineMoveError(f"the administrator's tool would refuse {path}: {named}. It stays where it was; "
                                "fix the definition and run cutover again")
+    return label
 
 
 def _cutover_to_background(label: str, home: Path, runner, uid: int, me: str, source: Path | None,
-                           background: Path | None) -> dict:
+                           background: Path | None, file_label: str | None = None) -> dict:
     """`cutover` for an account with no GUI session (OBS-361): the definition goes to the background
     folder, writable by this account alone, where the administrator's space_daemons.py reads it. Nothing
     is put back on the way: the job is placed here, and runs once root loads it."""
@@ -395,7 +402,7 @@ def _cutover_to_background(label: str, home: Path, runner, uid: int, me: str, so
     else:
         mi.ensure_private_dir(folder, home)
         # Named <Label>.plist, the only name root's tool accepts for it.
-        target = folder / f"{mi.job_label(source)}.plist"
+        target = folder / f"{file_label or mi.job_label(source)}.plist"
         if os.path.lexists(target):
             if target.is_file() and source.is_file() and target.read_bytes() == source.read_bytes():
                 source.unlink()
