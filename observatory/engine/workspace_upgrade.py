@@ -331,17 +331,60 @@ def _snapshot(base: Path, output: Path, *, carry_stores: bool = False,
         raise
 
 
+def secret_stores_inside(base: Path) -> list[str]:
+    """The secret stores inside the workspace that hold a file, as workspace-relative folders (OBS-389).
+
+    A plaintext snapshot copies every file of the workspace into `data/`, so a store inside it (the
+    default `<home>/secrets`, or a `sources.secret_store`/`sources.secrets`, `OBSERVATORY_SECRETS` or
+    `OBSERVATORY_VAULT_DIR` folder under the home) is copied unencrypted. A store outside the workspace
+    is never copied into a plaintext snapshot (`plaintext-output`) and is not listed. Locks and
+    temporaries (`secret_store_carry.SKIPPED`) are not secrets; an empty store is not listed."""
+    home = base.resolve()
+    try:
+        doc = config.load(base)
+    except config.ConfigurationError:
+        doc = {}
+    sources = doc.get('sources') if isinstance(doc.get('sources'), dict) else {}
+    values = [sources.get('secret_store'), sources.get('secrets'),
+              os.environ.get(backup_vault.SECRETS_ENV), os.environ.get(backup_vault.VAULT_DIR_ENV)]
+    candidates = [home / 'secrets']
+    for value in values:
+        if isinstance(value, str) and value:
+            path = Path(value).expanduser().resolve()
+            if home in path.parents:
+                candidates.append(path)
+    found: list[str] = []
+    for store in candidates:
+        rel = store.relative_to(home).as_posix()
+        if rel in found or any(rel.startswith(f + '/') for f in found) or excluded(PurePosixPath(rel)):
+            continue
+        for directory, children, files in os.walk(store, followlinks=False):
+            children[:] = [c for c in children
+                           if not excluded((Path(directory) / c).relative_to(home))]
+            if any(not secret_store_carry._skipped(name)
+                   and not excluded((Path(directory) / name).relative_to(home)) for name in files):
+                found.append(rel)
+                break
+    return found
+
+
 def snapshot(base: Path, output: Path | None = None, *, writers_stopped: bool = False,
-             kind: str = 'snapshot', update: bool = False) -> dict:
-    """An explicit --output is honoured as a plaintext directory, exactly as before.
-    Without one the snapshot is staged under <home>/backups and then handed to
-    backup_vault: exported encrypted to the backups root when a passphrase is
-    configured, otherwise kept locally under rotation. `update` names the snapshot an
-    update takes before it installs (its reason for not carrying a secret store)."""
+             kind: str = 'snapshot', update: bool = False, plaintext: bool = False) -> dict:
+    """An explicit --output is written as a plaintext directory. When the workspace holds secrets
+    (a store inside it with a file, `secret_stores_inside`) that copy is refused unless the caller
+    passes `plaintext=True` (`--plaintext`), and then the answer says so (OBS-389); without secrets
+    it is written exactly as before. Without an output the snapshot is staged under <home>/backups
+    and then handed to backup_vault: exported encrypted to the backups root when a passphrase is
+    configured, otherwise kept locally under rotation. `update` names the snapshot an update takes
+    before it installs (its reason for not carrying a secret store); that caller passes `plaintext`
+    as well, since its stage is the plaintext copy a rollback restores."""
     managed_layout(base)
     preflight(base)  # unknown versions refuse before locks or other writes
     require_stopped(writers_stopped)
     explicit = output is not None
+    if plaintext and not explicit:
+        raise config.ConfigurationError('--plaintext applies only to --output DIR; without --output the snapshot '
+                                        'is exported encrypted when a backup passphrase is configured')
     if kind not in backup_vault.SNAPSHOT_KINDS:
         raise config.ConfigurationError(f'Unknown snapshot kind: {kind}')
     output = output or base / 'backups' / (f'{kind}-' + uuid.uuid4().hex)
@@ -352,8 +395,22 @@ def snapshot(base: Path, output: Path | None = None, *, writers_stopped: bool = 
         # A folder the sweep could not clean is said, never a reason to stop the backup.
         unswept = {'secret_store_sweep': {'failed': swept['failed']}} if swept['failed'] else {}
         if explicit:
+            stores = secret_stores_inside(base)
+            if stores and not plaintext:
+                named = ', '.join(stores)
+                raise config.ConfigurationError(
+                    f'This workspace holds secrets ({named}) and --output writes a plaintext copy of them. '
+                    'Either run without --output, which exports the snapshot encrypted to the backups root '
+                    'once a backup passphrase is set (`project-observatory full backup-passphrase status` says, '
+                    '`... set` sets one), or pass --plaintext to write the plaintext copy anyway and keep it as '
+                    'private as the vault')
             result = _snapshot(base, output, not_carried='update-snapshot' if update else 'plaintext-output')
             result['encrypted'] = False
+            if stores:
+                result['plaintext'] = True
+                result['warnings'] = [f'the snapshot holds the secrets of {", ".join(stores)} in plaintext '
+                                      '(files 0600, folders 0700): keep it as private as the vault and delete '
+                                      'it when done']
             result.update(unswept)
             return result
         # The store is carried only into a snapshot about to be encrypted: the condition
@@ -974,7 +1031,11 @@ def parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog='project-observatory full', description=__doc__)
     commands = ap.add_subparsers(dest='command',required=True)
     backup = commands.add_parser('backup', prog='project-observatory full workspace-backup')
-    backup.add_argument('--output',type=Path)
+    backup.add_argument('--output',type=Path,
+                        help='write a plaintext snapshot folder here instead of the managed backup; refused '
+                             'when the workspace holds secrets unless --plaintext is given (OBS-389)')
+    backup.add_argument('--plaintext',action='store_true',
+                        help='with --output: write the plaintext copy even though it holds the vault\'s secrets')
     backup.add_argument('--writers-stopped',action='store_true')
     up = commands.add_parser('upgrade', prog='project-observatory full upgrade')
     up.add_argument('--apply',action='store_true')
@@ -1004,7 +1065,7 @@ def main(argv: list[str]) -> int:
         stdin_value = backup_vault.read_passphrase_stdin() if getattr(args, 'passphrase_stdin', False) else None
         base = config.home()
         if args.command == 'backup':
-            result = snapshot(base,args.output,writers_stopped=args.writers_stopped)
+            result = snapshot(base,args.output,writers_stopped=args.writers_stopped,plaintext=args.plaintext)
         elif args.command == 'upgrade':
             result = upgrade(base,apply=args.apply,writers_stopped=args.writers_stopped)
             # An update from a release before 0.17.0 runs that release's transaction, which
