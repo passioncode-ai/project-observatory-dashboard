@@ -33,6 +33,7 @@ authentication rather than decrypting to something shorter.
 from __future__ import annotations
 
 import base64
+import collections
 import contextlib
 import datetime
 import oslocks
@@ -170,13 +171,13 @@ def candidates(base: Path) -> list[dict]:
                         continue  # the same name at another path is another workspace
                 except OSError:
                     continue
-            snaps = sorted([f for kind in SNAPSHOT_KINDS
-                            for f in artifacts(folder, kind, SNAPSHOT_SUFFIX)],
-                           key=lambda f: _artifact_stamp(f.name))
             # Every snapshot, so a damaged newest one still leaves an older one to restore.
             found += [{"label": folder.name, "folder": folder, "snapshot": snap,
-                       "stamp": _artifact_stamp(snap.name)} for snap in snaps]
-    return sorted(found, key=lambda c: c["stamp"], reverse=True)
+                       "stamp": _artifact_stamp(snap.name)}
+                      for kind in SNAPSHOT_KINDS for snap in artifacts(folder, kind, SNAPSHOT_SUFFIX)]
+    # Newest first, same-second snapshots included (OBS-388): one order over every folder.
+    order = {snap: n for n, snap in enumerate(order_artifacts(c["snapshot"] for c in found))}
+    return sorted(found, key=lambda c: order[c["snapshot"]], reverse=True)
 
 
 def _home_tail(base: Path) -> tuple[str, ...] | None:
@@ -226,20 +227,22 @@ def elsewhere(base: Path) -> list[dict]:
             parts = Path(named).parts
             if named == own or len(parts) <= len(tail) or tuple(parts[-len(tail):]) != tail:
                 continue
-            snaps = sorted([f for kind in SNAPSHOT_KINDS for f in artifacts(folder, kind, SNAPSHOT_SUFFIX)],
-                           key=lambda f: _artifact_stamp(f.name))
+            snaps = order_artifacts(f for kind in SNAPSHOT_KINDS for f in artifacts(folder, kind, SNAPSHOT_SUFFIX))
             if snaps:
                 out.append({"label": folder.name, "owner_home_relative": "~/" + "/".join(tail),
                             "newest": str(snaps[-1]), "snapshots": len(snaps)})
-    return sorted(out, key=lambda e: _artifact_stamp(Path(e["newest"]).name), reverse=True)
+    order = {n: i for i, n in enumerate(order_artifacts(Path(e["newest"]) for e in out))}
+    return sorted(out, key=lambda e: order[Path(e["newest"])], reverse=True)
+
+
+_STAMP = re.compile(r"(?:^|-)(\d{8}T\d{6}Z)(?=-|\.|$)")
 
 
 def _artifact_stamp(name: str) -> str:
-    """`<kind>-<YYYYmmddTHHMMSSZ>-…` → the stamp, so kinds sort together by time."""
-    for part in name.split("-"):
-        if len(part) == 16 and part[8] == "T" and part.endswith("Z"):
-            return part
-    return ""
+    """`<kind>-<YYYYmmddTHHMMSSZ>-…` or `<kind>-<YYYYmmddTHHMMSSZ>.<suffix>` → the stamp, so
+    kinds sort together by time ("" when the name carries none)."""
+    found = _STAMP.search(name)
+    return found.group(1) if found else ""
 
 
 # --- the passphrase ------------------------------------------------------
@@ -1034,11 +1037,54 @@ def extract_tree(path: Path, parent: Path, secret: str) -> Path:
 
 # --- rotation, export, migration ----------------------------------------
 
+def _header_created(path: Path) -> float | None:
+    """When an encrypted backup was made, from its plaintext header's `created_at` (written by
+    `_publish`, microseconds); None when the file does not read as one. Read only to order
+    backups whose names share one stamp (OBS-388), so a folder of backups is not opened file
+    by file on every listing."""
+    try:
+        with path.open("rb") as stream:
+            if stream.read(len(MAGIC)) != MAGIC:
+                return None
+            size = struct.unpack(">I", stream.read(4))[0]
+            if size > 64 * 1024:
+                return None
+            created = json.loads(stream.read(size)).get("created_at")
+        return datetime.datetime.fromisoformat(created).timestamp()
+    except (OSError, ValueError, TypeError, AttributeError, struct.error):
+        return None
+
+
+def order_artifacts(paths) -> list[Path]:
+    """Backups oldest first, in the order they were made (OBS-388).
+
+    The UTC stamp in the name orders backups taken in different seconds. Within one second
+    the name differs only by its random suffix, and ordering by that rotated the newest away
+    when several were taken at once; so ties go to the creation time in the encrypted
+    header, then to the file's mtime in nanoseconds (a file system that keeps whole seconds
+    gives same-second files one mtime, and a copy may reset it, which is why the header
+    comes first), and the name only last, so the order is at least stable."""
+    paths = list(paths)
+    stamps = {p: _artifact_stamp(p.name) for p in paths}
+    counts = collections.Counter(stamps.values())
+    tied = {s for s, n in counts.items() if n > 1}
+
+    def key(p: Path):
+        created = _header_created(p) if stamps[p] in tied else None
+        try:
+            mtime = p.stat().st_mtime_ns
+        except OSError:
+            mtime = 0
+        return (stamps[p], created is not None, created or 0.0, mtime, p.name)
+    return sorted(paths, key=key)
+
+
 def artifacts(root: Path, kind: str, suffix: str) -> list[Path]:
-    """Oldest first: names begin with a UTC stamp, so name order is age order."""
+    """Oldest first, in the order they were made (`order_artifacts`): never by the random
+    suffix that follows the stamp in the name."""
     if not root.is_dir():
         return []
-    return sorted(p for p in root.glob(f"{kind}-*{suffix}") if p.is_file() and not p.name.startswith("."))
+    return order_artifacts(p for p in root.glob(f"{kind}-*{suffix}") if p.is_file() and not p.name.startswith("."))
 
 
 def rotate(root: Path, kind: str, suffix: str, keep: int = KEEP) -> list[str]:
