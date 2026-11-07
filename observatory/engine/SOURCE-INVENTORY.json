@@ -954,8 +954,8 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "89154227d13f1a976eb15aa2fe135f48c33557d2b11cff4c5232174a8a90bc90",
-      "bytes": 81919,
+      "export_sha256": "46ff36bfde3a419d22236830cfe765f337999df7c194e2b96e3b62104bd67d98",
+      "bytes": 82537,
       "upstream_modified": true
     },
     {
@@ -3582,8 +3582,8 @@
       "path": "peer_owner.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "60df51d40ab97ec826d0da67147a2cb2a84c8056e5af15fc9173ec3679e8086b",
-      "bytes": 40292
+      "export_sha256": "24cb783043658eff6d0b9401435b13d13056b5ebe288bb75594384b6093049a8",
+      "bytes": 40552
     },
     {
       "path": "plugins/README.md",
@@ -5781,8 +5781,8 @@
       "path": "tests/test_peer_owner.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "306d4ce548715788d34e203895334ee0b35b79c91bf7663941f8225ebbd112ae",
-      "bytes": 30179
+      "export_sha256": "44f8bbb337e801685783eaee0ad941437f5d566fd046b792bb70e1d4649f1f99",
+      "bytes": 32446
     },
     {
       "path": "tests/test_pipeline.py",

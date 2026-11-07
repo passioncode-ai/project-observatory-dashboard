@@ -350,21 +350,27 @@ platform, so neither a machine bundle nor a workspace snapshot carries them:
 | `machine-move/peers/` | 0.31.0 | the other machine's facts (`full machine-move facts --out FILE`, schema `observatory-machine-facts/1`: `machine`, `generated_at`, `engine_version`, `platform`, `ssh[]` of `file` and `fingerprint`, `device`, `jobs[]`, `elsewhere[]`, `restore`, `omitted`), placed by the person; written whole through a temporary file and a link, never over an existing name; `full machine-move status` reads every `*.json` here | never written by the engine; a file that does not read is named in `degraded`; deleting one forgets that machine |
 | `machine-id` | 0.30.1 | a random machine id, written only where the platform has no machine identifier of its own (macOS, most Linux and Windows have one) | deleting it gives the machine a new id: bundles and snapshots it took before then read as another machine's |
 
-## Linux: a connection not accepted yet reads its listener's owner (peer_owner 1.2.0, the release after 0.34.0)
+## Linux: a client reads its server's owner from the listener (peer_owner 1.2.0, the release after 0.34.0)
 
-A fix on Linux only; macOS and Windows answer as before. `/proc/net/tcp` and `tcp6` print a connection the server
-has not `accept()`ed yet with uid 0 and inode 0, because its socket has no owner until then. A client that checks the
+A fix on Linux, and one rule change on every POSIX host. `/proc/net/tcp` and `tcp6` print a connection the server has
+not `accept()`ed yet with uid 0 and inode 0, because its socket has no owner until then. A client that checks the
 server end right after connecting (OBS-355) read that row as root's and refused its own account's server
 (`server-not-own`), on a busy server for most connections; a client running as root could take another account's slow
-listener for its own uid. Now such a server end is read again three times (5, 10 and 20 ms) and, still not accepted,
-takes the owner of the listener on its address: the exact bind first, else the wildcard (`0.0.0.0`, `::`, IPv4-mapped
-included). Listeners of one uid count as that uid; listeners of different uids, a listener without its inode, or no
-listener read as `unknown` (`unaccepted-listeners-disagree`, `unaccepted-no-listener`), which the client refuses as
-`server-unverified`. On the server side a client end with inode 0 is a socket its process already closed: it now
-reads as `unknown` (`no-socket`) and is refused `403 peer-unverified` instead of `403 peer-foreign-account`; an open
-client end always has its inode, so nothing else changes there. `peer_owner.Row` gains `inode` (Linux only, None
-elsewhere) as its last field, so positional construction is unchanged. A project that vendors `peer_owner.py`
-takes this file's 1.2.0 to get the fix.
+listener for its own uid. Now, on Linux, the client takes the server end's owner only from the listener rows (state
+`0A`) on the server's address and port, never from the connection's own row, whatever its inode: the exact bind first,
+else the wildcard (`0.0.0.0`, `::`, IPv4-mapped included). Rows of one uid (a `SO_REUSEPORT` group, or one process's
+IPv4 and IPv6 sockets) count as that uid; rows of different uids, a listener row without its inode, or no listener read
+as `unknown` (`listeners-disagree`, `listener-no-socket`, `no-listener`), which the client refuses as
+`server-unverified`. This is the Fabric agent contract's DEC-0154 HA-2, as amended. macOS and Windows still read the
+accepting process's own socket. On the server side a client end with inode 0 is a socket its process already closed:
+it reads as `unknown` (`no-socket`) and is refused `403 peer-unverified` instead of `403 peer-foreign-account`; an open
+client end always has its inode, so nothing else changes there.
+
+The rule change: an owner's uid is now compared with this process's uid before uid 0 reads as the system's, so a
+process running as root owns root's sockets. A server or client running as root now admits its own root peer or listener as `this-account`
+where it refused it as `system`; pid 1 (launchd's socket-activated jobs) stays `system`. An ordinary account still refuses root's
+sockets. `peer_owner.Row` gains `inode` (Linux only, None elsewhere) as its last field, so positional construction is
+unchanged. A project that vendors `peer_owner.py` takes this file's 1.2.0 to get the fix.
 
 ## Machine move: a space with nobody logged in (OBS-361 part 1, the release after 0.34.0)
 
