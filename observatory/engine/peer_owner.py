@@ -1,6 +1,6 @@
 """peer_owner: which OS account owns each end of a loopback TCP connection.
 
-    peer_owner 1.1.0. One file, Python standard library only, no imports from any other
+    peer_owner 1.2.0. One file, Python standard library only, no imports from any other
     module of its project, so another project can vendor it by commit: copy this file and
     record the commit it came from. Its tests and their fixtures live beside the engine's
     tests (`tests/test_peer_owner.py`, `tests/peer_owner_fixtures.py`).
@@ -56,6 +56,16 @@ addresses are `unknown` (`several-rows`), never a guess.
 - Linux (`proc`): `/proc/net/tcp` and `/proc/net/tcp6`, whose `uid` column every account may
   read (also under `hidepid=2`, which hides `/proc/<pid>` and not this file). No pid: that is
   only readable for this account's own processes, and the decision needs the uid alone.
+  A connection the server has not `accept()`ed yet is printed with uid 0 and inode 0: its child
+  socket has no `struct socket` until then, and the kernel falls back to root. A client that asks
+  right after `connect()` meets such a row often (reproduced on Linux 6.8: 68 of 100 connections
+  to a busy server), and read as it stands it refused its own server, or, running as root, took
+  another account's slow listener for its own uid. So a server end with inode 0 is read again a
+  few times (UNACCEPTED_BACKOFF, about 35 ms in all) and, still unaccepted, answers through the
+  listener on its local address: the exact bind, else the wildcard, as the kernel delivers it.
+  Listeners of one uid count as that uid; listeners of different uids, a listener without its own
+  inode, or none, are `unknown`. A client end with inode 0 is a socket its process already
+  closed, owned by no listener: `unknown` (`no-socket`) at once.
 - Windows (`iphlpapi`): `GetExtendedTcpTable(TCP_TABLE_OWNER_PID_ALL)` gives each row's owning
   pid; `OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION)`, `OpenProcessToken(TOKEN_QUERY)` and
   `GetTokenInformation(TokenUser)` give its account SID, compared with this process's. A process
@@ -86,7 +96,7 @@ import threading
 import time
 
 # This file's own version, for projects that copy it; not the engine's (that is configuration.VERSION).
-PEER_OWNER_VERSION = "1.1.0"
+PEER_OWNER_VERSION = "1.2.0"
 
 THIS_ACCOUNT = "this-account"
 ANOTHER_ACCOUNT = "another-account"
@@ -103,6 +113,9 @@ MAX_TABLE_BYTES = 4 * 1024 * 1024
 TIMEOUT_SECONDS = 2.0
 #: `listener(port)` answers from a read at most this old (a doctor asks several times in a row).
 LISTENER_TTL = 1.0
+#: Linux: the pauses, in seconds, before each new read of a server end the server has not accepted
+#: yet (inode 0). Bounded: at most len() more reads, then the listener answers.
+UNACCEPTED_BACKOFF = (0.005, 0.01, 0.02)
 
 NETSTAT = "/usr/sbin/netstat"
 PS = "/bin/ps"
@@ -129,13 +142,16 @@ class Owner:
 @dataclasses.dataclass(frozen=True)
 class Row:
     """One TCP socket of the host's table. `uid` is None where the table carries no owner
-    (netstat, Windows): it is resolved from `pid` only for the row a question selects."""
+    (netstat, Windows): it is resolved from `pid` only for the row a question selects. `inode` is
+    Linux's only (None elsewhere); 0 there means the socket has no `struct socket`, and then its
+    printed uid 0 is not its owner."""
     local: tuple[str, int]
     remote: tuple[str, int]
     listening: bool
     uid: int | None = None
     pid: int | None = None
     time_wait: bool = False
+    inode: int | None = None
 
 
 class TableUnreadable(Exception):
@@ -253,7 +269,9 @@ def parse_ps_uid(text: str) -> int | None:
 
 def parse_proc_net_tcp(text: str, *, family: int, byteorder: str | None = None) -> list[Row]:
     """`/proc/net/tcp` (family AF_INET) or `/proc/net/tcp6` (AF_INET6). The kernel prints each
-    32-bit word of an address in host byte order and each port in network order, in hex."""
+    32-bit word of an address in host byte order and each port in network order, in hex; the
+    tenth column is the inode, 0 for a socket with no `struct socket` (not accepted yet, or
+    already closed by its process)."""
     order = byteorder or sys.byteorder
     rows: list[Row] = []
     for line in text.splitlines()[1:]:
@@ -264,9 +282,10 @@ def parse_proc_net_tcp(text: str, *, family: int, byteorder: str | None = None) 
             local = _proc_address(tok[1], family, order)
             remote = _proc_address(tok[2], family, order)
             uid = int(tok[7])
+            inode = int(tok[9])
         except ValueError:
             continue
-        rows.append(Row(local, remote, tok[3].upper() == "0A", uid, None, tok[3].upper() == "06"))
+        rows.append(Row(local, remote, tok[3].upper() == "0A", uid, None, tok[3].upper() == "06", inode))
     return rows
 
 
@@ -641,24 +660,56 @@ def find(rows: list[Row], local: tuple[str, int], remote: tuple[str, int]) -> li
             if not row.listening and not row.time_wait and row.local == local and row.remote == remote]
 
 
-def _owner_of(local: tuple[str, int], remote: tuple[str, int]) -> Owner:
-    try:
-        rows, how = read_table()
-    except TableUnreadable as exc:
-        return Owner(UNKNOWN, None, None, method(), str(exc))
-    found = find(rows, local, remote)
-    if not found:
-        return Owner(UNKNOWN, None, None, how, "no-row")
-    if len(found) > 1:
-        return Owner(UNKNOWN, None, None, how, "several-rows")
-    return resolve(found[0], how)
+def unaccepted_owner(rows: list[Row], local: tuple[str, int], how: str) -> Owner:
+    """Linux: the owner of a server end the server has not accepted yet (inode 0, printed uid 0),
+    which is its listener's: the listeners on the row's exact local address, else on the
+    wildcard, the order the kernel delivers a connection in. Listeners of one uid count as that
+    uid (a SO_REUSEPORT group, which the kernel keeps to one uid); listeners of different uids, a
+    listener without its own inode, or none at all, are `unknown`, which every caller refuses."""
+    host, port = local
+    hits: list[Row] = []
+    for bind in (host, "*"):
+        hits = [row for row in rows if row.listening and not row.time_wait and row.local == (bind, port)]
+        if hits:
+            break
+    if not hits:
+        return Owner(UNKNOWN, None, None, how, "unaccepted-no-listener")
+    uids = {row.uid for row in hits}
+    if len(uids) != 1 or None in uids or any(row.inode == 0 for row in hits):
+        return Owner(UNKNOWN, None, None, how, "unaccepted-listeners-disagree")
+    return classify(uids.pop(), None, method=how)
+
+
+def _owner_of(local: tuple[str, int], remote: tuple[str, int], *, server_side: bool) -> Owner:
+    """The owner of the one live row from `local` to `remote`. `server_side`: that row is a server
+    end, whose local address is a listener's, so a row Linux prints without its socket (inode 0:
+    not accepted yet) is read again for UNACCEPTED_BACKOFF and then answers through its listener.
+    A client end without its socket was closed by its process and is `unknown` at once."""
+    pauses = list(UNACCEPTED_BACKOFF) if server_side else []
+    while True:
+        try:
+            rows, how = read_table()
+        except TableUnreadable as exc:
+            return Owner(UNKNOWN, None, None, method(), str(exc))
+        found = find(rows, local, remote)
+        if not found:
+            return Owner(UNKNOWN, None, None, how, "no-row")
+        if len(found) > 1:
+            return Owner(UNKNOWN, None, None, how, "several-rows")
+        if found[0].inode != 0:
+            return resolve(found[0], how)
+        if not server_side:
+            return Owner(UNKNOWN, None, None, how, "no-socket")
+        if not pauses:
+            return unaccepted_owner(rows, local, how)
+        time.sleep(pauses.pop(0))
 
 
 def peer_at(server: tuple, client: tuple) -> Owner:
     """The owner of the CLIENT socket of the connection between `server` and `client`, as a
     server sees them (its own address, the peer's address): the row whose local address is the
     client's and whose remote address is the server's."""
-    return _owner_of(_address(client), _address(server))
+    return _owner_of(_address(client), _address(server), server_side=False)
 
 
 def peer(sock: socket.socket) -> Owner:
@@ -673,12 +724,14 @@ def peer(sock: socket.socket) -> Owner:
 def server_end(sock: socket.socket) -> Owner:
     """For a client's connected socket: who accepted it. The row whose local address is the
     server's and whose remote address is this socket's own, which is the server process's
-    accepted socket, so a listener swapped after `listen` cannot pass for the one that answers."""
+    accepted socket, so a listener swapped after `listen` cannot pass for the one that answers.
+    On Linux a connection not accepted yet has no owner in its row; it is read again briefly and
+    then answers through its listener (`unaccepted_owner`)."""
     try:
         own, server = sock.getsockname(), sock.getpeername()
     except OSError as exc:
         return Owner(UNKNOWN, None, None, "none", f"socket: {type(exc).__name__}")
-    return _owner_of(_address(server), _address(own))
+    return _owner_of(_address(server), _address(own), server_side=True)
 
 
 #: port -> (time.monotonic() of the read, the Owner)

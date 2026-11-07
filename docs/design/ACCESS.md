@@ -91,14 +91,24 @@ a referer are labels at most.
     writes one JSON line on the server's stderr (at most one per peer uid and code a minute). The
     local server's refusals are counted in its receipt `store/raw/serverd.json` (`peer`) and shown
     by `full doctor` (`loopback.refused`); memory over HTTP and the keyserver count in their own
-    process only.
+    process only. On Linux the table prints a connection the server has not accepted yet with uid 0
+    and inode 0, which is not its owner: a client asking about such a server end reads it again a
+    few times and then takes the owner of the listener on its address (the exact bind, else the
+    wildcard; listeners that disagree, or none, are `unknown`), and a server reading a client end
+    without its inode (a socket its process closed) answers `peer-unverified` (`peer_owner.py`
+    1.2.0).
     - `test_foreign_and_unverified_are_refused_before_the_request_line`;
     - `test_foreign_refused_before_host_origin_and_bearer`,
       `test_x_forwarded_for_does_not_change_the_peer_address`, `test_a_websocket_is_refused`;
     - `test_any_failure_is_a_typed_peer_unverified`;
     - `test_foreign_is_refused_before_the_handler_exists`;
     - `test_one_account_serves_as_before`, `test_one_account_and_auto_never_reads_the_table`;
-    - `test_peer_picks_the_client_socket`, `test_both_ends_of_a_real_pair_are_this_account`.
+    - `test_peer_picks_the_client_socket`, `test_both_ends_of_a_real_pair_are_this_account`;
+    - `test_an_unaccepted_row_whose_listener_is_ours_reads_as_ours`,
+      `test_a_root_client_refuses_another_accounts_slow_listener`,
+      `test_two_listeners_with_different_uids_are_unknown`,
+      `test_the_server_reading_a_client_row_without_a_socket_fails_closed`,
+      `test_a_connection_not_accepted_yet_is_this_accounts`.
 
 ## Gaps, stated
 

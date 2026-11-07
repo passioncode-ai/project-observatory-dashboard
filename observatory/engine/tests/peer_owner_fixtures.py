@@ -11,6 +11,10 @@ uids are invented, and no address leaves loopback. Copy this file beside the ven
     PS_UID                    pid -> what `ps -o uid= -p PID` prints for it ("" when gone)
     PROC_NET_TCP_*            `/proc/net/tcp` (Linux, little-endian host), one and two accounts
     PROC_NET_TCP6_MULTI       `/proc/net/tcp6`, an IPv6 loopback pair of two accounts
+    PROC_NET_TCP_UNACCEPTED   a connection the server has not accept()ed yet: its server end
+                              printed with uid 0 and inode 0
+    PROC_NET_TCP6_WILDCARD_UNACCEPTED  the same through another account's `::` listener, the
+                              connection IPv4-mapped
     pcblist_n(rows)           a `net.inet.tcp.pcblist_n` blob built from XNU's pack(4) layout,
                               with each socket's TCP state in its xtcpcb_n
     windows_table(rows, af)   a `GetExtendedTcpTable(TCP_TABLE_OWNER_PID_ALL)` buffer
@@ -98,6 +102,28 @@ PROC_NET_TCP6_MULTI = _PROC_HEADER + "".join((
     _proc(0, f"{_V6_LOOP}:B8CF", f"{'0' * 32}:0000", "0A", OWN_UID, 2001),
     _proc(1, f"{_V6_LOOP}:B8CF", f"{_V6_LOOP}:C352", "01", OWN_UID, 2002),
     _proc(2, f"{_V6_LOOP}:C352", f"{_V6_LOOP}:B8CF", "01", OTHER_UID, 2003),
+))
+
+#: Linux prints a connection the server has not accept()ed yet with uid 0 and inode 0: until
+#: accept() its child socket has no `struct socket`, so `sock_i_uid` falls back to root. The
+#: client end, created by socket() before connect(), has its own inode and its real uid.
+#: 50004 is C354.
+UNACCEPTED_CLIENT = ("127.0.0.1", 50004)
+PROC_NET_TCP_UNACCEPTED = PROC_NET_TCP_SINGLE + "".join((
+    _proc(3, "0100007F:B8CF", "0100007F:C354", "01", 0, 0),
+    _proc(4, "0100007F:C354", "0100007F:B8CF", "01", OWN_UID, 1007),
+))
+
+#: Another account listens on `::` port 47400 (B928) and has not accepted this account's IPv4
+#: connection from 127.0.0.1:50005 (C355). ::ffff:127.0.0.1 is the words 00000000 00000000
+#: FFFF0000 0100007F on a little-endian host.
+WILDCARD_PORT = 47400
+WILDCARD_CLIENT = ("127.0.0.1", 50005)
+_V4_MAPPED_LOOP = "0000000000000000FFFF00000100007F"
+PROC_NET_TCP6_WILDCARD_UNACCEPTED = _PROC_HEADER + "".join((
+    _proc(0, f"{'0' * 32}:B928", f"{'0' * 32}:0000", "0A", OTHER_UID, 3001),
+    _proc(1, f"{_V4_MAPPED_LOOP}:B928", f"{_V4_MAPPED_LOOP}:C355", "01", 0, 0),
+    _proc(2, f"{_V4_MAPPED_LOOP}:C355", f"{_V4_MAPPED_LOOP}:B928", "01", OWN_UID, 3002),
 ))
 
 

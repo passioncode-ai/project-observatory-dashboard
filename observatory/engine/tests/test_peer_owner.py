@@ -226,6 +226,131 @@ class Selection(unittest.TestCase):
         self.assertEqual(read.call_count, 1)
 
 
+class Unaccepted(unittest.TestCase):
+    """Linux prints a connection the server has not accept()ed yet with uid 0 and inode 0. Read as
+    it stands, a client refused its own server and a root client read another account's listener as
+    its own uid. The owner of such a row is its listener's (peer_owner 1.2.0)."""
+
+    LISTENER = (SERVER, ("*", 0))
+
+    def setUp(self):
+        self.uid = F.OWN_UID
+        self.own_uid = mock.patch.object(P.os, "getuid", side_effect=lambda: self.uid, create=True)
+        self.own_uid.start()
+        self.sleep = mock.patch.object(P.time, "sleep")
+        self.pauses = self.sleep.start()
+
+    def tearDown(self):
+        self.sleep.stop()
+        self.own_uid.stop()
+
+    def proc(self, rows):
+        return mock.patch.object(P, "read_table", return_value=(rows, "proc"))
+
+    def unaccepted(self, *listeners, local=SERVER, client=F.UNACCEPTED_CLIENT):
+        """A table with the server end not accepted yet, the client end, and these listeners
+        given as (local address, uid)."""
+        rows = [P.Row(local, client, False, 0, None, False, 0),
+                P.Row(client, local, False, F.OWN_UID, None, False, 1007)]
+        return rows + [P.Row(at, ("*", 0), True, uid, None, False, 900 + i) for i, (at, uid) in enumerate(listeners)]
+
+    def test_the_parser_reads_the_inode(self):
+        rows = P.parse_proc_net_tcp(F.PROC_NET_TCP_UNACCEPTED, family=socket.AF_INET, byteorder="little")
+        by = {(r.local, r.remote): r for r in rows}
+        self.assertEqual((by[(SERVER, F.UNACCEPTED_CLIENT)].uid, by[(SERVER, F.UNACCEPTED_CLIENT)].inode), (0, 0))
+        self.assertEqual((by[(F.UNACCEPTED_CLIENT, SERVER)].uid, by[(F.UNACCEPTED_CLIENT, SERVER)].inode),
+                         (F.OWN_UID, 1007))
+        self.assertEqual(by[self.LISTENER].inode, 1001)
+        # The other tables carry no inode: the listener rule never applies to them.
+        self.assertTrue(all(r.inode is None for r in P.parse_netstat(F.NETSTAT_MULTI_ACCOUNT)))
+        self.assertTrue(all(r.inode is None for r in P.parse_pcblist_n(F.pcblist_n(F.PCBLIST_MULTI_ROWS))))
+
+    def test_an_unaccepted_row_whose_listener_is_ours_reads_as_ours(self):
+        rows = P.parse_proc_net_tcp(F.PROC_NET_TCP_UNACCEPTED, family=socket.AF_INET, byteorder="little")
+        with self.proc(rows) as read:
+            owner = P.server_end(FakeSocket(F.UNACCEPTED_CLIENT, SERVER))
+        self.assertEqual((owner.kind, owner.uid, owner.method), (P.THIS_ACCOUNT, F.OWN_UID, "proc"))
+        self.assertIsNone(P.refusal(owner, F.SERVER_PORT))
+        # Read again a bounded number of times while the server has not accepted, then the listener.
+        self.assertEqual(read.call_count, 1 + len(P.UNACCEPTED_BACKOFF))
+        self.assertEqual([c.args[0] for c in self.pauses.call_args_list], list(P.UNACCEPTED_BACKOFF))
+        self.assertLess(sum(P.UNACCEPTED_BACKOFF), 0.1)
+
+    def test_a_root_client_refuses_another_accounts_slow_listener(self):
+        self.uid = 0
+        with self.proc(self.unaccepted((SERVER, F.OTHER_UID))):
+            owner = P.server_end(FakeSocket(F.UNACCEPTED_CLIENT, SERVER))
+        self.assertEqual((owner.kind, owner.uid), (P.ANOTHER_ACCOUNT, F.OTHER_UID))
+        self.assertEqual(P.refusal(owner, F.SERVER_PORT)[0], P.SERVER_NOT_OWN)
+
+    def test_a_wildcard_listener(self):
+        rows = P.parse_proc_net_tcp(F.PROC_NET_TCP6_WILDCARD_UNACCEPTED, family=socket.AF_INET6, byteorder="little")
+        with self.proc(rows):
+            owner = P.server_end(FakeSocket(("::ffff:127.0.0.1", F.WILDCARD_CLIENT[1], 0, 0),
+                                            ("::ffff:127.0.0.1", F.WILDCARD_PORT, 0, 0)))
+        self.assertEqual((owner.kind, owner.uid), (P.ANOTHER_ACCOUNT, F.OTHER_UID))
+        with self.proc(self.unaccepted((("*", F.SERVER_PORT), F.OWN_UID))):
+            self.assertEqual(P.server_end(FakeSocket(F.UNACCEPTED_CLIENT, SERVER)).kind, P.THIS_ACCOUNT)
+        # The exact bind takes the connection before the wildcard, as the kernel delivers it.
+        with self.proc(self.unaccepted((("*", F.SERVER_PORT), F.OTHER_UID), (SERVER, F.OWN_UID))):
+            self.assertEqual(P.server_end(FakeSocket(F.UNACCEPTED_CLIENT, SERVER)).kind, P.THIS_ACCOUNT)
+
+    def test_listeners_of_one_uid_count_as_that_uid(self):
+        with self.proc(self.unaccepted((SERVER, F.OWN_UID), (SERVER, F.OWN_UID))):
+            owner = P.server_end(FakeSocket(F.UNACCEPTED_CLIENT, SERVER))
+        self.assertEqual((owner.kind, owner.uid), (P.THIS_ACCOUNT, F.OWN_UID))
+
+    def test_two_listeners_with_different_uids_are_unknown(self):
+        with self.proc(self.unaccepted((SERVER, F.OWN_UID), (SERVER, F.OTHER_UID))):
+            owner = P.server_end(FakeSocket(F.UNACCEPTED_CLIENT, SERVER))
+        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "unaccepted-listeners-disagree"))
+        self.assertEqual(P.refusal(owner, F.SERVER_PORT)[0], P.SERVER_UNVERIFIED)
+
+    def test_no_listener_is_unknown(self):
+        with self.proc(self.unaccepted((("127.0.0.1", 1), F.OWN_UID))):
+            owner = P.server_end(FakeSocket(F.UNACCEPTED_CLIENT, SERVER))
+        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "unaccepted-no-listener"))
+        self.assertEqual(P.refusal(owner, F.SERVER_PORT)[0], P.SERVER_UNVERIFIED)
+
+    def test_a_listener_without_its_own_inode_is_not_trusted(self):
+        rows = self.unaccepted()
+        rows.append(P.Row(SERVER, ("*", 0), True, F.OWN_UID, None, False, 0))
+        with self.proc(rows):
+            owner = P.server_end(FakeSocket(F.UNACCEPTED_CLIENT, SERVER))
+        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "unaccepted-listeners-disagree"))
+
+    def test_a_connection_accepted_while_read_again_answers_from_its_own_row(self):
+        before = self.unaccepted((SERVER, F.OTHER_UID))
+        after = [P.Row(SERVER, F.UNACCEPTED_CLIENT, False, F.OWN_UID, None, False, 1010)] + before[1:]
+        with mock.patch.object(P, "read_table", side_effect=[(before, "proc"), (after, "proc")]) as read:
+            owner = P.server_end(FakeSocket(F.UNACCEPTED_CLIENT, SERVER))
+        self.assertEqual((owner.kind, owner.uid), (P.THIS_ACCOUNT, F.OWN_UID))
+        self.assertEqual((read.call_count, self.pauses.call_count), (2, 1))
+
+    def test_the_established_row_with_an_inode_keeps_todays_answer(self):
+        rows = P.parse_proc_net_tcp(F.PROC_NET_TCP_MULTI, family=socket.AF_INET, byteorder="little")
+        with self.proc(rows) as read:
+            owner = P.server_end(FakeSocket(F.OWN_CLIENT, SERVER))
+        self.assertEqual((owner.kind, owner.uid), (P.THIS_ACCOUNT, F.OWN_UID))
+        self.assertEqual((read.call_count, self.pauses.call_count), (1, 0))
+        # Root's real server: uid 0 with an inode is root's, and refused as today.
+        root = [P.Row(SERVER, F.OWN_CLIENT, False, 0, None, False, 77), P.Row(SERVER, ("*", 0), True, F.OWN_UID, None,
+                                                                              False, 78)]
+        with self.proc(root):
+            self.assertEqual(P.server_end(FakeSocket(F.OWN_CLIENT, SERVER)).kind, P.SYSTEM)
+
+    def test_the_server_reading_a_client_row_without_a_socket_fails_closed(self):
+        """A client end without its inode is a socket its process already closed: no listener owns
+        it, so the server refuses at once, and never borrows the owner of a listener on that port."""
+        rows = [P.Row(F.UNACCEPTED_CLIENT, SERVER, False, 0, None, False, 0),
+                P.Row(SERVER, F.UNACCEPTED_CLIENT, False, F.OWN_UID, None, False, 1011),
+                P.Row(F.UNACCEPTED_CLIENT, ("*", 0), True, F.OWN_UID, None, False, 1012)]
+        with self.proc(rows) as read:
+            owner = P.peer(FakeSocket(SERVER, F.UNACCEPTED_CLIENT))
+        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "no-socket"))
+        self.assertEqual((read.call_count, self.pauses.call_count), (1, 0))
+
+
 class OwnConnection(unittest.TestCase):
     """The client check: refused before a byte of the request is sent."""
 
@@ -314,6 +439,19 @@ class Live(unittest.TestCase):
         finally:
             for s in (client, accepted, listener):
                 s.close()
+
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux prints an unaccepted connection without its owner")
+    def test_a_connection_not_accepted_yet_is_this_accounts(self):
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(4)
+        client = socket.create_connection(listener.getsockname())
+        try:
+            owner = P.server_end(client)                                # before accept(): uid 0, inode 0 in the table
+            self.assertEqual((owner.kind, owner.uid, owner.method), (P.THIS_ACCOUNT, os.getuid(), "proc"))
+        finally:
+            client.close()
+            listener.close()
 
     @unittest.skipUnless(sys.platform == "darwin", "the fallback is macOS's")
     def test_the_netstat_fallback_agrees(self):
