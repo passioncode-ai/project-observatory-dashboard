@@ -72,7 +72,10 @@ this tool's check: a path in a folder the account controls could be swapped for 
 write elsewhere. So the definition's own log paths are ignored (`plan` notes `logs-moved`) and the
 daemon writes to /Library/Logs/ProjectObservatory/<user>/<label>.out.log and .err.log, a folder root
 owns (root:wheel 0700, under a root:wheel 0755 one) with one inherited ACL entry that lets the account
-read it. WorkingDirectory stays as validated (inside the home, its final component not a link).
+read it. Both files are created ahead of launchd, owned by the account, mode 0600: the account reads and
+appends to them but cannot create, rename, link or unlink in the folder, so they are safe whichever
+credentials launchd opens them with. WorkingDirectory stays as validated (inside the home, its final
+component not a link).
 
 Standard library only, and Python 3.9 (macOS's /usr/bin/python3): nothing here imports the engine.
 
@@ -192,13 +195,15 @@ class System(object):
     `euid` for os.geteuid(); `set_owner(fd or path)` makes a written file or folder root:wheel; `self_check()` answers
     the problems of the copy being run (an empty list when it is the root-owned one); `owner_uid` is
     who must own the system folders it writes into (root; a test's own uid in a temporary root);
-    `isolated` whether Python runs in isolated mode (`-I`)."""
+    `isolated` whether Python runs in isolated mode (`-I`); `chown_fd` gives a log file to the account."""
 
     def __init__(self, root="/", runner=None, euid=None, set_owner=None, self_check=None, launchctl=LAUNCHCTL,
-                 owner_uid=0, isolated=None, chmod=CHMOD):
+                 owner_uid=0, isolated=None, chmod=CHMOD, chown_fd=None):
         self.root = root
         self.isolated = (sys.flags.isolated == 1) if isolated is None else isolated
         self.chmod = chmod
+        #: chown_fd(fd, uid, gid): hands a pre-created log file to the account (os.fchown).
+        self.chown_fd = chown_fd or os.fchown
         self.owner_uid = owner_uid
         self.runner = runner or subprocess.run
         if euid is None:
@@ -852,6 +857,55 @@ def _acl_entries(system, path):
     return entries
 
 
+class LogFileError(SpaceDaemonsError):
+    """A daemon's log file is already there and is not one the account may be given."""
+
+
+def prepare_log_file(system, account, path):
+    """Create the daemon's log file ahead of launchd: a new file, never through a link, owned by the account,
+    mode 0600, inside root's 0700 folder (the account reads and appends to it, but cannot create, rename,
+    link or unlink there). So it is safe whether launchd opens it as root or as the account. A file already
+    there is kept only when it is a regular file with one link, owned by the account (or by root, then given
+    to the account), and not writable by group or others. Answers `created`, `kept` or `adopted`."""
+    flags = (os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0))
+    try:
+        fd = os.open(path, flags, 0o600)
+    except FileExistsError:
+        return _keep_log_file(system, account, path)
+    try:
+        system.chown_fd(fd, account.uid, account.gid)
+        os.fchmod(fd, 0o600)
+    finally:
+        os.close(fd)
+    return "created"
+
+
+def _keep_log_file(system, account, path):
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_CLOEXEC", 0)
+    try:
+        fd = os.open(path, flags)
+    except OSError as exc:
+        raise LogFileError("%s is a link or cannot be opened (%s)" % (path, type(exc).__name__), "log-file")
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
+            raise LogFileError("%s is not a regular file" % path, "log-file")
+        if info.st_nlink != 1:
+            raise LogFileError("%s has %d links: a hard link is never written through" % (path, info.st_nlink),
+                               "log-file")
+        if info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+            raise LogFileError("%s is writable by group or others" % path, "log-file")
+        if info.st_uid == account.uid:
+            return "kept"
+        if info.st_uid == system.owner_uid:
+            system.chown_fd(fd, account.uid, account.gid)
+            return "adopted"
+        raise LogFileError("%s is owned by uid %d, neither %s nor root" % (path, info.st_uid, account.name),
+                           "log-file")
+    finally:
+        os.close(fd)
+
+
 def label_holders(system):
     """{label: [plist paths]} of every plist in /Library/LaunchDaemons and /System/Library/LaunchDaemons.
     A plist that does not read, or is too large, is ignored."""
@@ -953,6 +1007,14 @@ def _install_one(system, account, definition, entries, holders=None):
         result.update(outcome="refused", problems=[_problem(
             "label_taken", "system/%s is loaded and this tool did not load it" % label)])
         return result
+    # The log files exist, the account's, before launchd ever opens them (whichever credentials it uses).
+    try:
+        logs = [prepare_log_file(system, account, definition["daemon"][key]) for key in LOG_KEYS]
+    except LogFileError as exc:
+        result.update(outcome="refused", problems=[_problem("log-file", str(exc))])
+        return result
+    result["logs"] = dict(zip(("out", "err"), (definition["daemon"][key] for key in LOG_KEYS)))
+    result["log_files"] = logs
     data = plistlib.dumps(definition["daemon"], fmt=plistlib.FMT_XML, sort_keys=True)
     new_entry = {"label": label, "user": account.name, "uid": account.uid, "source": definition["file"],
                  "sourceSha256": definition["source_sha256"], "written": target,
@@ -1055,7 +1117,10 @@ def remove(system, account, label):
         if os.path.lexists(target):
             os.unlink(target)
         write_registry(system, [e for e in entries if e["label"] != label])
-    return {"label": label, "user": account.name, "outcome": "removed", "ok": True}
+    kept = [p for p in log_paths(system.log_dir(account.name), label) if os.path.lexists(p)]
+    return {"label": label, "user": account.name, "outcome": "removed", "ok": True, "logs_kept": kept,
+            "note": "the log files stay in %s; delete them by hand if they are not wanted"
+                    % system.log_dir(account.name) if kept else ""}
 
 
 def status(system, account):
@@ -1132,6 +1197,8 @@ def _render(command, result):
             lines.append("nothing to apply in %s" % result["folder"])
     elif command == "remove":
         lines.append("  %s  %s" % (result["label"], result["outcome"]))
+        if result.get("note"):
+            lines.append("  " + result["note"])
     else:
         lines.append("%d daemon(s) of %s in %s" % (len(result["daemons"]), result["user"], result["registry"]))
         for d in result["daemons"]:

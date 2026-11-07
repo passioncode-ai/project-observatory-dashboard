@@ -377,7 +377,7 @@ It writes files outside any workspace:
 |---|---|---|
 | `~/.local/share/project-observatory/background/LaunchAgents/` | the account's launchd jobs that run as system daemons; written by `cutover`, read by root's `space_daemons.py` | an older engine neither reads nor writes it; deleting a plist deletes only that copy (root's daemon keeps running until `remove`) |
 | `/Library/LaunchDaemons/<label>.plist` | the daemon `apply` wrote: the plist's allowed keys plus `UserName`, `GroupName`, `InitGroups`, HOME, USER, LOGNAME and the two log paths below; root:wheel 0644, written atomically | `sudo ... remove --user ACCOUNT --label LABEL` unloads and deletes it; the engine never writes it |
-| `/Library/Logs/ProjectObservatory/<user>/` | the daemons' `<label>.out.log` and `<label>.err.log`; the folder root:wheel 0700 under a root:wheel 0755 `ProjectObservatory`, with one inherited ACL entry (`<user> allow list,search,read,readattr,readextattr,readsecurity,file_inherit,directory_inherit`) so the account reads its logs; `apply` refuses, installing nothing, when either folder exists as a link or is not root's | `remove` leaves the logs; deleting the folder loses them, and the next `apply` makes it again |
+| `/Library/Logs/ProjectObservatory/<user>/` | the daemons' `<label>.out.log` and `<label>.err.log`; the folder root:wheel 0700 under a root:wheel 0755 `ProjectObservatory`, with one inherited ACL entry (`<user> allow list,search,read,readattr,readextattr,readsecurity,file_inherit,directory_inherit`) so the account reads its logs; `apply` refuses, installing nothing, when either folder exists as a link or is not root's. Each log file is created ahead of launchd (`O_CREAT|O_EXCL|O_NOFOLLOW`), owned by the account, mode 0600: the account reads and appends to it but cannot create, rename, link or unlink in the folder, so the file is safe whether launchd opens it as root or as the account and cannot be replaced. An existing one is kept only as a regular file with one link, owned by the account (root's is given to the account), not writable by group or others; otherwise that job is refused (`log-file`) | `remove` leaves the log files and says so; deleting the folder loses them, and the next `apply` makes it again |
 | `/Library/Application Support/ProjectObservatory/space-daemons.json` | the registry of what `apply` wrote, a stable interface (below); root:wheel 0644 in a 0755 folder; the engine only reads it | a file that is not this schema is refused by name, never replaced; deleting it makes the tool refuse to replace or remove the daemons it wrote (they keep running) |
 
 **The registry is a stable interface** that other tools (Fabric Dashboards among them) read without root. Its
@@ -417,9 +417,9 @@ same steps in `human_steps`; `remove` checks the file is its own before it stops
 later. The program runs as the account, so a program swapped after the check gives the account only what it already
 has, and the account changing its own program is expected. Only `ProgramArguments[0]` is checked (owned by root or
 the account, in folders only root or the account can write): an interpreter that runs a script elsewhere inherits
-that script's folder permissions, which this tool does not read. The log paths, which launchd may open with root's
-rights, are root's own folder and not the account's to change; their layout is decided in one function
-(`space_daemons.log_paths`).
+that script's folder permissions, which this tool does not read. The log files sit in root's own folder, created ahead
+by `apply` and owned by the account, so it does not matter whether launchd opens them as root or as the account;
+their layout is decided in one function (`space_daemons.log_paths`).
 
 **Rules added in review.** A label is letters and digits, then `. _ @ -` (at most 128), the same rule the engine's
 headless `cutover` applies before it moves anything; a label any plist in `/Library/LaunchDaemons` or

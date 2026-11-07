@@ -1180,8 +1180,8 @@ outside the home, an integer outside 0..2147483647 and a daemon that would not w
 definition's failure is `failed` and the others go on; a crash between the registry and the plist leaves an entry
 `status` shows as `missing`; a label already loaded as an agent in the account's GUI domain is refused (`loaded-in-gui`, one copy only);
 the plist's own log paths are ignored (`logs-moved`) and the logs go to root's
-`/Library/Logs/ProjectObservatory/ACCOUNT/` (0700, read ACL for the account), refused when that folder is a link or
-not root's; a failed load puts back what was there. `apply` and `remove` refuse without root, outside Python's isolated mode
+`/Library/Logs/ProjectObservatory/ACCOUNT/` (0700, read ACL for the account), the two files created ahead and owned by
+the account (0600); a link, a hard link, another account's file or a folder that is not root's is refused; a failed load puts back what was there. `apply` and `remove` refuse without root, outside Python's isolated mode
 (`not-isolated`) and from a copy that is not root's alone. `leave` refuses while root's daemon runs and names the `remove` command. An account with a custom
 `XDG_DATA_HOME` is refused before anything moves (part 1).
 

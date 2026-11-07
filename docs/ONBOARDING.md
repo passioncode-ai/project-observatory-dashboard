@@ -2853,8 +2853,15 @@ controls could make root write elsewhere. The daemon writes
 on both (`/bin/chmod -N`), adds one inherited entry that lets the account read (`/bin/chmod +a "ACCOUNT
 allow list,search,read,readattr,readextattr,readsecurity,file_inherit,directory_inherit"`), checks that
 only that entry is there, and refuses,
-installing nothing, when such a folder exists as a link or is not root's. `plan` notes `logs-moved`
-for a plist that named its own log paths. A file in
+installing nothing, when such a folder exists as a link or is not root's. It then creates both log
+files ahead of launchd (a new file, never through a link), owned by the account, mode 0600. Inside the
+root-owned 0700 folder the account can read and append to its files but cannot create, rename, link
+or unlink anything there, so they are safe whichever credentials launchd uses to open them, and the
+account cannot replace them. A log file already there is kept only when it is a regular file with one
+link, owned by the account (or by root, then given to the account) and not writable by group or
+others; otherwise that job is refused (`log-file`) and nothing is installed for it. `remove` leaves
+the log files in place and says so. `plan` notes `logs-moved` for a plist that named its own log
+paths. A file in
 `/Library/LaunchDaemons` the tool did not write is never replaced: what it wrote is recorded in
 `/Library/Application Support/ProjectObservatory/space-daemons.json` (a stable interface, readable
 without root; its format is in COMPATIBILITY.md). One copy only: a label already loaded as an agent in

@@ -185,13 +185,13 @@ class Base(unittest.TestCase):
         self.folder.mkdir(parents=True, mode=0o700)
         self.sysroot = self.base / "system"
         self.sysroot.mkdir()
-        self.owner_calls = []
+        self.owner_calls, self.chowns = [], []
         self.launchctl = Launchctl()
 
     def system(self, euid=0, self_check=lambda: [], isolated=True, owner_uid=None):
         return sd.System(root=str(self.sysroot), runner=self.launchctl, euid=euid, set_owner=self.owner_calls.append,
                          self_check=self_check, owner_uid=os.getuid() if owner_uid is None else owner_uid,
-                         isolated=isolated)
+                         isolated=isolated, chown_fd=lambda fd, uid, gid: self.chowns.append((uid, gid)))
 
     def logs(self):
         return self.sysroot / sd.LOGS_DIR / "space"
@@ -503,6 +503,11 @@ class Applying(Base):
         doc = plistlib.loads(self.daemon().read_bytes())
         self.assertEqual((doc["StandardOutPath"], doc["StandardErrorPath"]),
                          (str(logs / f"{LABEL}.out.log"), str(logs / f"{LABEL}.err.log")))
+        for name in (f"{LABEL}.out.log", f"{LABEL}.err.log"):
+            info = (logs / name).lstat()
+            self.assertTrue(stat.S_ISREG(info.st_mode), name)
+            self.assertEqual((stat.S_IMODE(info.st_mode), info.st_nlink), (0o600, 1), name)
+        self.assertEqual(self.chowns, [(os.getuid(), os.getgid())] * 2, "both handed to the account")
         self.assertTrue(sd.apply(self.system(), self.account)["ok"], "a second apply reuses root's folder")
 
     def test_a_log_folder_that_is_a_link_or_not_roots_is_refused_and_nothing_installed(self):
@@ -533,6 +538,67 @@ class Applying(Base):
         with self.assertRaisesRegex(sd.SpaceDaemonsError, "could not be cleared"):
             sd.apply(self.system(), self.account)
         self.assertFalse(self.daemon().exists())
+
+    def log(self, suffix="out"):
+        self.logs().mkdir(parents=True, exist_ok=True)
+        return self.logs() / f"{LABEL}.{suffix}.log"
+
+    def test_an_existing_log_file_that_is_a_hard_link_is_refused(self):
+        self.define()
+        other = self.base / "elsewhere.log"
+        other.write_text("")
+        other.chmod(0o600)
+        os.link(other, self.log())
+        result = sd.apply(self.system(), self.account)
+        self.assertEqual(result["results"][0]["problems"][0]["code"], "log-file")
+        self.assertIn("2 links", result["results"][0]["problems"][0]["detail"])
+        self.assertFalse(self.daemon().exists(), "nothing installed for it")
+        self.assertEqual(self.registry()["entries"] if (self.sysroot / sd.REGISTRY_DIR / sd.REGISTRY_NAME).exists()
+                         else [], [])
+
+    def test_an_existing_log_file_that_is_a_link_is_refused(self):
+        self.define()
+        target = self.base / "target.log"
+        self.log().symlink_to(target)
+        result = sd.apply(self.system(), self.account)
+        self.assertEqual(result["results"][0]["problems"][0]["code"], "log-file")
+        self.assertFalse(target.exists(), "nothing is written through the link")
+        self.assertFalse(self.daemon().exists())
+
+    def test_an_existing_log_file_of_another_account_or_writable_by_others_is_refused(self):
+        path = self.log()
+        path.write_text("")
+        path.chmod(0o600)
+        foreign = sd.Account("space", os.getuid() + 1, os.getgid(), "staff", str(self.home))
+        with self.assertRaisesRegex(sd.LogFileError, "owned by uid"):
+            sd.prepare_log_file(self.system(owner_uid=os.getuid() + 2), foreign, str(path))
+        path.chmod(0o620)
+        with self.assertRaisesRegex(sd.LogFileError, "writable by group or others"):
+            sd.prepare_log_file(self.system(), self.account, str(path))
+        self.assertEqual(self.chowns, [])
+
+    def test_a_root_owned_log_file_is_given_to_the_account(self):
+        path = self.log()
+        path.write_text("earlier lines\n")
+        path.chmod(0o600)
+        space = sd.Account("space", os.getuid() + 1, os.getgid(), "staff", str(self.home))
+        # The test's own uid plays root here (owner_uid): the file is root's, the account another uid.
+        self.assertEqual(sd.prepare_log_file(self.system(), space, str(path)), "adopted")
+        self.assertEqual(self.chowns, [(os.getuid() + 1, os.getgid())])
+        self.assertEqual(path.read_text(), "earlier lines\n", "kept, never truncated")
+        self.assertEqual(sd.prepare_log_file(self.system(), self.account, str(path)), "kept")
+        fresh = self.log("err")
+        self.assertEqual(sd.prepare_log_file(self.system(), self.account, str(fresh)), "created")
+        self.assertEqual((stat.S_IMODE(fresh.stat().st_mode), fresh.stat().st_nlink), (0o600, 1))
+
+    def test_remove_leaves_the_log_files_and_says_so(self):
+        self.define()
+        sd.apply(self.system(), self.account)
+        result = sd.remove(self.system(), self.account, LABEL)
+        self.assertEqual(sorted(result["logs_kept"]), sorted([str(self.logs() / f"{LABEL}.err.log"),
+                                                               str(self.logs() / f"{LABEL}.out.log")]))
+        self.assertIn("stay in", result["note"])
+        self.assertTrue((self.logs() / f"{LABEL}.out.log").is_file())
 
     def test_a_stray_acl_entry_is_cleared_and_only_ours_remains(self):
         self.define()

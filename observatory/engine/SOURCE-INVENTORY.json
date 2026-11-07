@@ -954,22 +954,22 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "b1bdb61cd521186ecff9126cc4a1e3c40d62b3b0b57106eda05e0885ee644f81",
-      "bytes": 79831,
+      "export_sha256": "f6ee3a0b8d7bf73b7296f4fa3385ffb37cda24af5e931b17dae5934dac9aafa8",
+      "bytes": 80390,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "62580151736be9852d729ebc87ff467f777117f5968f261630a4d0a158eb49a5",
-      "bytes": 274116,
+      "export_sha256": "1bf1083c191fcfa0c715d48d5c478ac701af6686a2aa171589dc9f54f7bf7e61",
+      "bytes": 274778,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "3dcc985d54f170915815ac1f66c2c43f9495ce404b7f4e76336cbbbff546cc16",
-      "bytes": 200202,
+      "export_sha256": "dd6e7289565b4270cc88103164c4fba6177e1850feab4c0d60bc5f62ceb63bdd",
+      "bytes": 200300,
       "upstream_modified": true
     },
     {
@@ -6283,8 +6283,8 @@
       "path": "tests/test_space_daemons.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "184c7cf0b7d6dca67694142e57efaafb4cdd1e20ad15443bb14846e6986a2eeb",
-      "bytes": 48989
+      "export_sha256": "2fa9af14672e73238505ae9b560557a685545cefa94f3b25cdd9f637fc99d13a",
+      "bytes": 52781
     },
     {
       "path": "tests/test_spend.py",
@@ -7456,8 +7456,8 @@
       "path": "tools/space_daemons.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6a71eff47e14f66e64efeb286709559f123fa252b68d8bdd971a223146826ae2",
-      "bytes": 57309
+      "export_sha256": "0df73699e35afe92f5432cbe1b3746386c505357520779be073845005b41ee25",
+      "bytes": 60873
     },
     {
       "path": "tools/spend.py",
