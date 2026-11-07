@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The application release is **0.35.0**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
+The application release is **0.35.1**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
 
 ## SQLite runtime prerequisite
 
@@ -397,7 +397,8 @@ Known limits of the Linux listener fallback, each failing closed or left as it w
 ## Machine move: a space with nobody logged in (OBS-361 part 1, 0.35.0)
 
 On macOS, `full machine-move cutover LABEL` in an account whose `launchctl print gui/<uid>` answers
-"could not find domain" (exit 112: nobody is logged in graphically) no longer tries to load an agent there,
+"could not find domain" (exit 112: nobody is logged in graphically; since 0.35.1 also exit 125, "Domain does not
+support specified action", which such an account answers on macOS 26.6) no longer tries to load an agent there,
 fails and puts the plist back. It runs the same checks, moves the plist into
 `~/.local/share/project-observatory/background/LaunchAgents/` (owner-only; group and other write bits cleared),
 removes the job from `elsewhere`, and answers with new fields: `domain` (`system`), `state` (`waiting-for-root`,

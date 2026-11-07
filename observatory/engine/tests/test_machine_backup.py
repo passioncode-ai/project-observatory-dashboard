@@ -1660,7 +1660,7 @@ class MachineMove(Base):
 
 class Launchd:
     """A stand-in for subprocess.run for launchctl alone: `print gui/UID` answers `gui` (112 is launchctl's
-    "could not find domain"), `print gui/UID/LABEL` 113, `print system/LABEL` 0 for a label in `system`."""
+    "could not find domain", 125 "Domain does not support specified action"), `print gui/UID/LABEL` 113, `print system/LABEL` 0 for a label in `system`."""
 
     def __init__(self, gui=112, system=()):
         self.calls, self.gui, self.system = [], gui, set(system)
@@ -1855,8 +1855,21 @@ class HeadlessSpace(Base):
         self.assertIn(str(staged), str(caught.exception))
         self.assertTrue(staged.is_file() and live.is_file())
 
+    def test_both_answers_of_an_absent_gui_domain_wait_for_root(self):
+        # 112 "could not find domain"; 125 "Domain does not support specified action", measured on macOS 26.6 for
+        # an account nobody has logged in to graphically, where `bootstrap gui/UID` fails with the same 125.
+        for code in (112, 125):
+            with self.subTest(code=code):
+                staged = self.stage()
+                run = Launchd(gui=code)
+                result = self.cutover(run)
+                self.assertEqual(result['state'], 'waiting-for-root')
+                self.assertTrue((MI.background_dir(self.home) / staged.name).is_file())
+                self.assertNotIn('bootstrap', [c[1] for c in run.calls])
+                (MI.background_dir(self.home) / staged.name).unlink()
+
     def test_other_answers_of_print_gui_keep_the_agent_path(self):
-        for code in (113, 125):
+        for code in (1, 5, 113):
             with self.subTest(code=code):
                 staged = self.stage()
                 run = Launchd(gui=code)

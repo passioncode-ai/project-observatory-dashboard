@@ -544,7 +544,7 @@
     {
       "path": "configuration.py",
       "source_sha256": "69575bf4b71bf590301f5dde7f87c26e19be4c96ed0f93647897a20c14574202",
-      "export_sha256": "e0d5f9d99f95f727c31600366764468c35eb154de736b180c5b4ca64cb6a6e15",
+      "export_sha256": "1232e4d69ae9d406f5e59db1a140d433cd35b35e0171f729a362317819fb8485",
       "bytes": 17513,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
@@ -947,15 +947,15 @@
     {
       "path": "docs/CLI-COMPATIBILITY.md",
       "source_sha256": "4ec1878cbc8ff9d68bd37a6e9902d3c50180b91093a4c20d59230b41de4a29c2",
-      "export_sha256": "4083dc3fdc617ddf369865a5569d4ab8cb48b6b0fa84f63289f4e91da3587d36",
-      "bytes": 15780,
+      "export_sha256": "e3f9184ca35e0e53e3de3c05e7665162991e6b74a8b87b2a679d727b0124a3c5",
+      "bytes": 15807,
       "upstream_modified": true
     },
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "ffea2c9521bcc6514cb0f3411c31b1a3a86d8d0d4a5d3bbeb858ec0ead0b6e7d",
-      "bytes": 86757,
+      "export_sha256": "4bcb3ea739d79bc9aae4d2c8047ebad6a7a9e78ddda8db6c6c11dc790dc15cd5",
+      "bytes": 86874,
       "upstream_modified": true
     },
     {
@@ -3160,8 +3160,8 @@
       "path": "machine_move.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "82af2796d0c92b61f772688ab85474e5a93800e0ecaa4b18c24c458c64748720",
-      "bytes": 71397
+      "export_sha256": "fc6879cfeb31f4528bbc7dec71c4fff60a93508d57a2ed002548be09836b1507",
+      "bytes": 71749
     },
     {
       "path": "machine_view.py",
@@ -5394,8 +5394,8 @@
       "path": "tests/test_machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "21b170f264465e7bfe59af2b920786c52fecf2b9f9de3b02c0464184e6cbf4c9",
-      "bytes": 161319
+      "export_sha256": "508f502f8f16b221443f7c08807f751431b07e1e2336a9e69948945ab11da8f3",
+      "bytes": 162159
     },
     {
       "path": "tests/test_machine_findings.py",

@@ -29,8 +29,9 @@ and writes the placement file but never calls launchctl or systemctl.
 AN ACCOUNT NOBODY LOGS IN TO (OBS-361 part 1). On macOS an account with no graphical login has no
 `gui/<uid>` domain, and `launchctl bootstrap user/<uid>` refuses agents even as root, so a job staged in
 such a "space" could never start as an agent. When `launchctl print gui/<uid>` answers that the domain does
-not exist (exit 112, "could not find domain"), `cutover` runs every check as before, then moves the
-definition into the background folder (`machine_identity.background_dir`) instead of
+not exist (exit 112, "could not find domain", or 125, "Domain does not support specified action", which
+an account nobody has logged in to graphically answers on macOS 26.6), `cutover` runs every check as
+before, then moves the definition into the background folder (`machine_identity.background_dir`) instead of
 ~/Library/LaunchAgents and answers `waiting-for-root` with the one command an administrator runs:
 `sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL`
 (`tools/space_daemons.py`, installed once as a root-owned copy, run in Python's isolated mode). That writes the job to
@@ -112,17 +113,19 @@ def _run(runner, argv: list[str]) -> subprocess.CompletedProcess:
     return runner(argv, capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
 
 
-#: `launchctl print gui/<uid>`'s exit code when the account has no GUI domain (measured on macOS 26.6:
-#: 112 "could not find domain"; 113 is a missing service, 0 a domain that exists).
-NO_DOMAIN = 112
+#: `launchctl print gui/<uid>`'s exit codes when the account has no GUI domain to load agents into, both measured
+#: on macOS 26.6 for an account nobody has logged in to graphically: 112 "could not find domain", and 125 "Domain
+#: does not support specified action", where `launchctl bootstrap gui/<uid>` then fails with the same 125. 113 is a
+#: missing service, 0 a domain that exists.
+NO_DOMAIN = frozenset({112, 125})
 #: Where an administrator installs the root-owned copy of tools/space_daemons.py (OBS-361).
 SPACE_DAEMONS_COPY = "/usr/local/libexec/observatory-space-daemons"
 
 
 def gui_session(uid: int, runner) -> bool:
     """Whether this account has a GUI launchd domain to load agents into. Only launchctl's own "no such
-    domain" answer says no: any other answer keeps the agent path, which fails and puts back as before."""
-    return _run(runner, ["launchctl", "print", f"gui/{uid}"]).returncode != NO_DOMAIN
+    domain" answers say no: any other answer keeps the agent path, which fails and puts back as before."""
+    return _run(runner, ["launchctl", "print", f"gui/{uid}"]).returncode not in NO_DOMAIN
 
 
 def _space_daemons_module():
