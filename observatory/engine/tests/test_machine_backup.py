@@ -682,9 +682,23 @@ class Restore(Machine):
         root = MB.stage_root(self.ws)
         self.assertTrue(list(root.rglob('id_example')), 'the plaintext exists while the restore runs')
         child.send_signal(sig)
-        child.wait(30)
-        child.stdout.close()
+        # OBS-392: a loaded CI runner took over 30 s to finish a child that had caught SIGTERM
+        # (run 42413575669), and `wait(30)` raised before the restore's cleanup could be judged.
+        # The bound only catches a hang: `communicate` also drains stdout, so the child never
+        # waits on a full pipe, and a child still alive at the bound is killed and named.
+        try:
+            child.communicate(timeout=self.KILLED_BOUND)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.communicate()
+            self.fail(f'the restore was still running {self.KILLED_BOUND} s after signal {sig}')
+        # Caught signals end through SystemExit(128 + signum) (raise_on_signals), so the
+        # cleanup in every `finally` ran; SIGKILL cannot be caught.
+        self.assertEqual(child.returncode, -sig if sig == signal.SIGKILL else 128 + sig, sig)
         return root
+
+    #: How long a signalled restore may take to clean up and exit before it counts as hung.
+    KILLED_BOUND = 300
 
     def test_a_restore_killed_by_sigterm_or_sighup_leaves_no_plaintext(self):
         for sig in (signal.SIGTERM, signal.SIGHUP):
