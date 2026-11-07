@@ -204,9 +204,10 @@ class Selection(unittest.TestCase):
         self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "no-row"))
 
     def test_unreadable_table_is_unknown_with_a_reason(self):
-        with mock.patch.object(P, "read_table", side_effect=P.TableUnreadable("netstat: exit 1")):
+        with mock.patch.object(P, "read_table", side_effect=P.TableUnreadable("proc: OSError")), \
+                mock.patch.object(P.sys, "platform", "linux"):
             owner = P.peer(FakeSocket(SERVER, F.FOREIGN_CLIENT))
-        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "netstat: exit 1"))
+        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "proc: OSError"))
 
     def test_a_gone_process_is_unknown(self):
         rows = [P.Row(F.FOREIGN_CLIENT, SERVER, False, None, 9999)]
@@ -394,6 +395,214 @@ class LinuxListener(unittest.TestCase):
         self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "no-socket"))
 
 
+
+OWN_PID = 4300
+
+
+class RestrictedMacTable(unittest.TestCase):
+    """macOS 27 hides the socket table from a process that is not Apple's own binary: empty, or
+    only this process's rows. Then only this uid's own sockets (libproc) answer, and only ever
+    `this-account` or `unknown` (`table-restricted`)."""
+
+    def setUp(self):
+        self.patches = [mock.patch.object(P.os, "getuid", return_value=F.OWN_UID, create=True),
+                        mock.patch.object(P.os, "geteuid", return_value=F.OWN_UID, create=True),
+                        mock.patch.object(P.os, "getpid", return_value=OWN_PID),
+                        mock.patch.object(P.sys, "platform", "darwin"),
+                        mock.patch.object(P.time, "sleep")]
+        for patch in self.patches:
+            patch.start()
+        P._LISTENERS.clear()
+
+    def tearDown(self):
+        for patch in reversed(self.patches):
+            patch.stop()
+        P._LISTENERS.clear()
+
+    def restricted(self, own, table=(), how="sysctl"):
+        """`read_table` answers `table` (restricted: empty or this pid's own rows); libproc `own`,
+        a list of row lists for successive reads, or one row list for all of them."""
+        reads = own if own and isinstance(own[0], list) else None
+        return (mock.patch.object(P, "read_table", return_value=(list(table), how)),
+                mock.patch.object(P, "read_own_sockets", side_effect=reads, return_value=None if reads else own))
+
+    def ask(self, question, *args, own=(), table=(), how="sysctl"):
+        read, libproc = self.restricted(list(own), table, how)
+        with read, libproc as reader:
+            return question(*args), reader
+
+    def row(self, local, remote, pid=F.SERVER_PID, listening=False):
+        return P.Row(local, remote, listening, F.OWN_UID, pid)
+
+    # parsers
+
+    def test_socket_fdinfo_reads_addresses_state_and_handle(self):
+        blob = F.socket_fdinfo(("127.0.0.1", F.SERVER_PORT), F.OWN_CLIENT, 4, 0xABC)
+        self.assertEqual(P.parse_socket_fdinfo(blob), (SERVER, F.OWN_CLIENT, 4, 0xABC))
+        listen = F.socket_fdinfo(("127.0.0.1", F.SERVER_PORT), ("*", 0), 1, 7)
+        self.assertEqual(P.parse_socket_fdinfo(listen), (SERVER, ("*", 0), 1, 7))
+        six = F.socket_fdinfo(("::1", 47070), ("::ffff:127.0.0.1", 50003), 4, 8, family=socket.AF_INET6)
+        self.assertEqual(P.parse_socket_fdinfo(six), (("::1", 47070), ("127.0.0.1", 50003), 4, 8))
+
+    def test_socket_fdinfo_skips_other_kinds_and_refuses_a_short_record(self):
+        self.assertIsNone(P.parse_socket_fdinfo(F.socket_fdinfo(SERVER, F.OWN_CLIENT, 4, 1, kind=1)))
+        with self.assertRaises(P.TableUnreadable):
+            P.parse_socket_fdinfo(b"\0" * 100)
+
+    def test_own_rows_are_one_per_socket_without_closed_or_time_wait(self):
+        rows = P.own_socket_rows([(10, SERVER, ("*", 0), 1, 1), (11, SERVER, ("*", 0), 1, 1),
+                                  (12, F.OWN_CLIENT, SERVER, 4, 2), (12, F.FOREIGN_CLIENT, SERVER, 10, 3),
+                                  (13, ("127.0.0.1", 50009), SERVER, 0, 4)], F.OWN_UID)
+        self.assertEqual(rows, [P.Row(SERVER, ("*", 0), True, F.OWN_UID, None),
+                                P.Row(F.OWN_CLIENT, SERVER, False, F.OWN_UID, 12)])
+
+    def test_a_table_with_only_this_process_or_nothing_is_restricted(self):
+        self.assertTrue(P.restricted([], OWN_PID, F.OWN_UID))
+        self.assertTrue(P.restricted([self.row(SERVER, ("*", 0), OWN_PID, True)], OWN_PID, F.OWN_UID))
+        self.assertFalse(P.restricted(P.parse_netstat(F.NETSTAT_MULTI_ACCOUNT), OWN_PID, F.OWN_UID))
+
+    def test_a_table_filtered_to_this_uid_is_restricted_too(self):
+        """A future filter by uid, not by pid: other processes of this uid only, no root socket."""
+        own_uid_only = [self.row(SERVER, ("*", 0), 4100, True), self.row(F.OWN_CLIENT, SERVER, 4300)]
+        self.assertTrue(P.restricted(own_uid_only, OWN_PID, F.OWN_UID))
+        self.assertFalse(P.restricted(own_uid_only + [P.Row(("127.0.0.1", 8021), ("*", 0), True, 0, 1)],
+                                      OWN_PID, F.OWN_UID))
+        with mock.patch.object(P, "read_own_sockets", return_value=[]):
+            with mock.patch.object(P, "read_table", return_value=(own_uid_only, "sysctl")):
+                owner = P.listener(47999)                               # another account's port, filtered out
+        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "table-restricted"))
+
+    def test_libproc_lists_only_this_uids_processes(self):
+        calls = []
+
+        def listpids(*args):
+            calls.append(args[:2])
+            return 0 if args[2] is not None else 8
+
+        lib = SimpleNamespace(proc_listpids=listpids, proc_pidinfo=lambda *a: 0, proc_pidfdinfo=lambda *a: 0)
+        with mock.patch.object(P.ctypes, "CDLL", return_value=lib):
+            with self.assertRaises(P.TableUnreadable):
+                P._libproc_sockets(P.time.monotonic() + 1)
+        self.assertEqual(calls, [(P.PROC_UID_ONLY, F.OWN_UID), (P.PROC_UID_ONLY, F.OWN_UID)])
+        self.assertEqual(P.PROC_UID_ONLY, 4)
+
+    def test_a_failed_libproc_calibration_answers_nothing(self):
+        saved = P._LIBPROC_OK[0]
+        P._LIBPROC_OK[0] = None
+        try:
+            with mock.patch.object(P, "_calibrate_libproc", return_value=False) as calibrate, \
+                    mock.patch.object(P, "_libproc_sockets", side_effect=AssertionError("read without calibration")):
+                with self.assertRaises(P.TableUnreadable):
+                    P.read_own_sockets()
+                with mock.patch.object(P, "read_table", return_value=([], "sysctl")):
+                    answers = [P.peer(FakeSocket(SERVER, F.OWN_CLIENT)), P.server_end(FakeSocket(F.OWN_CLIENT, SERVER)),
+                               P.listener(F.SERVER_PORT)]
+            self.assertEqual(calibrate.call_count, 1)
+            for owner in answers:
+                self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "libproc: layout failed calibration"))
+        finally:
+            P._LIBPROC_OK[0] = saved
+
+    def test_a_setuid_context_is_refused_the_libproc_path(self):
+        with mock.patch.object(P.os, "geteuid", return_value=0), \
+                mock.patch.object(P, "_libproc_sockets", side_effect=AssertionError("read in a setuid context")):
+            with self.assertRaises(P.TableUnreadable) as raised:
+                P.read_own_sockets()
+            with mock.patch.object(P, "read_table", return_value=([], "sysctl")):
+                owner = P.peer(FakeSocket(SERVER, F.OWN_CLIENT))
+        self.assertEqual(str(raised.exception), "setuid-context")
+        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "setuid-context"))
+
+    def test_one_deadline_bounds_every_libproc_read_of_a_question(self):
+        deadlines = []
+        reads = iter([[], [], [self.row(SERVER, F.OWN_CLIENT)]])
+        with mock.patch.object(P, "read_table", return_value=([], "sysctl")), \
+                mock.patch.object(P, "read_own_sockets", side_effect=lambda d=None: deadlines.append(d) or next(reads)):
+            P.server_end(FakeSocket(F.OWN_CLIENT, SERVER))
+        self.assertEqual(len(set(deadlines)), 1)
+        self.assertIsNotNone(deadlines[0])
+
+    # answers, for both restricted shapes
+
+    def test_this_uids_client_is_this_account_through_libproc(self):
+        own = [self.row(F.OWN_CLIENT, SERVER, F.OWN_CLIENT_PID)]
+        for table in ([], [self.row(SERVER, ("*", 0), OWN_PID, True)]):
+            owner, _ = self.ask(P.peer, FakeSocket(SERVER, F.OWN_CLIENT), own=own, table=table)
+            self.assertEqual((owner.kind, owner.uid, owner.pid, owner.method),
+                             (P.THIS_ACCOUNT, F.OWN_UID, F.OWN_CLIENT_PID, "libproc"))
+
+    def test_a_socket_not_among_this_uids_is_unknown_never_another_account(self):
+        owner, _ = self.ask(P.peer, FakeSocket(SERVER, F.FOREIGN_CLIENT), own=[self.row(F.OWN_CLIENT, SERVER)])
+        self.assertEqual((owner.kind, owner.reason, owner.method), (P.UNKNOWN, "table-restricted", "libproc"))
+
+    def test_an_unreadable_table_on_macos_also_reads_this_uids_sockets(self):
+        with mock.patch.object(P, "read_table", side_effect=P.TableUnreadable("netstat-format: no process:pid column")), \
+                mock.patch.object(P, "read_own_sockets", return_value=[self.row(F.OWN_CLIENT, SERVER)]):
+            owner = P.peer(FakeSocket(SERVER, F.OWN_CLIENT))
+        self.assertEqual((owner.kind, owner.method), (P.THIS_ACCOUNT, "libproc"))
+
+    def test_a_socket_held_by_several_processes_has_no_pid(self):
+        owner, _ = self.ask(P.peer, FakeSocket(SERVER, F.OWN_CLIENT), own=[self.row(F.OWN_CLIENT, SERVER, None)])
+        self.assertEqual((owner.kind, owner.pid, owner.reason), (P.THIS_ACCOUNT, None, "several-processes"))
+        self.assertIsNone(P.refusal(owner, F.SERVER_PORT, expect_pid=999))   # documented: no pid, no pid check
+
+    def test_two_sockets_with_one_address_pair_are_unknown(self):
+        own = [self.row(F.OWN_CLIENT, SERVER, 1), self.row(F.OWN_CLIENT, SERVER, 2)]
+        owner, _ = self.ask(P.peer, FakeSocket(SERVER, F.OWN_CLIENT), own=own)
+        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "several-rows"))
+
+    def test_server_end_reads_again_until_the_server_accepts(self):
+        accepted = [self.row(SERVER, F.OWN_CLIENT, F.SERVER_PID)]
+        owner, reader = self.ask(P.server_end, FakeSocket(F.OWN_CLIENT, SERVER), own=[[], [], accepted])
+        self.assertEqual((owner.kind, owner.pid, owner.method), (P.THIS_ACCOUNT, F.SERVER_PID, "libproc"))
+        self.assertEqual(reader.call_count, 3)
+
+    def test_server_end_never_accepted_by_this_uid_is_unknown_within_the_wait(self):
+        with mock.patch.object(P, "ACCEPT_WAIT_SECONDS", 0.05):
+            owner, _ = self.ask(P.server_end, FakeSocket(F.OWN_CLIENT, SERVER), own=[self.row(SERVER, ("*", 0), listening=True)])
+        self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "table-restricted"))
+
+    def test_peer_never_waits(self):
+        owner, reader = self.ask(P.peer, FakeSocket(SERVER, F.OWN_CLIENT), own=[[], [self.row(F.OWN_CLIENT, SERVER)]])
+        self.assertEqual((owner.kind, reader.call_count), (P.UNKNOWN, 1))
+
+    def test_listener_is_this_uids_exact_loopback_bind_or_unknown_never_none(self):
+        exact = [self.row(SERVER, ("*", 0), listening=True)]
+        owner, _ = self.ask(P.listener, F.SERVER_PORT, own=exact)
+        self.assertEqual((owner.kind, owner.pid, owner.method), (P.THIS_ACCOUNT, F.SERVER_PID, "libproc"))
+        for own in ([], [self.row(("*", F.SERVER_PORT), ("*", 0), listening=True)],
+                    [self.row(("::1", F.SERVER_PORT), ("*", 0), listening=True)]):
+            P._LISTENERS.clear()
+            owner, _ = self.ask(P.listener, F.SERVER_PORT, own=own)
+            self.assertEqual((owner.kind, owner.reason), (P.UNKNOWN, "table-restricted"))
+
+    def test_libproc_never_answers_another_account_system_or_none(self):
+        own = [self.row(SERVER, ("*", 0), listening=True), self.row(F.OWN_CLIENT, SERVER, F.OWN_CLIENT_PID),
+               self.row(SERVER, F.OWN_CLIENT), self.row(("127.0.0.1", 50005), SERVER, None)]
+        seen = set()
+        with mock.patch.object(P, "ACCEPT_WAIT_SECONDS", 0.0):
+            for port in (F.SERVER_PORT, 1, 8021):
+                P._LISTENERS.clear()
+                seen.add(self.ask(P.listener, port, own=own)[0].kind)
+            for client in (F.OWN_CLIENT, F.FOREIGN_CLIENT, ("127.0.0.1", 50005), ("127.0.0.1", 59999)):
+                seen.add(self.ask(P.peer, FakeSocket(SERVER, client), own=own)[0].kind)
+                seen.add(self.ask(P.server_end, FakeSocket(client, SERVER), own=own)[0].kind)
+        self.assertEqual(seen, {P.THIS_ACCOUNT, P.UNKNOWN})
+
+    def test_a_complete_table_is_read_as_before(self):
+        table = P.parse_netstat(F.NETSTAT_MULTI_ACCOUNT)
+        with mock.patch.object(P, "_run", side_effect=ps_from_fixture):
+            owner, reader = self.ask(P.peer, FakeSocket(SERVER, F.FOREIGN_CLIENT), table=table, how="netstat")
+        self.assertEqual(owner.kind, P.ANOTHER_ACCOUNT)
+        reader.assert_not_called()
+
+    def test_other_platforms_never_read_libproc(self):
+        with mock.patch.object(P.sys, "platform", "linux"):
+            owner, reader = self.ask(P.peer, FakeSocket(SERVER, F.OWN_CLIENT), how="proc")
+            listening, _ = self.ask(P.listener, 1, how="proc")
+        self.assertEqual((owner.reason, listening.kind), ("no-row", P.NONE))
+        reader.assert_not_called()
+
 class OwnConnection(unittest.TestCase):
     """The client check: refused before a byte of the request is sent."""
 
@@ -538,6 +747,50 @@ class Live(unittest.TestCase):
             for s in (client, accepted, listener):
                 s.close()
 
+
+    @unittest.skipUnless(sys.platform == "darwin", "libproc is macOS's")
+    def test_the_libproc_path_reads_a_real_pair_and_a_child_listener(self):
+        """A restricted table forced empty: this process's pair and a same-uid child's listener and
+        accepted socket, which accepts late, all read as this account's through libproc."""
+        import subprocess
+        child = subprocess.Popen([sys.executable, "-c", CHILD_SERVER], stdout=subprocess.PIPE, text=True)
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        client = socket.create_connection(listener.getsockname())
+        accepted, _ = listener.accept()
+        to_child = None
+        try:
+            port = int(child.stdout.readline())
+            with mock.patch.object(P, "read_table", return_value=([], "sysctl")):
+                P._LISTENERS.clear()
+                for owner in (P.peer(accepted), P.server_end(client), P.listener(listener.getsockname()[1])):
+                    self.assertEqual((owner.kind, owner.uid, owner.pid, owner.method),
+                                     (P.THIS_ACCOUNT, os.getuid(), os.getpid(), "libproc"))
+                self.assertEqual((P.listener(port).kind, P.listener(port).pid), (P.THIS_ACCOUNT, child.pid))
+                to_child = socket.create_connection(("127.0.0.1", port))   # the child accepts 0.3 s after it listens
+                owner = P.server_end(to_child)
+                self.assertEqual((owner.kind, owner.pid, owner.method), (P.THIS_ACCOUNT, child.pid, "libproc"))
+                self.assertEqual(P.peer_at(("127.0.0.1", 9), ("127.0.0.1", 9)).reason, "table-restricted")
+        finally:
+            for s in (to_child, client, accepted, listener):
+                if s is not None:
+                    s.close()
+            child.kill()
+            child.wait()
+            child.stdout.close()
+            P._LISTENERS.clear()
+
+
+CHILD_SERVER = """
+import socket, sys, time
+s = socket.socket(); s.bind(("127.0.0.1", 0)); s.listen(1)
+print(s.getsockname()[1], flush=True)
+time.sleep(0.3)
+while True:
+    c, _ = s.accept()
+    time.sleep(30)
+"""
 
 class SelfContained(unittest.TestCase):
     """Other projects vendor peer_owner.py by commit: standard library only, a version in its header."""

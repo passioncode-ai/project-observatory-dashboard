@@ -544,7 +544,7 @@
     {
       "path": "configuration.py",
       "source_sha256": "69575bf4b71bf590301f5dde7f87c26e19be4c96ed0f93647897a20c14574202",
-      "export_sha256": "1232e4d69ae9d406f5e59db1a140d433cd35b35e0171f729a362317819fb8485",
+      "export_sha256": "d75e0bc0a933993fc087e101f8d3af0364dcbb60afcfb432e7583af464351696",
       "bytes": 17513,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
@@ -947,15 +947,15 @@
     {
       "path": "docs/CLI-COMPATIBILITY.md",
       "source_sha256": "4ec1878cbc8ff9d68bd37a6e9902d3c50180b91093a4c20d59230b41de4a29c2",
-      "export_sha256": "e3f9184ca35e0e53e3de3c05e7665162991e6b74a8b87b2a679d727b0124a3c5",
-      "bytes": 15807,
+      "export_sha256": "9fab561ff0eaf6c7286fdb4cc7ff24ba73ff09ea0f04b9b4b680ecffa45b6d65",
+      "bytes": 15981,
       "upstream_modified": true
     },
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "2387143a48d832cdd6d5c077301760c6889e2712be3c167c014346b4622ac2c8",
-      "bytes": 86885,
+      "export_sha256": "74854e3da5b7d9479a7906fa9c20332dbc09daa7bddef229a5b9898f190987ee",
+      "bytes": 88091,
       "upstream_modified": true
     },
     {
@@ -3582,8 +3582,8 @@
       "path": "peer_owner.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3c5f67e264acbeb630490c0e12756e6a50bfacaa311ade9a9de0e3496d7ead0f",
-      "bytes": 41220
+      "export_sha256": "cf97277eae907db75f231675c67a0be0e8362b5f06b388787c072d411c22307d",
+      "bytes": 56621
     },
     {
       "path": "plugins/README.md",
@@ -4281,8 +4281,8 @@
       "path": "tests/peer_owner_fixtures.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "74789a7e4d96e8297c17443691367be3c9c537e6b86748778d0a42f41add000f",
-      "bytes": 10569
+      "export_sha256": "c6e21a1c5f11343570394c1f3ba56be1c43afbe287f237f32ae1cf5acd65a799",
+      "bytes": 11914
     },
     {
       "path": "tests/pgp_fixture.py",
@@ -5736,8 +5736,8 @@
       "path": "tests/test_osprivacy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ac0f45f4464ccf1e1942ea0d3e214eca965784c178075501a7ea2d2ee84615b0",
-      "bytes": 14716
+      "export_sha256": "139a1b8f66b65695cd9d8942e2038052fd6bef184e0fa29633f8aac6e088af39",
+      "bytes": 14803
     },
     {
       "path": "tests/test_osproc.py",
@@ -5781,8 +5781,8 @@
       "path": "tests/test_peer_owner.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ef5a9c6041acede2a8e969b553e83c2d13881663718de3411c8d02aa0c6fd553",
-      "bytes": 34463
+      "export_sha256": "23228a1741c8bc2c3658dccf07f215b4496178f22f0d3c45784eca1d4e3d72a8",
+      "bytes": 49160
     },
     {
       "path": "tests/test_pipeline.py",

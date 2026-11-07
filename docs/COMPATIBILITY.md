@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The application release is **0.35.1**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
+The application release is **0.35.2**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
 
 ## SQLite runtime prerequisite
 
@@ -349,6 +349,19 @@ platform, so neither a machine bundle nor a workspace snapshot carries them:
 | `machine-move/restore.json` | 0.31.0 | schema `observatory-machine-restore/1`: `machine`, `updatedAt` and one part per step that wrote (`apply`, `packages`, `clone`), each with its `at`, the bundle's name, counts and failures; `apply` adds `mode`, `taken_on`, `this_machine`, `only`, `skip`, `left_out` and `other_keys[]` of `key`, `fingerprint` and `in_ssh` (the public fingerprints of the keys a second-machine restore withheld; `in_ssh`, added after 0.31.0, is true when the key sat directly in `~/.ssh`, and only such an entry gets a `rekey` step in status, so an entry written by 0.31.0, without it, gets none); owner-only, written atomically; written by `full machine-restore`, read by `full machine-move status` (OBS-282, OBS-286) | an older engine neither reads nor writes it; one that is not this schema reads as `unknown` in status; deleting it makes the restore item `unknown` |
 | `machine-move/peers/` | 0.31.0 | the other machine's facts (`full machine-move facts --out FILE`, schema `observatory-machine-facts/1`: `machine`, `generated_at`, `engine_version`, `platform`, `ssh[]` of `file` and `fingerprint`, `device`, `jobs[]`, `elsewhere[]`, `restore`, `omitted`), placed by the person; written whole through a temporary file and a link, never over an existing name; `full machine-move status` reads every `*.json` here | never written by the engine; a file that does not read is named in `degraded`; deleting one forgets that machine |
 | `machine-id` | 0.30.1 | a random machine id, written only where the platform has no machine identifier of its own (macOS, most Linux and Windows have one) | deleting it gives the machine a new id: bundles and snapshots it took before then read as another machine's |
+
+## macOS 27: a restricted connection table (peer_owner 1.3.0, 0.35.2)
+
+On macOS 27.2 a process sees only its own sockets in `sysctl net.inet.tcp.pcblist_n` (sometimes none), and
+`netstat -anv` no longer prints `process:pid`. `peer_owner` 1.2.0 then read every other process's connection as
+`unknown` (`no-row`) and refused it: a client refused its own account's server, and a server refused its own account's
+clients. Since 0.35.2 a table with no row of another account (or, read through `netstat`, of another process) is
+treated as restricted, and the owner is read from this account's own processes through libproc. A connection found in
+one of them answers `this-account` (method `libproc`, with its pid, or pid None and reason `several-processes` when
+several processes hold it); anything else answers `unknown` with reason `table-restricted`, which every caller
+refuses as before. `listener(port)` on a restricted table answers `this-account` only for this account's exact
+`127.0.0.1` bind, else `table-restricted`, never `none`. A process whose real and effective uids differ is refused this
+path (`setuid-context`). On a full table (macOS 26 and earlier, Linux, Windows) every answer is unchanged.
 
 ## Linux: a server end not accepted yet reads its listener's owner (peer_owner 1.2.0, 0.35.0)
 

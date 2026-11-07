@@ -1,6 +1,6 @@
 """peer_owner: which OS account owns each end of a loopback TCP connection.
 
-    peer_owner 1.2.0. One file, Python standard library only, no imports from any other
+    peer_owner 1.3.0. One file, Python standard library only, no imports from any other
     module of its project, so another project can vendor it by commit: copy this file and
     record the commit it came from. Its tests and their fixtures live beside the engine's
     tests (`tests/test_peer_owner.py`, `tests/peer_owner_fixtures.py`).
@@ -54,6 +54,44 @@ addresses are `unknown` (`several-rows`), never a guess.
   846 sockets, and it names the pids of root's listeners, which `lsof` run by an ordinary account
   cannot see. Another local service implemented the same check this way; it is kept as the
   documented fallback for a macOS whose record layout the calibration refuses.
+- macOS, a restricted table (`libproc`). macOS 27 hides the host's socket table from a process
+  that is not Apple's own binary: for such an interpreter (Homebrew's or uv's CPython) `pcblist_n`
+  holds no record at all, or only this process's own (both shapes measured on macOS 27.2, the
+  second passing the calibration above), and the `netstat` it starts prints no rows, or a header
+  without `process:pid`. A table is RESTRICTED when it cannot be read, or holds no row of another
+  uid (sysctl, whose rows carry it) or of another pid (netstat, whose rows carry only the pid): a
+  real host always has root's sockets, so a filter by pid or by uid both read as restricted. Then a filtered
+  table cannot prove another account's socket absent, so the question is answered from this
+  account's own processes instead: `proc_listpids(PROC_UID_ONLY)`, `PROC_PIDLISTFDS` and
+  `proc_pidfdinfo(PROC_PIDFDSOCKETINFO)` (`sys/proc_info.h`), the records `lsof` itself reads,
+  without a subprocess. Another account's process answers EPERM and is skipped, so this path only
+  ever answers `this-account` (the socket sits in one of this uid's processes) or `unknown`,
+  reason `table-restricted`; never `another-account`, `system` or `none`. The proof is weaker than
+  the sysctl path's `so_uid`: it is "a process of this uid holds the descriptor", not "the
+  socket's credential is this uid" (`soi_stat` carries no uid). A socket another account accepted
+  and passed with SCM_RIGHTS to a process of this uid that takes foreign descriptors would read as
+  this account's; a caller that knows the server's pid closes that with `expect_pid`. A process
+  whose real and effective uids differ is refused this path (`setuid-context`): XNU lists and
+  checks processes by the effective uid. One socket held by
+  several of this uid's processes (an inherited descriptor) is one socket, `this-account` with
+  pid None and reason `several-processes` (and `refusal` then skips an `expect_pid` check); two
+  different sockets with the same addresses are `several-rows`. `listener` answers only for this
+  uid's listener bound exactly to 127.0.0.1: XNU's `in_pcbbind` refuses an account other than root
+  the same port beside another uid's socket, so no other ordinary account can hold a more
+  specific bind; a wildcard or `::1` listener of ours, and root's, cannot be told apart from a
+  hidden one and are `unknown`. `server_end` reads the server's ACCEPTED socket, which exists only
+  once the server has called `accept()`; a client that asks right after `connect()` usually comes
+  first, so on this path only `server_end` reads again, briefly (for ACCEPT_WAIT_SECONDS), until
+  the accepted socket shows in one of this uid's processes. The libproc reads of one `peer` or
+  `server_end` question share one deadline, TIMEOUT_SECONDS from the question's start (the accept
+  wait included); `listener` gives its libproc read TIMEOUT_SECONDS of its own, and the first read
+  in a process also calibrates the layout under a deadline of its own. This is the
+  darwin counterpart of the Linux listener rule below, and it differs because a listener
+  inference cannot see root's listeners here (EPERM), while an accepted socket in our own process
+  is the stronger proof. The `socket_fdinfo` layout is checked once per process like the sysctl
+  one (a pair of this process's own must read back exactly); a layout that fails is never used,
+  and the answer is `unknown`. Bounded by MAX_PIDS, MAX_FDS and TIMEOUT_SECONDS. Measured on
+  macOS 26: about 11 ms for 880 processes and 370 TCP sockets.
 - Linux (`proc`): `/proc/net/tcp` and `/proc/net/tcp6`, whose `uid` column every account may
   read (also under `hidepid=2`, which hides `/proc/<pid>` and not this file). No pid: that is
   only readable for this account's own processes, and the decision needs the uid alone.
@@ -104,7 +142,7 @@ import threading
 import time
 
 # This file's own version, for projects that copy it; not the engine's (that is configuration.VERSION).
-PEER_OWNER_VERSION = "1.2.0"
+PEER_OWNER_VERSION = "1.3.0"
 
 THIS_ACCOUNT = "this-account"
 ANOTHER_ACCOUNT = "another-account"
@@ -121,6 +159,11 @@ MAX_TABLE_BYTES = 4 * 1024 * 1024
 TIMEOUT_SECONDS = 2.0
 #: `listener(port)` answers from a read at most this old (a doctor asks several times in a row).
 LISTENER_TTL = 1.0
+#: macOS, restricted table: how long `server_end` reads again for the server's accepted socket.
+ACCEPT_WAIT_SECONDS = 0.5
+#: macOS, restricted table: the most of this uid's processes, and of descriptors in one, read.
+MAX_PIDS = 16384
+MAX_FDS = 65536
 
 NETSTAT = "/usr/sbin/netstat"
 PS = "/bin/ps"
@@ -203,8 +246,9 @@ def _address(addr) -> tuple[str, int]:
 
 def _posix_uid() -> int | None:
     """This process's uid, or None where the OS has none (Windows compares SIDs instead). The one
-    place this module reads it: this file is vendored without its project's OS layer, so the uid
-    is read here, once, on the POSIX paths only (an engine boundary test names this function)."""
+    place this module reads it for a decision: this file is vendored without its project's OS layer,
+    so the uid is read here, on the POSIX paths only (an engine boundary test names this function).
+    The libproc path also reads the effective uid, only to refuse a setuid context."""
     return os.getuid() if hasattr(os, "getuid") else None
 
 
@@ -414,6 +458,70 @@ def parse_windows_tcp_table(blob: bytes, family: int) -> list[Row]:
     return rows
 
 
+
+#: macOS `sys/proc_info.h` (libproc): selectors and the `struct socket_fdinfo` offsets this module
+#: reads. The struct is 792 bytes: `proc_fileinfo` (24), then `socket_info`, whose `soi_so` is the
+#: kernel's socket (the same in every process that holds it) and whose `soi_proto.pri_tcp` starts
+#: with an `in_sockinfo` (ports as ints holding a network-order port, then `insi_vflag` and the
+#: foreign and local `in4in6_addr`) and carries `tcpsi_state`.
+PROC_UID_ONLY = 4
+PROC_PIDLISTFDS = 1
+PROX_FDTYPE_SOCKET = 2
+PROC_PIDFDSOCKETINFO = 3
+SOCKINFO_TCP = 2
+SOCKET_FDINFO_SIZE = 792
+_SOI = 24                         # socket_fdinfo.psi
+_SOI_SO = _SOI + 136              # socket_info.soi_so
+_SOI_KIND = _SOI + 232            # socket_info.soi_kind
+_INI = _SOI + 240                 # soi_proto.pri_tcp.tcpsi_ini
+_INI_VFLAG = _INI + 24            # INI_IPV4 0x1, INI_IPV6 0x2
+_INI_FOREIGN = _INI + 32
+_INI_LOCAL = _INI + 48
+_TCPSI_STATE = _INI + 80          # TSI_S_CLOSED 0, TSI_S_LISTEN 1, TSI_S_TIME_WAIT 10
+_TSI_S_CLOSED = 0
+
+
+def parse_socket_fdinfo(blob: bytes) -> tuple[tuple[str, int], tuple[str, int], int, int] | None:
+    """One `proc_pidfdinfo(PROC_PIDFDSOCKETINFO)` record: (local, remote, TCP state, socket
+    handle) for a TCP socket, None for any other kind. A short record is unreadable."""
+    if len(blob) < SOCKET_FDINFO_SIZE:
+        raise TableUnreadable("libproc: short socket record")
+    if struct.unpack_from("<i", blob, _SOI_KIND)[0] != SOCKINFO_TCP:
+        return None
+    fport, lport = struct.unpack_from(">H", blob, _INI)[0], struct.unpack_from(">H", blob, _INI + 4)[0]
+    if blob[_INI_VFLAG] & 0x1:
+        foreign = socket.inet_ntop(socket.AF_INET, blob[_INI_FOREIGN + 12:_INI_FOREIGN + 16])
+        local = socket.inet_ntop(socket.AF_INET, blob[_INI_LOCAL + 12:_INI_LOCAL + 16])
+    else:
+        foreign = socket.inet_ntop(socket.AF_INET6, blob[_INI_FOREIGN:_INI_FOREIGN + 16])
+        local = socket.inet_ntop(socket.AF_INET6, blob[_INI_LOCAL:_INI_LOCAL + 16])
+    state = struct.unpack_from("<i", blob, _TCPSI_STATE)[0]
+    handle = struct.unpack_from("<Q", blob, _SOI_SO)[0]
+    return (norm_host(local), lport), (norm_host(foreign), fport), state, handle
+
+
+def own_socket_rows(sockets: list[tuple[int, tuple[str, int], tuple[str, int], int, int]], uid: int) -> list[Row]:
+    """Rows from this uid's sockets as (pid, local, remote, state, handle): one row per socket
+    handle, whose pid is None when several processes hold it (an inherited descriptor). Closed
+    and TIME_WAIT sockets are left out."""
+    by_handle: dict[int, tuple[tuple[str, int], tuple[str, int], int, set[int]]] = {}
+    for pid, local, remote, state, handle in sockets:
+        if state in (_TSI_S_CLOSED, _TCPS_TIME_WAIT):
+            continue
+        hit = by_handle.setdefault(handle, (local, remote, state, set()))
+        hit[3].add(pid)
+    rows = []
+    for local, remote, state, pids in by_handle.values():
+        rows.append(Row(local, remote, state == _TCPS_LISTEN, uid, pids.pop() if len(pids) == 1 else None))
+    return rows
+
+
+def restricted(rows: list[Row], pid: int, uid: int | None) -> bool:
+    """A macOS table that holds no row of another uid (`uid`, this process's) where a row carries
+    its uid (sysctl), nor of another pid (`pid`, this process's) where it carries only the pid
+    (netstat): empty, or filtered to this process or this uid. It cannot prove anything absent."""
+    return not any((row.uid is not None and row.uid != uid) or (row.uid is None and row.pid != pid) for row in rows)
+
 # -- readers: the live table on this host ------------------------------------------------------------------------------
 
 _LOCK = threading.Lock()
@@ -435,11 +543,17 @@ def _run(argv: list[str]) -> str:
 
 
 def _sysctl_blob(name: bytes = b"net.inet.tcp.pcblist_n") -> bytes:
+    path = ctypes.util.find_library("c")
+    if not path:                                                     # Windows has none: unreadable
+        raise TableUnreadable("sysctl: no libc")
     try:
-        libc = ctypes.CDLL(ctypes.util.find_library("c"), use_errno=True)
-    except OSError as exc:
+        libc = ctypes.CDLL(path, use_errno=True)
+    except (OSError, TypeError) as exc:
         raise TableUnreadable(f"sysctl: libc: {type(exc).__name__}") from None
-    fn = libc.sysctlbyname
+    try:
+        fn = libc.sysctlbyname
+    except AttributeError:                                           # a libc without it (glibc): unreadable
+        raise TableUnreadable("sysctl: no sysctlbyname") from None
     fn.argtypes = [ctypes.c_char_p, ctypes.c_void_p, ctypes.POINTER(ctypes.c_size_t), ctypes.c_void_p,
                    ctypes.c_size_t]
     fn.restype = ctypes.c_int
@@ -492,8 +606,101 @@ def _calibrate_sysctl() -> bool:
                 s.close()
 
 
+
+#: macOS: None until the first restricted read checks the libproc layout, then True or False.
+_LIBPROC_OK: list = [None]
+
+
+def _libproc_sockets(deadline: float) -> list[tuple[int, tuple[str, int], tuple[str, int], int, int]]:
+    """This uid's processes' TCP sockets, as (pid, local, remote, state, handle). A process that
+    cannot be read (gone, or EPERM) is skipped: it can only lose an answer, never make one."""
+    try:
+        lib = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+    except (OSError, TypeError) as exc:
+        raise TableUnreadable(f"libproc: {type(exc).__name__}") from None
+    try:
+        lib.proc_listpids.argtypes = [ctypes.c_uint32, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_int]
+        lib.proc_pidinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_uint64, ctypes.c_void_p, ctypes.c_int]
+        lib.proc_pidfdinfo.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+    except AttributeError as exc:                                    # a missing symbol answers nothing
+        raise TableUnreadable(f"libproc: missing {exc.args[0] if exc.args else 'symbol'}"[:120]) from None
+    for fn in (lib.proc_listpids, lib.proc_pidinfo, lib.proc_pidfdinfo):
+        fn.restype = ctypes.c_int
+    uid = _posix_uid()
+    need = lib.proc_listpids(PROC_UID_ONLY, uid, None, 0)
+    if need <= 0:
+        raise TableUnreadable(f"libproc: errno {ctypes.get_errno()}")
+    count = min(need // 4 + 64, MAX_PIDS)
+    pids = (ctypes.c_int * count)()
+    got = lib.proc_listpids(PROC_UID_ONLY, uid, pids, ctypes.sizeof(pids))
+    if got <= 0:
+        raise TableUnreadable(f"libproc: errno {ctypes.get_errno()}")
+    if got // 4 >= MAX_PIDS:
+        raise TableUnreadable(f"libproc: over {MAX_PIDS} processes")
+    record = ctypes.create_string_buffer(SOCKET_FDINFO_SIZE)
+    out = []
+    for pid in pids[:got // 4]:
+        if pid <= 0:
+            continue
+        if time.monotonic() > deadline:
+            raise TableUnreadable("libproc: deadline")
+        size = lib.proc_pidinfo(pid, PROC_PIDLISTFDS, 0, None, 0)
+        if size <= 0:
+            continue
+        size = min(size + 32 * 8, MAX_FDS * 8)
+        fds = ctypes.create_string_buffer(size)
+        size = lib.proc_pidinfo(pid, PROC_PIDLISTFDS, 0, fds, size)
+        for i in range(max(size, 0) // 8):
+            fd, kind = struct.unpack_from("<iI", fds, i * 8)
+            if kind != PROX_FDTYPE_SOCKET:
+                continue
+            if lib.proc_pidfdinfo(pid, fd, PROC_PIDFDSOCKETINFO, record, SOCKET_FDINFO_SIZE) != SOCKET_FDINFO_SIZE:
+                continue
+            parsed = parse_socket_fdinfo(record.raw)
+            if parsed is not None:
+                out.append((pid,) + parsed)
+    return out
+
+
+def _calibrate_libproc() -> bool:
+    """The `socket_fdinfo` layout must read back a connected pair of this process's own (listen,
+    connect, accept) exactly, as `calibration_holds` asks of the sysctl one."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    client = accepted = None
+    try:
+        probe.bind(("127.0.0.1", 0))
+        probe.listen(1)
+        client = socket.create_connection(probe.getsockname(), timeout=TIMEOUT_SECONDS)
+        accepted, _ = probe.accept()
+        rows = own_socket_rows(_libproc_sockets(time.monotonic() + TIMEOUT_SECONDS), _posix_uid())
+        return calibration_holds(rows, _address(probe.getsockname()), _address(client.getsockname()),
+                                 uid=_posix_uid(), pid=os.getpid())
+    except (TableUnreadable, OSError, struct.error, ValueError):
+        return False
+    finally:
+        for s in (client, accepted, probe):
+            if s is not None:
+                s.close()
+
+
+def read_own_sockets(deadline: float | None = None) -> list[Row]:
+    """macOS, a restricted table: this uid's own TCP sockets (`own_socket_rows`), from libproc,
+    once its layout passed calibration in this process, read before `deadline` (time.monotonic(),
+    by default TIMEOUT_SECONDS from now). TableUnreadable with the reason; `setuid-context` when
+    the real and effective uids differ."""
+    if hasattr(os, "geteuid") and _posix_uid() != os.geteuid():
+        raise TableUnreadable("setuid-context")
+    with _LOCK:
+        if _LIBPROC_OK[0] is None:
+            _LIBPROC_OK[0] = _calibrate_libproc()
+        ok = _LIBPROC_OK[0]
+    if not ok:
+        raise TableUnreadable("libproc: layout failed calibration")
+    return own_socket_rows(_libproc_sockets(deadline or time.monotonic() + TIMEOUT_SECONDS), _posix_uid())
+
 def method() -> str:
-    """The method the next read on this host uses: sysctl, netstat, proc, iphlpapi or none."""
+    """The method the next read on this host uses: sysctl, netstat, proc, iphlpapi or none. On
+    macOS a read whose table turns out restricted answers through `libproc` instead (`_table`)."""
     if sys.platform == "darwin":
         with _LOCK:
             if _SYSCTL_OK[0] is None:
@@ -693,17 +900,64 @@ def listener_owner(rows: list[Row], local: tuple[str, int], how: str) -> Owner:
     return classify(uids.pop(), None, method=how)
 
 
+LIBPROC = "libproc"
+TABLE_RESTRICTED = "table-restricted"
+
+
+def _table(deadline: float | None = None) -> tuple[list[Row], str]:
+    """`read_table`, except on macOS when the table is restricted (`restricted`) or unreadable:
+    then this uid's own sockets (`read_own_sockets`), method `libproc`. TableUnreadable with the
+    reason when neither reads."""
+    try:
+        rows, how = read_table()
+    except TableUnreadable:
+        if sys.platform != "darwin":
+            raise
+    else:
+        if (sys.platform != "darwin" or how not in ("sysctl", "netstat")
+                or not restricted(rows, os.getpid(), _posix_uid())):
+            return rows, how
+    return read_own_sockets(deadline), LIBPROC
+
+
+def _own_answer(row: Row) -> Owner:
+    """A row of this uid's own sockets (method `libproc`): this account's, with the one pid that
+    holds it, or pid None and reason `several-processes` when several do."""
+    if row.pid is None:
+        return Owner(THIS_ACCOUNT, row.uid, None, LIBPROC, "several-processes")
+    return classify(row.uid, row.pid, method=LIBPROC)
+
+
 def _owner_of(local: tuple[str, int], remote: tuple[str, int], *, server_end_of: bool = False) -> Owner:
     """The owner of the socket at `local` connected to `remote`: the one live row with those
     addresses. A row Linux prints with inode 0 has no socket, so its uid 0 is no owner. A server
     end (`server_end_of`) in that state is a connection not accepted yet and answers through its
     listener (`listener_owner`); a client end in it is a socket its process closed: `unknown`
-    (`no-socket`). A row with an inode always answers with its own uid."""
+    (`no-socket`). A row with an inode always answers with its own uid. On a restricted macOS
+    table only this uid's own sockets are seen: a socket found there is this account's, anything
+    else `unknown` (`table-restricted`), and a server end not accepted yet is read again for
+    ACCEPT_WAIT_SECONDS. The libproc reads of one call share one deadline, TIMEOUT_SECONDS from
+    its start (a first calibration in the process has a deadline of its own)."""
+    start = time.monotonic()
     try:
-        rows, how = read_table()
+        rows, how = _table(start + TIMEOUT_SECONDS)
     except TableUnreadable as exc:
         return Owner(UNKNOWN, None, None, method(), str(exc))
     found = find(rows, local, remote)
+    if how == LIBPROC:
+        wait, deadline = 0.005, min(start + ACCEPT_WAIT_SECONDS, start + TIMEOUT_SECONDS)
+        while not found and server_end_of and time.monotonic() < deadline:
+            time.sleep(wait)
+            wait = min(wait * 2, 0.05)
+            try:
+                found = find(read_own_sockets(start + TIMEOUT_SECONDS), local, remote)
+            except TableUnreadable as exc:
+                return Owner(UNKNOWN, None, None, LIBPROC, str(exc))
+        if not found:
+            return Owner(UNKNOWN, None, None, LIBPROC, TABLE_RESTRICTED)
+        if len(found) > 1:
+            return Owner(UNKNOWN, None, None, LIBPROC, "several-rows")
+        return _own_answer(found[0])
     if not found:
         return Owner(UNKNOWN, None, None, how, "no-row")
     if len(found) > 1:
@@ -763,18 +1017,31 @@ def pick_listener(rows: list[Row], port: int) -> list[Row]:
 
 def listener(port: int) -> Owner:
     """Who listens on 127.0.0.1:<port>, or on 0.0.0.0 or ::1, which take the same connections.
-    `none` when nothing does, `unknown` (`several-rows`) when two sockets do. Cached for
-    LISTENER_TTL seconds."""
+    `none` when nothing does, `unknown` (`several-rows`) when two sockets do. On a restricted
+    macOS table only this uid's listener bound exactly to 127.0.0.1 answers (`this-account`);
+    anything else is `unknown` (`table-restricted`), never `none`. Cached for LISTENER_TTL
+    seconds."""
     now = time.monotonic()
     hit = _LISTENERS.get(port)
     if hit is not None and now - hit[0] < LISTENER_TTL:
         return hit[1]
     try:
-        rows, how = read_table()
+        rows, how = _table()
     except TableUnreadable as exc:
         owner = Owner(UNKNOWN, None, None, method(), str(exc))
     else:
         found = pick_listener(rows, port)
+        if how == LIBPROC:
+            # Only an exact 127.0.0.1 bind: XNU refuses another ordinary account that port beside ours.
+            found = [row for row in found if row.local == ("127.0.0.1", port)]
+            if not found:
+                owner = Owner(UNKNOWN, None, None, how, TABLE_RESTRICTED)
+            elif len(found) > 1:
+                owner = Owner(UNKNOWN, None, None, how, "several-rows")
+            else:
+                owner = _own_answer(found[0])
+            _LISTENERS[port] = (now, owner)
+            return owner
         if not found:
             owner = Owner(NONE, None, None, how)
         elif len(found) > 1:

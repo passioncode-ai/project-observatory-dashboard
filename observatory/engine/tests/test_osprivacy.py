@@ -267,7 +267,8 @@ class Boundary(unittest.TestCase):
     #: One file meant to be vendored by other projects, standard library only, so it cannot call
     #: this module: `peer_owner.py` reads this process's uid in its `_posix_uid()` alone, on its
     #: POSIX paths (Windows compares SIDs), and `tests/test_peer_owner.py` pins that it is the only
-    #: place. Allowed for the uid read only, never for a mode or ownership decision.
+    #: place; its libproc path also reads the effective uid, only to refuse a setuid context.
+    #: Allowed for the uid read only, never for a mode or ownership decision.
     STANDALONE_UID = {"peer_owner.py"}
     #: The administrator's root-side installer for a space with nobody logged in (OBS-361). It runs
     #: only on macOS, as root, under `/usr/bin/python3 -I`, from a root-owned copy, so it may not
