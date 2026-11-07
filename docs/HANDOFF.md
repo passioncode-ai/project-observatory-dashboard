@@ -22,7 +22,9 @@ expectation. It changes test evidence and documentation, not the published engin
 1, #458; space daemons 1.1.0, #459), and on Linux `peer_owner` 1.2.0 no longer misreads a connection the server has not
 accepted yet (#460).
 
-Next: tag `v0.35.0`, verify and install (receipts in the record).
+Released: tag `v0.35.0` on `fbf991d1`, verified, installed and announced (receipts in the record). Next: the
+administrator's real `apply` on the computer whose dry run the record names, then the next row after the shared
+source of truth.
 
 [2026-11-06: release 0.34.0](runs/2026-11-06-release-0.34.0/README.md): engine 0.34.0 (`observatory-log` stays
 0.30.0): another OS account's loopback connection refused (OBS-355 part 1, #451), an external secret store carried
