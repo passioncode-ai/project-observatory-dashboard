@@ -30,6 +30,47 @@ def open_worker(target: str, home: str, queue) -> None:
 
 
 
+class _Plain:
+    @staticmethod
+    def migration(conn):
+        conn.execute("CREATE TABLE t (id TEXT)")
+        return "created"
+
+
+class _Documented:
+    @staticmethod
+    def migration(conn):
+        """A docstring the AST digest also left out."""
+        # A comment on its own line.
+        conn.execute("CREATE TABLE t (id TEXT)")  # and one after the code
+
+        return "created"   
+
+
+class _Changed:
+    @staticmethod
+    def migration(conn):
+        conn.execute("CREATE TABLE u (id TEXT)")
+        return "created"
+
+
+#: The version-stable digests (OBS-387) of the migrations this release ships,
+#: written out: a run under any interpreter that computes another value fails,
+#: which is the property the digest exists for.
+STABLE_CHECKSUMS = {
+    '0001-events-occurred-at-utc': 'v2:e369f0bd52a4d834c4e0865414b67bddac04d12c7836b6035dc667b986c2ae19',
+    '0002-drop-events-outside-the-estate': 'v2:f9f16d2789c2155794810cd7a6d0cc9ae3d62606d75f26c2fc3894460f264e4a',
+    '0003-project-week-rollup': 'v2:9dfba9dc8a219f8579ed335743e8593e100cb694b442f595308a6e1be6dc99f2',
+    '0004-plugin-metrics': 'v2:098200c5ea4e57ff4dd53c2ae4789e50238b795ab1f4956040b8b14e7ba2edeb',
+    '0005-project-week-sessions': 'v2:66cb1a9c7a5e844d843821cae223a9fb281b2f587f4152f089c0bff35f64a6ab',
+    '0006-collector-cursors': 'v2:b727342214244a4a950d7b26f8127343cdbaf809ce6b54f6a6e1f5be27a27344',
+    '0007-drop-inert-retention-policy': 'v2:6ead61f0a24ec5f97df50ad90c8ab1185f44ea65cd3254b47e9c87cd4b0e3b9b',
+    '0008-agent-memory-workflows': 'v2:bb904cb8e072734edd597f54e6148a05d40aaf154efa580bc90c025d1a1c42ca',
+    '0009-search-stems': 'v2:c551853dccfed624a25449f85f92f14a4098013bdb1197f608eb04cc220d6631',
+    '0010-vector-namespaces': 'v2:3ec688329519acfebdb1b240fc3b5237f273da35ac0a7ccba5ab409873b4a25c',
+}
+
+
 #: Written out rather than read from `migrate.MIGRATIONS`, so that adding a
 #: migration fails here until someone has looked at what the upgrade matrix now
 #: covers. 0008 added the agent-memory workflow tables; 0010 the vector-namespace registry.
@@ -335,6 +376,62 @@ class SchemaCompatibility(unittest.TestCase):
             conn = self.db.connect(self.target)
             conn.close()
 
+
+
+class MigrationChecksums(unittest.TestCase):
+    """OBS-387: a database recorded under one Python opens under every other."""
+
+    setUp = SchemaCompatibility.setUp
+    tearDown = SchemaCompatibility.tearDown
+    digest = SchemaCompatibility.digest
+
+    def test_the_digest_is_the_same_under_every_interpreter(self):
+        self.assertEqual({mid: self.migrate.checksum(fn) for mid, fn in self.migrate.MIGRATIONS},
+                         STABLE_CHECKSUMS)
+
+    def test_the_running_interpreters_old_digest_is_listed(self):
+        if not (3, 11) <= sys.version_info[:2] <= (3, 15):
+            self.skipTest("the legacy table lists Python 3.11 to 3.15")
+        for mid, fn in self.migrate.MIGRATIONS:
+            self.assertIn(self.migrate.ast_checksum(fn), self.migrate.LEGACY_AST_CHECKSUMS[mid], mid)
+
+    def test_comments_docstrings_and_blank_lines_do_not_count(self):
+        plain = self.migrate.checksum(_Plain.migration)
+        self.assertEqual(plain, self.migrate.checksum(_Documented.migration))
+        self.assertNotEqual(plain, self.migrate.checksum(_Changed.migration))
+
+    def test_a_fresh_store_records_the_stable_digest(self):
+        conn = self.db.connect(self.target)
+        recorded = dict(conn.execute('SELECT id, checksum FROM migration_checksums'))
+        conn.close()
+        self.assertEqual(recorded, STABLE_CHECKSUMS)
+
+    def test_digests_another_interpreter_recorded_open_and_stay(self):
+        conn = self.db.connect(self.target)
+        foreign = {}
+        for mid, fn in self.migrate.MIGRATIONS:
+            # A digest another interpreter recorded: never this one's, so only the table admits it.
+            own = self.migrate.ast_checksum(fn)
+            digest = next(d for d in sorted(self.migrate.LEGACY_AST_CHECKSUMS[mid]) if d != own)
+            foreign[mid] = digest
+            conn.execute('UPDATE migration_checksums SET checksum=? WHERE id=?', (digest, mid))
+        conn.commit()
+        conn.close()
+        before = self.digest()
+        conn = self.db.connect(self.target)
+        self.assertFalse(self.migrate.needs_upgrade(conn))
+        self.assertEqual(dict(conn.execute('SELECT id, checksum FROM migration_checksums')), foreign)
+        conn.close()
+        self.assertEqual(before, self.digest())
+
+    def test_a_listed_digest_of_another_migration_is_refused(self):
+        conn = self.db.connect(self.target)
+        other = sorted(self.migrate.LEGACY_AST_CHECKSUMS['0002-drop-events-outside-the-estate'])[0]
+        conn.execute("UPDATE migration_checksums SET checksum=? WHERE id='0001-events-occurred-at-utc'", (other,))
+        conn.commit()
+        conn.close()
+        with self.assertRaises(self.migrate.CompatibilityError):
+            self.db.connect(self.target)
 
 if __name__ == '__main__':
     unittest.main()
