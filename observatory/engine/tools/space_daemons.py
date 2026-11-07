@@ -125,7 +125,7 @@ TRUST_SCHEMA = "observatory-space-daemons-trust/1"
 TRUST_NAME = "space-daemons-trust.json"
 #: The only groups a trust file may name: their members hold root through sudo already.
 TRUSTED_GROUPS = ("wheel", "admin")
-DSMEMBERUTIL = "/usr/sbin/dsmemberutil"
+DSMEMBERUTIL = "/usr/bin/dsmemberutil"
 DS_MEMBER = "user is a member of the group"
 DS_NOT_MEMBER = "user is not a member of the group"
 MAX_TRUST_BYTES = 64 * 1024
@@ -282,10 +282,10 @@ class System(object):
         code, _out, tail = self.output(argv)
         return code, tail
 
-    def output(self, argv):
+    def output(self, argv, timeout=60):
         """ARGV through the runner: (exit code, its output, last line of its error)."""
         try:
-            p = self.runner(list(argv), capture_output=True, text=True, timeout=60, stdin=subprocess.DEVNULL)
+            p = self.runner(list(argv), capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
         except (OSError, subprocess.SubprocessError) as exc:
             return 127, "", type(exc).__name__
         tail = ((p.stderr or "").strip().splitlines() or [""])[-1][:200]
@@ -611,7 +611,7 @@ def _read_root_file(path, folder, system, max_bytes):
 def admin_member(system, name):
     """Whether account NAME is a member of `admin` now (True or False), or None when it cannot be told:
     `dsmemberutil checkmembership -U NAME -G admin` through the runner, its exact answer."""
-    code, out, _tail = system.output([DSMEMBERUTIL, "checkmembership", "-U", name, "-G", "admin"])
+    code, out, _tail = system.output([DSMEMBERUTIL, "checkmembership", "-U", name, "-G", "admin"], timeout=10)
     answer = (out or "").strip()
     if code == 0 and answer == DS_MEMBER:
         return True

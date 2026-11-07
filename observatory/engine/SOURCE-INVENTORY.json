@@ -6283,8 +6283,8 @@
       "path": "tests/test_space_daemons.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f12c9cbd9221d6447da5f1d3ed2bb0deec47549ae642b8faad2683961e3f2dfe",
-      "bytes": 67797
+      "export_sha256": "1ba11d5360d563b48049a5b1dee0300427619bbb879a9494ee7db0da79ea2c5c",
+      "bytes": 68662
     },
     {
       "path": "tests/test_spend.py",
@@ -7456,8 +7456,8 @@
       "path": "tools/space_daemons.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8a87ca90d741045c793765a7dc5e42bd4c3d721ec91ea5b8245fafed45d3ef2f",
-      "bytes": 76817
+      "export_sha256": "2940909a471820f1c14e0abf4a9486e4f96d5ce2c9a40a90c4c50ad6db868b8e",
+      "bytes": 76845
     },
     {
       "path": "tools/spend.py",

@@ -92,6 +92,22 @@ class Launchctl:
         return subprocess.CompletedProcess(argv, code, "", "synthetic refusal" if code else "")
 
 
+class RealMembership(unittest.TestCase):
+    """The membership check asks the real `dsmemberutil` where the tool expects it (the fake runner in the other
+    tests dispatches on the basename, so only this catches a wrong path)."""
+
+    @unittest.skipUnless(sys.platform == "darwin", "dsmemberutil is macOS's")
+    def test_dsmemberutil_is_where_the_tool_calls_it_and_answers(self):
+        self.assertTrue(os.path.isfile(sd.DSMEMBERUTIL), sd.DSMEMBERUTIL)
+        system = sd.System()
+        code, out, _tail = system.output([sd.DSMEMBERUTIL, "checkmembership", "-U", "root", "-G", "wheel"], timeout=10)
+        self.assertEqual((code, out.strip()), (0, sd.DS_MEMBER))
+        code, out, _tail = system.output([sd.DSMEMBERUTIL, "checkmembership", "-U", "nobody", "-G", "admin"], timeout=10)
+        self.assertEqual((code, out.strip()), (0, sd.DS_NOT_MEMBER))
+
+
+
+
 class Pure(unittest.TestCase):
     """What runs on every platform, Windows included: no account database is needed."""
 
