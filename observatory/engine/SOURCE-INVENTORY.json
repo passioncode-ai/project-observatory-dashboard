@@ -73,8 +73,8 @@
       "path": "backup_vault.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b6db536e06066e422aac5867decf52b06bbf42368bffbc9034147f55ad65aa52",
-      "bytes": 72507
+      "export_sha256": "2c53c90d88a0bb361c31c7192f56c32ec1bea89d65f5803c8db04f3ca7cc4177",
+      "bytes": 72585
     },
     {
       "path": "cache_coverage.py",

@@ -1130,6 +1130,8 @@ def artifacts(root: Path, kind: str, suffix: str) -> list[Path]:
 def rotate(root: Path, kind: str, suffix: str, keep: int = KEEP, protect: Path | None = None) -> list[str]:
     """Keep the `keep` newest. `protect`, the backup just written, is never dropped: a clock set back
     names it older than the ones before it, and its source is already gone (OBS-388 review)."""
+    if keep < 1:
+        raise ValueError("rotate keeps at least one backup")
     found = artifacts(root, kind, suffix)
     if protect is not None and protect in found:
         found.remove(protect)
