@@ -410,7 +410,8 @@ def checksum(fn: object) -> str:
 
     Comments and docstrings are cut out exactly; outside string literals trailing
     spaces and blank lines are dropped, so a documentation-only or layout edit
-    keeps the digest. Inside a literal every character counts. Only positions are
+    keeps the digest. Inside a literal its rows are kept as `textwrap.dedent`
+    leaves them (a row of only spaces reads as empty there). Only positions are
     read from the parser and the tokenizer, and those agree on 3.11 to 3.15.
     """
     source = textwrap.dedent(inspect.getsource(fn))

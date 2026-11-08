@@ -360,12 +360,11 @@ def secret_stores_inside(base: Path) -> list[str]:
     # The node folder holds private keys outside every vault store (review of OBS-389): the device keys,
     # each organization's keys, every share's keys (owner, sent, received) and the relay's sealing key.
     # Counted whole, under OBSERVATORY_NODE when it is inside the home and at <home>/node in any case.
-    for node in {home / 'node', Path(os.environ.get('OBSERVATORY_NODE') or home / 'node').expanduser().resolve()}:
+    for node in sorted({home / 'node', Path(os.environ.get('OBSERVATORY_NODE') or home / 'node').expanduser().resolve()}):
         if node == home / 'node' or home in node.parents:
             candidates.append(node)
-    # Provider keys and the keyserver's bearer token kept as files in the state folder (OBSERVATORY_STATE,
-    # <home>/store by default).
-    for state in {home / 'store', Path(os.environ.get('OBSERVATORY_STATE') or home / 'store').expanduser().resolve()}:
+    # Provider keys kept as files in the state folder (OBSERVATORY_STATE, <home>/store by default).
+    for state in sorted({home / 'store', Path(os.environ.get('OBSERVATORY_STATE') or home / 'store').expanduser().resolve()}):
         if state == home / 'store' or home in state.parents:
             candidates += [state / name for name in STATE_SECRET_FILES]
     for value in values:

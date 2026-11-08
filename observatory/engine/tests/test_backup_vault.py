@@ -776,6 +776,12 @@ class RotationOrder(Base):
 
     def test_the_newest_machine_bundle_is_the_last_made(self):
         import machine_backup as MB
+        # find_latest also scans the default roots: point them at empty folders, never the real ones.
+        empty = self.base / 'no-default-roots'
+        for name, value in (('documents_dir', empty / 'Documents'), ('data_dir', empty / 'share')):
+            patcher = patch.object(vault, name, lambda value=value: value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         files = self.make(kind=vault.MACHINE_KIND, suffix=vault.MACHINE_SUFFIX)
         self.assertEqual(MB.newest(self.home), files[-1])
         self.assertEqual(MB.find_latest(self.home), files[-1])

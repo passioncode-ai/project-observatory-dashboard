@@ -3174,8 +3174,8 @@
       "path": "maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0239aac6a582ba4f337b6f41f2e836122c89b30a57d08c727cae53af75c9bb31",
-      "bytes": 119350
+      "export_sha256": "578cc4978da0fae5bf06331b85086674b873625f2fb759fd657798d32f9f2d92",
+      "bytes": 119505
     },
     {
       "path": "mcp/capability_tools.py",
@@ -4024,8 +4024,8 @@
     {
       "path": "store/migrate.py",
       "source_sha256": "7f7ab93c500f075433b15d2d10e370b9de915271e0bc0ca6f8945beba4835443",
-      "export_sha256": "6d38688b9727c688906b4144aa2866510bbe9fdb698ee7cc4833871b7ca8b843",
-      "bytes": 33664,
+      "export_sha256": "523144d828cebbe08f512b24e68dcaaef87a7400777dc9c4dcadb84a409c5ab5",
+      "bytes": 33740,
       "python_comments_removed": 18,
       "python_docstrings_removed": 12,
       "tool_descriptions_retained": 0,
@@ -4523,8 +4523,8 @@
       "path": "tests/test_backup_vault.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ce99cd80c64b4cdfed594d4d4f49c04ee61219fce5b2a0ed681f91b0ebb6b8bc",
-      "bytes": 63633
+      "export_sha256": "d3a62892bc77d6005c5d4ba238a6f121ad00a0a54e60771043d9fa7d7b1143d3",
+      "bytes": 64027
     },
     {
       "path": "tests/test_blank_page.py",
@@ -5422,8 +5422,8 @@
       "path": "tests/test_maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "61f7d2d6158219fb3c42e6d4c25781fb4ecc773ffaba11e32c73924c5eb1bb3c",
-      "bytes": 163134
+      "export_sha256": "979bc7705cf51d0e6cb586874e552ea8c56f0e47a5304e20ad0cfc5928a8f176",
+      "bytes": 163317
     },
     {
       "path": "tests/test_manifest_urls.py",
@@ -7665,8 +7665,8 @@
     {
       "path": "workspace_upgrade.py",
       "source_sha256": "d9816f9711b69badae87382cbae34e5a303e0942823587aecf4361026828277d",
-      "export_sha256": "2c6dfa36fc95932a5d143c0f3a4651945524206711597d5d3914144caa496bb6",
-      "bytes": 64029,
+      "export_sha256": "5fa96e807b3237fca61e722b55fe901c6df974c7c94a3dfdefb1e266bd4ec41d",
+      "bytes": 64006,
       "python_comments_removed": 5,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,

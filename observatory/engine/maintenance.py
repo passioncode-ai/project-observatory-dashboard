@@ -1618,7 +1618,7 @@ class LaunchdSchedule:
 
     def kick(self) -> dict:
         """Run the job now (`launchctl kickstart`, no `-k`: a running pass is left alone)."""
-        if self.headless():
+        if self.headless() or self.system_daemon():
             # A system daemon: only root can kickstart it, and the pass runs at its next interval anyway.
             return {"result": "failed", "detail": f"{self.label} is a system daemon of this account; "
                                                   f"it runs at its next interval (sudo launchctl kickstart system/{self.label} "
@@ -1627,9 +1627,11 @@ class LaunchdSchedule:
         return {"result": "started" if ok else "failed", **({} if ok else {"detail": detail[:200]})}
 
     def uninstall(self) -> dict:
-        if self.headless():
+        if self.headless() or self.system_daemon():
             import machine_move
-            loaded = self.loaded()
+            if self.launch.job_loaded(self.label):
+                self.launch.stop_job(self.label)
+            loaded = self.system_daemon()
             self.definition.unlink(missing_ok=True)
             self.plist.unlink(missing_ok=True)
             out = {"schedule": self.kind, "label": self.label, "removed": True, "domain": "system"}

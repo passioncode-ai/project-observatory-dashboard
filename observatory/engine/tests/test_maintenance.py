@@ -1920,6 +1920,9 @@ class Schedule(Base):
             self.assertEqual((out["domain"], out["load"]), ("system", "loaded"))
             self.assertEqual(self.stops, [sched.label], "the agent loaded beside the daemon is booted out")
             self.assertEqual(sched.status()["domain"], "system")
+            out = sched.uninstall()
+            self.assertIn(" remove ", out["next"][0], "only root stops the daemon")
+            self.assertEqual(sched.kick()["result"], "failed")
 
     def test_headless_a_loaded_daemon_with_the_same_definition_is_left_alone(self):
         sched = self.headless(loaded=True)
