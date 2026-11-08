@@ -3,7 +3,252 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.35.5 (2026-11-08)
+
+The secret store kept outside the workspace now comes back with a workspace restored on another computer. Until now
+the encrypted snapshot carried it, but `full restore` only checked it and wrote it nowhere, so a machine lost meant
+keys lost unless a separate copy existed. Nothing needs you after installing.
+
+### Added
+
+- **`full restore` puts the carried secret store back** (OBS-350 part 2, `docs/COMPATIBILITY.md`,
+  `docs/CLI-COMPATIBILITY.md`). The store goes to the folder the restored settings name, under a policy for one
+  already there: `--secret-store auto` (the default: written where the folder is absent or empty, refused before any
+  write where it differs), `keep` (what `full init` uses), `merge` (missing files added, nothing overwritten),
+  `replace` (the old store moved aside, never deleted) or `skip`. The plan is made before anything is written; the
+  store is written through a staged copy under the vault's own lock, before the workspace is put in place.
+- **`full restore SNAPSHOT --secret-store-only`** writes only the stores, into the folders the current settings
+  name, for a workspace restored earlier or a store a restore skipped.
+- **Places a store is never written to.** A folder holding the home, the home's start-up files, `~/.ssh`,
+  `~/.gnupg`, `~/.aws`, `~/.config/gh`, `~/Library/LaunchAgents` and `~/Library/Keychains` are refused
+  (`secret-store-target-refused`), however spelled; a snapshot from another computer writes only where this
+  computer's settings name the same folder or `--secret-store-target PATH` confirms it
+  (`secret-store-target-unconfirmed`).
+- **Doctor says when a store was not put back** (`backups-secret-store-not-restored`, with the command that writes
+  it), until a store is in place.
+
+## 0.35.4 (2026-11-08)
+
+A fix release for workspaces that move between machines, Python versions and accounts with nobody signed in. A
+workspace now opens under any supported Python; the maintenance schedule works in an account with no GUI session;
+backups keep the newest copy and say where the passphrase is kept. One command changes: `workspace-backup --output`
+over a workspace that holds secrets now needs `--plaintext`. Nothing needs you after installing.
+
+### Fixed
+
+- **A workspace opens under any supported Python** (OBS-387, `docs/COMPATIBILITY.md` "Migration checksums: the
+  same under every Python"). The checksum recorded for each applied migration was the sha256 of `ast.dump`, whose
+  text differs between Python 3.11, 3.12, 3.13 and 3.14, and 3.15, so a workspace recorded under one interpreter was
+  refused under another as "corrupt or incompatible" (seen when Homebrew moved a venv from 3.14 to 3.15). A new
+  record is `v2:` and a digest of the migration's source text, the same under 3.11 to 3.15; the digests earlier
+  releases recorded are still read, each pinned to the code it attests, and never rewritten.
+- **The maintenance schedule in an account with no GUI session** (OBS-361 part 2). `full maintain ensure` failed
+  there with `Bootstrap failed: 125`; the maintenance and update-check jobs now go to the background folder that the
+  administrator's space daemons tool loads as system daemons, and the answer says `waiting-for-root` with the
+  administrator's command. Until the daemon runs, the plugin hook keeps running the pass at each session start; a
+  copy in `~/Library/LaunchAgents` stays until then (an ordinary account reached over SSH answers the same way).
+- **Backups keep the newest** (OBS-388). Rotation and "the newest" ordered backups made within one second by their
+  name's random suffix, so the newest could be rotated away; they now follow the order the backups were made in, and
+  the backup just written is never dropped, even after the clock was set back.
+- **Where the backup passphrase is kept** (OBS-391). Where no login Keychain takes it (a headless account), the
+  outside copy is the owner-only file, and the answer now says so instead of "the login Keychain refused"; once the
+  Keychain takes it, the copy moves there and the file goes.
+- **`machine-move cutover` refuses a stale staged definition** (OBS-390). A definition staged by a restore days ago
+  can name a release folder a newer release replaced; cutover now refuses it as `staged-plist-stale`, naming the
+  missing path, before anything moves.
+- A test of a restore killed by a signal no longer fails on a loaded CI runner (OBS-392).
+
+### Changed
+
+- **`full workspace-backup --output DIR` over a workspace that holds secrets needs `--plaintext`** (OBS-389,
+  `docs/CLI-COMPATIBILITY.md`). It wrote `secrets/`, the node's private keys and provider key files as a plaintext
+  directory without a word. It is now refused before anything is written, naming the encrypted route (no
+  `--output`) and the new `--plaintext` flag, which keeps the old copy and adds `"plaintext": true` and a warning.
+
+## 0.35.3 (2026-11-07)
+
+A follow-up to 0.35.2's security check on macOS 27. The check now says more precisely why it could not confirm a
+local connection, and on a computer that hides the connection table it answers faster. Every connection it refused
+before is still refused. Nothing needs you after installing.
+
+### Changed
+
+- **Two forms of `table-restricted`** (OBS-386, `peer_owner` 1.3.1, contract DEC-0155 RT-1, `docs/COMPATIBILITY.md`
+  "macOS 27: a restricted connection table"). The bare `table-restricted` means this account's sockets were read and
+  none is the connection; `table-restricted: <detail>` means the proof could not be read at all (calibration,
+  libproc, `setuid-context`), which 0.35.2 reported as `libproc: ...` or `setuid-context`.
+- **A restricted table is remembered for 30 seconds**, so each later question skips the table read (about 20 ms of
+  `netstat` measured on macOS 27.2); a full table clears it at once. `peer_owner.last_method()` names what answered.
+
+### Fixed
+
+- **The module's tests no longer depend on their order** (found by the project that vendors it): a test of a failed
+  calibration made the process's first sysctl calibration under patched state and left it failed for the tests after
+  it; the unreadable-table branches no longer start a calibration, and the tests save and restore every cache.
+
+## 0.35.2 (2026-11-07)
+
+A security-check fix for macOS 27. There a process sees only its own sockets in the kernel's connection table, so the
+check that a local server or client belongs to your own account could read no owner at all and refused every loopback
+connection, your own included: services that run the check (on a computer with several accounts) stopped answering.
+Now the check finds the connection among your account's own processes instead. Another account's or the system's
+connection is still refused. Nothing needs you after installing.
+
+### Fixed
+
+- **The loopback owner check on macOS 27** (OBS-384, `peer_owner` 1.3.0, `docs/design/ACCESS.md` rule 10,
+  `docs/COMPATIBILITY.md` "macOS 27: a restricted connection table"). When the table a process reads (`sysctl
+  net.inet.tcp.pcblist_n`, or `netstat`, which on macOS 27.2 no longer prints `process:pid`) holds no row of another
+  account, `peer_owner` reads this account's own processes' sockets through libproc. A connection found there is
+  this account's; anything else is `unknown` (`table-restricted`) and refused, never another account's, the system's
+  or "nothing listens". A server end the server has not accepted yet is read again for up to half a second. The path
+  is refused to a process whose real and effective uids differ. A full table (macOS 26 and earlier) answers exactly
+  as before and never reads libproc. Measured on macOS 27.2 (own connections answer this account; every listener of
+  root and of three other accounts answers `table-restricted`) and on macOS 26.6.2.
+
+## 0.35.1 (2026-11-07)
+
+A fix for 0.35.0: an account nobody has signed in to at the screen answers in a second way that it has no graphical
+session as soon as anything runs as it (an SSH login, or the jobs this release installs), and 0.35.0 did not recognise
+it, so moving its jobs to another computer failed instead of
+waiting for the administrator. Nothing needs you after installing.
+
+### Fixed
+
+- **Moving a job into an account with nobody signed in** (OBS-361 part 1, `docs/COMPATIBILITY.md` "Machine move: a
+  space with nobody logged in"). `full machine-move cutover` now treats `launchctl print gui/<uid>` exit 125 ("Domain
+  does not support specified action") like exit 112 ("could not find domain"): it moves the job to the background
+  folder and answers `waiting-for-root`. 0.35.0 read 125 as a graphical session, tried to load the job as an agent,
+  which launchd refused with the same 125, and put the definition back. Exit 112 means nothing runs as the account
+  yet; 125 that something does (its own daemons, an SSH login), so it is the usual answer of a space that already
+  works. Any other answer keeps the agent path as before.
+
+## 0.35.0 (2026-11-07)
+
+A macOS account that nobody signs in to at the screen can now run its jobs. Such an account has no graphical session,
+so launchd refuses the jobs a move to another computer staged for it, and `machine-move cutover` could not start them.
+Now cutover moves each job to the account's background folder, and the computer's administrator installs it once as a
+system daemon that runs as that account, never as root, and comes back by itself after a restart. A computer where the
+person signs in at the screen keeps working as before. Nothing needs you after installing; the administrator's
+one-time step is below. This release also fixes how, on Linux, a client checks that the server it is about to send a
+token to belongs to its own account.
+
+### Added
+
+- **Jobs of an account with nobody signed in** (OBS-361 part 1, #458, `docs/COMPATIBILITY.md` "Machine move: a space
+  with nobody logged in", `docs/ONBOARDING.md`). In an account with no graphical session, `full machine-move cutover`
+  checks the job against the same rules the administrator's tool applies, moves it into
+  `~/.local/share/project-observatory/background/LaunchAgents/` and answers `waiting-for-root` with the command for the
+  administrator. The administrator installs a root-owned copy of `tools/space_daemons.py` from a verified release once
+  (the release key fingerprint `63B30DC324BD697487AA31944FAFB8AEC803B6A7` is pinned in the steps) and runs
+  `sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user NAME`. It writes its own
+  `/Library/LaunchDaemons/<label>.plist` with the account as `UserName`, keeps its logs in
+  `/Library/Logs/ProjectObservatory/<account>/`, and records what it wrote in
+  `/Library/Application Support/ProjectObservatory/space-daemons.json` (`observatory-space-daemons/1`, a stable
+  format). `plan` and `status` need no root; `remove` takes a daemon away. `leave` refuses a job installed this way
+  until the administrator removes it.
+- **Programs from Homebrew, and more definitions accepted** (OBS-361, #459, space daemons 1.1.0). The administrator
+  may name accounts and groups that already hold root through sudo in a root-owned trust file (`trust set --owner
+  ADMIN --group admin`; only `wheel` and `admin`, and owners the system confirms are in `admin`), so programs under a
+  prefix they own pass. `Umask` and `SoftResourceLimits` are accepted, `AssociatedBundleIdentifiers` is dropped, a
+  working folder of `/` becomes the home, and XML comments that launchd accepts are read. On one real computer's staged jobs,
+  49 of 73 definitions now pass, against 29 before; the rest need their agent installed first.
+
+### Fixed
+
+- **On Linux, a client no longer misreads a server that has not accepted its connection yet** (`peer_owner` 1.2.0,
+  #460, `docs/COMPATIBILITY.md` "Linux: a server end not accepted yet reads its listener's owner"). The kernel prints
+  such a connection as root's, so a client could refuse its own service, or, running as root, send its token to
+  another account's server. Now an accepted connection decides by its own owner, and one not accepted yet by the
+  owner of the server listening on that address. Other projects that copy `peer_owner.py` were sent the new version.
+  macOS and Windows are unchanged.
+
+The plugin stays 0.30.0.
+
+## 0.34.0 (2026-11-06)
+
+This release prepares a workspace to move to another computer and to run on a computer other accounts share. Local
+servers now refuse a connection from another account on the same computer before reading it. A workspace restored on
+another computer keeps paths under the home folder, and its backup passphrase is asked once and never stored there. A
+secret store kept outside the workspace travels inside the encrypted snapshot, and `full doctor` gives one verdict
+that names a store no snapshot carries. Products can send their daily operations digests (`ops.digest.record`), and a
+daily learning review reports new lessons and failures on the rise. With automatic updates off, a newer version is
+still announced once. Nothing needs you after installing. On a computer with more than one person's account the check
+of the connecting account turns itself on.
+
+### Added
+
+- **Another account's connection refused before it is read** (OBS-355 part 1, #451, `docs/design/ACCESS.md` rule
+  10, `docs/COMPATIBILITY.md` "Servers: another OS account's connection refused"). The local server, memory over HTTP
+  and the keyserver find the account that owns the connecting process and answer `403 peer-foreign-account` for
+  another account, root or launchd, and `403 peer-unverified` when the owner cannot be read, on every path. The check
+  is on when the computer has more than one person's account, or with `config/local.json`
+  `{"loopback": {"peerCheck": "always"}}`; clients check the listener the same way before they send a token.
+  `peer_owner.py` is one standard-library file other projects copy as it is.
+- **A secret store outside the workspace is carried encrypted** (OBS-350 part 1, #453, `docs/COMPATIBILITY.md`
+  "Workspace snapshot: an external secret store carried encrypted"). A snapshot with a passphrase carries the store the
+  settings name under `external/<name>/`, with every file's digest in the manifest; `full vault-digests keep-here`
+  keeps a slot on this computer only, and `unkeep-here` lets it travel again. The restore side follows in a later
+  release: `full restore` does not write the store into place yet.
+- **Products' daily operations digests** (OBS-330, #447, `fabric/FABRIC-CONFORMANCE.md` "Operations digests"). The
+  capability `ops.digest.record` takes one `ops.digest.daily@1` line of the Fabric agent contract (DEC-0153), checked
+  against its closed schema and rules, and keeps the first revision of each project, service, source and day for 400
+  days. The project comes from the access binding (scope `ops.digest.record`) or the delegation token, never from the
+  caller. The manifest declares it as revision 10.
+- **The daily learning review** (OBS-331 part a, #450, `full learning-review show|list|run`). Once a day, after the day
+  settles (06:00 UTC by default, `full configure learning_review settle_hour_utc`), a local JSON report and page list
+  the lessons minted, revised, replaced, promoted or invalidated, the classes held by two or more origins, failures
+  rising in products' digests, and retro-after-work as asked and answered.
+- **One doctor verdict** (OBS-349 part 1, #445). `full doctor` answers `clean` and the rows that need attention; it
+  names an external secret store and whether the newest snapshot carried it, and `observatory_machine` with
+  `section: "move"` returns the move checklist to agents.
+- **A newer version is announced with automatic updates off** (OBS-333, #432). The five-minute check keeps reading
+  the newest release while updates are off, records it as `available` and says it once per version in `full maintain
+  status`, `full doctor`, Health and Home; it never downloads or installs anything.
+- **Observatory declares the connections it makes** (OBS-326, #436; OBS-339 to OBS-342, #442). The well-known document
+  carries `extensions/connections/0.1`: the hub, the release feed and each integration that is on, with a state read
+  from its last receipt; an old receipt reads as stale, and the offline switch applies.
+
+### Changed
+
+- **Paths under the home folder survive another home** (OBS-347, #446). `configure sources` and `configure storage
+  backups` store such a path as `~/...` and answer `stored_as`; a restore rewrites the settings, the machine bundle's
+  folders and tracked folders to the new home and lists what it could not resolve.
+- **Another computer's backup passphrase is asked once and never stored** (OBS-348, #446). `restore` and
+  `machine-restore` take `--passphrase-stdin`; a second-computer restore leaves out `secrets/backup-passphrase`.
+- **A session Fabric starts for a board request gets only its packet's keys** (OBS-323, #437; OBS-343, OBS-344,
+  #440). A dispatch packet is read from a workflow's first revision only, and the lease file is checked on its open
+  descriptor.
+
+### Fixed
+
+- **A Git repository above the installed engine is not its source checkout** (#444). A home folder made into a
+  repository no longer made `use_secret.py` refuse every workspace under it.
+- **Test budgets** (OBS-335, #434; OBS-278, #449): `test_session_reload` gets 300 seconds; `workflow_memory`'s timeout
+  on Windows is a known outcome.
+
+The plugin stays 0.30.0.
+
+## 0.33.1 (2026-11-05)
+
+A patch release. This build carries the analytics App-Key, so the anonymous usage and error data that 0.33.0 turned
+on by default is now sent; 0.33.0 itself had no key and sent nothing. What is sent, and how to turn it off, is
+unchanged: `full analytics status` shows both. Nothing needs you after installing.
+
+### Changed
+
+- **The release wheel carries the analytics App-Key** (OBS-329): the repository secret the release workflow reads was
+  set on 2026-11-05, after 0.33.0 was built without it. No code changed.
+
+## 0.33.0 (2026-11-04)
+
+Observatory now collects anonymous usage and error data by default, so we can see which commands and tools are
+used and where they fail. An event says what ran and how it ended, how long it took and, on a failure, the error's
+class name; it carries a random install id with the version and platform. It never sends keys, paths, names, registry
+content, URLs, prompts or arguments. A one-time notice says so, and `full analytics off`, the apps' Settings switch,
+`OBSERVATORY_ANALYTICS=off` or `DO_NOT_TRACK=1` turn it off. A copy of a repository can now record the prefix of the
+organization it moved to, and Observatory tells you when the copy's name lacks it; a copy's own record may name its
+source as `name@sha`. Nothing needs you after installing.
 
 ### Added
 
@@ -17,6 +262,14 @@ while the major version is 0, a minor release may change behaviour and says so h
   `full doctor` show and change it; `OBSERVATORY_ANALYTICS=off` and `DO_NOT_TRACK=1` turn it off for a process. An
   install that predates this release is on after the update unless a person turned it off. A build without an
   analytics App-Key collects nothing.
+- **The release wheel carries the analytics App-Key** (OBS-329, #426): the release workflow writes it from a
+  repository secret beside `usage_analytics.py`; `tools/check_package.py` admits that one file only in the key's shape.
+  A build without the secret ships no key and collects nothing.
+- **A copy's name prefix** (OBS-332, #428, `docs/COMPATIBILITY.md` "Registry: derivations (OBS-321)"): a curated
+  `config/derivations.json` entry may give `name_prefix`; `copy.name_unprefixed` names a copy whose repository name
+  does not start with it. A wrong value is refused as `bad-prefix`.
+- **A copy's point may be `name@sha`** (OBS-334, #427): `.copy/upstream.json` may write `copy_point` and `last_synced`
+  the way its sync commit's `Source-Revision` line does; the name is checked and dropped.
 
 ## 0.32.0 (2026-11-04)
 

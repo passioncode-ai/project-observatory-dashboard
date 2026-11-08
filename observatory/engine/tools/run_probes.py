@@ -619,8 +619,8 @@ async def run_write_capability(cap: dict) -> tuple[list[dict], str]:
             negotiated = session.protocol_version
             for probe in cap["profile"]["probes"]:
                 args = local_fixture(probe["inputFixture"])
-                results = await assess_record(session, args, out_schema,
-                                              scratch_db=scratch)
+                assessor = WRITE_ASSESSORS.get(probe["id"], assess_record)
+                results = await assessor(session, args, out_schema, scratch_db=scratch)
                 receipts.append({
                     "probe": probe["id"], "capability": cap["name"],
                     "inputFixture": probe["inputFixture"],
@@ -655,6 +655,42 @@ def assess_grant_check(data: dict, OUT_SCHEMA: dict) -> list[dict]:
         clean.get("decision") == "denied" and clean.get("code") == "principal-unproven" and clean.get("level") is None,
         f"{clean.get('decision')} {clean.get('code')} level={clean.get('level')}")
     return a
+
+
+async def assess_ops_digest_record(session, args: dict, out_schema: dict,
+                                   scratch_db: pathlib.Path | None = None) -> list[dict]:
+    """`ops.digest.record` (OBS-330): the probe's stdio server runs under no access binding, so the line is refused
+    `binding-required` and nothing is kept; the operator's own local agent names no project."""
+    a: list[dict] = []
+
+    def say(text: str, ok: bool, note: str = "") -> None:
+        a.append({"assertion": text, "verdict": "PASS" if ok else "FAIL", "note": note})
+
+    store = pathlib.Path(paths.STATE) / "ops-digests"
+
+    def listing() -> list[str]:
+        return sorted(str(p.relative_to(store)) for p in store.rglob("*")) if store.is_dir() else []
+
+    before = listing()
+    res = await session.call_tool("ops.digest.record", dict(args))
+    data = json.loads(res.content[0].text) if res.content else {}
+    try:
+        jsonschema.validate(data, out_schema)
+        schema_ok, schema_note = True, ""
+    except jsonschema.ValidationError as exc:
+        schema_ok, schema_note = False, str(exc).splitlines()[0][:180]
+    say("result validates against ops-digest-record-output.schema.json", schema_ok and not res.is_error,
+        schema_note)
+    say("a stdio server started without an access binding refuses the line with binding-required",
+        data.get("code") == "binding-required", f"{data.get('code')}")
+    say("no line is kept: the digest store is unchanged after the call", listing() == before,
+        f"{len(before)} before, {len(listing())} after")
+    return a
+
+
+#: probe id -> the assessor of a write capability's probe; any other probe of a write capability is
+#: `project.record`'s (`assess_record`).
+WRITE_ASSESSORS = {"ops-digest-record-needs-a-binding": assess_ops_digest_record}
 
 
 READ_ASSESSORS = {

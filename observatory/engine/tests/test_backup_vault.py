@@ -6,11 +6,14 @@ temporary directory, so no test can reach the operator's real Documents folder.
 """
 from __future__ import annotations
 import importlib
+import datetime
 import io
+import json
 import os
 from pathlib import Path
 import sqlite3
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -300,6 +303,31 @@ class Snapshots(Base):
         self.assertTrue(Path(result['snapshot']).is_dir())
 
 
+    def test_latest_under_another_home_names_the_backups_it_found_elsewhere(self):
+        # OBS-347: the owner file names the first machine's home, so the exact-path rule finds
+        # nothing under another user name; the backups are named, never chosen.
+        import maintenance
+        vault.set_passphrase(self.home, PASS)
+        made = Path(upgrade.snapshot(self.home, writers_stopped=True)['snapshot'])
+        ann, bob = self.base / 'Users' / 'ann', self.base / 'Users' / 'bob'
+        folder = self.root / 'obs-0badc0de'
+        folder.mkdir(parents=True)
+        (folder / made.name).write_bytes(made.read_bytes())
+        (folder / vault.OWNER_FILE).write_text(str(ann / '.local/share/obs') + '\n')
+        unrelated = self.root / 'obs-1badc0de'
+        unrelated.mkdir()
+        (unrelated / made.name).write_bytes(made.read_bytes())
+        (unrelated / vault.OWNER_FILE).write_text(str(ann / 'elsewhere/obs') + '\n')
+        with patch.dict(os.environ, {'HOME': str(bob), 'USERPROFILE': str(bob)}):
+            out = maintenance.restore_latest(bob / '.local/share/obs', store=FakeStore())
+        self.assertEqual(out['status'], 'no-backup')
+        self.assertEqual(out['elsewhere'], [{'label': 'obs-0badc0de', 'owner_home_relative': '~/.local/share/obs',
+                                             'newest': str(folder / made.name), 'snapshots': 1}])
+        self.assertEqual(out['next'], f"project-observatory full restore '{folder / made.name}'")
+        self.assertNotIn(str(ann), json.dumps(out), 'only the home-relative tail of the owner file is shown')
+        self.assertFalse((bob / '.local/share/obs').exists(), 'nothing is chosen or restored')
+
+
 class StoreCopies(Base):
     def run_backup(self, *args):
         sys.path.insert(0, str(ROOT / 'tools'))
@@ -495,6 +523,628 @@ class Doctor(Base):
             report = vault.status(self.home)
         self.assertFalse(report['inside_workspace'])
         self.assertEqual(report['warnings'], [])
+
+    # OBS-349 part 1: the secret store the settings name, and a code on every warning.
+
+    def configure(self, **sources):
+        file = self.home / 'config' / 'settings.json'
+        doc = json.loads(file.read_text())
+        doc.setdefault('sources', {}).update({k: str(v) for k, v in sources.items()})
+        file.write_text(json.dumps(doc))
+
+    def carry(self, **record):
+        file = self.home / 'store' / 'raw' / 'secret-store-carry.json'
+        file.parent.mkdir(parents=True, exist_ok=True)
+        at = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        file.write_text(json.dumps({'at': at, 'kind': 'daily', 'file': 'daily-20261106T000000Z.obsnap',
+                                    'state': 'carried', 'reason': None, 'files': 3, 'size': 120, **record}))
+
+    def codes(self, report):
+        return [item['code'] for item in report['warning_items']]
+
+    def item(self, report, code):
+        return next(i for i in report['warning_items'] if i['code'] == code)
+
+    def test_a_store_inside_the_workspace_is_not_external(self):
+        self.assertEqual(vault.status(self.home)['secret_store'], {'external': False})
+        self.configure(secret_store=self.home / 'secrets')
+        self.assertEqual(vault.status(self.home)['secret_store'], {'external': False})
+
+    def test_an_external_store_not_carried_is_a_coded_warning(self):
+        store = self.base / 'external-store'
+        store.mkdir()
+        self.configure(secret_store=store)
+        report = vault.status(self.home)
+        section = report['secret_store']
+        self.assertTrue(section['external'])
+        self.assertTrue(section['exists'])
+        self.assertFalse(section['env_override'])
+        self.assertEqual(section['settings_keys'], ['secret_store'])
+        self.assertIsNone(section['last_carry'])
+        item = self.item(report, 'backups-vault-store-not-carried')
+        self.assertIn(str(store), item['text'])
+        self.assertIn('another machine restored from these backups would not get these keys', item['text'])
+        self.assertTrue(item['step'])
+        self.assertIn(item['text'], report['warnings'])
+        # A snapshot that could not encrypt names the passphrase as the step.
+        self.carry(state='not-carried', reason='no-passphrase')
+        item = self.item(vault.status(self.home), 'backups-vault-store-not-carried')
+        self.assertIn('no-passphrase', item['text'])
+        self.assertIn('backup-passphrase set', item['step'])
+        # A carry older than 48 hours proves nothing about the store as it is now.
+        old = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(hours=49)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        self.carry(at=old)
+        self.assertIn('backups-vault-store-not-carried', self.codes(vault.status(self.home)))
+        # A record that does not read cannot prove the store was carried.
+        (self.home / 'store' / 'raw' / 'secret-store-carry.json').write_text('{not json')
+        report = vault.status(self.home)
+        self.assertEqual(report['secret_store']['last_carry'], {'state': 'unknown'})
+        self.assertIn('backups-vault-store-not-carried', self.codes(report))
+
+    def test_without_a_carrier_the_step_says_the_store_is_copied_by_hand(self):
+        # A release whose snapshots never carry an external store must not send a person to take
+        # another snapshot: that snapshot would not carry it either.
+        store = self.base / 'external-store'
+        store.mkdir()
+        self.configure(secret_store=store)
+        with patch.object(vault, 'secret_store_carrier', return_value=False):
+            item = self.item(vault.status(self.home), 'backups-vault-store-not-carried')
+        self.assertNotIn('workspace-backup', item['step'])
+        self.assertIn(str(store), item['step'])
+        with patch.object(vault, 'secret_store_carrier', return_value=True):
+            item = self.item(vault.status(self.home), 'backups-vault-store-not-carried')
+        self.assertIn('workspace-backup --writers-stopped', item['step'])
+
+    def test_a_carried_store_is_not(self):
+        store = self.base / 'external-store'
+        store.mkdir()
+        self.configure(secret_store=store)
+        self.carry()
+        report = vault.status(self.home)
+        self.assertEqual(report['secret_store']['last_carry']['state'], 'carried')
+        self.assertEqual(report['secret_store']['last_carry']['files'], 3)
+        self.assertNotIn('backups-vault-store-not-carried', self.codes(report))
+
+    def test_a_missing_configured_store_is_named_with_its_configure_step(self):
+        store = self.base / 'gone-store'
+        self.configure(secrets=store)
+        report = vault.status(self.home)
+        self.assertFalse(report['secret_store']['exists'])
+        self.assertEqual(report['secret_store']['settings_keys'], ['secrets'])
+        self.assertNotIn('backups-vault-store-not-carried', self.codes(report), 'the missing store says more')
+        item = self.item(report, 'backups-secret-store-missing')
+        self.assertIn(str(store), item['text'])
+        self.assertIn('configure sources secrets PATH', item['step'])
+
+    def test_nested_settings_name_the_outer_store_once(self):
+        outer = self.base / 'outer-store'
+        (outer / 'inner').mkdir(parents=True)
+        self.configure(secret_store=outer / 'inner', secrets=outer)
+        section = vault.status(self.home)['secret_store']
+        self.assertEqual(section['path'], str(outer))
+        self.assertEqual(section['settings_keys'], ['secret_store', 'secrets'])
+
+    def test_existing_backup_warnings_keep_their_text_and_gain_codes(self):
+        report = vault.status(self.home)
+        self.assertEqual(self.codes(report), ['backups-no-passphrase'])
+        self.assertEqual([i['text'] for i in report['warning_items']], report['warnings'])
+        vault.set_passphrase(self.home, PASS)
+        (self.home.parent / f'{self.home.name}.failed-update-20261101T000000Z').mkdir()
+        (self.home / 'backups' / 'daily-20261101T000000Z').mkdir(parents=True)
+        with patch.dict(os.environ, {'OBSERVATORY_BACKUPS': str(self.home / 'nested')}):
+            report = vault.status(self.home)
+        self.assertEqual(self.codes(report), ['backups-root-inside-workspace', 'backups-failed-update-copy',
+                                              'backups-unencrypted-local'])
+        self.assertEqual([i['text'] for i in report['warning_items']], report['warnings'])
+        steps = {i['code']: i['step'] for i in report['warning_items']}
+        self.assertIn('configure storage backups', steps['backups-root-inside-workspace'])
+        self.assertIn('backups migrate', steps['backups-unencrypted-local'])
+        self.assertNotIn(PASS, repr(report))
+
+    def test_the_environment_override_is_named(self):
+        store = self.base / 'external-store'
+        (store / 'projects').mkdir(parents=True)
+        self.configure(secret_store=store)
+        self.carry()
+        # The environment repeating what the settings name moves nothing.
+        with patch.dict(os.environ, {'OBSERVATORY_VAULT_DIR': str(store / 'projects')}):
+            report = vault.status(self.home)
+        self.assertFalse(report['secret_store']['env_override'])
+        self.assertNotIn('backups-secret-store-env-override', self.codes(report))
+        with patch.dict(os.environ, {'OBSERVATORY_VAULT_DIR': str(self.base / 'elsewhere')}):
+            report = vault.status(self.home)
+        self.assertTrue(report['secret_store']['env_override'])
+        item = self.item(report, 'backups-secret-store-env-override')
+        self.assertIn('OBSERVATORY_VAULT_DIR', item['text'])
+        self.assertIn('configure sources secret_store PATH', item['step'])
+        # A store inside the workspace is carried whole, but a slot folder the environment names is not.
+        self.configure(secret_store=self.home / 'secrets')
+        with patch.dict(os.environ, {'OBSERVATORY_VAULT_DIR': str(self.base / 'elsewhere')}):
+            report = vault.status(self.home)
+        self.assertEqual(report['secret_store'], {'external': False})
+        self.assertIn('backups-secret-store-env-override', self.codes(report))
+
+    def test_observatory_secrets_moves_nothing_while_secret_store_is_set(self):
+        # The vault's root is `sources.secret_store` first; OBSERVATORY_SECRETS is only its fallback.
+        store = self.base / 'external-store'
+        store.mkdir()
+        self.configure(secret_store=store)
+        self.carry()
+        with patch.dict(os.environ, {'OBSERVATORY_SECRETS': str(self.base / 'elsewhere')}):
+            report = vault.status(self.home)
+        self.assertFalse(report['secret_store']['env_override'])
+        self.assertEqual(self.codes(report), ['backups-no-passphrase'])
+
+    def test_observatory_secrets_moves_the_vault_when_only_secrets_is_set(self):
+        store = self.base / 'external-store'
+        store.mkdir()
+        self.configure(secrets=store)
+        self.carry()
+        with patch.dict(os.environ, {'OBSERVATORY_SECRETS': str(store)}):
+            self.assertNotIn('backups-secret-store-env-override', self.codes(vault.status(self.home)))
+        with patch.dict(os.environ, {'OBSERVATORY_SECRETS': str(self.base / 'elsewhere')}):
+            report = vault.status(self.home)
+        self.assertTrue(report['secret_store']['env_override'])
+        self.assertIn('OBSERVATORY_SECRETS', self.item(report, 'backups-secret-store-env-override')['text'])
+
+    def test_a_vault_dir_elsewhere_is_named(self):
+        store = self.base / 'external-store'
+        store.mkdir()
+        self.configure(secret_store=store)
+        self.carry()
+        with patch.dict(os.environ, {'OBSERVATORY_VAULT_DIR': str(self.base / 'other-slots')}):
+            report = vault.status(self.home)
+        self.assertTrue(report['secret_store']['env_override'])
+        self.assertIn('OBSERVATORY_VAULT_DIR', self.item(report, 'backups-secret-store-env-override')['names'])
+
+    def test_a_store_only_the_environment_names_is_reported_as_external(self):
+        # No setting names a store, OBSERVATORY_SECRETS points outside the workspace: the vault's keys
+        # live there, no snapshot carries them, and doctor says where they came from.
+        store = self.base / 'env-store'
+        store.mkdir()
+        with patch.dict(os.environ, {'OBSERVATORY_SECRETS': str(store)}):
+            report = vault.status(self.home)
+        section = report['secret_store']
+        self.assertTrue(section['external'])
+        self.assertEqual(section['path'], str(store))
+        self.assertEqual(section['settings_keys'], [])
+        self.assertEqual(section['environment'], 'OBSERVATORY_SECRETS')
+        self.assertTrue(section['env_override'])
+        self.assertIn('backups-secret-store-env-override', self.codes(report))
+        self.assertNotIn('backups-vault-store-not-carried', self.codes(report), 'one row for one cause')
+        # Inside the workspace it is carried with it.
+        with patch.dict(os.environ, {'OBSERVATORY_SECRETS': str(self.home / 'other-secrets')}):
+            report = vault.status(self.home)
+        self.assertEqual(report['secret_store'], {'external': False})
+
+
+class RotationOrder(Base):
+    """OBS-388: backups taken within one second share their name's stamp, and only a random
+    suffix follows it. Rotation, the newest-first list a restore picks from and the newest
+    machine bundle must follow the order the backups were made in, never that suffix."""
+
+    STAMP = '20261107T211839Z'
+    # Made in this order: by name `aaaaaaaa` sorts first and `ffffffff` last, so a name sort
+    # would keep cccc, eeee and ffff and rotate away bbbb, the newest.
+    MADE = ('cccccccc', 'ffffffff', 'aaaaaaaa', 'eeeeeeee', 'bbbbbbbb')
+
+    def setUp(self):
+        super().setUp()
+        cheap = patch.dict(vault.SCRYPT, {'n': 2 ** 12})
+        cheap.start()
+        self.addCleanup(cheap.stop)
+
+    def make(self, kind='daily', suffix=vault.SNAPSHOT_SUFFIX, same_mtime=True):
+        files = []
+        for tail in self.MADE:
+            dest = self.target() / f'{kind}-{self.STAMP}-{tail}{suffix}'
+            vault.encrypt_stream(dest, lambda writer: writer.write(b'synthetic'), PASS, kind=kind, content='file')
+            files.append(dest)
+        if same_mtime:
+            # A file system that keeps whole seconds (HFS+, FAT, many network shares) gives
+            # them one mtime: the header's creation time still tells them apart.
+            for f in files:
+                os.utime(f, ns=(1_800_000_000_000_000_000, 1_800_000_000_000_000_000))
+        return files
+
+    def test_the_newest_of_several_in_one_second_survives_rotation(self):
+        files = self.make()
+        self.assertEqual(vault.artifacts(self.target(), 'daily', vault.SNAPSHOT_SUFFIX), files)
+        dropped = vault.rotate(self.target(), 'daily', vault.SNAPSHOT_SUFFIX)
+        self.assertEqual(dropped, [f.name for f in files[:-vault.KEEP]])
+        self.assertEqual(vault.artifacts(self.target(), 'daily', vault.SNAPSHOT_SUFFIX), files[-vault.KEEP:])
+        self.assertTrue(files[-1].exists(), 'the newest backup is kept')
+
+    def test_a_clock_set_back_never_drops_the_backup_just_written(self):
+        # OBS-388 review: three backups stamped in the future, then a new one stamped today. By
+        # their stamps the new one is the oldest, and its source folder is already gone.
+        future = []
+        for tail in ('aaaaaaaa', 'bbbbbbbb', 'cccccccc'):
+            dest = self.target() / f'daily-20991231T000000Z-{tail}{vault.SNAPSHOT_SUFFIX}'
+            vault.encrypt_stream(dest, lambda writer: writer.write(b'synthetic'), PASS, kind='daily', content='file')
+            future.append(dest)
+        new = self.target() / f'daily-{self.STAMP}-dddddddd{vault.SNAPSHOT_SUFFIX}'
+        vault.encrypt_stream(new, lambda writer: writer.write(b'synthetic'), PASS, kind='daily', content='file')
+        dropped = vault.rotate(self.target(), 'daily', vault.SNAPSHOT_SUFFIX, keep=3, protect=new)
+        self.assertTrue(new.exists(), 'the backup just written is kept')
+        self.assertEqual(dropped, [future[0].name])
+        self.assertEqual(len(vault.artifacts(self.target(), 'daily', vault.SNAPSHOT_SUFFIX)), 3)
+
+    def test_a_restore_offers_the_newest_first(self):
+        files = self.make()
+        self.assertEqual([c['snapshot'] for c in vault.candidates(self.home)], files[::-1])
+
+    def test_the_newest_machine_bundle_is_the_last_made(self):
+        import machine_backup as MB
+        # find_latest also scans the default roots: point them at empty folders, never the real ones.
+        empty = self.base / 'no-default-roots'
+        for name, value in (('documents_dir', empty / 'Documents'), ('data_dir', empty / 'share')):
+            patcher = patch.object(vault, name, lambda value=value: value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        files = self.make(kind=vault.MACHINE_KIND, suffix=vault.MACHINE_SUFFIX)
+        self.assertEqual(MB.newest(self.home), files[-1])
+        self.assertEqual(MB.find_latest(self.home), files[-1])
+
+    def test_without_a_readable_header_the_mtime_orders_them(self):
+        root = self.target()
+        root.mkdir(parents=True, exist_ok=True)
+        files = []
+        for n, tail in enumerate(self.MADE):
+            f = root / f'daily-{self.STAMP}-{tail}{vault.SNAPSHOT_SUFFIX}'
+            f.write_bytes(b'not an encrypted backup')
+            os.utime(f, ns=(1_800_000_000_000_000_000 + n, 1_800_000_000_000_000_000 + n))
+            files.append(f)
+        self.assertEqual(vault.artifacts(root, 'daily', vault.SNAPSHOT_SUFFIX), files)
+
+    def test_the_stamp_in_the_name_still_orders_across_seconds(self):
+        # The stamp is when the snapshot was taken (an export may encrypt it later): a later
+        # stamp is newer whatever the file times say. The database copies, whose name ends
+        # in the stamp itself, keep their stamp order too.
+        root = self.target()
+        root.mkdir(parents=True, exist_ok=True)
+        later = root / f'daily-20261107T211840Z-00000000{vault.SNAPSHOT_SUFFIX}'
+        earlier = root / f'daily-{self.STAMP}-ffffffff{vault.SNAPSHOT_SUFFIX}'
+        later.write_bytes(b'x')
+        earlier.write_bytes(b'x')
+        os.utime(later, ns=(1_000, 1_000))
+        self.assertEqual(vault.artifacts(root, 'daily', vault.SNAPSHOT_SUFFIX), [earlier, later])
+        dbs = [root / f'{vault.DB_KIND}-{s}{vault.DB_SUFFIX}' for s in ('20261107T211841Z', '20261105T000000Z')]
+        for n, f in enumerate(dbs):
+            f.write_bytes(b'x')
+            os.utime(f, ns=(1_000 + n, 1_000 + n))
+        self.assertEqual(vault.artifacts(root, vault.DB_KIND, vault.DB_SUFFIX), dbs[::-1])
+
+
+class FakeStore:
+    """The OS credential store, in memory: what a restore reads, and proof it never writes."""
+
+    def __init__(self, items=None):
+        self.items, self.puts = dict(items or {}), []
+
+    def get(self, label):
+        return self.items.get(label)
+
+    def put(self, label, value, replace=False):
+        self.puts.append(label)
+        self.items[label] = value
+        return 'file'
+
+    def kind(self):
+        return 'file'
+
+
+def stdin_of(data: bytes):
+    return io.TextIOWrapper(io.BytesIO(data), encoding='utf-8')
+
+
+class PassphraseStdin(unittest.TestCase):
+    """OBS-348: what `--passphrase-stdin` accepts and refuses. No workspace and no backup, so it runs
+    wherever Python does, Windows included."""
+
+    def test_stdin_is_refused_when_it_is_a_terminal_empty_or_too_long(self):
+        read = vault.read_passphrase_stdin
+        self.assertEqual(read(stdin_of(b'a value from a file\n')), 'a value from a file')
+        self.assertEqual(read(stdin_of(b'a value from windows\r\n')), 'a value from windows')
+        self.assertEqual(read(stdin_of(b' kept as typed \n\n')), ' kept as typed \n', 'only one newline goes')
+        self.assertEqual(read(stdin_of(b'x' * vault.STDIN_LIMIT + b'\n')), 'x' * vault.STDIN_LIMIT)
+        for data, code in ((b'', 'passphrase-stdin-empty'), (b'\n', 'passphrase-stdin-empty'),
+                           (b'x' * (vault.STDIN_LIMIT + 1), 'passphrase-stdin-too-long'),
+                           (b'\xff\xfe', 'passphrase-stdin-not-text')):
+            with self.subTest(code=code), self.assertRaises(vault.BackupError) as caught:
+                read(stdin_of(data))
+            self.assertEqual(caught.exception.code, code)
+        # A terminal: `osprivacy.is_terminal` decides (a real console on Windows, `isatty` elsewhere).
+        with patch.object(vault.osprivacy, 'is_terminal', return_value=True), \
+                self.assertRaises(vault.BackupError) as caught:
+            read(stdin_of(b'typed\n'))
+        self.assertEqual(caught.exception.code, 'passphrase-stdin-terminal')
+        closed = stdin_of(b'never read\n')
+        closed.close()
+        for stream in (None, closed):   # no standard input at all, or one already closed: a typed refusal
+            with self.subTest(stream=stream), patch.object(sys, 'stdin', None), \
+                    self.assertRaises(vault.BackupError) as caught:
+                read(stream)
+            self.assertEqual(caught.exception.code, 'passphrase-stdin-empty')
+
+
+class ForeignPassphrase(Base):
+    """OBS-348 (D2): another machine's backup opens with its passphrase given once, on stdin or
+    at a terminal; it is never stored and never replaces this machine's own."""
+    OTHER = 'a synthetic passphrase of the second machine'
+
+    def setUp(self):
+        super().setUp()
+        cheap = patch.dict(vault.SCRYPT, {'n': 2 ** 12})
+        cheap.start()
+        self.addCleanup(cheap.stop)
+        vault.set_passphrase(self.home, PASS)
+        self.file = Path(upgrade.snapshot(self.home, writers_stopped=True)['snapshot'])
+        # The second machine: its own workspace, its own passphrase, its own store.
+        self.second = self.base / 'second workspace'
+        workspace.initialize(self.second)
+        vault.set_passphrase(self.second, self.OTHER)
+        self.store = FakeStore({vault._workspace_label(self.second): self.OTHER})
+
+    def sealed(self):
+        """The second machine's passphrase file and store, as digests: compared, never printed."""
+        import hashlib
+        return (hashlib.sha256(vault.passphrase_file(self.second).read_bytes()).hexdigest(),
+                hashlib.sha256(json.dumps(self.store.items, sort_keys=True).encode()).hexdigest())
+
+    def test_a_snapshot_of_another_workspace_opens_with_a_value_on_stdin_and_nothing_is_stored(self):
+        before = self.sealed()
+        dest = self.base / 'restored on the second machine'
+        with patch.object(vault, 'SecretStore', return_value=self.store):
+            result = upgrade.restore(self.file, dest, stdin_value=PASS, second_machine=True)
+        self.assertEqual(result['passphrase_source'], 'stdin')
+        self.assertEqual(self.sealed(), before)
+        self.assertEqual(self.store.puts, [])
+        self.assertFalse((dest / 'secrets/backup-passphrase').exists(), 'the second machine makes its own')
+        self.assertEqual((dest / 'secrets/demo-slot').read_text(), 'synthetic opaque private value')
+        self.assertNotIn(PASS, json.dumps(result))
+
+    def test_the_prompt_is_asked_once_and_only_after_every_other_candidate_failed(self):
+        asked = []
+
+        def typed(prompt):
+            asked.append(prompt)
+            return PASS
+
+        wrong = FakeStore({self.file.parent.name: 'a stored value that is not it'})
+        with patch.object(vault, 'SecretStore', return_value=wrong), \
+                patch.object(vault.osprivacy, 'is_terminal', return_value=True), \
+                patch('getpass.getpass', side_effect=typed), \
+                patch.dict(os.environ, {vault.PASS_ENV: 'an environment value that is not it'}):
+            result = upgrade.restore(self.file, self.base / 'asked', stdin_value='a piped value that is not it')
+        self.assertEqual(result['passphrase_source'], 'prompt')
+        self.assertEqual(asked, [f'Backup passphrase for {self.file.parent.name}: '])
+        asked.clear()
+        with patch.object(vault, 'SecretStore', return_value=FakeStore()), \
+                patch.object(vault.osprivacy, 'is_terminal', return_value=True), \
+                patch('getpass.getpass', side_effect=lambda prompt: asked.append(prompt) or 'typed wrong'):
+            with self.assertRaises(vault.BackupError) as caught:
+                upgrade.restore(self.file, self.base / 'typed wrong')
+        self.assertEqual(caught.exception.code, 'passphrase-refused')
+        self.assertEqual(len(asked), 1, 'one prompt per run, so a script cannot loop on it')
+        self.assertFalse((self.base / 'typed wrong').exists())
+        with patch.object(vault, 'SecretStore', return_value=FakeStore({self.file.parent.name: PASS})), \
+                patch.object(vault.osprivacy, 'is_terminal', return_value=True), \
+                patch('getpass.getpass', side_effect=AssertionError('no prompt when a stored value opens it')):
+            self.assertEqual(upgrade.restore(self.file, self.base / 'stored')['passphrase_source'], 'stored')
+
+    def test_without_a_terminal_and_without_stdin_the_refusal_names_the_sources_tried(self):
+        wrong = FakeStore({self.file.parent.name: 'a stored value that is not it',
+                           self.file.parent.name + vault.PREVIOUS: 'an earlier stored value that is not it'})
+        with patch.object(vault, 'SecretStore', return_value=wrong), \
+                patch.object(vault.osprivacy, 'is_terminal', return_value=False), \
+                patch.dict(os.environ, {vault.PASS_ENV: 'an environment value that is not it'}):
+            with self.assertRaises(vault.BackupError) as caught:
+                upgrade.restore(self.file, self.base / 'refused')
+        message = str(caught.exception)
+        self.assertEqual(caught.exception.code, 'passphrase-refused')
+        for source in ('environment', 'stored', 'stored-previous'):
+            self.assertIn(source, message)
+        self.assertIn('--passphrase-stdin', message)
+        self.assertNotIn('not it', message, 'a value is never in a refusal')
+        self.assertFalse((self.base / 'refused').exists())
+
+    def test_a_wrong_candidate_costs_one_chunk_not_a_whole_file(self):
+        src, enc = self.base / 'plain.bin', self.base / 'many chunks' / 'out.obsdb'
+        src.write_bytes(os.urandom(20_000))
+        with patch.object(vault, 'CHUNK', 1024):
+            vault.encrypt_file(src, enc, PASS, kind='observatory-db')
+        opened = []
+        original = vault._Reader._open_next
+
+        def counting(reader):
+            opened.append(1)
+            return original(reader)
+
+        with patch.object(vault._Reader, '_open_next', counting):
+            self.assertFalse(vault.opens(enc, 'not the passphrase at all'))
+            self.assertEqual(len(opened), 1)
+            opened.clear()
+            secret, header, source = vault.open_with(enc, base=None, label=None, given='not the passphrase at all',
+                                                     stdin_value=PASS)
+        self.assertEqual((secret == PASS, source, header['kind']), (True, 'stdin', 'observatory-db'))
+        self.assertEqual(len(opened), 1 + 1 + 20, 'one chunk for the wrong one, then the winner once in full')
+        with open(enc, 'r+b') as f:   # a damaged header is not a passphrase problem
+            f.write(b'NOTOURS\n')
+        with self.assertRaises(vault.BackupError) as caught:
+            vault.open_with(enc, base=None, label=None, given=PASS)
+        self.assertIsNone(caught.exception.code)
+
+    def test_the_command_line_refuses_an_empty_stdin_and_restores_with_a_value(self):
+        # From the command line: refused before any write, exit 2, the code named.
+        dest = self.base / 'never made'
+        err = io.StringIO()
+        with patch.dict(os.environ, {'OBSERVATORY_HOME': str(dest)}), patch.object(sys, 'stdin', stdin_of(b'')), \
+                patch.object(sys, 'stderr', err), patch.object(sys, 'stdout', io.StringIO()):
+            self.assertEqual(upgrade.main(['restore', str(self.file), '--passphrase-stdin']), 2)
+        self.assertIn('passphrase-stdin-empty', err.getvalue())
+        self.assertFalse(dest.exists())
+        out = io.StringIO()
+        with patch.dict(os.environ, {'OBSERVATORY_HOME': str(dest), 'OBSERVATORY_SYSTEM_SETUP': '0'}), \
+                patch.object(sys, 'stdin', stdin_of(PASS.encode() + b'\n')), \
+                patch.object(sys, 'stderr', io.StringIO()), patch.object(sys, 'stdout', out):
+            self.assertEqual(upgrade.main(['restore', str(self.file), '--passphrase-stdin']), 0)
+        self.assertEqual(json.loads(out.getvalue())['passphrase_source'], 'stdin')
+
+    def test_restore_latest_asks_once_per_foreign_label(self):
+        import maintenance
+        upgrade.snapshot(self.home, writers_stopped=True)   # two snapshots under one label
+        import shutil
+        shutil.rmtree(self.home)
+        asked = []
+        foreign = FakeStore()   # this machine's store never held the other machine's passphrase
+        with patch.object(vault.osprivacy, 'is_terminal', return_value=False):
+            out = maintenance.restore_latest(self.home, store=foreign, ask=True)
+        self.assertEqual(out['status'], 'backups-found-locked')
+        self.assertIn('--passphrase-stdin < FILE', out['next'])
+        self.assertFalse(self.home.exists() and any(self.home.iterdir()))
+        with patch.object(vault.osprivacy, 'is_terminal', return_value=True), \
+                patch('getpass.getpass', side_effect=lambda prompt: asked.append(prompt) or PASS):
+            self.assertEqual(maintenance.restore_latest(self.home, store=foreign)['status'], 'backups-found-locked',
+                             'only `restore --latest` asks; `init` names the backups and the steps')
+            self.assertEqual(asked, [])
+            out = maintenance.restore_latest(self.home, store=foreign, ask=True)
+        self.assertEqual((out['status'], out['passphrase_source']), ('restored', 'prompt'))
+        self.assertEqual(len(asked), 1)
+        self.assertEqual(foreign.puts, [], 'nothing is stored')
+        shutil.rmtree(self.home)
+        with patch.object(vault.osprivacy, 'is_terminal', return_value=False):
+            out = maintenance.restore_latest(self.home, store=foreign, stdin_value=PASS)
+        self.assertEqual((out['status'], out['passphrase_source']), ('restored', 'stdin'))
+
+
+
+class ThisMachineOnly(Base):
+    """OBS-350 (spec 3.2a): a slot marked with `full vault-digests keep-here` stays on this machine; the
+    encrypted snapshot carries the rest of the store and names it."""
+
+    SLOT = 'projects/alpha/prod/API_KEY'
+
+    def setUp(self):
+        super().setUp()
+        cheap = patch.dict(vault.SCRYPT, {'n': 2 ** 12})
+        cheap.start()
+        self.addCleanup(cheap.stop)
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from secret_store_fixture import make_external_store, all_values
+        self.values = all_values()
+        self.store = make_external_store(self.base / 'external-store')
+        file = self.home / 'config' / 'settings.json'
+        doc = json.loads(file.read_text())
+        doc.setdefault('sources', {})['secret_store'] = str(self.store)
+        file.write_text(json.dumps(doc))
+        vault.set_passphrase(self.home, PASS)
+        self.outputs = []
+
+    def tearDown(self):
+        text = '\n'.join(self.outputs)
+        for value in self.values:
+            self.assertNotIn(value, text, 'a value reached an answer, a manifest or a command\'s output')
+        super().tearDown()
+
+    def tool(self, name, *args, value=None):
+        env = {**os.environ, 'OBSERVATORY_VAULT_DIR': str(self.store / 'projects')}
+        run = subprocess.run([sys.executable, str(ROOT / 'tools' / name), *args], input=value, text=True,
+                             capture_output=True, env=env, timeout=60)
+        self.outputs.append(run.stdout + run.stderr)
+        return run
+
+    def carried(self):
+        result = upgrade.snapshot(self.home, writers_stopped=True, kind='daily')
+        opened = vault.extract_tree(Path(result['snapshot']), self.base / 'opened', PASS)
+        self.addCleanup(__import__('shutil').rmtree, opened, True)
+        manifest = config.read_json(opened / 'manifest.json')
+        self.outputs += [json.dumps(result), json.dumps(manifest)]
+        return opened / 'external' / 'secret_store', manifest['externals'][0]
+
+    def test_a_marked_slot_is_left_out_and_named(self):
+        run = self.tool('vault_digests.py', 'keep-here', 'alpha', 'prod', 'API_KEY', '--why', 'root seed, one home')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        meta = json.loads((self.store / (self.SLOT + '.meta.json')).read_text())
+        self.assertEqual(meta['this_machine_only']['why'], 'root seed, one home')
+        store, entry = self.carried()
+        self.assertEqual(entry['state'], 'carried', 'a slot kept here does not make the store not carried')
+        self.assertFalse((store / self.SLOT).exists())
+        self.assertFalse((store / (self.SLOT + '.meta.json')).exists())
+        self.assertIn({'path': self.SLOT, 'reason': 'this-machine-only'}, entry['not_carried'])
+        self.assertNotIn(self.SLOT, {f['path'] for f in entry['files']})
+        self.assertEqual((entry['kept_here'], entry['vault_slots']), (1, 2))
+        self.assertTrue((store / 'projects/alpha/stage/DB_PASSWORD').is_file(), 'the other slots travel')
+        moves = (self.store / 'projects' / 'movements.jsonl').read_text()
+        self.assertIn('mark-this-machine-only', moves)
+
+    def test_unmarking_carries_the_slot_in_the_next_snapshot(self):
+        self.assertEqual(self.tool('vault_digests.py', 'keep-here', 'alpha', 'prod', 'API_KEY',
+                                   '--why', 'root seed, one home').returncode, 0)
+        run = self.tool('vault_digests.py', 'unkeep-here', 'alpha', 'prod', 'API_KEY')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        self.assertIn('unmark-this-machine-only', (self.store / 'projects' / 'movements.jsonl').read_text())
+        store, entry = self.carried()
+        self.assertEqual((store / self.SLOT).read_bytes(), (self.store / self.SLOT).read_bytes())
+        self.assertEqual(entry['kept_here'], 0)
+        # Clearing a mark that is not there is refused.
+        self.assertEqual(self.tool('vault_digests.py', 'unkeep-here', 'alpha', 'prod', 'API_KEY').returncode, 2)
+
+    def test_marking_a_slot_this_machine_does_not_hold_is_refused(self):
+        run = self.tool('vault_digests.py', 'keep-here', 'alpha', 'prod', 'ABSENT', '--why', 'root seed, one home')
+        self.assertEqual(run.returncode, 2)
+        run = self.tool('vault_digests.py', 'keep-here', 'alpha', 'prod', 'API_KEY', '--why', 'short')
+        self.assertEqual(run.returncode, 2, 'a reason of at least 8 characters, as mark asks')
+
+    def test_the_mark_survives_a_new_value(self):
+        self.assertEqual(self.tool('vault_digests.py', 'keep-here', 'alpha', 'prod', 'API_KEY',
+                                   '--why', 'root seed, one home').returncode, 0)
+        run = self.tool('vault.py', 'put', 'alpha', 'prod', 'API_KEY', '--force', value='fixture-value-008')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        meta = json.loads((self.store / (self.SLOT + '.meta.json')).read_text())
+        self.assertIn('this_machine_only', meta)
+        store, entry = self.carried()
+        self.assertFalse((store / self.SLOT).exists())
+
+
+    def test_a_rotated_kept_slot_leaves_its_archives_behind_too(self):
+        self.assertEqual(self.tool('vault_digests.py', 'keep-here', 'alpha', 'prod', 'API_KEY',
+                                   '--why', 'root seed, one home').returncode, 0)
+        run = self.tool('vault.py', 'rotate', 'alpha', 'prod', 'API_KEY', value='fixture-value-008')
+        self.assertEqual(run.returncode, 0, run.stderr)
+        retired = sorted(p.name for p in (self.store / 'projects/alpha/prod').iterdir() if '.retired-' in p.name)
+        self.assertTrue(retired, 'rotate archives the old value beside the slot')
+        store, entry = self.carried()
+        carried = [f['path'] for f in entry['files']]
+        self.assertFalse([p for p in carried if p.startswith(self.SLOT)], carried)
+        self.assertFalse([p for p in store.rglob('*') if p.name.startswith('API_KEY')])
+        held = {r['path'] for r in entry['not_carried'] if r['reason'] == 'this-machine-only'}
+        self.assertEqual(held, {self.SLOT, self.SLOT + '.meta.json',
+                                *(f'projects/alpha/prod/{name}' for name in retired)})
+
+    def test_a_mark_that_does_not_read_keeps_the_slot_here(self):
+        # Fail closed: a metadata file that may carry a keep-here mark but does not read is not a reason
+        # to carry the slot.
+        meta = self.store / (self.SLOT + '.meta.json')
+        for name, damage in (('not json', lambda: meta.write_text('{not json')),
+                             ('not utf-8', lambda: meta.write_bytes(b'\xff\xfe{}')),
+                             ('too large', lambda: meta.write_text('{"x": "' + 'a' * 70000 + '"}')),
+                             ('not an object', lambda: meta.write_text('[]')),
+                             ('a folder', lambda: (meta.unlink(), meta.mkdir()))):
+            with self.subTest(name):
+                # Five snapshots in one second: before OBS-388 rotation ordered same-second names by
+                # their random suffix, so the newest could be rotated away (RotationOrder now proves
+                # it is kept). Each case still starts with an empty root.
+                for old in vault.artifacts(self.target(), 'daily', vault.SNAPSHOT_SUFFIX):
+                    old.unlink()
+                if meta.is_dir():
+                    meta.rmdir()
+                damage()
+                store, entry = self.carried()
+                self.assertFalse((store / self.SLOT).exists())
+                self.assertIn({'path': self.SLOT, 'reason': 'unreadable'}, entry['not_carried'])
+                self.assertEqual(entry['state'], 'carried')
+                __import__('shutil').rmtree(self.base / 'opened', True)
 
 
 if __name__ == '__main__':

@@ -125,6 +125,32 @@ A mark is kept in the slot's own metadata (`NAME.meta.json`, `differs_on_purpose
 slot this machine holds can be marked; `--why` (8 to 200 characters) is refused, exit 2, when it
 holds a control character or a credential shape.
 
+A second mark keeps a slot on one machine on purpose (OBS-350): a root seed or an administrator token
+whose single home is this machine.
+
+    project-observatory full vault-digests keep-here PROJECT ENV NAME --why "root seed, one home"
+    project-observatory full vault-digests unkeep-here PROJECT ENV NAME
+
+It is kept in the same metadata (`this_machine_only: {why, at}`), journaled (`mark-this-machine-only`,
+`unmark-this-machine-only`) and refused the same way (a slot this machine does not hold, a `--why` under
+8 characters, a mark that is not there to clear: exit 2). The encrypted workspace snapshot leaves the
+slot and its metadata out and names it with the reason `this-machine-only` (`secret_store_carry.py`).
+The manifest row carries `"this_machine_only": true` (a peer row with any other value there is refused
+as malformed). The view reads this machine's `only here` as `only here on purpose`, and a peer's slot
+this machine does not hold as `only on <machine> on purpose`; `--json` gives the cell
+`"on_purpose": "this-machine-only"`. Neither is a difference: the view exits 0 when nothing else
+differs, and the one-line summary counts them (`1 kept on one machine on purpose`). A restore never
+deletes a slot of that name another machine already holds: the mark is the source machine's statement,
+not an order to delete elsewhere.
+
+A second-machine restore (OBS-350 part 2) moves the first machine's own manifest, which the workspace
+snapshot holds as `<state>/vault-digests/local.json`, to `<state>/vault-digests/peers/<its machine>.json`
+(`peer-<hex8>.json` when its machine name is this machine's, or a peer of that name is already there), after
+`read_manifest` accepts it; a file it does not accept stays where it is and the restore's
+`digest_manifest` names it. The carried store brings the estate key, so this machine's first `write` makes a
+`local.json` of its own instead of refusing the first machine's as a key lost, and the view compares against
+the first machine at once. A same-machine restore keeps `local.json` as it is.
+
 A rotation marks the other copies stale without a separate step: the manifest carries each slot's
 `rotated_at`, and a `differs` cell names the side that rotated later, comparing the times (not
 their text, so `10:00+02:00` is earlier than `09:00Z`); a side that never rotated is the older one.

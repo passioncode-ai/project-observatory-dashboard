@@ -9,7 +9,8 @@ proves it. A rule without a test is written as a gap, not as a guarantee.
 Project Observatory runs on one machine for one operator. Reaching it at all means being local, and
 **authority comes from something a remote party cannot obtain**:
 
-- a loopback socket;
+- a loopback socket of this OS account (on a host with several accounts the servers check the
+  peer's account, rule 10; loopback itself is one per machine, not one per account);
 - a token file at mode 600 in the workspace;
 - the operator's own terminal.
 
@@ -20,8 +21,9 @@ a referer are labels at most.
 
 | Surface | Reached by | Authority | What it can do | Checks |
 |---|---|---|---|---|
-| Dashboard server (`tools/serverd.py`, 127.0.0.1) | a browser or `curl` on this machine; a local Fabric host | none for the pages and `/.well-known/fabric-service`; the workspace's `service.token` (600) as `Authorization: Bearer` for `/fabric/v1/events` | GET pages, `/health`, `/remote`, `/leaks`, `/skills`, the well-known document, the events feed | loopback bind; `Host` names this server; `Origin`, when sent, is this server; `Sec-Fetch-Site: cross-site` refused; POST answered 405; one copy per workspace (instance lock) — see [FABRIC-SERVICE.md](FABRIC-SERVICE.md) |
-| Keyserver (`tools/keyserver.py`, 127.0.0.1) | the dashboard page it serves, or a local client | the workspace token (`X-Observatory-Token`), handed to a page the keyserver itself served, or read from the 600 token file | mint, limit, revoke, leak, reveal, annotate, disable, enable, rotate-key | loopback bind only; exact `Host`; exact same-origin `Origin` when present; one token header compared with `compare_digest`; bounded JSON body; `put` and `rotate` refused, because values travel only on stdin |
+| Dashboard server (`tools/serverd.py`, 127.0.0.1) | a browser or `curl` on this machine; a local Fabric host | none for the pages and `/.well-known/fabric-service`; the workspace's `service.token` (600) as `Authorization: Bearer` for `/fabric/v1/events` | GET pages, `/health`, `/remote`, `/leaks`, `/skills`, the well-known document, the events feed | loopback bind; `Host` names this server; `Origin`, when sent, is this server; `Sec-Fetch-Site: cross-site` refused; POST answered 405; one copy per workspace (instance lock), see [FABRIC-SERVICE.md](FABRIC-SERVICE.md); before all of them, on a host with several OS accounts, the peer's account (rule 10) |
+| Keyserver (`tools/keyserver.py`, 127.0.0.1) | the dashboard page it serves, or a local client | the workspace token (`X-Observatory-Token`), handed to a page the keyserver itself served, or read from the 600 token file | mint, limit, revoke, leak, reveal, annotate, disable, enable, rotate-key | loopback bind only; on a host with several OS accounts the peer's account (rule 10) before the handler runs; exact `Host`; exact same-origin `Origin` when present; one token header compared with `compare_digest`; bounded JSON body; `put` and `rotate` refused, because values travel only on stdin |
+| Memory over HTTP (`mcp/http_service.py`, 127.0.0.1) | an agent or service holding an access binding | the binding's bearer, or a Fabric delegation token for the meter | the memory tools of the binding's scope | the peer's OS account (rule 10) first, then `Host`, `Origin`, the bearer, the rate |
 | MCP server (`mcp/server.py`, stdio) | an agent the operator started | the process was started by the operator | the reads; `observatory_record` and `observatory_propose` append to the ledger; the workflow tools write checkpoints, handoff packs and executor leases ([AGENT-MEMORY.md](AGENT-MEMORY.md)) | every note or proposal lands `proposed` with confidence below 1, and nothing here can promote it; a checkpoint needs the workflow's lease token; every workflow write is redacted before it is stored |
 | CLI (`observatory.py`, `tools/*.py`) | the operator's shell | the operator | everything the tools do | values only on stdin (`vault.py put`, `install_key.py`); destinations enumerated, not taken from input |
 
@@ -66,11 +68,90 @@ a referer are labels at most.
    - `test_install_writes_the_descriptor_then_the_plist`.
 8. **Errors don't reflect secrets.** An unexpected failure answers with a fixed sentence.
    - `test_unexpected_exception_does_not_reflect_sensitive_detail`.
+9. **(Reserved for the client side, OBS-355 part 2: a bearer leaves only for a listener of this
+   account and this workspace.)**
+10. **On a host with several OS accounts another account's connection is refused before it is
+    read.** Loopback is one per machine: every account's processes reach every port any account
+    listens on. When the host has more than one person's account (`host_accounts.count()`: the
+    local accounts that can log in, hidden administrators and an enabled Guest included, joined
+    with the people's uids that run processes now; a host bound to a directory, or a count that
+    cannot be read, counts as several) or `config/local.json` sets `{"loopback": {"peerCheck":
+    "always"}}` (a value other than `auto` or `always`, or a file that does not read, reads as
+    `always`), the local server, memory over HTTP and the keyserver find the OS account of each
+    connecting peer from the host's socket table (`peer_owner.py`) and answer anything but this
+    account with `403 {"error":"peer-foreign-account"}` (another account, root, launchd) or
+    `403 {"error":"peer-unverified"}` (the owner could not be read), `Connection: close`, on every
+    path, the dashboard pages and `/.well-known/fabric-service` included. Nothing of the request is
+    parsed or logged: after the 403 is written, the bytes the peer had already sent are received
+    and discarded unparsed (at most 64 KiB, half a second) so the close does not reset the answer
+    away. Memory over HTTP gets the request line and headers parsed by uvicorn first and uses none
+    of them; `X-Forwarded-For` cannot change the address it checks (`proxy_headers` off), and a
+    WebSocket upgrade is refused. Any failure of the check is a `peer-unverified` refusal, never an
+    admission. On a one-account host nothing changes and no table is read. Each refused connection
+    writes one JSON line on the server's stderr (at most one per peer uid and code a minute). The
+    local server's refusals are counted in its receipt `store/raw/serverd.json` (`peer`) and shown
+    by `full doctor` (`loopback.refused`); memory over HTTP and the keyserver count in their own
+    process only. On Linux the table prints a connection the server has not accepted yet with uid 0
+    and inode 0, which is not its owner. A client therefore reads the server end's row while it
+    has an inode: from `accept()` on it carries the accepting process's uid and decides, so another
+    account that accepted during our server's restart and gave the port back is still refused.
+    Only a row with inode 0 takes the owner of the listener rows (state 0A) on the server's address
+    and port: the exact bind, else the wildcard; rows of one uid count as that uid, rows of
+    different uids or none are `unknown`. A queued connection dies with its listener and two uids
+    cannot listen on one address and port at once, so a swapped listener shows as `no-row`, never
+    as ours. A server reading a client end without its inode (a socket its process closed) answers
+    `peer-unverified`. An
+    owner's uid is compared with this process's before uid 0 reads as the system's, so a process
+    running as root owns root's sockets; pid 1 stays the system's (`peer_owner.py` 1.2.0).
+    On macOS 27 a process that is not Apple's own binary (Homebrew's or uv's Python) sees the
+    socket table empty, or holding only its own rows. Such a restricted table (no row of another
+    uid, or of another pid where the table shows only pids, or unreadable) proves nothing absent,
+    so the owner is read from this account's own processes instead (`libproc`: `proc_listpids` for this uid, then each process's socket
+    descriptors), which another account's processes refuse: a socket found there is this
+    account's, anything else is `unknown` (`table-restricted`) and refused `peer-unverified`, never
+    `peer-foreign-account`. The proof is that a process of this account holds the descriptor, not
+    the socket's own credential, so a socket another account passed in with SCM_RIGHTS to a process
+    of ours that takes foreign descriptors would read as ours; a client that knows the server's pid
+    closes that with `expect_pid`. A process whose real and effective uids differ is refused this
+    path (`setuid-context`). `listener` answers only for this account's exact 127.0.0.1 bind and
+    never `none`; a client reads the server's accepted socket again for up to half a second, until
+    the server has called `accept()`. Since 1.3.1 (contract DEC-0155, RT-1) the bare reason
+    `table-restricted` means this account's sockets were read and none matches, and
+    `table-restricted: <detail>` means the proof could not be read (calibration, libproc,
+    `setuid-context`); a restricted table is remembered for 30 seconds (`peer_owner.py` 1.3.1).
+    - `test_foreign_and_unverified_are_refused_before_the_request_line`;
+    - `test_foreign_refused_before_host_origin_and_bearer`,
+      `test_x_forwarded_for_does_not_change_the_peer_address`, `test_a_websocket_is_refused`;
+    - `test_any_failure_is_a_typed_peer_unverified`;
+    - `test_foreign_is_refused_before_the_handler_exists`;
+    - `test_one_account_serves_as_before`, `test_one_account_and_auto_never_reads_the_table`;
+    - `test_peer_picks_the_client_socket`, `test_both_ends_of_a_real_pair_are_this_account`;
+    - `test_a_socket_not_among_this_uids_is_unknown_never_another_account`,
+      `test_libproc_never_answers_another_account_system_or_none`,
+      `test_server_end_reads_again_until_the_server_accepts`,
+      `test_the_libproc_path_reads_a_real_pair_and_a_child_listener`;
+    - `test_an_unaccepted_row_whose_listener_is_ours_reads_as_ours`,
+      `test_an_inode_zero_row_falls_back_to_the_listener`,
+      `test_an_accepted_row_of_another_uid_refuses_even_with_our_listener`,
+      `test_an_accepted_row_of_ours_passes`,
+      `test_a_root_client_refuses_another_accounts_slow_listener`,
+      `test_a_root_client_owns_its_own_root_listener`,
+      `test_listener_rows_of_one_uid_count_as_that_uid`,
+      `test_two_listeners_with_different_uids_are_unknown`, `test_no_listener_is_unknown`,
+      `test_the_server_reading_a_client_row_without_a_socket_fails_closed`,
+      `test_on_linux_an_unaccepted_server_end_is_checked_through_its_listener`,
+      `test_a_connection_not_accepted_yet_is_this_accounts`.
 
 ## Gaps, stated
 
-- **Local users are trusted.** Any process running as the operator's user can read the token file.
-  The model separates this machine from the web, not one local process from another.
+- **Local processes of the same account are trusted.** Any process running as the operator's user can
+  read the token file. The model separates this machine from the web and, since rule 10, one OS
+  account from another; not one process of an account from another.
+- **The relay is exempt from rule 10.** Its admission is cryptographic (the estate record's
+  signatures), and behind a TLS terminator every peer is the terminator's process, which may run as
+  another account or root.
+- **Rule 10 is the servers' half.** A client of this engine still sends its bearer to whatever
+  listens on the port it was given (OBS-355 part 2 checks the server end first).
 - **The MCP server has no per-tool scope.** An agent that can start it can call all eighteen tools. Its
   writes are bounded by rule 5, not by who the agent is.
 - **The dashboard server's GET data is visible to any local process.** It holds names and verdicts,

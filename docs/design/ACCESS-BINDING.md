@@ -26,7 +26,7 @@ is N-015/N-016.
 | 3 | **Everything else is denied by default.** An HTTP request needs a bearer whose digest matches exactly one binding, issued for this server's audience (`observatory:<instance>`), unexpired and unrevoked. | No binding, no access. An audience stops a bearer issued for one instance from opening another. |
 | 4 | **The registry holds digests, never tokens.** `credentialRef` is `{kind: bearer-sha256, digest}`. One credential maps to one binding. | A leaked registry must not be a leaked credential. A bearer that names two principals names none. |
 | 5 | **An HTTP binding names its projects** and always expires. Only `local:stdio` covers every project. | A remote principal that reads across every project is the global scope D-3 and §7.2 exclude. |
-| 6 | **Scopes are explicit:** `memory.read`, `memory.search`, `memory.record`, `memory.checkpoint`, `memory.handoff`. An unknown scope, `memory.forget` among them, is denied until it is defined. | A scope added by accident is a privilege added by accident. |
+| 6 | **Scopes are explicit:** `memory.read`, `memory.search`, `memory.record`, `memory.checkpoint`, `memory.handoff`, and `ops.digest.record` (OBS-330, below). An unknown scope, `memory.forget` among them, is denied until it is defined. | A scope added by accident is a privilege added by accident. |
 | 7 | **Effect has a ceiling: `read` < `propose`.** The operator's authority is never a binding effect, and a request for it is denied (`effect-above-ceiling`). | Writes through the wire are proposals. Only a person at a terminal promotes them. |
 | 8 | **A session binding names its workflows.** A binding with `workflows` (a one-shot binding for a Fabric or Switchboard session) must name the workflow on every request and can touch no other. | A handed-over session continues one piece of work. It does not gain the project. |
 | 9 | **Visibility follows the class ceiling.** A record is visible when its classification (plan aliases mapped) is at or below the ceiling. An unknown class is never visible. | Search applies it inside its candidate query, before ranking and limits (N-009). |
@@ -43,6 +43,20 @@ records in `config/node-lifecycle.json` which tools and targets ONE binding's ca
 same principal (one issued to read memory, say) is refused there (403), and revoking or letting the named binding
 expire refuses the caller's next lifecycle call. The memory tools never read that grant, and a binding's memory scopes
 never read the lifecycle grant either.
+
+### A binding over stdio: ops.digest.record
+
+`ops.digest.record` (OBS-330, `ops_digest_store.py`) records a product's daily operations digest for one project,
+and the project is the transport's. Over stdio that is a binding too: the connection that starts the server passes
+`--binding-token-file PATH` (or `OBSERVATORY_BINDING_TOKEN_FILE`), and at each call the tool reads the owner-only
+file, hashes the bearer and resolves it with `resolve` exactly as an HTTP request is resolved (this server's audience,
+expiry, revocation, rule 11), then authorizes the scope `ops.digest.record` with the effect `propose` on the
+binding's project. A binding that names more than one project is refused (`binding-not-one-project`): the line names
+no project, so the binding must; `full access-binding issue` refuses to issue one with this scope. The flag changes nothing else: every other tool of that stdio server is still
+`local:stdio`'s, and `local:stdio` does not hold the scope, so a server without the flag answers `binding-required`.
+On the memory-http door the same tool takes no binding's bearer (`delegation-required`): it takes a delegation token
+the hub minted for `project-observatory` with that scope, verified as the meter verifies its own (DL-13), and reads the
+project from the token.
 
 ## The refusal envelope
 

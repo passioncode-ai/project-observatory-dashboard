@@ -1,0 +1,4 @@
+{
+ "about": "Capabilities this engine serves before the release that publishes their schemas declares them. A capability added between releases pins its schemas at the tag of the release that will ship it (AGENTS.md, Releasing; ENG-018), and fabric-agent.json may not pin a tag newer than the engine's version (tools/check_manifest_urls.py), so the declaration waits here and interop.mcp_capabilities serves it from here. The release whose version reaches the pinned tag moves each entry into fabric-agent.json's capabilities (provider.revision + 1, tools/fabric_hash.py), empties this list and updates the probe and revision counts; tests/test_ops_digest_record.py fails until it does.",
+ "capabilities": []
+}

@@ -386,6 +386,220 @@ def test_a_slot_is_released_only_under_a_grant() -> None:
           journal and value not in journal, "IT LEAKED")
 
 
+def test_a_dispatched_run_gets_only_its_packets_keys() -> None:
+    """OBS-323 (Fabric's on-demand sessions spec §3.4): under a workflow Fabric wrote for a board request, a slot is
+    released only to the lease holder (OBSERVATORY_WORKFLOW_LEASE, taken out of the environment), only when the
+    packet's `credentials` name it, only from the project `fabric-project` resolves to, and only until the deadline.
+    A helper that inherits FABRIC_DISPATCH_WORKFLOW without the lease is refused; the journal records the request."""
+    import sqlite3 as _sqlite3
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    import memory_redact
+    from store import workflow as W
+    d, env = estate()
+    fproject = "2d3e4f50-3333-4444-8555-666677778888"
+    request = "0b1e2c3d-1111-4222-8333-444455556666"
+    registry, scratch, db = d / "registry", pathlib.Path(env["OBSERVATORY_SCRATCH"]), d / "store.db"
+    registry.mkdir()
+    (registry / "projects.json").write_text(json.dumps({"projects": [
+        {"id": "project:demo", "name": "demo", "local_folders": [str(d / "estate" / "demo")]}]}), encoding="utf-8")
+    (scratch / "fabric-attribution.json").write_text(json.dumps(
+        {"aliases": {"project:demo": {"alias": f"fabric:{fproject}"}}}), encoding="utf-8")
+    env = {**env, "OBSERVATORY_VAULT_DIR": str(d / "vault"), "OBSERVATORY_DB": str(db),
+           "OBSERVATORY_REGISTRY": str(registry)}
+    value, other = "sk-" + "or-v1-" + "D1sp4tch" * 4, "sk-" + "or-v1-" + "0th3rK3y" * 4
+    for name, v in (("DEMO_SLOT", value), ("OTHER_SLOT", other)):
+        put = subprocess.run([sys.executable, str(ROOT / "tools/vault.py"), "put", "demo", "prod", name],
+                             input=v, env=env, capture_output=True, text=True, timeout=60)
+        check(f"dispatch: {name} is put", put.returncode == 0, put.stderr[-200:])
+    conn = _sqlite3.connect(db)
+    conn.row_factory = _sqlite3.Row
+    conn.executescript((ROOT / "store/schema.sql").read_text(encoding="utf-8"))
+    red = memory_redact.Redactor(known_loader=lambda: {})
+
+    def packet(deadline):
+        return {"goal": "answer the request", "credentials": [{"project": "demo", "env": "prod", "name": "DEMO_SLOT"}],
+                "artifacts": [{"kind": "other", "ref": f"board-request:{request}"},
+                              {"kind": "other", "ref": "capability:analytics.ask"},
+                              {"kind": "other", "ref": f"fabric-project:{fproject}"},
+                              {"kind": "other", "ref": "deadline:" + deadline.strftime("%Y-%m-%dT%H:%M:%SZ")}]}
+    later = _dt.now(_tz.utc) + _td(hours=1)
+    wf = W.checkpoint_write(conn, owner="service:fabric", idempotency_key="key-dispatch-0001", step_id="packet",
+                            status="in_progress", body=packet(later), project_id="project:demo", redactor=red)
+    conn.commit()
+    child = d / "child.py"
+    child.write_text("import os\nprint('len', len(os.environ.get('DEMO_SLOT', '')))\n"
+                     "print('lease-inherited', 'OBSERVATORY_WORKFLOW_LEASE' in os.environ)\n", encoding="utf-8")
+
+    def run(names="DEMO_SLOT", lease=wf["leaseId"], args=("--env", "prod", "--workflow", wf["workflowId"]),
+            extra=None):
+        e = {**env, **(extra or {})}
+        if lease:
+            e["OBSERVATORY_WORKFLOW_LEASE"] = lease
+        return subprocess.run([sys.executable, str(ROOT / "tools/use_secret.py"), "run", *args, "demo", names, "--",
+                               sys.executable, str(child)], env=e, capture_output=True, text=True, timeout=60)
+
+    p = run()
+    check("dispatch: the lease holder gets the named slot", f"len {len(value)}" in p.stdout, p.stderr[-300:])
+    check("dispatch: and the child does not inherit the lease", "lease-inherited False" in p.stdout, p.stdout)
+    for why, kw, code in (("without the lease", {"lease": None}, "not-lease-holder"),
+                          ("with another lease", {"lease": "wl_" + "x" * 32}, "not-lease-holder"),
+                          ("a slot the packet does not name", {"names": "OTHER_SLOT"}, "slot-not-named"),
+                          ("without --env", {"args": ("--workflow", wf["workflowId"])}, "env-required"),
+                          ("a helper that inherits only FABRIC_DISPATCH_WORKFLOW",
+                           {"lease": None, "args": ("--env", "prod"),
+                            "extra": {"FABRIC_DISPATCH_WORKFLOW": wf["workflowId"]}}, "not-lease-holder")):
+        p = run(**kw)
+        check(f"dispatch: {why} is {code}", p.returncode == 2 and code in p.stderr and "len" not in p.stdout,
+              f"rc={p.returncode} err={p.stderr[-300:]}")
+    # The packet is frozen at the dispatcher's write (B1): the run that holds the lease cannot widen it with its next
+    # checkpoint, and an ordinary step that leaves it out keeps its keys.
+    widened = packet(later + _td(days=30))
+    widened["credentials"].append({"project": "demo", "env": "prod", "name": "OTHER_SLOT"})
+    try:
+        W.checkpoint_write(conn, owner="agent:claude-code", idempotency_key="key-dispatch-0002", step_id="widen",
+                           status="in_progress", body=widened, workflow_id=wf["workflowId"],
+                           lease_token=wf["leaseId"], redactor=red)
+        frozen = False
+    except W.PacketFrozen:
+        frozen = True
+    check("dispatch: a later checkpoint that widens the packet is refused", frozen)
+    p = run(names="OTHER_SLOT")
+    check("dispatch: and the widened slot is still not handed out", p.returncode == 2 and "slot-not-named" in p.stderr
+          and "len" not in p.stdout, p.stderr[-300:])
+    W.checkpoint_write(conn, owner="agent:claude-code", idempotency_key="key-dispatch-0003", step_id="step",
+                       status="in_progress", body={"goal": "answer the request", "done": [
+                           {"step_id": "read", "result": "read the request"}]},
+                       workflow_id=wf["workflowId"], lease_token=wf["leaseId"], redactor=red)
+    conn.commit()
+    p = run()
+    check("dispatch: a step that leaves the packet out keeps its keys", f"len {len(value)}" in p.stdout,
+          p.stderr[-300:])
+    # The lease from a file the session keeps (M2): never on a command line; refused unless it is this user's
+    # private regular file.
+    lease_file = d / "lease"
+    lease_file.write_text(wf["leaseId"] + "\n", encoding="utf-8")
+    import osprivacy
+    osprivacy.make_private(lease_file)  # 0600 on POSIX, owner-only on Windows
+    p = run(lease=None, extra={"OBSERVATORY_WORKFLOW_LEASE_FILE": str(lease_file)})
+    check("dispatch: the lease is read from a private file", f"len {len(value)}" in p.stdout, p.stderr[-300:])
+    child_env = d / "child_env.py"
+    child_env.write_text("import os\nprint('file-inherited', 'OBSERVATORY_WORKFLOW_LEASE_FILE' in os.environ)\n",
+                         encoding="utf-8")
+    p = subprocess.run([sys.executable, str(ROOT / "tools/use_secret.py"), "run", "--env", "prod", "--workflow",
+                        wf["workflowId"], "demo", "DEMO_SLOT", "--", sys.executable, str(child_env)],
+                       env={**env, "OBSERVATORY_WORKFLOW_LEASE_FILE": str(lease_file)}, capture_output=True,
+                       text=True, timeout=60)
+    check("dispatch: and the child does not inherit the file's name", "file-inherited False" in p.stdout,
+          p.stdout + p.stderr[-300:])
+    p = run(lease=None, extra={"OBSERVATORY_WORKFLOW_LEASE_FILE": str(d / "no-such-lease")})
+    check("dispatch: a lease file that is not there is lease-file-refused",
+          p.returncode == 2 and "lease-file-refused" in p.stderr and "len" not in p.stdout, p.stderr[-300:])
+    if os.name != "nt":  # Windows keeps no permission bits; its owner-only check is osprivacy's own suite
+        os.chmod(lease_file, 0o644)
+        p = run(lease=None, extra={"OBSERVATORY_WORKFLOW_LEASE_FILE": str(lease_file)})
+        check("dispatch: a lease file others may read is lease-file-refused",
+              p.returncode == 2 and "lease-file-refused" in p.stderr and "len" not in p.stdout, p.stderr[-300:])
+        osprivacy.make_private(lease_file)
+        link = d / "lease-link"
+        link.symlink_to(lease_file)
+        p = run(lease=None, extra={"OBSERVATORY_WORKFLOW_LEASE_FILE": str(link)})
+        check("dispatch: a link to a lease file is lease-file-refused",
+              p.returncode == 2 and "lease-file-refused" in p.stderr and "len" not in p.stdout, p.stderr[-300:])
+    # A request whose deadline has passed: its own workflow, since no checkpoint may move a packet's deadline.
+    past = W.checkpoint_write(conn, owner="service:fabric", idempotency_key="key-dispatch-0004", step_id="packet",
+                              status="in_progress", body=packet(_dt.now(_tz.utc) - _td(minutes=1)),
+                              project_id="project:demo", redactor=red)
+    conn.commit()
+    p = run(lease=past["leaseId"], args=("--env", "prod", "--workflow", past["workflowId"]))
+    check("dispatch: after the deadline nothing is handed out", p.returncode == 2 and "deadline-passed" in p.stderr
+          and "len" not in p.stdout, p.stderr[-300:])
+    conn.close()
+    journal = (d / "state" / "logs" / "secret-use.jsonl").read_text(encoding="utf-8")
+    rows = [json.loads(line) for line in journal.splitlines()]
+    check("dispatch: the journal records the request a release served",
+          any(r.get("action") == "use" and r.get("request") == f"board-request:{request}" for r in rows), journal[-400:])
+    check("dispatch: and each refusal by its code", {r.get("dispatch") for r in rows if r.get("action") == "use-refused"}
+          >= {"not-lease-holder", "slot-not-named", "env-required", "deadline-passed"}, journal[-400:])
+    check("dispatch: and a lease file it would not read",
+          "lease-file-refused" in {r.get("dispatch") for r in rows if r.get("action") == "use-refused"}, journal[-400:])
+    check("dispatch: never the lease or a value", wf["leaseId"] not in journal and past["leaseId"] not in journal
+          and value not in journal and other not in journal, "IT LEAKED")
+
+
+def test_the_lease_file_is_judged_on_its_opened_descriptor() -> None:
+    """OBS-344: the lease file is opened without following a link and without waiting, and whether it is a regular
+    file, this user's and private is read from the OPENED descriptor, never from the path beforehand, so a file
+    swapped in between a look and the open cannot be read. The swap itself cannot be timed in a test; what is shown
+    is that the decision follows the descriptor: with every path-based stat answering a lie, a private file still
+    passes and a readable one is still refused. A FIFO is refused without waiting, a link is refused."""
+    from unittest import mock
+    import osprivacy
+    import use_secret as U
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-lease-fd-"))
+    lease = "wl_" + "L" * 32
+    good = d / "lease"
+    good.write_text(lease + "\n", encoding="utf-8")
+    osprivacy.make_private(good)
+    saved = (U._WORKFLOW_LEASE, U._LEASE_FILE)
+
+    def read(path: pathlib.Path) -> tuple[str | None, str]:
+        U._WORKFLOW_LEASE, U._LEASE_FILE = None, str(path)
+        try:
+            return U.workflow_lease(), ""
+        except U.LeaseFileRefused as exc:
+            return None, str(exc)
+
+    try:
+        got, why = read(good)
+        check("lease fd: a private regular file of this user is read", got == lease, why)
+        check("lease fd: and the refusal text never carries it", lease not in why)
+        if os.name != "nt":  # Windows keeps no permission bits and no FIFOs; its owner-only check is osprivacy's suite
+            real_stat, real_lstat = os.stat, os.lstat
+
+            def lie(real, private: bool):
+                def fake(target, *a, **kw):
+                    info = real(target, *a, **kw)
+                    mode = (info.st_mode & ~0o777) | (0o600 if private else 0o644)
+                    return os.stat_result((mode,) + tuple(info)[1:])
+                return fake
+
+            # Every path-based stat says the file is shared: the descriptor says private, and it is read.
+            with mock.patch.object(os, "stat", lie(real_stat, False)), \
+                    mock.patch.object(os, "lstat", lie(real_lstat, False)):
+                got, why = read(good)
+            check("lease fd: a path stat that lies does not refuse a private file", got == lease, why)
+            shared = d / "shared"
+            shared.write_text(lease + "\n", encoding="utf-8")
+            os.chmod(shared, 0o644)
+            # Every path-based stat says the file is private: the descriptor says 0644, and it is refused.
+            with mock.patch.object(os, "stat", lie(real_stat, True)), \
+                    mock.patch.object(os, "lstat", lie(real_lstat, True)):
+                got, why = read(shared)
+            check("lease fd: a path stat that lies does not pass a shared file", got is None and "chmod 600" in why,
+                  why)
+            got, why = read(shared)
+            check("lease fd: mode 644 is refused", got is None and "chmod 600" in why, why)
+            link = d / "lease-link"
+            link.symlink_to(good)
+            got, why = read(link)
+            check("lease fd: a link is refused, not followed", got is None and "link" in why, why)
+            fifo = d / "lease-fifo"
+            os.mkfifo(fifo)
+            got, why = read(fifo)  # opened non-blocking: a FIFO nobody writes would otherwise hang here
+            check("lease fd: a FIFO is refused without waiting", got is None and "not a regular file" in why, why)
+            folder = d / "lease-folder"
+            folder.mkdir()
+            got, why = read(folder)
+            check("lease fd: a folder is refused", got is None and why != "", why)
+        big = d / "big"
+        big.write_text("x" * 5000, encoding="utf-8")
+        osprivacy.make_private(big)
+        got, why = read(big)
+        check("lease fd: more than 4 KiB is refused", got is None and why != "", why)
+    finally:
+        U._WORKFLOW_LEASE, U._LEASE_FILE = saved
+
+
 def test_where_reports_the_source_it_would_take() -> None:
     d, env = estate()
     p = subprocess.run([sys.executable, str(ROOT / "tools/use_secret.py"), "where",
@@ -600,6 +814,8 @@ if __name__ == "__main__":
                test_vault_only_refuses_a_project_env_file,
                test_serve_starts_a_service_from_the_vault_and_rotation_names_it,
                test_a_slot_is_released_only_under_a_grant,
+               test_a_dispatched_run_gets_only_its_packets_keys,
+               test_the_lease_file_is_judged_on_its_opened_descriptor,
                test_the_leak_scan_finds_a_planted_value,
                test_the_file_a_value_lives_in_is_not_a_sighting,
                test_an_undistinctive_value_is_named_rather_than_hunted,

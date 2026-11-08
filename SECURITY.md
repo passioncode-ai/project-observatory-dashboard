@@ -71,7 +71,9 @@ downloads, verifies and installs it (`full update --apply --unattended`; a relea
 that declares a step needing a person is verified and held, not installed), and on
 macOS the matching app, never while the app runs. Once a day it writes an encrypted
 snapshot of the workspace to the backups folder. `full auto-update off` stops the
-checks, downloads and installs and keeps the daily backup; `full maintain uninstall`
+downloads and installs and keeps the daily backup; the check job still reads the release
+feed on its schedule, so a newer version is announced, and installs only on a person's
+`full update --apply`; `full maintain uninstall`
 removes the schedule, and `full init` and `full update` leave it removed until
 `full maintain ensure` or `full auto-update on`. `full init` schedules the job only
 from a person's terminal or with `OBSERVATORY_SYSTEM_SETUP=1`
@@ -111,6 +113,16 @@ them as a multi-tenant service. The always-on dashboard server's events feed
 (`/fabric/v1/events`) requires the workspace's `service.token` (mode 600) as
 `Authorization: Bearer`; its pages and its `/.well-known/fabric-service` identity
 document stay open to local reads. See [the service design](docs/design/FABRIC-SERVICE.md).
+
+Loopback is one per machine, not one per OS account. On a host with more than one
+person's account (or with `loopback.peerCheck` set to `always` in `config/local.json`),
+the dashboard server, memory over HTTP and the keyserver read the connecting peer's
+account from the host's socket table and refuse any other account's (and root's)
+connection with `403 peer-foreign-account`, or `403 peer-unverified` when the owner
+cannot be read, before reading its request, on every path. The relay is exempt: its
+admission is signed. On a one-account host nothing changes. Clients of this engine do
+not yet check whose listener they send a bearer to (OBS-355 part 2). See
+[the access model](docs/design/ACCESS.md), rule 10.
 
 The meter and the vault-slot and keyserver doors accept a Fabric delegation token only from the estate issuer
 `config/meter.json` names (or the issuer the hub's `hub.json` names beside its own keys), checked in the order of
@@ -185,7 +197,9 @@ only when you turn them on:
   the copy is a generic-password item in the login Keychain, service
   "Project Observatory backups", account the workspace label, written and read with
   `security`; the value travels on stdin, never as an argument. A locked keychain can
-  show an unlock dialog when a backup or the maintenance job reaches it. Elsewhere the
+  show an unlock dialog when a backup or the maintenance job reaches it. An account
+  with no login Keychain that takes the item (a headless one) gets the owner-only file
+  below instead, and `kept_outside` reads `file`. Elsewhere the
   copy goes to the Secret Service through `secret-tool`, or, without one, to an
   owner-only file under `~/.config/project-observatory/backup-passphrases/`. A
   passphrase given through `OBSERVATORY_BACKUP_PASSPHRASE` is not copied anywhere.

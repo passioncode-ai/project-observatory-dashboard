@@ -8,6 +8,10 @@
 `issue` also takes `--project` again for more projects, `--scope`, `--class`,
 `--effect read|propose`, `--workflow`, `--days` and `--audience observatory:<instance>`.
 
+A binding with the scope `ops.digest.record`, the effect `propose` and one project is what a
+product's collector records its daily operations digests under over stdio (OBS-330): `issue`
+then also prints the server line with `--binding-token-file`.
+
 A binding lets one principal (`agent:<name>` or `service:<name>`) reach the memory tools
 over HTTP, for the listed projects, scopes, class ceiling and effect ceiling, until it
 expires. The local stdio agent needs none: it is built in (`local:stdio`).
@@ -140,6 +144,9 @@ def cmd_issue(a: argparse.Namespace) -> int:
                          f"file only, never over another")
     if not 1 <= a.days <= MAX_DAYS:
         raise SystemExit(f"access-binding: --days must be 1..{MAX_DAYS}; a binding always expires")
+    if "ops.digest.record" in (a.scopes or []) and len(set(a.projects)) != 1:
+        raise SystemExit("access-binding: a binding with the scope ops.digest.record names exactly one project: the "
+                         "digests it records name none, so the binding says whose they are; issue one per project")
     now = datetime.now(timezone.utc)
     bearer = secrets.token_urlsafe(32)
     binding = {
@@ -170,7 +177,18 @@ def cmd_issue(a: argparse.Namespace) -> int:
           f"({', '.join(binding['scopes'])}; class ≤ {a.class_ceiling}; effect ≤ {a.effect}) "
           f"until {binding['expiresAt']} (revision {reg.revision}). The bearer is in "
           f"{token_file} (owner-only); give the client that file, never its contents in a chat.")
+    if "ops.digest.record" in binding["scopes"]:
+        print(stdio_registration(token_file))
     return 0
+
+
+def stdio_registration(token_file: pathlib.Path) -> str:
+    """The stdio server a product's collector starts to record its daily digests under this binding (OBS-330):
+    `ops.digest.record` reads the bearer from the file at each call, and the project is the binding's one project."""
+    import paths
+    return (f"ops.digest.record over stdio: start the MCP server with the token file, for example\n"
+            f"  \"{sys.executable}\" \"{ROOT / 'mcp' / 'server.py'}\" --stdio --home \"{paths.HOME}\" "
+            f"--binding-token-file \"{token_file.resolve()}\"")
 
 
 def cmd_revoke(binding_id: str) -> int:

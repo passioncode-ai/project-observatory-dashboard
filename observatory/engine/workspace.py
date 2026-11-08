@@ -487,6 +487,26 @@ def _tick_health(base: Path, doc: dict) -> dict:
                               scheduler_enabled=bool((doc.get("features") or {}).get("scheduler")))
 
 
+def storable_path(path: Path) -> tuple[str, str]:
+    """(the value `configure` stores, its form) for an absolute path (OBS-347).
+
+    A path that is this account's home or lies under it is stored `~/<rel>` (`~` for the home
+    itself), so a workspace restored under another home (another user name, another platform's
+    home layout) still finds it: every reader expands `~` (`configuration.load` accepts it since
+    the loader validates `expanduser()`). Compared resolved, without requiring the path to exist.
+    Anything else is stored absolute, as before."""
+    try:
+        rel = path.resolve(strict=False).relative_to(Path.home().resolve())
+    except (ValueError, OSError, RuntimeError):
+        return str(path), "absolute"
+    return ("~" if not rel.parts else "~/" + rel.as_posix()), "home-relative"
+
+
+def path_form(value: str) -> str:
+    """How a stored path reads: `home-relative` (`~` or `~/...`) or `absolute`."""
+    return "home-relative" if value == "~" or value.startswith(("~/", "~\\")) else "absolute"
+
+
 def _switches(doc: dict, section: str) -> dict:
     """{name: on} for every known name, sorted; a switch is on only when `true`,
     the rule `configuration.enabled` applies."""
@@ -495,17 +515,27 @@ def _switches(doc: dict, section: str) -> dict:
     return {name: found.get(name) is True for name in names}
 
 
+def _loopback(base: Path) -> dict:
+    try:
+        import peer_check
+        return peer_check.status(base)
+    except Exception as exc:  # noqa: BLE001 - doctor reports, it never fails on one block
+        return {"error": f"{type(exc).__name__}"}
+
+
 def doctor(base: Path) -> dict:
     runtime = require_runtime()
     config.validate_workspace(base, required=True)
     doc = config.load(base)
     database = validate_data(base, integrity=True)
-    return {"version": config.VERSION, "runtime": runtime, "database": database, "workspace_format": config.WORKSPACE_VERSION,
+    report = {"version": config.VERSION, "runtime": runtime, "database": database, "workspace_format": config.WORKSPACE_VERSION,
             "configuration_schema": doc["schema_version"],
             # EVERY name `configure` accepts, on or off: the onboarding says
             # "list current settings with doctor", and a fresh workspace listed
             # `{}`. Unknown names a hand-edited file carries are kept as found.
-            "sources": {**{k: {"configured": True, "exists": Path(v).expanduser().exists()}
+            # `form` (OBS-347): whether the value moves with the home (`~/...`) or names one path.
+            # An absolute value an older release stored is named as it is, never migrated.
+            "sources": {**{k: {"configured": True, "exists": Path(v).expanduser().exists(), "form": path_form(v)}
                            for k, v in doc.get("sources", {}).items()},
                         **{k: {"configured": False} for k in sorted(config.known_names("sources"))
                            if not doc.get("sources", {}).get(k)}},
@@ -515,7 +545,9 @@ def doctor(base: Path) -> dict:
             "coverage_warnings": coverage_warnings(doc),
             "tracked": __import__("tracked").health(),
             "open_unlinked": __import__("open_unlinked").saved_summary(base=base),
-            "backups": __import__("backup_vault").status(base),
+            "backups": {**__import__("backup_vault").status(base),
+                        **({"form": path_form(doc["storage"]["backups"])}
+                           if isinstance(doc.get("storage"), dict) and doc["storage"].get("backups") else {})},
             # The machine's agent setup (OBS-157): the newest bundle, its age and size, and
             # what it did not carry. Its warnings are also in `maintenance.warnings`.
             "machine_backup": __import__("machine_backup").status(base),
@@ -542,6 +574,10 @@ def doctor(base: Path) -> dict:
             "vector_namespaces": _vector_namespaces(base),
             # PB-137 N-008: who may reach memory over HTTP besides the local stdio agent.
             "access_bindings": _access_bindings(base),
+            # OBS-355: loopback is one per machine. How many people's accounts the host has, whether the
+            # servers' peer check is on (`config/local.json` loopback.peerCheck: auto or always) and how many
+            # connections of another OS account the local server refused before reading them.
+            "loopback": _loopback(base),
             # OBS-162 (contract DEC-0045): whether the meter has the issuer it must trust, the estate's
             # keys and the grant directory; with no issuer every grant check is a denial, and this says so.
             "meter": _meter_readiness(base),
@@ -555,6 +591,62 @@ def doctor(base: Path) -> dict:
             # models.json has neither, and the refusal a call meets says less.
             **({"agent": config.model_readiness(base, _key_report())}
                if (doc.get("features") or {}).get("agent") is True else {})}
+    # OBS-349: one verdict over the maintenance items (which join the backups' and the machine
+    # bundle's), the missing sources and the tick, so "doctor is clean" is a value, not a reading.
+    # It does not cover the other sections yet (organizations, meter, session_servers, analytics,
+    # review, embedding and vector state): those keep their own fields.
+    report.update(verdict(report))
+    return report
+
+
+#: What the verdict reads as news or a person's own choice, never as a gap (decision WA-5): a
+#: release announced, automatic updates or the schedule turned off on purpose, an update waiting
+#: for a quiet moment. A deliberate setting must not keep doctor from ever reading clean.
+INFO_CODES = frozenset({"update-available", "auto-off", "deferred", "schedule-off"})
+#: Tick verdicts (tick_health, PB-132) that say no tick finished as it should: the scheduler is
+#: on, and a dead or stuck tick is the gap a person most often misses. `never` (no tick yet on a
+#: fresh install), `disabled`, `running` and `ok` are not gaps.
+TICK_WARNINGS = frozenset({"interrupted", "stale", "running-long"})
+
+
+def verdict(report: dict) -> dict:
+    """`attention` (what needs a look, each with its area, code, severity, text and step) and
+    `clean` (no item is a warning), from doctor's own sections.
+
+    The maintenance items already join the backups' and the machine bundle's (maintenance.status),
+    so they are the source; each is credited to the section that raised it, and a code is taken
+    once, from its first row. Each missing source is its own `source-missing` row (one per source:
+    two switches needing one folder have one fix). A dead, interrupted or stuck tick is a `tick-<verdict>`
+    row. Other sections (organizations, meter, session servers, analytics, review) are not read yet.
+    Doctor stays a report: its exit code does not follow the verdict."""
+    areas: dict = {}
+    for area in ("backups", "machine_backup"):
+        for item in (report.get(area) or {}).get("warning_items") or []:
+            areas.setdefault(item.get("code"), area)
+    attention: list[dict] = []
+    seen: set = set()
+
+    def add(key, area: str, code: str, text: str, step) -> None:
+        if key in seen:
+            return
+        seen.add(key)
+        attention.append({"area": area, "code": code, "severity": "info" if code in INFO_CODES else "warning",
+                          "text": text, "step": step if isinstance(step, str) and step else None})
+
+    for item in (report.get("maintenance") or {}).get("warning_items") or []:
+        code = str(item.get("code") or "maintenance")
+        add(code, areas.get(code, "maintenance"), code, str(item.get("text") or ""), item.get("step"))
+    for row in report.get("coverage_warnings") or []:
+        source = str(row.get("source") or "")
+        add(("source-missing", source), "sources", "source-missing", f"{source}: {row.get('problem')}",
+            row.get("fix"))
+    tick = report.get("tick") if isinstance(report.get("tick"), dict) else {}
+    if tick.get("verdict") in TICK_WARNINGS:
+        code = f"tick-{tick['verdict']}"
+        # No single command fixes every cause (a scheduler not loaded, a ceiling, a sleep), so the
+        # row carries the tick's own reason and no step.
+        add(code, "tick", code, f"the scheduled tick is {tick['verdict']}: {tick.get('why') or ''}".rstrip(": "), None)
+    return {"attention": attention, "clean": not any(row["severity"] == "warning" for row in attention)}
 
 
 def _analytics(base: Path) -> dict:
@@ -650,7 +742,7 @@ def _parser() -> argparse.ArgumentParser:
     init = sub.add_parser("init", help="create the private workspace, or complete one; an empty home "
                                        "first restores the newest backup a workspace at this path left")
     init.add_argument("--fresh", action="store_true", help="start empty even when backups exist")
-    sub.add_parser("doctor", help="workspace health, sources and backups")
+    sub.add_parser("doctor", help="workspace health, sources, backups and one verdict (attention, clean)")
     sub.add_parser("version", help="the engine, workspace and configuration versions")
     sub.add_parser("onboard", help="print the agent onboarding guide")
     migration = sub.add_parser("migrate-local", help="copy an original full-engine installation into a new workspace; previews without --apply")
@@ -658,7 +750,8 @@ def _parser() -> argparse.ArgumentParser:
     migration.add_argument("--apply", action="store_true")
     migration.add_argument("--writers-stopped", action="store_true")
     conf = sub.add_parser("configure", help="set one setting in config/settings.json; model and budget write config/models.json")
-    conf.add_argument("section", choices=["sources", "integrations", "features", "interface", "storage", "model", "budget"])
+    conf.add_argument("section", choices=["sources", "integrations", "features", "interface", "storage",
+                                                 "learning_review", "model", "budget"])
     conf.add_argument("name")
     conf.add_argument("value")
     phrase = sub.add_parser("backup-passphrase", help="the passphrase that encrypts backups (stdin)")
@@ -836,13 +929,21 @@ def main(argv: list[str]) -> int:
                     f"Unknown {a.section[:-1]}: {a.name}; known: {', '.join(sorted(config.known_names(a.section)))}")
             if a.section in ("model", "budget"):
                 return _configure_models(base, a)
+            stored_as = None
             if a.section == "storage":
                 if a.name not in config.STORAGE_SETTINGS:
                     raise config.ConfigurationError(f"Unknown storage setting: {a.name}; known: {', '.join(config.STORAGE_SETTINGS)}")
                 value = Path(a.value).expanduser()
                 if not value.is_absolute():
                     raise config.ConfigurationError("Storage path must be absolute")
-                value = str(value)
+                value, stored_as = storable_path(value)
+            elif a.section == "learning_review":
+                if a.name not in config.LEARNING_REVIEW_SETTINGS:
+                    raise config.ConfigurationError(f"Unknown learning_review setting: {a.name}; known: "
+                                                    f"{', '.join(config.LEARNING_REVIEW_SETTINGS)}")
+                if not (a.value.isascii() and a.value.isdigit() and len(a.value) <= 2 and int(a.value) <= 23):
+                    raise config.ConfigurationError("learning_review settle_hour_utc is a whole hour from 0 to 23")
+                value = int(a.value)
             elif a.section == "interface":
                 choices = config.INTERFACE_SETTINGS.get(a.name)
                 if choices is None:
@@ -854,7 +955,7 @@ def main(argv: list[str]) -> int:
                 value = Path(a.value).expanduser()
                 if not value.is_absolute():
                     raise config.ConfigurationError("Source path must be absolute")
-                value = str(value)
+                value, stored_as = storable_path(value)
             else:
                 if a.value not in {"true", "false"}:
                     raise config.ConfigurationError("Use true or false")
@@ -864,6 +965,8 @@ def main(argv: list[str]) -> int:
                 doc.setdefault(a.section, {})[a.name] = value
                 write_json(base / "config/settings.json", doc)
             result = {"status": "configured", "section": a.section, "name": a.name}
+            if stored_as:
+                result["stored_as"] = stored_as
             if a.section == "interface":
                 # The pages carry the language they were built in; say how to see it.
                 result["next"] = "project-observatory full open --rebuild"
@@ -890,11 +993,17 @@ def _init(base: Path, *, fresh: bool = False) -> dict:
         # Most often a reinstall on THIS machine: a snapshot that names no machine (taken before 0.30.1)
         # is restored whole and said to be `unknown`; only a known other machine id is restored
         # without that machine's identity (OBS-284).
-        restored = maintenance.restore_latest(base, unknown="keep")
+        # A store the snapshot carried is written only where none is: a reinstall over a surviving
+        # store never fails or overwrites it (OBS-350).
+        restored = maintenance.restore_latest(base, unknown="keep", secret_store="keep")
     result = initialize(base)
     if restored and restored.get("status") == "restored":
         result = {**result, "status": "restored", "restored_from": restored.get("from"),
                   "files": restored.get("files"), "machine": restored.get("machine")}
+        # What happened to a secret store the snapshot carried: under keep a folder not confirmed, busy or
+        # unwritable is skipped, and its `next` names the exact command that writes it (OBS-350).
+        if "secret_store" in restored:
+            result["secret_store"] = restored["secret_store"]
         if (restored.get("machine") or {}).get("mode") == "unknown":
             snap = restored.get("from")
             result["machine"]["next"] = [

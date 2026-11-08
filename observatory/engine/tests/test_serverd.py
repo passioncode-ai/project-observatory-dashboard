@@ -286,6 +286,18 @@ def test_disconnected_clients_are_not_server_failures() -> None:
                 raise self.error
 
     server = SimpleNamespace(server_address=("127.0.0.1", 43210))
+    # `Peer` is no socket (no addresses): the handler is driven as on a one-account host, where the peer
+    # check (OBS-355) is off. On a host with several accounts it would refuse such a peer first
+    # (tests/test_peer_check.py, `test_a_refusal_to_a_peer_that_is_no_socket`), as the CI runners have.
+    saved_gate = serverd.peer_check.GATE
+    serverd.peer_check.GATE = serverd.peer_check.Gate(accounts=lambda: 1)
+    try:
+        _drive_disconnects(serverd, Peer, server)
+    finally:
+        serverd.peer_check.GATE = saved_gate
+
+
+def _drive_disconnects(serverd, Peer, server) -> None:
     for error in (BrokenPipeError(errno.EPIPE, "peer closed"),
                   ConnectionResetError(errno.ECONNRESET, "peer reset")):
         for fail_at in (1, 2):

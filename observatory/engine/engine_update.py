@@ -1251,7 +1251,8 @@ def restore_in_place(base: Path, snapshot: Path) -> Path:
     stage = base.parent / f".{base.name}.update-restore-{uuid.uuid4().hex[:12]}"
     # The snapshot this update took a moment ago on this machine: restored whole, whatever machine
     # id it names (a snapshot from before 0.30.1 names none, OBS-284).
-    workspace_upgrade.restore(snapshot, stage, same_machine=True)
+    # The pre-update snapshot carries no external secret store, and a rollback never touches one (OBS-350).
+    workspace_upgrade.restore(snapshot, stage, same_machine=True, secret_store="skip")
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     failed = base.parent / f"{base.name}.failed-update-{stamp}-{uuid.uuid4().hex[:6]}"
     if (base / "backups").is_dir():
@@ -1613,8 +1614,12 @@ class Transaction:
             try:
                 if self.has_ws:
                     wait_idle(self.base, self.deps.idle_timeout)
+                    # The rollback stage is a plaintext copy under the home's own backups that undo()
+                    # restores, then handed to backup_vault like the managed snapshots: it opts in to
+                    # holding the vault in plaintext while the update runs (OBS-389).
                     receipt = workspace_upgrade.snapshot(
-                        self.base, self.base / "backups" / f"before-update-{uuid.uuid4().hex}", writers_stopped=True)
+                        self.base, self.base / "backups" / f"before-update-{uuid.uuid4().hex}", writers_stopped=True,
+                        update=True, plaintext=True)
                     snapshot = Path(receipt["snapshot"])
                     before = state(self.base)
                     self.step("snapshot", files=receipt["files"])
@@ -1650,6 +1655,13 @@ class Transaction:
         report = self.report
         report.update(status="updated", version=self.release.version, rolled_back=False)
         if self.has_ws:
+            # OBS-333: the version the check announced while updates are off is installed now (or a
+            # later one): nothing, the Mac app's menu included, names it as waiting any more.
+            try:
+                import maintenance
+                maintenance.settle_available(self.base, installed=self.release.version)
+            except Exception:  # noqa: BLE001: the update is done; the next check settles it anyway
+                pass
             for path, version in ((rollback, self.current), (wheel, self.release.version)):
                 if path is not None and path.parent != self.base / CACHE:
                     try:

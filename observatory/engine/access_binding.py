@@ -40,7 +40,10 @@ CLASSES = ("public", "project-internal", "confidential")
 ALIASES = {"private": "confidential", "secret-adjacent": "confidential",
            "internal": "project-internal"}
 SCOPES = ("memory.read", "memory.search", "memory.record", "memory.checkpoint",
-          "memory.handoff")
+          "memory.handoff",
+          # A product's daily operations digests, over stdio, for the binding's one project (OBS-330,
+          # ops_digest_store.py). It opens no memory tool and no memory tool needs it.
+          "ops.digest.record")
 #: `read` < `propose`. `operator` exists only to be refused: it is the authority a
 #: terminal grants (review.py, embedding-policy), never a binding.
 EFFECTS = ("read", "propose")
@@ -94,10 +97,11 @@ class Binding:
     revoked_at: str | None
 
 
-#: The built-in binding of the stdio channel. Not configurable, not storable.
+#: The built-in binding of the stdio channel. Not configurable, not storable. It holds the memory scopes only:
+#: the operator's local agent names no project, so it records no product's digests (OBS-330).
 STDIO_LOCAL = Binding(binding_id="local:stdio", principal="local:stdio", channel="stdio",
                       audience=None, digest=None, projects="all", workflows=None,
-                      scopes=frozenset(SCOPES), class_ceiling="confidential",
+                      scopes=frozenset(s for s in SCOPES if s.startswith("memory.")), class_ceiling="confidential",
                       effect_ceiling="propose", expires_at=None, revoked_at=None)
 
 

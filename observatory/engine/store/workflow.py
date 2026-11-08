@@ -194,6 +194,21 @@ class InvalidInput(WorkflowError):
     """An argument is outside its declared shape. The message names which."""
 
 
+class PacketFrozen(WorkflowError):
+    """A checkpoint would change the packet of a session Fabric started for a board request (OBS-323): its board
+    refs and credentials are frozen at the dispatcher's write. Leaving them out keeps the packet."""
+
+
+class PacketNotFirst(PacketFrozen):
+    """A checkpoint after the first would bring a packet into a workflow whose first checkpoint carried none
+    (OBS-343): a packet is the dispatcher's, written in the checkpoint that starts the workflow, never one the run
+    holding the lease adds later. A PacketFrozen, so a caller that catches that one catches this too."""
+
+
+class DeadlineTooFar(WorkflowError):
+    """A packet's deadline is more than seven days after the write that sets it, the board's limit on a request."""
+
+
 def _now() -> datetime:
     return datetime.now(timezone.utc).replace(microsecond=0)
 
@@ -322,6 +337,13 @@ def checkpoint_body(raw: Any) -> dict[str, Any]:
             raise InvalidInput(f"body.artifacts[{i}].kind must be git, file, url or other")
         if a["kind"] == "git" and a.get("path") and not pathlib.PurePath(a["path"]).is_absolute():
             raise InvalidInput(f"body.artifacts[{i}].path must be absolute for a git artifact")
+    # A session Fabric starts for a board request (OBS-323): its packet's refs in their exact shape, one of each,
+    # and no absolute folder in a packet. A workflow without those refs is not touched.
+    import dispatch_packet
+    try:
+        dispatch_packet.validate(body["artifacts"])
+    except dispatch_packet.Invalid as exc:
+        raise InvalidInput(str(exc)) from None
     for a in body["artifacts"]:
         for key in ("head", "ref"):
             if key in a:
@@ -605,7 +627,16 @@ def checkpoint_latest(conn: sqlite3.Connection, workflow_id: str,
             "checkpoint": None if ckpt is None else _checkpoint_view(ckpt),
             "lease": _lease_view(_active(conn, workflow_id)),
             "pendingHandoff": _lease_view(offer), "lapsedHandoff": lapsed,
-            **_credential_view(ckpt, credential_reader)}
+            **_credential_view(ckpt, credential_reader),
+            **_dispatch_view(conn, workflow_id, wf["status"], now)}
+
+
+def _dispatch_view(conn: sqlite3.Connection, workflow_id: str, status: str, now: datetime) -> dict:
+    """The board refs of a session Fabric started for a request, and its key window (OBS-323); {} otherwise. Read
+    from the frozen packet, never the latest body: a later checkpoint may leave the packet out."""
+    import dispatch_packet
+    seen = dispatch_packet.view(dispatch_packet.packet_of(conn, workflow_id), status, now=now)
+    return {"dispatch": seen} if seen else {}
 
 
 def _credential_view(ckpt: sqlite3.Row | None, reader) -> dict:
@@ -698,7 +729,8 @@ def workflow_list(conn: sqlite3.Connection, *, project_id: str | None = None,
             and quiet > STALL_SECONDS,
             "lease": _lease_view(held),
             "pendingHandoff": _lease_view(offer) if live_offer else None,
-            "handoffs": handoffs, "keptSteps": kept})
+            "handoffs": handoffs, "keptSteps": kept,
+            **_dispatch_view(conn, w["workflow_id"], w["status"], now)})
     answer = {"status": status, "projectId": project_id, "count": len(out), "total": total,
               "workflows": out}
     if more and out:
@@ -866,6 +898,17 @@ def checkpoint_write(conn: sqlite3.Connection, *, owner: str, idempotency_key: s
                                                   prior["revision"] != expected_revision):
                 raise L.RevisionConflict(_checkpoint_id(wid), expected_revision,
                                          0 if prior is None else prior["revision"])
+        # A session Fabric started for a board request (OBS-323): the packet is frozen at the dispatcher's write, so
+        # the run it constrains cannot widen it by writing the next checkpoint, and may leave it out. Only the first
+        # checkpoint, the one that starts the workflow, may carry one (OBS-343): a later one cannot bring a packet
+        # into a workflow that started without.
+        import dispatch_packet
+        try:
+            dispatch_packet.check_write(None if prior is None else dispatch_packet.packet_of(conn, wid), clean, now,
+                                        first=prior is None)
+        except dispatch_packet.Refused as exc:
+            raise {"deadline-too-far": DeadlineTooFar,
+                   "packet-not-first": PacketNotFirst}.get(exc.code, PacketFrozen)(str(exc)) from None
         revision = 1 if prior is None else prior["revision"] + 1
         mid = _checkpoint_id(wid)
         cursor = L.insert_revision(conn, dict(

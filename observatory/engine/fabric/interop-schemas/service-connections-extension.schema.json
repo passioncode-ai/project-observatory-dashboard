@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/service-connections-extension.schema.json",
+  "title": "What an agent uses (fabric-connections/0.1, DEC-0096)",
+  "description": "The value a service puts under the extension key https://fabric.passioncode.ai/agent-contract/extensions/connections/0.1 in its well-known document's extensions: the other agents, models, connectors, stores and channels it uses, and whether each works now. Data for a host's map, never an authority. A host validates the value against this schema and treats an invalid one as not declared; a checker reports it as FAC-SEM-127.",
+  "type": "object",
+  "required": [
+    "connections"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "connections": {
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/connection"
+      }
+    }
+  },
+  "$defs": {
+    "connection": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "target",
+        "state"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9._-]{0,63}$",
+          "description": "Unique in the list; a degraded[].source equal to it is this connection failing."
+        },
+        "kind": {
+          "enum": [
+            "service",
+            "model",
+            "connector",
+            "store",
+            "channel"
+          ]
+        },
+        "target": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": "^[^\\s]+$",
+          "description": "What it reaches: for a service an id.instance key or a product id (lower case, at most one dot), for a model provider/model, otherwise a name. Never a credential or a URL with one."
+        },
+        "capability": {
+          "$ref": "common.schema.json#/$defs/capabilityName",
+          "description": "Only on kind service: the capability it calls (a DEC-0020 capability name)."
+        },
+        "state": {
+          "enum": [
+            "ok",
+            "degraded",
+            "down",
+            "unknown"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "^[^\\n\\r]+$"
+        },
+        "purpose": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "^[^\\n\\r]+$"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 300,
+          "pattern": "^[^\\n\\r]+$"
+        },
+        "lastAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the service last used it or saw it work (RFC 3339)."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "not": {
+                  "const": "service"
+                }
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "capability": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "service"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "target": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]{0,63}(\\.[a-z0-9][a-z0-9-]{0,63})?$"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

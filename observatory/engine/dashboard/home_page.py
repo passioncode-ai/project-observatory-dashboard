@@ -456,10 +456,25 @@ def analytics_notice_html(payload: dict, t: Translator) -> str:
             + f'<p>{said}</p>{_copy(full_command(payload, "analytics off"), t)}</section>')
 
 
+def update_available_html(payload: dict, t: Translator) -> str:
+    """A newer version found while automatic updates are off (OBS-333, ADR-0188 item 4): one calm row
+    on Home with the command that installs it, while the engine has not caught up. Never a finding:
+    off is the person's choice, and the row only says what waits."""
+    m = (payload.get("health") or {}).get("maintenance") or {}
+    version = m.get("available")
+    if m.get("auto") is not False or not version:
+        return ""
+    said = t.mark("Version {version} is available. Automatic updates are off, so it waits for you. "
+                  "Install it when you choose:", version=str(version))
+    return (f'<section class="home-notice" aria-labelledby="home-update-h">'
+            + t.mark("A new version is available", tag="h2", attrs=' class="home-h" id="home-update-h"')
+            + f'<p>{said}</p>{_copy(full_command(payload, "update --apply"), t)}</section>')
+
+
 def home_html(payload: dict, t: Translator | None = None) -> str:
     """Home's body, rendered at build time into the index page."""
     t = t or Translator()
-    notice = analytics_notice_html(payload, t)
+    notice = update_available_html(payload, t) + analytics_notice_html(payload, t)
     if not payload.get("rows"):
         return f'<div id="home" class="home">{notice}{empty_html(payload, t)}</div>'
     return (f'<div id="home" class="home">{notice}{band_html(payload, t)}{needs_html(payload, t)}'

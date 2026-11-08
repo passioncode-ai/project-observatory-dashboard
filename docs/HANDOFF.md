@@ -17,6 +17,70 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-11-08: release 0.35.5](runs/2026-11-08-release-0.35.5/README.md): engine 0.35.5 (`observatory-log` stays
+0.30.0): `full restore` puts the secret store kept outside the workspace back on another computer, under a policy for
+one already there, with `--secret-store-only` and doctor's not-restored warning (OBS-350 part 2).
+
+Next: tag `v0.35.5`, verify and install (receipts in the record); then the «machine lost» drill with the second Mac.
+
+[2026-11-08: release 0.35.4](runs/2026-11-08-release-0.35.4/README.md): engine 0.35.4 (`observatory-log` stays
+0.30.0): migration checksums the same under every Python (OBS-387), the maintenance schedule in an account with no
+GUI session (OBS-361 part 2), backups that keep the newest and say where the passphrase is (OBS-388, OBS-391),
+`workspace-backup --output` refusing secrets without `--plaintext` (OBS-389), a stale staged definition refused at
+cutover (OBS-390).
+
+Released 2026-11-08 (tag `v0.35.4` on `87bff14b`), verified and installed; receipts in the record. Next: OBS-350 part 2 (PR #470).
+
+[2026-11-07: release 0.35.3](runs/2026-11-07-release-0.35.3/README.md): engine 0.35.3 (`observatory-log` stays
+0.30.0): `peer_owner` 1.3.1 names why a restricted macOS table could not prove an owner (contract DEC-0155),
+remembers a restricted table for 30 seconds and keeps its tests independent of their order (OBS-386).
+
+Released 2026-11-07 (tag `v0.35.3` on `a69c6fee`), verified and installed; receipts in the record.
+
+[2026-11-07: release 0.35.2](runs/2026-11-07-release-0.35.2/README.md): engine 0.35.2 (`observatory-log` stays
+0.30.0): the loopback owner check works on macOS 27, where a process sees only its own sockets (`peer_owner` 1.3.0,
+OBS-384, #465); a full table answers as before.
+
+Released 2026-11-07 (tag `v0.35.2` on `4dfe1484`), verified and installed; receipts in the record.
+
+[2026-11-07: release 0.35.1](runs/2026-11-07-release-0.35.1/README.md): engine 0.35.1 (`observatory-log` stays
+0.30.0): `machine-move cutover` also reads `launchctl print gui/<uid>` exit 125 as an account with nobody signed in
+(OBS-361 part 1), which macOS 26.6 answers there; 0.35.0 tried an agent load that launchd refused.
+
+Released: tag `v0.35.1` on `4575bdfc`, verified, installed and announced (receipts in the record). Next: OBS-361
+part 2 after the shared source of truth.
+
+[2026-11-07: release 0.35.0](runs/2026-11-07-release-0.35.0/README.md): engine 0.35.0 (`observatory-log` stays
+0.30.0): jobs of a macOS account with nobody signed in run as system daemons the administrator installs (OBS-361 part
+1, #458; space daemons 1.1.0, #459), and on Linux `peer_owner` 1.2.0 no longer misreads a connection the server has not
+accepted yet (#460).
+
+Released: tag `v0.35.0` on `fbf991d1`, verified, installed and announced (receipts in the record). Next: the
+administrator's real `apply` on the computer whose dry run the record names, then the next row after the shared
+source of truth.
+
+[2026-11-06: release 0.34.0](runs/2026-11-06-release-0.34.0/README.md): engine 0.34.0 (`observatory-log` stays
+0.30.0): another OS account's loopback connection refused (OBS-355 part 1, #451), an external secret store carried
+encrypted (OBS-350 part 1, #453), home-relative paths and another computer's passphrase (OBS-347, OBS-348, #446), one
+doctor verdict (OBS-349 part 1, #445), `ops.digest.record` declared as manifest revision 10 (OBS-330, #447), the daily
+learning review (OBS-331 part a, #450), and an update announced with automatic updates off (OBS-333, #432).
+
+Released: tag `v0.34.0` on `fa4c39ec`, verified, installed and announced (receipts in the record). Next: the next row
+after the shared source of truth.
+
+[2026-11-05: release 0.33.1](runs/2026-11-05-release-0.33.1/README.md): engine 0.33.1, a patch whose wheel carries the
+analytics App-Key (OBS-329), so the anonymous data 0.33.0 turned on is sent.
+
+Released: tag `v0.33.1` on `fd33c60f`, verified (the wheel carries the key) and installed; anonymous data is sent
+(receipts in the record). Next: OBS-326 and OBS-323, then OBS-330 and OBS-331 once the contract tags DEC-0153.
+
+[2026-11-04: release 0.33.0](runs/2026-11-04-release-0.33.0/README.md): engine 0.33.0 (`observatory-log` stays
+0.30.0): anonymous usage and error data on by default (OBS-324, #421), the App-Key in the release wheel (OBS-329,
+#426), a copy's name prefix (OBS-332, #428) and `name@sha` points (OBS-334, #427).
+
+Released: tag `v0.33.0` on `2426ea16`, verified and installed (receipts in the record). Next: the App-Key secret
+(the operator's step), then OBS-330, OBS-331, OBS-333 and OBS-323 for wave 3, by 2026-11-18.
+
 [2026-11-04: release 0.32.0](runs/2026-11-04-release-0.32.0/README.md): engine 0.32.0 (`observatory-log` stays
 0.30.0): copies and moves of repositories (OBS-321, #418), `ssh-keys rekey` in the restore plan and the move checklist
 (OBS-300, OBS-306, #409, #414), the disk guard's Docker VM space (OBS-305, #411), the keyserver on Windows (OBS-309,

@@ -23,7 +23,9 @@ authentication rather than decrypting to something shorter.
     root_info(base)          where backups go, and which setting chose it
     passphrase(base)         OBSERVATORY_BACKUP_PASSPHRASE, else secrets/backup-passphrase
     ensure_passphrase(base)  one by default, mirrored outside the workspace (SecretStore)
+    open_with(path, ...)     the first passphrase that opens an artifact, and where it came from
     candidates(base)         every backup set of a workspace at this path, newest first
+    elsewhere(base)          backup sets the same workspace left under another home
     encrypt_file / encrypt_tree / decrypt_to / extract_tree
     after_snapshot(...)      export a finished snapshot, or rotate it locally
     migrate(base)            move the newest legacy copies into the root
@@ -31,8 +33,10 @@ authentication rather than decrypting to something shorter.
 from __future__ import annotations
 
 import base64
+import collections
 import contextlib
 import datetime
+import fnmatch
 import oslocks
 import osprivacy
 import hashlib
@@ -81,7 +85,16 @@ LEGACY_DB_PREFIX = "observatory.db.backup-"
 
 
 class BackupError(config.ConfigurationError):
-    """A backup could not be written, proven or read. Never carries a value."""
+    """A backup could not be written, proven or read. Never carries a value.
+
+    `code` names a refusal a caller or an agent acts on without parsing the text (OBS-348):
+    `passphrase-refused`, `passphrase-stdin-empty`, `passphrase-stdin-too-long`,
+    `passphrase-stdin-not-text`, `passphrase-stdin-terminal`; `authentication` marks a chunk that
+    did not open. None for every other failure."""
+
+    def __init__(self, message: str = "", code: str | None = None):
+        super().__init__(message)
+        self.code = code
 
 
 # --- where ---------------------------------------------------------------
@@ -159,21 +172,78 @@ def candidates(base: Path) -> list[dict]:
                         continue  # the same name at another path is another workspace
                 except OSError:
                     continue
-            snaps = sorted([f for kind in SNAPSHOT_KINDS
-                            for f in artifacts(folder, kind, SNAPSHOT_SUFFIX)],
-                           key=lambda f: _artifact_stamp(f.name))
             # Every snapshot, so a damaged newest one still leaves an older one to restore.
             found += [{"label": folder.name, "folder": folder, "snapshot": snap,
-                       "stamp": _artifact_stamp(snap.name)} for snap in snaps]
-    return sorted(found, key=lambda c: c["stamp"], reverse=True)
+                       "stamp": _artifact_stamp(snap.name)}
+                      for kind in SNAPSHOT_KINDS for snap in artifacts(folder, kind, SNAPSHOT_SUFFIX)]
+    # Newest first, same-second snapshots included (OBS-388): one order over every folder.
+    order = {snap: n for n, snap in enumerate(order_artifacts(c["snapshot"] for c in found))}
+    return sorted(found, key=lambda c: order[c["snapshot"]], reverse=True)
+
+
+def _home_tail(base: Path) -> tuple[str, ...] | None:
+    """`base` relative to this account's home, as parts; None when it is not under the home."""
+    try:
+        rel = base.resolve().relative_to(Path.home().resolve())
+    except (ValueError, OSError, RuntimeError):
+        return None
+    return rel.parts or None
+
+
+def elsewhere(base: Path) -> list[dict]:
+    """Backup sets a workspace at the SAME place under ANOTHER home left (OBS-347).
+
+    `candidates` keeps its exact-path rule: a folder whose owner file names another path is
+    another workspace. Restored under another user name, though, the owner file names the
+    first machine's home (`<home of a>/...`) and this home is another (`<home of b>/...`), so `--latest` found
+    nothing while the backups were there. This lists, and never chooses, the folders of the
+    same name pattern whose owner path ends in the same home-relative tail as `base` (`<other
+    home>/<rel>` with this workspace's `<rel>`). Only that tail is shown: the other home is a
+    person's path, and the explicit-file restore (`full restore FILE`) needs no owner match."""
+    tail = _home_tail(base)
+    if tail is None:
+        return []
+    roots, seen, out = [], set(), []
+    try:
+        roots.append(root_info(base)["path"].parent)
+    except config.ConfigurationError:
+        pass
+    if sys.platform == "darwin":
+        roots.append(documents_dir() / "Project Observatory" / "Backups")
+    roots.append(data_dir() / "project-observatory-backups")
+    exact = re.compile(rf"{re.escape(base.name)}-(?:[0-9a-f]{{8}}|unknown)")
+    own = str(base.resolve())
+    for root in roots:
+        if root in seen or not root.is_dir():
+            continue
+        seen.add(root)
+        for folder in sorted(root.iterdir()):
+            owner = folder / OWNER_FILE
+            if not exact.fullmatch(folder.name) or not folder.is_dir() or folder.is_symlink() or not owner.is_file():
+                continue
+            try:
+                named = owner.read_text(encoding="utf-8").strip()
+            except (OSError, UnicodeDecodeError):
+                continue
+            parts = Path(named).parts
+            if named == own or len(parts) <= len(tail) or tuple(parts[-len(tail):]) != tail:
+                continue
+            snaps = order_artifacts(f for kind in SNAPSHOT_KINDS for f in artifacts(folder, kind, SNAPSHOT_SUFFIX))
+            if snaps:
+                out.append({"label": folder.name, "owner_home_relative": "~/" + "/".join(tail),
+                            "newest": str(snaps[-1]), "snapshots": len(snaps)})
+    order = {n: i for i, n in enumerate(order_artifacts(Path(e["newest"]) for e in out))}
+    return sorted(out, key=lambda e: order[Path(e["newest"])], reverse=True)
+
+
+_STAMP = re.compile(r"(?:^|-)(\d{8}T\d{6}Z)(?=-|\.|$)")
 
 
 def _artifact_stamp(name: str) -> str:
-    """`<kind>-<YYYYmmddTHHMMSSZ>-…` → the stamp, so kinds sort together by time."""
-    for part in name.split("-"):
-        if len(part) == 16 and part[8] == "T" and part.endswith("Z"):
-            return part
-    return ""
+    """`<kind>-<YYYYmmddTHHMMSSZ>-…` or `<kind>-<YYYYmmddTHHMMSSZ>.<suffix>` → the stamp, so
+    kinds sort together by time ("" when the name carries none)."""
+    found = _STAMP.search(name)
+    return found.group(1) if found else ""
 
 
 # --- the passphrase ------------------------------------------------------
@@ -187,6 +257,11 @@ def passphrase(base: Path | None = None) -> str | None:
     value = os.environ.get(PASS_ENV)
     if value:
         return value
+    return _file_passphrase(base)
+
+
+def _file_passphrase(base: Path | None = None) -> str | None:
+    """The workspace's own passphrase file, whatever the environment says."""
     file = passphrase_file(base)
     if file.is_symlink():
         raise BackupError("The backup passphrase file must not be a symbolic link")
@@ -293,8 +368,10 @@ class SecretStore:
     docs/runs/2026-10-05-auto-update).
 
     macOS: the login Keychain, item service "Project Observatory backups", account = the
-    workspace label. Windows: the Credential Manager, a generic credential named
-    "Project Observatory backups/<label>", kept for this account on this machine (W5).
+    workspace label; an account with no login Keychain to write to (a headless one, OBS-391)
+    keeps it in the owner-only file below instead, and says so. Windows: the Credential
+    Manager, a generic credential named "Project Observatory backups/<label>", kept for this
+    account on this machine (W5).
     Elsewhere: the Secret Service through `secret-tool`, or, without it, an owner-only file
     under ~/.config/project-observatory/backup-passphrases/.
     A value travels on stdin and is never an argument: `security -i` reads its command
@@ -311,6 +388,10 @@ class SecretStore:
         # The Windows Credential Manager, or a stand-in with read/write (the tests).
         self.credentials = credentials if credentials is not None else (
             WindowsCredentials() if self.platform == "win32" else None)
+        #: Where `get` last found each label's item: `kind()` names the store this machine
+        #: tries first, and a Keychain or keyring that did not take the copy left it in the
+        #: owner-only file (OBS-391), so an answer naming where it is kept reads this.
+        self.held_in: dict[str, str] = {}
 
     def kind(self) -> str:
         if self.platform == "darwin" and self.which("security"):
@@ -335,6 +416,9 @@ class SecretStore:
     #: `security find-generic-password` exits 44 when no such item exists; every other
     #: failure (a locked Keychain, interaction not allowed, a timeout) is NOT absence.
     KEYCHAIN_NOT_FOUND = 44
+    #: `add-generic-password` without -U exits 45 when the item already exists: a first copy
+    #: that never replaces one, so it is a refusal and never a reason to write the file.
+    KEYCHAIN_DUPLICATE = 45
 
     def _run(self, argv: list[str], data: str | None = None) -> tuple[int, str]:
         code, out, _ = self._run_full(argv, data)
@@ -357,9 +441,14 @@ class SecretStore:
             code, _ = self._run(["security", "-i"],
                                 f'add-generic-password -a "{label}" -s "{self.SERVICE}" -w {encoded}'
                                 + (" -U" if replace else "") + "\n")
-            if code != 0:
-                raise BackupError("the login Keychain refused the backup passphrase")
-            return kind
+            if code == 0:
+                return kind
+            if code == self.KEYCHAIN_DUPLICATE:
+                raise BackupError(f"the login Keychain already holds a passphrase for {label}")
+            # No login Keychain takes it (a headless account, OBS-391): the owner-only file
+            # keeps the copy outside the workspace instead, as for a keyring that does not
+            # answer (review F7), and the answer names the file, not the Keychain.
+            kind = "file"
         if kind == "credential-manager":
             target = f"{self.SERVICE}/{label}"
             if not replace and self.credentials.read(target) is not None:
@@ -403,28 +492,36 @@ class SecretStore:
         caller then generated a new passphrase and wrote it over the only copy every
         existing backup opens with."""
         label, kind = self._safe(label), self.kind()
+        self.held_in.pop(label, None)
+        keyring_error = None
         if kind == "keychain":
             code, out, err = self._run_full(["security", "find-generic-password", "-a", label,
                                              "-s", self.SERVICE, "-w"])
-            if code == self.KEYCHAIN_NOT_FOUND:
-                return None
             text = out.strip()
-            if code != 0 or not text:
-                raise BackupError(f"the login Keychain did not answer (exit {code}"
-                                  + (f", {err.strip()[:120]}" if err.strip() else "") + ")")
-            if text.startswith("hex:"):
-                try:
-                    return bytes.fromhex(text[4:]).decode("utf-8")
-                except ValueError:
-                    raise BackupError(f"the Keychain item for {label} is not a passphrase this engine wrote") from None
-            return text
+            if code == 0 and text:
+                if text.startswith("hex:"):
+                    try:
+                        text = bytes.fromhex(text[4:]).decode("utf-8")
+                    except ValueError:
+                        raise BackupError(f"the Keychain item for {label} is not a passphrase this engine wrote") from None
+                self.held_in[label] = kind
+                return text
+            # Absent from the Keychain (exit 44), or a Keychain that did not answer: `put`
+            # keeps the copy in the owner-only file when no Keychain took it (OBS-391), so
+            # the file is read before either is called absence or an error.
+            if code != self.KEYCHAIN_NOT_FOUND:
+                keyring_error = (f"the login Keychain did not answer (exit {code}"
+                                 + (f", {err.strip()[:120]}" if err.strip() else "") + ")")
         if kind == "credential-manager":
-            return self.credentials.read(f"{self.SERVICE}/{label}")
-        keyring_error = None
+            value = self.credentials.read(f"{self.SERVICE}/{label}")
+            if value is not None:
+                self.held_in[label] = kind
+            return value
         if kind == "secret-service":
             code, out, err = self._run_full(["secret-tool", "lookup", "service", self.TOOL_SERVICE,
                                              "account", label])
             if code == 0 and out.rstrip("\n"):
+                self.held_in[label] = kind
                 return out.rstrip("\n")
             # `secret-tool lookup` exits 1 with nothing on stderr when the item is absent;
             # a message means no keyring answered. `put` then fell back to the owner-only
@@ -439,6 +536,7 @@ class SecretStore:
                 raise BackupError(f"{file} is readable by others; refusing to read it")
             value = file.read_text(encoding="utf-8").rstrip("\n")
             if value:
+                self.held_in[label] = "file"
                 return value
         if keyring_error:
             raise BackupError(keyring_error)
@@ -537,11 +635,28 @@ def ensure_passphrase(base: Path, store: SecretStore | None = None) -> dict:
             _keep_previous(store, label, stored)
             kind = store.put(label, current, replace=True)
         else:
-            kind = store.kind()
+            # Where the copy IS, not the store this machine tries first: a Keychain that
+            # took nothing left it in the owner-only file (OBS-391).
+            kind = (getattr(store, "held_in", None) or {}).get(label) or store.kind()
+            if kind == "file" and store.kind() != "file":
+                kind = _move_into_store(store, label, current)
     except (BackupError, OSError) as exc:
         return {"passphrase": state, "kept_outside": None,
                 "warning": f"the passphrase is only in {passphrase_file(base)}: {exc}"}
     return {"passphrase": state, "kept_outside": kind, "label": label}
+
+
+def _move_into_store(store: "SecretStore", label: str, value: str) -> str:
+    """A copy the owner-only file kept because the Keychain (or keyring) once took nothing, moved
+    into it once it does: one timed-out unlock dialog must not leave the passphrase in a file for
+    good (OBS-391 review). The file goes only after the store holds the item; any refusal keeps it."""
+    try:
+        kind = store.put(label, value)
+    except (BackupError, OSError):
+        return "file"
+    if kind != "file":
+        store._file(label).unlink(missing_ok=True)
+    return kind
 
 
 def stored_passphrases(store: "SecretStore", label: str) -> list[str]:
@@ -558,6 +673,153 @@ def stored_passphrases(store: "SecretStore", label: str) -> list[str]:
         if value and value not in out:
             out.append(value)
     return out
+
+
+#: The most `--passphrase-stdin` reads (OBS-348): a passphrase, never a file someone piped by mistake.
+STDIN_LIMIT = 4096
+
+
+def read_passphrase_stdin(stream=None) -> str:
+    """The value `--passphrase-stdin` hands over (OBS-348), read once before any other work.
+
+    At most STDIN_LIMIT bytes of UTF-8, one trailing newline (LF or CRLF) removed. A
+    terminal on stdin is refused: there the prompt is the route, and it never echoes what is
+    typed, where a value typed into a shell's stdin is echoed. The value is never logged."""
+    stream = sys.stdin if stream is None else stream
+    if stream is None:   # no standard input at all (a detached process, pythonw on Windows)
+        raise BackupError("passphrase-stdin-empty: --passphrase-stdin found no standard input to read; redirect "
+                          "the passphrase file into the command (`... --passphrase-stdin < FILE`)",
+                          code="passphrase-stdin-empty")
+    if osprivacy.is_terminal(stream):
+        raise BackupError("passphrase-stdin-terminal: --passphrase-stdin reads a file or a pipe, not a terminal; "
+                          "run the command without it to be asked once (nothing typed is shown)",
+                          code="passphrase-stdin-terminal")
+    try:
+        raw = getattr(stream, "buffer", stream).read(STDIN_LIMIT + 3)
+    except (AttributeError, OSError, ValueError):   # closed, or not readable
+        raise BackupError("passphrase-stdin-empty: --passphrase-stdin could not read standard input; redirect "
+                          "the passphrase file into the command (`... --passphrase-stdin < FILE`)",
+                          code="passphrase-stdin-empty") from None
+    if isinstance(raw, str):
+        raw = raw.encode("utf-8")
+    raw = raw or b""
+    if raw.endswith(b"\r\n"):
+        raw = raw[:-2]
+    elif raw.endswith(b"\n"):
+        raw = raw[:-1]
+    if len(raw) > STDIN_LIMIT:
+        raise BackupError(f"passphrase-stdin-too-long: --passphrase-stdin takes at most {STDIN_LIMIT} bytes",
+                          code="passphrase-stdin-too-long")
+    try:
+        value = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise BackupError("passphrase-stdin-not-text: --passphrase-stdin read bytes that are not UTF-8 text",
+                          code="passphrase-stdin-not-text") from None
+    if not value:
+        raise BackupError("passphrase-stdin-empty: --passphrase-stdin read nothing; redirect the passphrase "
+                          "file into the command (`... --passphrase-stdin < FILE`)", code="passphrase-stdin-empty")
+    return value
+
+
+def _first_chunk(path: Path, secret: str) -> dict | None:
+    """The header when `secret` opens the first chunk of `path`, else None.
+
+    One key derivation and one chunk: a wrong passphrase fails there, so trying several
+    candidates costs one chunk each instead of a whole-file pass each. A header that is not
+    ours, or a file cut short before its first chunk, is no passphrase's fault and raises."""
+    with path.open("rb") as stream:
+        reader = _Reader(stream, secret)
+        try:
+            reader._open_next()
+        except BackupError as exc:
+            if exc.code == "authentication":
+                return None
+            raise
+        return reader.header
+
+
+def opens(path: Path, secret: str) -> bool:
+    """Whether `secret` opens `path`'s first chunk (the cheap test before a full pass)."""
+    return _first_chunk(path, secret) is not None
+
+
+def _store_allowed() -> bool:
+    """OBSERVATORY_SYSTEM_SETUP=0 keeps a process away from the OS credential store (audit A25)."""
+    return os.environ.get("OBSERVATORY_SYSTEM_SETUP") != "0"
+
+
+def ask(label: str) -> str | None:
+    """One prompt at a terminal, naming the backups folder the passphrase is for; None elsewhere."""
+    if not osprivacy.is_terminal(sys.stdin):
+        return None
+    import getpass
+    return getpass.getpass(f"Backup passphrase for {label}: ") or None
+
+
+def open_with(path: Path, *, base: Path | None, label: str | None, given: str | None = None,
+              stdin_value: str | None = None, prompt: bool = False, store: "SecretStore | None" = None,
+              verify: bool = True) -> tuple[str, dict, str]:
+    """(secret, header, source) for the first candidate that opens `path` (OBS-348).
+
+    WHY. A restore used to try one passphrase: this workspace's, or the environment's. A backup
+    another machine took opens with THAT machine's passphrase, which this one does not hold, and
+    the only way in was to make it this machine's own (`backup-passphrase set`), overwriting the
+    passphrase every local backup opens with. Each machine keeps its own (decision D2); the
+    other's is handed over once and dropped.
+
+    Candidates, in order, each tried once, a value already tried skipped: `given` (a caller that
+    holds one), OBSERVATORY_BACKUP_PASSPHRASE, `stdin_value` (`--passphrase-stdin`), this
+    workspace's own file (`base`), the OS credential store under the artifact's folder `label`
+    (`stored`, then each earlier one, `stored-previous`), and last, only when `prompt` and stdin
+    is a terminal, one prompt naming the label. Each candidate costs one chunk (`opens`); the
+    winner is then authenticated in full once (`verify`; a caller that authenticates the whole
+    file itself, as `extract_tree` does, passes verify=False).
+
+    THE VALUE IS NEVER KEPT: it is returned to the caller for this one operation and written
+    nowhere, the store included (`SecretStore.put` is never called here). A refusal names the
+    sources tried, never a value."""
+    seen: set[str] = set()
+    tried: list[str] = []
+    name = label or path.parent.name
+
+    def candidates_in_order():
+        yield "given", given
+        yield "environment", os.environ.get(PASS_ENV)
+        yield "stdin", stdin_value
+        if base is not None and (base / "workspace.json").is_file():
+            try:
+                yield "this-workspace", _file_passphrase(base)
+            except BackupError:
+                pass
+        chosen = store if store is not None else (SecretStore() if label and _store_allowed() else None)
+        if label and chosen is not None:
+            for entry in (label, *_previous_labels(label)):
+                try:
+                    value = chosen.get(entry)
+                except (BackupError, OSError):
+                    value = None   # a locked or silent store contributes nothing
+                if value is None and entry != label:
+                    break
+                yield ("stored" if entry == label else "stored-previous"), value
+        if prompt:
+            yield "prompt", ask(name)
+
+    for source, value in candidates_in_order():
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        tried.append(source)
+        header = _first_chunk(path, value)
+        if header is None:
+            continue
+        return value, (verify_file(path, value) if verify else header), source
+    error = BackupError(
+        f"passphrase-refused: no passphrase opens {path.name} (backups folder {name}); tried: "
+        f"{', '.join(dict.fromkeys(tried)) or 'none'}. Hand the other machine's passphrase over once with "
+        f"--passphrase-stdin (`... --passphrase-stdin < FILE`), set {PASS_ENV}, or run the command at a "
+        "terminal to be asked; it is used for this restore and kept nowhere", code="passphrase-refused")
+    error.tried = list(dict.fromkeys(tried))
+    raise error
 
 
 def require_passphrase(base: Path | None = None, *, prompt: bool = False) -> str:
@@ -686,7 +948,7 @@ class _Reader(io.RawIOBase):
             plain = self.aes.decrypt(_nonce(self.prefix, self.counter, final), sealed, self.aad)
         except InvalidTag:
             raise BackupError("Encrypted backup failed authentication: wrong passphrase, "
-                              "or the file was truncated or changed") from None
+                              "or the file was truncated or changed", code="authentication") from None
         self.counter += 1
         self.done = final
         return plain
@@ -816,17 +1078,67 @@ def extract_tree(path: Path, parent: Path, secret: str) -> Path:
 
 # --- rotation, export, migration ----------------------------------------
 
+def _header_created(path: Path) -> float | None:
+    """When an encrypted backup was made, from its plaintext header's `created_at` (written by
+    `_publish`, microseconds); None when the file does not read as one. Read only to order
+    backups whose names share one stamp (OBS-388), so a folder of backups is not opened file
+    by file on every listing."""
+    try:
+        with path.open("rb") as stream:
+            if stream.read(len(MAGIC)) != MAGIC:
+                return None
+            size = struct.unpack(">I", stream.read(4))[0]
+            if size > 64 * 1024:
+                return None
+            created = json.loads(stream.read(size)).get("created_at")
+        return datetime.datetime.fromisoformat(created).timestamp()
+    except (OSError, ValueError, TypeError, AttributeError, struct.error):
+        return None
+
+
+def order_artifacts(paths) -> list[Path]:
+    """Backups oldest first, in the order they were made (OBS-388).
+
+    The UTC stamp in the name orders backups taken in different seconds. Within one second
+    the name differs only by its random suffix, and ordering by that rotated the newest away
+    when several were taken at once; so ties go to the creation time in the encrypted
+    header, then to the file's mtime in nanoseconds (a file system that keeps whole seconds
+    gives same-second files one mtime, and a copy may reset it, which is why the header
+    comes first), and the name only last, so the order is at least stable."""
+    paths = list(paths)
+    stamps = {p: _artifact_stamp(p.name) for p in paths}
+    counts = collections.Counter(stamps.values())
+    tied = {s for s, n in counts.items() if n > 1}
+
+    def key(p: Path):
+        created = _header_created(p) if stamps[p] in tied else None
+        try:
+            mtime = p.stat().st_mtime_ns
+        except OSError:
+            mtime = 0
+        return (stamps[p], created is not None, created or 0.0, mtime, p.name)
+    return sorted(paths, key=key)
+
+
 def artifacts(root: Path, kind: str, suffix: str) -> list[Path]:
-    """Oldest first: names begin with a UTC stamp, so name order is age order."""
+    """Oldest first, in the order they were made (`order_artifacts`): never by the random
+    suffix that follows the stamp in the name."""
     if not root.is_dir():
         return []
-    return sorted(p for p in root.glob(f"{kind}-*{suffix}") if p.is_file() and not p.name.startswith("."))
+    return order_artifacts(p for p in root.glob(f"{kind}-*{suffix}") if p.is_file() and not p.name.startswith("."))
 
 
-def rotate(root: Path, kind: str, suffix: str, keep: int = KEEP) -> list[str]:
+def rotate(root: Path, kind: str, suffix: str, keep: int = KEEP, protect: Path | None = None) -> list[str]:
+    """Keep the `keep` newest. `protect`, the backup just written, is never dropped: a clock set back
+    names it older than the ones before it, and its source is already gone (OBS-388 review)."""
+    if keep < 1:
+        raise ValueError("rotate keeps at least one backup")
     found = artifacts(root, kind, suffix)
+    if protect is not None and protect in found:
+        found.remove(protect)
+        keep -= 1
     dropped = []
-    for old in found[:-keep] if len(found) > keep else []:
+    for old in (found[:-keep] if keep > 0 else found) if len(found) > keep else []:
         old.unlink()
         dropped.append(old.name)
     return dropped
@@ -874,7 +1186,7 @@ def export_snapshot(base: Path, directory: Path, kind: str, secret: str) -> Path
     dest = root / f"{kind}-{_snapshot_stamp(directory)}-{uuid.uuid4().hex[:8]}{SNAPSHOT_SUFFIX}"
     encrypt_tree(directory, dest, secret, kind=kind)
     shutil.rmtree(directory)
-    rotate(root, kind, SNAPSHOT_SUFFIX)
+    rotate(root, kind, SNAPSHOT_SUFFIX, protect=dest)
     return dest
 
 
@@ -948,21 +1260,286 @@ def migrate(base: Path) -> dict:
     return report
 
 
+# --- the secret store the settings name (OBS-349) -----------------------------
+
+#: The record a workspace snapshot leaves of what it did with an external secret store
+#: (names, counts, times; never a value), in the workspace's own state folder.
+CARRY_RECORD = ("store", "raw", "secret-store-carry.json")
+#: A carry older than this proves nothing about the store as it is now: two daily snapshots.
+CARRY_FRESH = datetime.timedelta(hours=48)
+CARRY_FIELDS = ("at", "kind", "file", "state", "reason", "files", "size", "not_carried", "sweep_failed")
+#: What the newest restore did with a carried store (OBS-350 part 2), written by `workspace_upgrade`.
+RESTORE_RECORD = ("store", "raw", "secret-store-restore.json")
+RESTORE_FIELDS = ("at", "snapshot", "state", "reason", "target", "files", "next")
+#: The environment can point the vault somewhere the settings do not; the maintenance job does
+#: not share a person's shell, so only the folder the settings name can be carried.
+VAULT_DIR_ENV, SECRETS_ENV = "OBSERVATORY_VAULT_DIR", "OBSERVATORY_SECRETS"
+
+
+def _display(path: Path) -> str:
+    try:
+        return "~/" + path.relative_to(Path.home().resolve()).as_posix()
+    except (ValueError, RuntimeError):
+        return str(path)
+
+
+def _within(path: Path, folder: Path) -> bool:
+    return path == folder or folder in path.parents
+
+
+def secret_store_carrier() -> bool:
+    """Whether this release's workspace snapshot carries an external secret store at all.
+
+    A release without the carrier must not send a person to take another snapshot to fix a
+    store no snapshot carries: the step names the copy by hand instead."""
+    import importlib.util
+    return importlib.util.find_spec("secret_store_carry") is not None
+
+
+def _settings_stores(base: Path, doc: dict) -> tuple[Path, list[dict]]:
+    """(the folder the vault's tools use, the external stores among the settings' candidates).
+
+    The tools read `sources.secret_store`, falling back to `sources.secrets`, then to
+    `<home>/secrets`. A candidate inside the workspace is carried with it, so only one outside
+    is external; two nested external candidates are one store, named by both settings."""
+    home = base.resolve()
+    sources = doc.get("sources") if isinstance(doc.get("sources"), dict) else {}
+    candidates = []
+    for key in ("secret_store", "secrets"):
+        value = sources.get(key)
+        if isinstance(value, str) and value:
+            try:
+                candidates.append((key, Path(value).expanduser().resolve()))
+            except (OSError, RuntimeError):
+                # A link loop (RuntimeError on Python 3.11): named as written, never followed.
+                candidates.append((key, Path(os.path.abspath(Path(value).expanduser()))))
+    effective = candidates[0][1] if candidates else home / "secrets"
+    stores: list[dict] = []
+    for key, path in candidates:
+        if _within(path, home):
+            continue
+        for store in stores:
+            if _within(path, store["path"]) or _within(store["path"], path):
+                store["settings_keys"].append(key)
+                store["path"] = min(path, store["path"], key=lambda p: len(p.parts))
+                break
+        else:
+            stores.append({"settings_keys": [key], "path": path})
+    return effective, stores
+
+
+def _env_override(effective: Path, doc: dict) -> tuple[list[str], Path | None]:
+    """(the environment names that move the vault away from the folder the settings name, the store
+    root the environment chose when it chose one).
+
+    The vault's precedence (`paths.SECRETS`, `tools/vault.py` STORE): the slots live in
+    `OBSERVATORY_VAULT_DIR`, else `<root>/projects`; the root is `sources.secret_store`, else
+    `OBSERVATORY_SECRETS`, else `sources.secrets`, else `<home>/secrets`. So `OBSERVATORY_SECRETS`
+    moves nothing while `sources.secret_store` is set, and either variable moves the vault only when it
+    names another folder than the one the settings choose (the one a snapshot can carry)."""
+    sources = doc.get("sources") if isinstance(doc.get("sources"), dict) else {}
+    moved, root = [], None
+    value = os.environ.get(SECRETS_ENV)
+    if value and not sources.get("secret_store"):
+        chosen = Path(value).expanduser().resolve()
+        if chosen != effective:
+            moved.append(SECRETS_ENV)
+            root = chosen
+    value = os.environ.get(VAULT_DIR_ENV)
+    if value and Path(value).expanduser().resolve() != effective / "projects":
+        moved.append(VAULT_DIR_ENV)
+    return moved, root
+
+
+def _last_carry(base: Path) -> dict | None:
+    """The newest carry record, or None before any; `{"state": "unknown"}` when it does not read."""
+    file = base.joinpath(*CARRY_RECORD)
+    if not file.exists() and not file.is_symlink():
+        return None
+    try:
+        if file.is_symlink() or not file.is_file() or file.stat().st_size > 65536:
+            raise ValueError("not a plain record")
+        doc = json.loads(file.read_text(encoding="utf-8"))
+        if not isinstance(doc, dict) or not isinstance(doc.get("state"), str):
+            raise ValueError("no state")
+    except (OSError, ValueError):
+        return {"state": "unknown"}
+    return {key: doc.get(key) if isinstance(doc.get(key), (str, int)) and not isinstance(doc.get(key), bool)
+            else None for key in CARRY_FIELDS}
+
+
+def _last_restore(base: Path) -> dict | None:
+    """The newest restore record, or None; `{"state": "unknown"}` when it does not read."""
+    file = base.joinpath(*RESTORE_RECORD)
+    if not file.exists() and not file.is_symlink():
+        return None
+    try:
+        if file.is_symlink() or not file.is_file() or file.stat().st_size > 65536:
+            raise ValueError("not a plain record")
+        doc = json.loads(file.read_text(encoding="utf-8"))
+        if not isinstance(doc, dict) or not isinstance(doc.get("state"), str):
+            raise ValueError("no state")
+    except (OSError, ValueError):
+        return {"state": "unknown"}
+    def plain(row: dict) -> dict:
+        return {key: row.get(key) if isinstance(row.get(key), (str, int)) and not isinstance(row.get(key), bool)
+                else None for key in RESTORE_FIELDS}
+    out = plain(doc)
+    stores = doc.get("stores")
+    if isinstance(stores, list):
+        out["stores"] = [{"name": r.get("name") if isinstance(r.get("name"), str) else None, **plain(r)}
+                         for r in stores[:8] if isinstance(r, dict)]
+    return out
+
+
+def _holds_a_store(display: str | None) -> bool:
+    """Whether the folder a record names holds a vault store: a top-level `projects/` folder (the layout
+    `tools/vault.py` writes and the restore's own checks use) with something in it beyond lock files and
+    temporaries, put there by a later restore, by `vault.py` or by hand. A folder of unrelated files (a
+    refused target such as `~/.ssh`) is no store. Listed only; nothing is read."""
+    if not isinstance(display, str) or not display:
+        return False
+    try:
+        folder = Path(display).expanduser()
+        if folder.is_symlink() or not folder.is_dir():
+            return False
+        def ignorable(name: str) -> bool:
+            return (fnmatch.fnmatch(name, "*.lock") or fnmatch.fnmatch(name, "*.tmp")
+                    or name.startswith((".vault-write-", ".passphrase-")))
+        projects = folder / "projects"
+        if projects.is_symlink() or not projects.is_dir():
+            return False
+        return any(not ignorable(child.name) for child in projects.iterdir())
+    except (OSError, RuntimeError):
+        return False
+
+
+def _parse_at(text) -> datetime.datetime | None:
+    if not isinstance(text, str):
+        return None
+    try:
+        at = datetime.datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=datetime.timezone.utc)
+
+
+def secret_store(base: Path) -> tuple[dict, list[dict]]:
+    """(doctor's `secret_store` section, its warning items). Reads the settings, the store's
+    existence and the carry record; never walks the store, never reads a value."""
+    try:
+        doc = config.load(base)
+    except config.ConfigurationError:
+        doc = {}
+    effective, stores = _settings_stores(base, doc)
+    moved, env_root = _env_override(effective, doc)
+    items: list[dict] = []
+
+    def warn(code: str, text: str, step: str | None, **params) -> None:
+        items.append({"code": code, "text": text, "step": step, **params})
+
+    if moved:
+        names = ", ".join(moved)
+        warn("backups-secret-store-env-override",
+             f"the vault folder comes from the environment ({names}), which the daily job may not share; "
+             "only the folder the settings name is carried",
+             "project-observatory full configure sources secret_store PATH", names=names)
+    if not stores:
+        if env_root is not None and not _within(env_root, base.resolve()):
+            # No setting names a store outside the workspace, but the environment does: the vault's keys
+            # live there and no snapshot carries them. The env-override row above says what to do.
+            return {"external": True, "path": _display(env_root), "settings_keys": [], "environment": SECRETS_ENV,
+                    "exists": env_root.is_dir(), "env_override": True, "last_carry": _last_carry(base)}, items
+        return {"external": False}, items
+    # One store is the answer's subject: the tools read the first candidate, so it is the one
+    # whose keys another machine needs.
+    store = stores[0]
+    path, keys = store["path"], store["settings_keys"]
+    shown = _display(path)
+    exists = path.is_dir()
+    last = _last_carry(base)
+    restored = _last_restore(base)
+    section = {"external": True, "path": shown, "settings_keys": keys, "exists": exists,
+               "env_override": bool(moved), "last_carry": last}
+    if restored is not None:
+        section["last_restore"] = restored
+        # A skip with a reason (not confirmed, refused, busy, unwritable) warns, store by store, until its folder
+        # holds a store again, however it got there; a skip the caller chose (`skipped-by-choice`) never does.
+        for row in restored.get("stores") or [restored]:
+            if row.get("state") != "skipped" or not row.get("reason") or _holds_a_store(row.get("target")):
+                continue
+            where = row.get("target") or shown
+            warn("backups-secret-store-not-restored",
+                 f"the last restore did not write the secret store {where} its backup carried ({row['reason']}); "
+                 "its keys are not on this machine until it is written",
+                 row.get("next") or "project-observatory full restore SNAPSHOT --secret-store-only",
+                 path=where, reason=row["reason"])
+    if not exists:
+        source = keys[0]
+        warn("backups-secret-store-missing", f"the configured secret store {shown} does not exist on this machine",
+             f"project-observatory full configure sources {source} PATH", path=shown)
+        return section, items
+    at = _parse_at((last or {}).get("at"))
+    if last is None:
+        reason = "no snapshot has carried it yet"
+    elif last.get("state") == "unknown":
+        reason = "the carry record does not read"
+    elif last.get("state") != "carried":
+        reason = str(last.get("reason") or last.get("state"))
+    elif at is None or datetime.datetime.now(datetime.timezone.utc) - at > CARRY_FRESH:
+        reason = "the newest snapshot that carried it is more than 48 hours old"
+    else:
+        return section, items
+    if (last or {}).get("reason") == "no-passphrase":
+        step = "project-observatory full backup-passphrase set"
+    elif secret_store_carrier():
+        step = "project-observatory full workspace-backup --writers-stopped"
+    else:
+        step = (f"copy {shown} to the other machine yourself: the snapshots of this release do not carry a "
+                "secret store kept outside the workspace")
+    warn("backups-vault-store-not-carried",
+         f"the secret store at {shown} is outside the workspace and the newest encrypted snapshot did not carry "
+         f"it ({reason}); another machine restored from these backups would not get these keys",
+         step, path=shown, reason=reason)
+    return section, items
+
+
 def status(base: Path) -> dict:
-    """For doctor: where, whether encrypted, what exists. Never a value."""
-    warnings = []
+    """For doctor: where, whether encrypted, what exists. Never a value.
+
+    `warnings` keeps its sentences in their order; `warning_items` carries each with a code
+    and its step (OBS-349), so doctor's verdict and Health can name it without parsing text."""
+    items: list[dict] = []
+
+    def warn(code: str, text: str, step: str | None = None, **params) -> None:
+        items.append({"code": code, "text": text, "step": step, **params})
+
+    store, store_items = secret_store(base)
+
+    def answer(**fields) -> dict:
+        every = items + store_items
+        return {**fields, "secret_store": store, "warnings": [i["text"] for i in every], "warning_items": every}
+
     try:
         info = root_info(base)
     except config.ConfigurationError as exc:
-        return {"encrypted": False, "warnings": [str(exc)]}
+        warn("backups-root-unusable", str(exc), "project-observatory full configure storage backups /absolute/path")
+        return answer(encrypted=False)
     try:
         configured = passphrase(base) is not None
     except BackupError as exc:
-        configured, warnings = False, [str(exc)]
+        configured = False
+        warn("backups-passphrase-unreadable", str(exc), "project-observatory full backup-passphrase set")
     root = info["path"]
     if not configured:
-        warnings.append("no backup passphrase: copies stay inside the workspace, unencrypted, on this "
-                        "disk only; run `project-observatory full backup-passphrase set`")
+        # `maintain ensure` first: it makes this machine's own and keeps it outside the workspace too,
+        # which is what a workspace restored from another machine needs (it left that one's behind,
+        # OBS-348) and what a fresh install would get from its first maintenance pass.
+        warn("backups-no-passphrase", "no backup passphrase: copies stay inside the workspace, unencrypted, on this "
+                                      "disk only; run `project-observatory full maintain ensure` to make this machine's "
+                                      "own (also kept outside the workspace), or choose one with "
+                                      "`project-observatory full backup-passphrase set`",
+             "project-observatory full maintain ensure")
     if configured and info["inside_workspace"]:
         # Encryption protects a copy that leaves this disk; a root inside the
         # workspace never leaves it. The fallback root (<home>/backups, chosen when
@@ -970,27 +1547,31 @@ def status(base: Path) -> dict:
         # it puts the copies in the same tree as the key that opens them.
         beside = (f"beside the passphrase in {passphrase_file(base)}" if os.environ.get(PASS_ENV) is None
                   else f"on the same disk as the workspace ({PASS_ENV} supplies the passphrase)")
-        warnings.append(f"the backups root {root} is inside the workspace, {beside}: a lost or stolen disk "
-                        "takes the copies and their key together. Point it at another disk or a synced "
-                        "folder: `project-observatory full configure storage backups /absolute/path` "
-                        f"(or {ROOT_ENV}); new copies go there, and the ones already here stay until moved by hand")
+        warn("backups-root-inside-workspace",
+             f"the backups root {root} is inside the workspace, {beside}: a lost or stolen disk "
+             "takes the copies and their key together. Point it at another disk or a synced "
+             "folder: `project-observatory full configure storage backups /absolute/path` "
+             f"(or {ROOT_ENV}); new copies go there, and the ones already here stay until moved by hand",
+             "project-observatory full configure storage backups /absolute/path", root=str(root))
     legacy = [path for kind in SNAPSHOT_KINDS for path in local_snapshots(base, kind)]
     # A rolled-back update keeps the changed workspace beside the restored one: a full,
     # UNENCRYPTED copy, secrets/ included, that nothing removes (audit A18).
     failed = sorted(p for p in base.parent.glob(f"{base.name}.failed-update-*") if p.is_dir())
     if failed:
-        warnings.append(f"{len(failed)} unencrypted copy(ies) of this workspace from a rolled-back update "
-                        f"remain beside it ({failed[0].name}…); they hold secrets/. Delete them once the "
-                        "restored workspace is confirmed")
+        warn("backups-failed-update-copy",
+             f"{len(failed)} unencrypted copy(ies) of this workspace from a rolled-back update "
+             f"remain beside it ({failed[0].name}…); they hold secrets/. Delete them once the "
+             "restored workspace is confirmed", None, count=len(failed), folder=failed[0].name)
     if configured and legacy:
-        warnings.append(f"{len(legacy)} unencrypted snapshot(s) remain in {base / 'backups'}; "
-                        "run `project-observatory full backups migrate`")
+        warn("backups-unencrypted-local", f"{len(legacy)} unencrypted snapshot(s) remain in {base / 'backups'}; "
+                                          "run `project-observatory full backups migrate`",
+             "project-observatory full backups migrate", count=len(legacy))
     latest = {}
     for kind, suffix in ((DB_KIND, DB_SUFFIX), *((k, SNAPSHOT_SUFFIX) for k in SNAPSHOT_KINDS),
                          (MACHINE_KIND, MACHINE_SUFFIX)):
         found = artifacts(root, kind, suffix)
         latest[kind] = {"count": len(found), "newest": found[-1].name if found else None}
-    return {"root": str(root), "root_source": info["source"], "inside_workspace": info["inside_workspace"],
-            "encrypted": configured,
-            "passphrase": "configured" if configured else "missing", "keep_per_kind": KEEP,
-            "artifacts": latest, "local_unencrypted_snapshots": len(legacy), "warnings": warnings}
+    return answer(root=str(root), root_source=info["source"], inside_workspace=info["inside_workspace"],
+                  encrypted=configured,
+                  passphrase="configured" if configured else "missing", keep_per_kind=KEEP,
+                  artifacts=latest, local_unencrypted_snapshots=len(legacy))

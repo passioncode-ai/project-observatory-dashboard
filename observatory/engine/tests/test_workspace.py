@@ -87,6 +87,61 @@ class WorkspaceTests(unittest.TestCase):
         warnings = json.loads(self.run_cli('doctor').stdout)['coverage_warnings']
         self.assertTrue(any(w['source'] == 'sessions' and 'does not exist' in w['problem'] for w in warnings))
 
+    # --- OBS-347: a path under the home is stored home-relative, so another home finds it ------
+
+    def configure(self, *args) -> dict:
+        return json.loads(self.run_cli('configure', *args).stdout)
+
+    def test_configure_stores_a_path_under_the_home_as_home_relative(self):
+        self.run_cli('init')
+        (self.user / 'src').mkdir()
+        self.assertEqual(self.configure('sources', 'projects', str(self.user / 'src'))['stored_as'], 'home-relative')
+        self.assertEqual(self.configure('storage', 'backups', str(self.user / 'Backups'))['stored_as'], 'home-relative')
+        self.assertEqual(self.configure('sources', 'wiki', '~/notes')['stored_as'], 'home-relative')
+        self.assertEqual(self.configure('sources', 'harness_root', str(self.user))['stored_as'], 'home-relative')
+        doc = json.loads((self.home / 'config/settings.json').read_text())
+        self.assertEqual(doc['sources']['projects'], '~/src')
+        self.assertEqual(doc['sources']['wiki'], '~/notes')
+        self.assertEqual(doc['sources']['harness_root'], '~')
+        self.assertEqual(doc['storage']['backups'], '~/Backups')
+        doctor = json.loads(self.run_cli('doctor').stdout)
+        self.assertTrue(doctor['sources']['projects']['exists'], 'every reader expands the stored form')
+        self.assertNotIn('projects', {w['source'] for w in doctor['coverage_warnings']})
+
+    def test_configure_keeps_a_path_outside_the_home_absolute(self):
+        self.run_cli('init')
+        outside = self.base / 'elsewhere'
+        # A sibling whose name only begins with the home's name is outside it.
+        lookalike = self.base / (self.user.name + 'name')
+        for folder in (outside, lookalike):
+            folder.mkdir()
+        self.assertEqual(self.configure('sources', 'projects', str(outside))['stored_as'], 'absolute')
+        self.assertEqual(self.configure('sources', 'wiki', str(lookalike))['stored_as'], 'absolute')
+        self.assertEqual(self.configure('storage', 'backups', str(outside / 'Backups'))['stored_as'], 'absolute')
+        doc = json.loads((self.home / 'config/settings.json').read_text())
+        self.assertEqual(doc['sources']['projects'], str(outside))
+        self.assertEqual(doc['sources']['wiki'], str(lookalike))
+        self.assertEqual(doc['storage']['backups'], str(outside / 'Backups'))
+
+    def test_doctor_names_each_sources_form(self):
+        self.run_cli('init')
+        (self.user / 'src').mkdir()
+        self.configure('sources', 'projects', str(self.user / 'src'))
+        self.configure('sources', 'sessions', str(self.base))
+        # A value an older release stored, absolute though it is under the home, is not migrated.
+        file = self.home / 'config/settings.json'
+        doc = json.loads(file.read_text())
+        doc['sources']['wiki'] = str(self.user / 'notes')
+        file.write_text(json.dumps(doc))
+        doctor = json.loads(self.run_cli('doctor').stdout)
+        self.assertEqual(doctor['sources']['projects']['form'], 'home-relative')
+        self.assertEqual(doctor['sources']['sessions']['form'], 'absolute')
+        self.assertEqual(doctor['sources']['wiki']['form'], 'absolute')
+        self.assertNotIn('form', doctor['sources']['secret_store'], 'an unconfigured source has no form')
+        self.assertNotIn('form', doctor['backups'], 'no storage.backups setting, no form')
+        self.configure('storage', 'backups', str(self.user / 'Backups'))
+        self.assertEqual(json.loads(self.run_cli('doctor').stdout)['backups']['form'], 'home-relative')
+
     def test_doctor_names_an_unset_or_missing_projects_source(self):
         # The base scan reads `sources.projects`; with it unset, `full local` used to
         # end in a FileNotFoundError traceback while doctor reported no gap at all.
@@ -102,6 +157,79 @@ class WorkspaceTests(unittest.TestCase):
         self.assertTrue(any(w['source'] == 'projects' and 'does not exist' in w['problem'] for w in warnings), warnings)
         (self.base / 'gone-projects').mkdir()
         self.assertEqual(json.loads(self.run_cli('doctor').stdout)['coverage_warnings'], [])
+
+    # OBS-349: one verdict a person and an agent read without walking every section.
+    def test_doctor_attention_unions_maintenance_items_and_coverage_by_code(self):
+        self.run_cli('init')
+        doc = json.loads(self.run_cli('doctor').stdout)
+        attention = doc['attention']
+        for row in attention:
+            self.assertEqual(set(row), {'area', 'code', 'severity', 'text', 'step'}, row)
+            self.assertIn(row['severity'], ('warning', 'info'))
+        source = next(r for r in attention if r['code'] == 'source-missing')
+        self.assertEqual(source['area'], 'sources')
+        self.assertEqual(source['step'], 'project-observatory full configure sources projects PATH')
+        self.assertIn('projects', source['text'])
+        codes = [r['code'] for r in attention]
+        for item in doc['maintenance']['warning_items']:
+            self.assertIn(item['code'], codes)
+        self.assertFalse(doc['clean'])
+        # Existing keys stay as they were.
+        self.assertIn('coverage_warnings', doc)
+        self.assertIn('warnings', doc['maintenance'])
+
+    def test_doctor_attention_takes_each_code_once_from_its_first_area(self):
+        import sys
+        sys.path.insert(0, str(ROOT))
+        import workspace
+        report = {'backups': {'warning_items': [{'code': 'backups-vault-store-not-carried', 'text': 'b',
+                                                 'step': 'project-observatory full workspace-backup --writers-stopped'}]},
+                  'machine_backup': {'warning_items': [{'code': 'machine-backup-missing', 'text': 'm'}]},
+                  'maintenance': {'warning_items': [
+                      {'code': 'no-backup', 'text': 'n'},
+                      {'code': 'machine-backup-missing', 'text': 'm'},
+                      {'code': 'backups-vault-store-not-carried', 'text': 'b',
+                       'step': 'project-observatory full workspace-backup --writers-stopped'},
+                      {'code': 'no-backup', 'text': 'n again'}]},
+                  'coverage_warnings': [
+                      {'collector': 'filesystem', 'source': 'projects', 'problem': 'not configured',
+                       'fix': 'project-observatory full configure sources projects PATH'},
+                      {'integration': 'sessions', 'source': 'sessions', 'problem': 'gone',
+                       'fix': 'project-observatory full configure sources sessions PATH'}]}
+        verdict = workspace.verdict(report)
+        rows = [(r['area'], r['code']) for r in verdict['attention']]
+        self.assertEqual(rows, [('maintenance', 'no-backup'), ('machine_backup', 'machine-backup-missing'),
+                                ('backups', 'backups-vault-store-not-carried'),
+                                ('sources', 'source-missing'), ('sources', 'source-missing')])
+        self.assertEqual(verdict['attention'][2]['step'], 'project-observatory full workspace-backup --writers-stopped')
+        self.assertIsNone(verdict['attention'][0]['step'])
+        self.assertFalse(verdict['clean'])
+
+    def test_doctor_is_clean_with_only_info_items(self):
+        import sys
+        sys.path.insert(0, str(ROOT))
+        import workspace
+        info = [{'code': code, 'text': code} for code in ('update-available', 'auto-off', 'deferred', 'schedule-off')]
+        verdict = workspace.verdict({'maintenance': {'warning_items': info}, 'coverage_warnings': []})
+        self.assertTrue(verdict['clean'])
+        self.assertEqual({r['severity'] for r in verdict['attention']}, {'info'})
+        self.assertEqual(len(verdict['attention']), 4)
+        verdict = workspace.verdict({'maintenance': {'warning_items': info + [{'code': 'no-backup', 'text': 'n'}]}})
+        self.assertFalse(verdict['clean'])
+        self.assertTrue(workspace.verdict({})['clean'], 'nothing to say is clean')
+
+    def test_a_dead_or_stuck_tick_is_a_warning_and_a_fresh_one_is_not(self):
+        import sys
+        sys.path.insert(0, str(ROOT))
+        import workspace
+        for verdict in ('interrupted', 'stale', 'running-long'):
+            out = workspace.verdict({'tick': {'verdict': verdict, 'why': 'synthetic reason'}})
+            self.assertFalse(out['clean'], verdict)
+            row = out['attention'][0]
+            self.assertEqual((row['area'], row['code'], row['severity']), ('tick', f'tick-{verdict}', 'warning'))
+            self.assertIn('synthetic reason', row['text'])
+        for verdict in ('never', 'disabled', 'running', 'ok'):
+            self.assertTrue(workspace.verdict({'tick': {'verdict': verdict}})['clean'], verdict)
 
     def configure_projects(self):
         projects = self.base / 'projects'

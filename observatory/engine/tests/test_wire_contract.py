@@ -58,6 +58,10 @@ def tool_parameters() -> dict[str, list[str]]:
     sys.path.insert(0, str(ROOT))
     import meter
     out["grant.check"] = sorted(meter.REQUEST_FIELDS)
+    # `ops.digest.record` (OBS-330) is a capability handler, not an `observatory_` function: its members are
+    # `ops_digest_store.REQUEST_FIELDS`, and the input schema refuses any other.
+    import ops_digest_store
+    out["ops.digest.record"] = sorted(ops_digest_store.REQUEST_FIELDS)
     return out
 
 
@@ -81,7 +85,9 @@ def test_every_declared_input_is_reachable_on_the_wire() -> None:
     """
     manifest = json.loads((ROOT / "fabric-agent.json").read_text(encoding="utf-8"))
     params = tool_parameters()
-    for cap in manifest.get("capabilities") or []:
+    # A capability served before its release declares it (fabric/unreleased-capabilities.json, OBS-330) too.
+    import interop
+    for cap in (manifest.get("capabilities") or []) + interop.unreleased_capabilities():
         schema_path = ROOT / "fabric/schemas" / cap["inputSchema"].rsplit("/", 1)[-1]
         declared = set((json.loads(schema_path.read_text(encoding="utf-8"))
                         .get("properties") or {}).keys())

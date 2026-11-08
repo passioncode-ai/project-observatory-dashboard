@@ -91,6 +91,7 @@ import configuration as config
 import machine_identity
 import osprivacy
 import oslocks
+import secret_store_carry
 
 KIND, SUFFIX = backup_vault.MACHINE_KIND, backup_vault.MACHINE_SUFFIX
 FORMAT = "observatory-machine/1"
@@ -319,6 +320,16 @@ class Collection:
         self.entry_root: Path | None = None
         self.groups: dict[tuple[str, str], dict] = {}
         self.seen: set[str] = set()
+        # The secret stores the workspace snapshot carries encrypted (OBS-350): never a second copy here.
+        self.store_roots: list[tuple[Path, dict]] = []
+
+    def carried_elsewhere(self, path: Path) -> bool:
+        """Skip `path` when it lies in a secret store the workspace snapshot carries, saying where it travels."""
+        store = secret_store_carry.inside(path, self.store_roots)
+        if store is None:
+            return False
+        self.skip(path, f"carried encrypted in the workspace snapshot (sources.{store['settings_keys'][0]})")
+        return True
 
     def mb(self, key: str) -> int:
         return int(self.limits[key] * 1024 * 1024)
@@ -406,6 +417,8 @@ class Collection:
         if entry.skip:
             self.skip(root, entry.skip)
             return
+        if self.carried_elsewhere(root):
+            return
         patterns = (*excludes, *(f"{display(root, self.home)}/{p}" for p in entry.exclude),
                     *(p for p in entry.exclude if "/" not in p))
         if _excluded(root, self.home, excludes):
@@ -430,6 +443,8 @@ class Collection:
                     path = here / name
                     if _excluded(path, self.home, patterns):
                         self.skip(path, "excluded")
+                    elif self.carried_elsewhere(path):
+                        pass
                     elif path.is_symlink():
                         self.link(path, category)
                     elif entry.recurse:
@@ -442,6 +457,8 @@ class Collection:
                         continue
                     if _excluded(path, self.home, patterns):
                         self.skip(path, "excluded")
+                    elif self.carried_elsewhere(path):
+                        pass
                     elif path.is_symlink():
                         self.link(path, category)
                     elif path.is_file():
@@ -1095,15 +1112,25 @@ def workspace_pointer(base: Path, home: Path) -> dict:
     newest = None
     try:
         root = backup_vault.root_info(base)["path"]
-        snaps = sorted((f for k in backup_vault.SNAPSHOT_KINDS
-                        for f in backup_vault.artifacts(root, k, backup_vault.SNAPSHOT_SUFFIX)),
-                       key=lambda f: backup_vault._artifact_stamp(f.name))
+        snaps = backup_vault.order_artifacts(f for k in backup_vault.SNAPSHOT_KINDS
+                                             for f in backup_vault.artifacts(root, k, backup_vault.SNAPSHOT_SUFFIX))
         newest = snaps[-1].name if snaps else None
     except (config.ConfigurationError, OSError):
         root = None
+    # Where the secret store kept outside the workspace travels (OBS-350): inside the workspace's
+    # encrypted snapshot, never in this bundle. `newest_snapshot_carried` is the carry record's word.
+    stores = secret_store_carry.plan(base, carry_now=True, why_not=None)
+    if stores and stores[0]["reason"]:
+        store = {"external": True, "carried_in": None, "reason": stores[0]["reason"]}
+    elif stores:
+        last = backup_vault._last_carry(base)
+        carried = None if not last or last.get("state") == "unknown" else last.get("state") == "carried"
+        store = {"external": True, "carried_in": "workspace snapshot", "newest_snapshot_carried": carried}
+    else:
+        store = {"external": False}
     return {"workspace": display(base, home), "engine_version": config.VERSION,
             "instance_id": marker.get("instance_id"), "backups_root": display(root, home) if root else None,
-            "newest_snapshot": newest,
+            "newest_snapshot": newest, "secret_store": store,
             "restore": "project-observatory full restore --latest (or full restore <snapshot>.obsnap)"}
 
 
@@ -1145,6 +1172,10 @@ def _take(base: Path, trigger: str, home: Path, runner, path: str | None, at, st
                           f"{limits['min_free_gb']} GB a machine backup leaves (limits.min_free_gb in "
                           f"config/{CONFIG_NAME}); the disk holds {root}")
     col = Collection(home, limits)
+    # Only a store the encrypted workspace snapshot carries is left to it (OBS-350): one it would never
+    # carry (a folder that holds the workspace itself) is walked like any other path the entries name.
+    col.store_roots = secret_store_carry.store_roots(
+        [s for s in secret_store_carry.plan(base, carry_now=True, why_not=None) if not s["reason"]], home)
     excludes = tuple(settings["exclude"])
     for entry in builtin_entries(home, transcripts=settings["transcripts"]):
         col.walk(entry, excludes)
@@ -1245,7 +1276,7 @@ def _take(base: Path, trigger: str, home: Path, runner, path: str | None, at, st
         backup_vault._mark_owner(root, base)
         dest = root / f"{KIND}-{at.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}{SUFFIX}"
         backup_vault.encrypt_stream(dest, fill, secret, kind=KIND, content="tar+gzip")
-        dropped = backup_vault.rotate(root, KIND, SUFFIX, KEEP)
+        dropped = backup_vault.rotate(root, KIND, SUFFIX, KEEP, protect=dest)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     settle_not_carried(col)
@@ -1425,45 +1456,18 @@ def find_latest(base: Path | None) -> Path | None:
         if root.is_dir():
             folders += [f for f in root.iterdir() if f.is_dir() and not f.is_symlink()]
     found = [f for folder in folders for f in backup_vault.artifacts(folder, KIND, SUFFIX)]
-    return max(found, key=lambda f: backup_vault._artifact_stamp(f.name)) if found else None
+    return backup_vault.order_artifacts(found)[-1] if found else None
 
 
-def _candidate_secrets(bundle: Path, base: Path | None):
-    if os.environ.get(backup_vault.PASS_ENV):
-        yield os.environ[backup_vault.PASS_ENV]
-    if base is not None:
-        try:
-            value = backup_vault.passphrase(base)
-        except backup_vault.BackupError:
-            value = None
-        if value:
-            yield value
-    try:
-        yield from backup_vault.stored_passphrases(backup_vault.SecretStore(), bundle.parent.name)
-    except (backup_vault.BackupError, OSError):
-        pass
-    if backup_vault.osprivacy.is_terminal(sys.stdin):
-        import getpass
-        value = getpass.getpass("Backup passphrase: ")
-        if value:
-            yield value
-
-
-def secret_for(bundle: Path, base: Path | None) -> tuple[str, dict]:
-    """The passphrase that opens `bundle`, and the bundle's header: the environment, this
-    workspace's, the OS credential store under the bundle's folder label, then a terminal
-    prompt. Each is tried by authenticating the whole file; the first that opens it wins."""
-    seen = set()
-    for value in _candidate_secrets(bundle, base):
-        if value in seen:
-            continue
-        seen.add(value)
-        try:
-            return value, backup_vault.verify_file(bundle, value)
-        except backup_vault.BackupError:
-            continue
-    raise MachineBackupError(f"no passphrase opens {bundle.name}: set {backup_vault.PASS_ENV}, or run this in a "
-                             "terminal to be asked for it")
+def secret_for(bundle: Path, base: Path | None, stdin_value: str | None = None) -> tuple[str, dict, str]:
+    """The passphrase that opens `bundle`, the bundle's header and where the passphrase came
+    from: the environment, `--passphrase-stdin`, this workspace's, the OS credential store
+    under the bundle's folder label, then one terminal prompt (`backup_vault.open_with`,
+    OBS-348). A wrong candidate costs one chunk, the winner is authenticated in full once, and
+    another machine's passphrase is used for this restore and kept nowhere."""
+    secret, header, source = backup_vault.open_with(bundle, base=base, label=bundle.parent.name,
+                                                    stdin_value=stdin_value, prompt=True)
+    return secret, header, source
 
 
 def _destination(source: str, home: Path) -> Path:
@@ -2457,7 +2461,8 @@ def clone(manifest: dict, stage: Path, home: Path, *, runner=subprocess.run, git
 def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "plan", overwrite: bool = False,
             do_packages: bool = False, do_clone: bool = False, secret: str | None = None,
             runner=subprocess.run, which=shutil.which, git: str = "git", hold=None,
-            machine: str | None = None, only=None, skip=None, projects=None) -> dict:
+            machine: str | None = None, only=None, skip=None, projects=None,
+            stdin_value: str | None = None) -> dict:
     """Plan, and each requested step in its own phase: only what that step needs is decrypted,
     into the private stage, and removed before the next step starts (round 1 of #305).
 
@@ -2475,9 +2480,9 @@ def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "
     if not bundle.is_file():
         raise MachineBackupError(f"no machine bundle at {bundle}")
     if secret:
-        header = backup_vault.verify_file(bundle, secret)
+        header, opened_by = backup_vault.verify_file(bundle, secret), "given"
     else:
-        secret, header = secret_for(bundle, base)
+        secret, header, opened_by = secret_for(bundle, base, stdin_value)
     if header.get("kind") != KIND:
         raise MachineBackupError(f"{bundle.name} is a {header.get('kind')} backup, not a machine bundle")
     with _staging(stage_root(base)) as root:
@@ -2540,7 +2545,8 @@ def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "
                          "this machine makes its own (`ssh_keys` names each step), and only --same-machine at a "
                          "terminal restores the other machine's keys")
         result = {"bundle": bundle.name, "created_at": manifest.get("created_at"), "trigger": manifest.get("trigger"),
-                  "from_platform": manifest.get("platform"), "mode": mode, "counts": counts,
+                  "from_platform": manifest.get("platform"), "mode": mode, "passphrase_source": opened_by,
+                  "counts": counts,
                   "categories": category_summary(rows, wanted if wanted is not None else set(CATEGORIES), manifest,
                                                  overwrite=overwrite),
                   **({"selection": {"only": parse_categories(only), "skip": parse_categories(skip),
@@ -2707,6 +2713,9 @@ def restore_parser() -> argparse.ArgumentParser:
     ap.add_argument("--projects", action="append", metavar="NAME|GLOB|PATH[,...]",
                     help="with --clone: only these checkouts (a folder name, a glob over it, or a path that "
                          "names every checkout under it); a worktree brings its main checkout")
+    ap.add_argument("--passphrase-stdin", action="store_true",
+                    help="read the bundle's passphrase (another machine's) from stdin once, a file or a pipe, "
+                         "never a terminal; used for this restore and stored nowhere")
     ap.epilog = "categories: " + "; ".join(f"{k}: {v}" for k, v in CATEGORY_HELP.items())
     return ap
 
@@ -2745,6 +2754,8 @@ def restore_main(argv: list[str]) -> int:
     a = restore_parser().parse_args(argv)
     raise_on_signals()
     try:
+        # Read once, before any other work (OBS-348): a refused value stops the command untouched.
+        stdin_value = backup_vault.read_passphrase_stdin() if a.passphrase_stdin else None
         if a.overwrite and not a.apply:
             raise MachineBackupError("--overwrite replaces files, so it needs --apply as well")
         if bool(a.bundle) == bool(a.latest):
@@ -2764,7 +2775,7 @@ def restore_main(argv: list[str]) -> int:
         result = restore(bundle, Path.home(), base=base, mode="apply" if a.apply else "plan",
                          overwrite=a.overwrite, do_packages=a.packages, do_clone=a.clone,
                          machine="second" if a.second_machine else ("same" if a.same_machine else None),
-                         only=a.only, skip=a.skip, projects=a.projects)
+                         only=a.only, skip=a.skip, projects=a.projects, stdin_value=stdin_value)
         print(json.dumps(result, indent=2, ensure_ascii=False))
         for note in result.get("notes") or []:
             print(f"Observatory: {note}", file=sys.stderr)

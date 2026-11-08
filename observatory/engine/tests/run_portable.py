@@ -171,8 +171,12 @@ BOUNDARY += ('workflow_memory',)
 BOUNDARY += ('identifiers',)
 # One repository derived from another: copies, moves, how far a copy is behind (OBS-321).
 BOUNDARY += ('derivations',)
+# A session Fabric starts for a board request: its packet, its view, its keys (OBS-323).
+BOUNDARY += ('dispatch_packet',)
 # Anonymous usage and error events: on by default, off by a switch, never a private fact (OBS-324).
 BOUNDARY += ('usage_analytics',)
+# What Observatory uses, declared in its well-known document (fabric-connections/0.1, OBS-326).
+BOUNDARY += ('service_connections',)
 # The Agents page: workflows, handoffs and sessions, rendered.
 BOUNDARY += ('agents_page',)
 # Home: the state band, the three problems to do first, projects at a glance (OSS-88).
@@ -298,6 +302,18 @@ BOUNDARY += ('node_lifecycle_helper',)
 # OBS-287: the interim relay (fabric-relay/0.1, the relay project's RLY-04) over the contract's `admit` vectors, and
 # the node's own client against it on loopback: admission, mailboxes and their refusals, expiry, revocation.
 BOUNDARY += ('relay_server',)
+# OBS-330: `ops.digest.record`, products' daily operations digests (contract DEC-0153): the engine's port over the
+# contract's vectors and fixtures, and the capability over stdio under a binding and on the HTTP door with a token.
+BOUNDARY += ('ops_digest', 'ops_digest_record')
+# OBS-331 part a: the daily learning review (lessons by class, rising failures from the digests, late arrivals, the
+# report's files) over synthetic clones, a synthetic ledger and digest store, at a fixed clock.
+BOUNDARY += ('learning_review',)
+# OBS-355 part 1: who owns each end of a loopback connection (peer_owner.py over captured tables and a live pair),
+# and the servers refusing another OS account's connection before reading it (peer_check.py).
+BOUNDARY += ('peer_owner', 'peer_check')
+# OBS-361 part 1: the administrator's tool that runs a headless space's jobs as system daemons with UserName,
+# against a temporary system root, an injected euid and a fake launchctl.
+BOUNDARY += ('space_daemons',)
 SUITES = LEGACY + BOUNDARY
 #: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
 #: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.
@@ -313,6 +329,8 @@ HELPERS = ('tmp.py', 'pgp_fixture.py', 'source_reader.py', 'live_estate.py',
     'concurrency.py', 'merge_fixture.py', 'probe_fixture.py',
     # Every test's git environment: configuration shut out, no background maintenance.
     'git_env.py',
+    # A synthetic secret store kept outside the workspace (OBS-350).
+    'secret_store_fixture.py',
 )
 # Suites and helpers ported by the second port stream.
 HELPERS += (
@@ -334,12 +352,14 @@ HELPERS += ('ask_why_transcript.json',)
 # The DigitalOcean door's account half and collector (OBS-155): run from `test_digitalocean_door.py`,
 # the `test-digitalocean` step, so one step covers one door.
 HELPERS += ('test_digitalocean_account.py',)
+# Captured-format socket tables for peer_owner.py, reusable by projects that vendor it (OBS-355).
+HELPERS += ('peer_owner_fixtures.py',)
 RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'node', 'plugins', 'store', 'tools')
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py', 'tracked.py',
     'identity_map.py', 'identifiers.py', 'derivations.py', 'folder_attribution.py', 'fabric_attribution.py', 'fabric_hub.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'tick_progress.py', 'tick_budget.py', 'workspace.py',
-    'workspace_upgrade.py', 'backup_vault.py', 'organizations.py', 'machine_view.py', 'memory_snapshot.py', 'checkout_inventory.py', 'checkout_state.py', 'checkout_graph.py', 'cache_coverage.py', 'open_unlinked.py', 'coverage_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
+    'workspace_upgrade.py', 'backup_vault.py', 'secret_store_carry.py', 'organizations.py', 'machine_view.py', 'memory_snapshot.py', 'checkout_inventory.py', 'checkout_state.py', 'checkout_graph.py', 'cache_coverage.py', 'open_unlinked.py', 'coverage_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
     'log_policy.py', 'code_freshness.py', 'session_reload.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',
     # The companion's request for a why: journal, measurement, reach (M-8).
@@ -352,6 +372,8 @@ ROOT_FILES = (
     'machine_identity.py', 'machine_move.py',
     # The native secret prompt's node queue and the agent's job (OBS-260): serverd and the job runner import them.
     'secret_prompt.py', 'secret_client.py',
+    # Who owns each end of a loopback connection, the account count, and the servers' peer check (OBS-355).
+    'peer_owner.py', 'host_accounts.py', 'peer_check.py',
     # The organization's signature on a release, checked before any update (audit A04).
     'release_signature.py',
     # The standing review policy (OBS-227): read by review.py, the findings, doctor and Health.
@@ -360,7 +382,7 @@ ROOT_FILES = (
     'delegation.py', 'meter.py',
     # The one small-order Ed25519 key check (contract DEC-0045, CT-29; OBS-162).
     'ed25519_order.py',
-    'fabric_service.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'observatory-profile.lock.json', 'contract_lock.py', 'public-profile.json',
+    'fabric_service.py', 'dispatch_packet.py', 'ops_digest.py', 'ops_digest_store.py', 'learning_review.py', 'service_connections.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'observatory-profile.lock.json', 'contract_lock.py', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',
 )
@@ -405,7 +427,9 @@ def source_files() -> list[Path]:
     selected.add(ROOT / 'fabric/delegation-schemas/README.md')
     selected.add(ROOT / 'fabric/node-vectors/README.md')
     selected.add(ROOT / 'fabric/delegation-vectors/README.md')
+    selected.add(ROOT / 'fabric/ops-digest/README.md')        # its digests, and the release tag it was copied at
     selected.add(ROOT / 'fabric/memory-provider.json')
+    selected.add(ROOT / 'fabric/unreleased-capabilities.json')   # OBS-330: served before its release declares it
     selected.add(ROOT / 'store/schema.sql')
     # The lifecycle broker's NSWorkspace helper, compiled from source by the macOS adapter's suite (OBS-79 L2).
     selected.add(ROOT / 'node/lifecycle/native_app.swift')
@@ -430,6 +454,7 @@ def source_files() -> list[Path]:
     selected |= set((ROOT / 'fabric/node-vectors/repair').rglob('*.json'))     # OBS-193: the repair vectors and schemas
     selected |= set((ROOT / 'fabric/node-vectors/peer').rglob('*.json'))       # OBS-264: fabric-peer-share/1
     selected |= set((ROOT / 'fabric/node-vectors/actions').rglob('*.json'))    # OBS-291: actionDecision's vectors
+    selected |= set((ROOT / 'fabric/ops-digest').rglob('*.json'))              # OBS-330: DEC-0153's schemas and vectors
     selected |= set((ROOT / 'cloud').glob('*.mjs'))                            # OBS-263: the mailbox Worker
     out = []
     for source in sorted(selected):
@@ -542,7 +567,10 @@ SUITE_SECONDS = {'credential_doors': 600, 'maintenance': 480, 'tick_py': 300, 'c
                  'node_org': 300,
                  # 68-72 s alone on windows-latest, past 120 s once each under the job's --jobs 4 there
                  # (run 40594551136; OBS-277).
-                 'gate_purity': 300, 'search': 300}
+                 'gate_purity': 300, 'search': 300,
+                 # 47-87 s on macos-latest (#416, #419, #420, #428), then past 120 s twice: 121.5 s
+                 # (#429, run 41921013085) and 122.2 s (#432, run 41963794187); OBS-335.
+                 'session_reload': 300}
 
 
 def suite_timeout(name: str, timeout: int) -> int:

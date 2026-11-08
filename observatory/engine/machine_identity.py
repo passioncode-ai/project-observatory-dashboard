@@ -62,6 +62,9 @@ PLACEMENT_NAME = "placement.json"
 ID_FILE = "machine-id"
 #: Where a second-machine restore puts the jobs it must not load, per job system.
 STAGED = {"launchd": "LaunchAgents", "systemd": "systemd-user"}
+#: Where `machine-move cutover` puts a launchd job of an account with no GUI session (OBS-361): an
+#: administrator's `space_daemons.py apply` loads it from there as a system daemon run as this account.
+BACKGROUND = ("background", "LaunchAgents")
 
 
 class MachineIdentityError(ValueError):
@@ -82,6 +85,12 @@ def placement_path(home: Path | None = None) -> Path:
 def staging_dir(home: Path | None = None, system: str = "launchd") -> Path:
     """The folder a second-machine restore writes `system`'s jobs to: nothing loads it at login."""
     return data_dir(home) / "machine-move" / STAGED[system]
+
+
+def background_dir(home: Path | None = None) -> Path:
+    """The folder of the launchd jobs this account runs as system daemons, having no GUI session (OBS-361).
+    `tools/space_daemons.py` mirrors it as root sees it, without XDG_DATA_HOME."""
+    return data_dir(home).joinpath(*BACKGROUND)
 
 
 def _platform_identifier(runner=subprocess.run) -> str | None:

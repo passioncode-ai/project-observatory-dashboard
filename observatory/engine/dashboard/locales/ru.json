@@ -2068,6 +2068,14 @@
  "the newest machine backup is {hours} hours old": "последней резервной копии машины {hours} ч.",
  "items the newest machine backup did not carry: {count}": "не вошло в последнюю резервную копию машины: {count}",
  "the machine backup settings are refused: {detail}": "настройки резервной копии машины отклонены: {detail}",
+ "the secret store {path} is outside the workspace and the newest encrypted snapshot did not carry it; another machine restored from these backups would not get its keys": "хранилище ключей {path} лежит вне папки данных, и последняя зашифрованная копия его не включила; машина, восстановленная из этих резервных копий, не получит эти ключи",
+ "the configured secret store {path} does not exist on this machine": "настроенного хранилища ключей {path} на этой машине нет",
+ "the last restore did not write the secret store {path} its backup carried ({reason}); its keys are not on this machine until it is written": "последнее восстановление не записало хранилище ключей {path} из резервной копии ({reason}); пока оно не записано, этих ключей на машине нет",
+ "the vault folder comes from the environment ({names}), which the daily job may not share; only the folder the settings name is carried": "папку хранилища задаёт переменная окружения ({names}), которую ежедневное задание может не видеть; в копию попадает только папка из настроек",
+ "unencrypted copies of this workspace left by a rolled-back update remain beside it: {count}; they hold secrets/. Delete them once the restored workspace is confirmed": "рядом с папкой данных остались незашифрованные копии от отменённого обновления: {count}; в них лежит secrets/. Удалите их, когда убедитесь, что восстановленная папка в порядке",
+ "the backups root is inside the workspace, beside the key that opens the copies; point it at another disk or a synced folder": "корень резервных копий лежит внутри папки данных, рядом с ключом от них; укажите другой диск или синхронизируемую папку",
+ "the backups root is refused: {detail}": "корень резервных копий не принят: {detail}",
+ "the backup passphrase does not read: {detail}": "парольная фраза резервных копий не читается: {detail}",
  "up to date": "актуальная версия",
  "a newer release exists": "есть новая версия",
  "could not check": "не удалось проверить",
@@ -2420,6 +2428,7 @@
  "Moved repository still open": "Перенесённый репозиторий не закрыт",
  "Copy record disagrees": "Запись копии расходится",
  "Copy relation not recorded": "Связь копии не записана",
+ "Copy name lacks its prefix": "Имя копии без префикса",
  "{copy} is {n} commits behind its source": {
   "one": "{copy} отстаёт от источника на {n} коммит",
   "few": "{copy} отстаёт от источника на {n} коммита",
@@ -2428,6 +2437,7 @@
  },
  "{copy} may be behind its source: not measured": "{copy} может отставать от источника: не измерено",
  "{copy} is recorded as a copy but does not say so": "{copy} записан как копия, но сам об этом не говорит",
+ "{copy} lacks its organization's name prefix": "У {copy} нет префикса организации в имени",
  "{copy} has a copy record that cannot be read": "у {copy} нечитаемая запись копии",
  "{copy} and its copy record disagree": "{copy} и его запись копии расходятся",
  "{copy} says it is a copy, but its source is not recorded": "{copy} называет себя копией, но его источник не записан",
@@ -2438,5 +2448,8 @@
  "on, but this build carries no analytics key: nothing is sent": "включено, но в этой сборке нет ключа аналитики: ничего не отправляется",
  "on: command, tool and error names, outcomes, versions and platform; never keys, paths, names or workspace content": "включено: названия команд, инструментов и ошибок, результаты, версии и платформа; никогда ключи, пути, имена или содержимое рабочего пространства",
  "Anonymous usage data": "Анонимные данные об использовании",
- "Project Observatory sends anonymous usage and error data to help improve it: which commands and tools run, their outcome and duration, error kinds, the version and the platform. It never sends keys, paths, project or person names, or anything from your workspace. To turn it off:": "Project Observatory отправляет анонимные данные об использовании и ошибках, чтобы его улучшать: какие команды и инструменты запускаются, их результат и длительность, типы ошибок, версию и платформу. Он никогда не отправляет ключи, пути, имена проектов и людей и ничего из вашего рабочего пространства. Чтобы выключить:"
+ "Project Observatory sends anonymous usage and error data to help improve it: which commands and tools run, their outcome and duration, error kinds, the version and the platform. It never sends keys, paths, project or person names, or anything from your workspace. To turn it off:": "Project Observatory отправляет анонимные данные об использовании и ошибках, чтобы его улучшать: какие команды и инструменты запускаются, их результат и длительность, типы ошибок, версию и платформу. Он никогда не отправляет ключи, пути, имена проектов и людей и ничего из вашего рабочего пространства. Чтобы выключить:",
+ "off: version {version} is available and waits for you": "выключено: версия {version} доступна и ждёт вас",
+ "A new version is available": "Доступна новая версия",
+ "Version {version} is available. Automatic updates are off, so it waits for you. Install it when you choose:": "Доступна версия {version}. Автоматические обновления выключены, поэтому она ждёт вас. Установите её, когда решите:"
 }

@@ -129,6 +129,17 @@ class CuratedFile(unittest.TestCase):
         self.assertEqual(self.codes([entry(copy_point="abc1234", builder={"rules_count": 3})]), ["bad-builder"])
         self.assertEqual(self.codes([entry(copy_point="abc1234", source_branch="-x")]), ["bad-branch"])
         self.assertEqual(self.codes(["x"]), ["not-an-object"])
+        for bad in ("Org-", "org", "-", "org_", "o" * 40 + "-", 7):
+            self.assertEqual(self.codes([entry(copy_point="abc1234", name_prefix=bad)]), ["bad-prefix"], bad)
+
+    def test_a_name_prefix_is_kept_on_the_entry(self):
+        # OBS-332: the organization a copy moved to names it with its own prefix; the prefix is a
+        # private value of the curated entry, never a name written in the engine.
+        accepted, refused, _ = derivations.read_config(config([entry(copy_point="abc1234", name_prefix="org-")]),
+                                                       self.REPOS)
+        self.assertEqual((refused, accepted[0]["name_prefix"]), ([], "org-"))
+        accepted, _, _ = derivations.read_config(config([entry(copy_point="abc1234")]), self.REPOS)
+        self.assertIsNone(accepted[0]["name_prefix"])
 
     def test_one_copy_has_one_source_and_a_cycle_is_refused(self):
         self.assertEqual(self.codes([entry(copy_point="abc1234"), entry(source=OTHER, copy_point="abc1234")]),
@@ -186,6 +197,27 @@ class Measured(unittest.TestCase):
         self.assertIsNone(rel["deny"])
         self.assertIsNone(rel["behind"]["outside_deny"])
         self.assertNotIn("never read", json.dumps(doc))
+
+    def test_a_point_may_name_its_source_as_name_at_commit(self):
+        # OBS-334: a copy's sync writes its points as the `Source-Revision: <name>@<sha12>` line of its
+        # sync commit does; the name is checked by shape and dropped, the commit is compared as before.
+        estate = Estate()
+        commit(estate.copy, ".copy/upstream.json", json.dumps({
+            "schema": 1, "kind": "rewritten", "copy_point": "agent@" + estate.first[:12],
+            "last_synced": "agent@" + estate.third[:12], "synced_at": "2026-11-04T19:00:00Z",
+            "builder": "the copy's own builder", "deny": ["insights/"], "rule": "source to copy"}))
+        doc = self.build(estate, [entry(copy_point=estate.first)])
+        rel = doc["relations"][0]
+        self.assertEqual(rel["copy_record"]["problems"], [])
+        self.assertEqual(rel["copy_record"]["differs"], [])
+        self.assertEqual(rel["provenance"]["sync_base"], "copy")
+        self.assertEqual(rel["sync_base"]["source_commit"], estate.third[:12])
+        self.assertEqual(rel["behind"]["commits"], 1)
+        for bad in ("@" + estate.first[:12], "a b@" + estate.first[:12], "a/b@" + estate.first[:12],
+                    "agent@" + "z" * 12, "agent@" + estate.first[:6], "agent@@" + estate.first[:12]):
+            self.assertIsNone(derivations._point(bad), bad)
+        self.assertEqual(derivations._point("agent-x.v2@" + estate.first[:12].upper())["source_commit"],
+                         estate.first[:12])
 
     def test_the_copy_speaks_its_own_kinds_and_a_curated_alias_is_read(self):
         estate = Estate({"kind": "rewritten", "sync_base": "1234567"})
@@ -346,6 +378,17 @@ class Findings(unittest.TestCase):
         [row] = self.rows(self.rel(kind="move", behind=None, sync_base=None))
         self.assertEqual((row["type"], row["subject"]), ("copy.moved_source_open", SOURCE))
         self.assertEqual(self.rows(self.rel(kind="move", behind=None, source_archived=True)), [])
+
+    def test_a_copy_without_its_organizations_prefix_is_named(self):
+        # OBS-332: `name_prefix` on the entry; the copy repository's own name must start with it.
+        quiet = {"behind": None}
+        [row] = self.rows(self.rel(name_prefix="beta-", **quiet))
+        self.assertEqual((row["type"], row["subject"], row["severity"]), ("copy.name_unprefixed", COPY, "info"))
+        self.assertIn("beta-alpha-agent", row["action"])
+        self.assertEqual(self.rows(self.rel(name_prefix="alpha-", **quiet)), [], "the copy already carries it")
+        self.assertEqual(self.rows(self.rel(**quiet)), [], "no prefix recorded, nothing owed")
+        [moved] = [r for r in self.rows(self.rel(kind="move", name_prefix="beta-", behind=None, source_archived=True))]
+        self.assertEqual(moved["type"], "copy.name_unprefixed", "a move carries the prefix too")
 
     def test_no_document_no_rows(self):
         self.assertEqual(derivation_findings.findings(None), [])

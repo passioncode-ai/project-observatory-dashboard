@@ -130,6 +130,10 @@ class Flock(unittest.TestCase):
         for f in ROOT.rglob("*.py"):
             if f.name == "oslocks.py" or "node_modules" in f.parts:
                 continue
+            if f.relative_to(ROOT).as_posix() == "tools/space_daemons.py":
+                # The administrator's macOS-only root-side installer (OBS-361): standard library
+                # only, it may not import the engine, and the engine never imports it on Windows.
+                continue
             text = f.read_text(encoding="utf-8", errors="replace")
             if text.startswith("# Vendored from"):
                 # Kept byte for byte with its upstream kit (test_fabric_service); its Windows

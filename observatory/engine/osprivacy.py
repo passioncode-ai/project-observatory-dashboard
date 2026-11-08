@@ -16,6 +16,7 @@ Every privacy decision goes through here:
     osprivacy.explain(path_or_fd)          # the mode and uid, or the owner and ACL, for a diagnostic
     osprivacy.real_home()                  # the account's home, never from HOME/USERPROFILE
     osprivacy.read_regular(path, limit)    # a regular file's bytes: no link, no wait, at most `limit`
+    osprivacy.read_regular(path, limit, check=fn)  # fn(fd) decides on the opened file before a read
     osprivacy.is_terminal(sys.stdin)       # a person at a console, never a pipe, a file or NUL
 
 POSIX: the calls the engine made before — `O_NOFOLLOW`, `S_IMODE(st_mode) & 0o077`, `st_uid`,
@@ -492,18 +493,26 @@ def is_terminal(stream=None) -> bool:
     return _console_fd(fd)  # pragma: no cover - Windows
 
 
-def read_regular(path, limit: int) -> bytes:
+def read_regular(path, limit: int, *, check=None) -> bytes:
     """A regular file's bytes, at most `limit` of them, read on every OS without following a
     link and without waiting: a FIFO is opened non-blocking and refused, not read, and a file
     past `limit` (by its size, or by what a read returns) is a ValueError, never read whole.
     Anything that is not a regular file (a folder, a device, a socket) is a ValueError; a link
     is the OSError of `open` with NOFOLLOW. The disk guard reads Fabric service descriptors with
-    it: a FIFO named `*.json` once blocked it, a link to `/dev/zero` was read without end."""
+    it: a FIFO named `*.json` once blocked it, a link to `/dev/zero` was read without end.
+
+    `check`, when given, is called with the OPEN descriptor once it is known to be a regular
+    file and before a byte is read, and refuses by raising. A decision about the file (its owner,
+    its mode or access list) belongs there rather than on the path beforehand: a path checked and
+    then opened can name another file by the time it is opened, a descriptor cannot. On Windows
+    the link refusal itself is still the look-before-open that `open` documents above."""
     fd = open(path, os.O_RDONLY | NOFOLLOW | NONBLOCK)
     try:
         info = os.fstat(fd)
         if not stat.S_ISREG(info.st_mode):
             raise ValueError("not a regular file")
+        if check is not None:
+            check(fd)
         if info.st_size > limit:
             raise ValueError("larger than the limit")
         chunks, total = [], 0

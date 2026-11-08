@@ -261,7 +261,9 @@ class TailBudget(unittest.TestCase):
     def test_the_tail_order_is_the_order_the_tick_runs(self):
         sys.path.insert(0, str(ROOT / "tests"))
         import tick_reader
-        calls = [name for _line, _fn, name, _words in tick_reader.tick_calls(ROOT)]
+        # A probe in the tail (`learning-review-due`, OBS-331) runs under the same watchdog as a step, so it
+        # is in the tail's order too: read with the steps, never left on the collectors' side.
+        calls = [name for _line, _fn, name, _words in tick_reader.tick_calls(ROOT, ("step", "bounded", "probe"))]
         tail = list(dict.fromkeys(calls[calls.index("merge"):]))
         self.assertEqual(tail, list(tick_budget.TAIL_ORDER))
         self.assertLessEqual(tick_budget.RESERVED, set(tick_budget.TAIL_ORDER))

@@ -289,6 +289,15 @@ class Meter:
     def issuer(self) -> Optional[str]:
         return self.trusted_issuer()[0]
 
+    def verify_call(self, token: Any, *, capability: str, effect: str):
+        """A delegation token Fabric's hub minted for another capability of this callee (`ops.digest.record`,
+        OBS-330): DL-13 in its order (`delegation.verify_delegation`), with the issuer, keys and audience this meter
+        trusts, so the two never disagree about whom the estate is. Not the meter's own narrowing (DL-21): that is
+        `check`'s, for `grant.check` alone. An `Accepted` or the first `Refusal`; never the token in either."""
+        return delegation.verify_delegation(token, audience=self.audience, jwks=self.keys.get(_token_kid(token)),
+                                            now=int(self.clock()), capability=capability, effect=effect,
+                                            issuer=self.issuer)
+
     def readiness(self) -> dict:
         """What the meter needs to answer anything but a denial, read without touching its ledger: the trusted
         issuer and where it came from, the estate's keys and the grant directory, each missing one named in

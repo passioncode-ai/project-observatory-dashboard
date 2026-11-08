@@ -39,17 +39,23 @@ never the REST API's 60 requests an hour and never the pass above, whose guard, 
 update may take longer than five minutes (LC-03: a job never runs past its own interval). When it
 finds a newer release it starts the pass at once (`kick`), unless that release is held for a
 person or was tried in the last 15 minutes; the pass applies it at a safe point as before. A check
-that finds what the last one found prints nothing and logs nothing new (`update_events`).
+that finds what the last one found prints nothing and logs nothing new (`update_events`). With
+automatic updates off the job still reads the feed on the same schedule (OBS-333, ADR-0188 item 4)
+but never starts the pass: a newer version is recorded as `available` in `update-check.json` and
+announced once per version (the job's output, `full doctor`, `full auto-update status`, Home and
+Health in the dashboard, the Mac app's menu), with the command that installs it,
+`full update --apply`. Where no scheduler exists the plugin hook runs this check while off.
 
 THE SWITCH (LC-16) is the file `auto-update` in the workspace home: absent means on, and
 only the word `off` turns automatic updates off. `full auto-update on|off` writes it; an
 update, a reinstall or an uninstall never does. Installs that turned updates off before
 0.19.0 did it with `updates.auto: false` in config/settings.json: that is still honoured
 as off while the file is absent, and the next `auto-update` command moves it into the file
-and says so. Off stops the checks, the downloads and the installs, the app's included;
-the daily backup keeps running.
+and says so. Off stops the downloads and the installs, the app's included, and never starts
+the pass for a release; the check keeps reading the feed so a newer version is still announced
+(OBS-333), and the daily backup keeps running. An update never turns a person's off back on.
 
-    full auto-update status|on|off     the switch; off keeps the backups
+    full auto-update status|on|off     the switch, and a newer version waiting while it is off
     full maintain run                  one pass now (what the scheduler runs)
     full maintain ensure               schedule the pass and mirror the passphrase
     full maintain uninstall            remove the schedule; it stays off until `ensure`
@@ -852,6 +858,11 @@ def _snapshot_with_jobs_stopped(base: Path, state: dict, at: datetime.datetime, 
                           "file": Path(result["snapshot"]).name}
                 if result.get("export_error"):
                     record["detail"] = result["export_error"][:300]
+                # What the snapshot did with a secret store kept outside the workspace (OBS-350): its
+                # state and reason only, so doctor and Health can say whether the newest daily carried it.
+                store = result.get("secret_store") or {}
+                if store.get("state") and store.get("state") != "not-applicable":
+                    record["secret_store"] = {"state": store["state"], "reason": store.get("reason")}
                 state["snapshot"] = record
                 state.pop("snapshot_failure", None)
                 return {"result": "taken", "encrypted": record["encrypted"]}
@@ -1179,9 +1190,11 @@ def check_pass(base: Path, *, at: datetime.datetime | None = None, feed=None, ki
     answer means the check found what the last one found: `main` prints nothing then."""
     at = at or now()
     config.validate_workspace(base, required=True)
-    if not auto_enabled(base):
-        return {"status": "off", "quiet": True}
-    kick_to = None
+    # OFF STILL ANNOUNCES (OBS-333, ADR-0188 item 4): with automatic updates off the feed is read
+    # on the same schedule, nothing is downloaded or installed and the pass is never started; a
+    # newer version is recorded in `available` and announced once per version.
+    off = not auto_enabled(base)
+    kick_to, announce = None, None
     with check_lock(base) as held:
         if not held:
             return {"status": "busy", "quiet": True}
@@ -1203,20 +1216,76 @@ def check_pass(base: Path, *, at: datetime.datetime | None = None, feed=None, ki
             newer = _newer(latest)
             check.update(result="update-available" if newer else "up-to-date", latest=latest)
             update_events.emit("update_check", "ready" if newer else "current", base=base)
-            if newer and _kick_wanted({**state, "kick": record.get("kick")}, latest, at):
+            if newer and off:
+                if (record.get("available") or {}).get("version") != latest:
+                    announce = record["available"] = {"version": latest, "found_at": iso(at)}
+            else:
+                record.pop("available", None)
+            if newer and not off and _kick_wanted({**state, "kick": record.get("kick")}, latest, at):
                 kick_to = latest
                 record["kick"] = {"at": iso(at), "to": latest}
         record["check"] = check
         write_check(base, record)
     report: dict = {"status": "checked", "at": iso(at), "check": check}
+    if off:
+        report["auto_update"] = False
+    if announce:
+        report["announce"] = {**announce, "install": INSTALL_COMMAND,
+                              "text": announcement(announce["version"])}
     if kick_to:
         try:
             report["kick"] = (kick or (lambda: schedule_for(base).kick()))()
         except Exception as exc:  # noqa: BLE001: the scheduled pass still comes within 15 minutes
             report["kick"] = {"result": "failed", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
-    report["quiet"] = not kick_to and previous.get("result") == check["result"] \
+    report["quiet"] = not kick_to and not announce and previous.get("result") == check["result"] \
         and previous.get("latest") == check.get("latest")
     return report
+
+
+#: How a person installs a release while automatic updates are off.
+INSTALL_COMMAND = "project-observatory full update --apply"
+
+
+def announcement(version: str) -> str:
+    return (f"version {version} is available; automatic updates are off, so it waits for you: "
+            f"`{INSTALL_COMMAND}`")
+
+
+def settle_available(base: Path, installed: str | None = None) -> dict | None:
+    """Keep the check record's `available` true right away, not at the next check five minutes on: it
+    is dropped once updates are on (the job installs) or once `installed` (default: this engine) is
+    that version or a later one. The Mac app reads the record as the engine's decision (OBS-333).
+    Answers what stays recorded; never raises, under the check job's lock when it can take it."""
+    try:
+        with check_lock(base) as held:
+            record = read_check(base)
+            found = record.get("available") or {}
+            if not found:
+                return None
+            try:
+                stale = auto_enabled(base) or (
+                    config.version_tuple(str(installed or config.VERSION)) >= config.version_tuple(str(found.get("version"))))
+            except (ValueError, TypeError, config.ConfigurationError):
+                stale = True
+            if not stale:
+                return found
+            if held:
+                record.pop("available", None)
+                write_check(base, record)
+            return None
+    except OSError:
+        return None
+
+
+def available_update(base: Path) -> dict | None:
+    """The newer version the check job found while automatic updates are off (OBS-333), or None:
+    None while they are on (the job installs it), and once the engine runs that version or a later one."""
+    if auto_enabled(base):
+        return None
+    found = read_check(base).get("available") or {}
+    if not _newer(found.get("version")):
+        return None
+    return {"version": str(found["version"]), "found_at": found.get("found_at"), "install": INSTALL_COMMAND}
 
 
 def _reload_after_pass(base: Path, spawn=None) -> str | None:
@@ -1359,21 +1428,47 @@ class LaunchdSchedule:
 
     kind = "launchd"
 
-    def __init__(self, base: Path, runner=None, job: str = "maintain"):
+    def __init__(self, base: Path, runner=None, job: str = "maintain", headless: bool | None = None):
         self.base, self.job = base, job
         self.launch = _install_launchd()
         self.label = f"org.project-observatory.{_instance_digest(base)}.{job}"
         self.plist = Path.home() / "Library" / "LaunchAgents" / f"{self.label}.plist"
         self.runner = runner
+        self._headless = headless
+
+    def headless(self) -> bool:
+        """This account has no GUI session (OBS-361 part 2): `bootstrap gui/<uid>` fails with 125 there, so
+        the job is a system daemon with UserName set to this account, which root's space_daemons.py loads
+        from the background folder. Asked once per schedule, as machine-move cutover asks it."""
+        if self._headless is None:
+            import machine_move
+            if sys.platform != "darwin" or shutil.which("launchctl") is None:
+                self._headless = False
+            else:
+                try:
+                    self._headless = not machine_move.gui_session(self.launch.uid(), self.runner or subprocess.run)
+                except (OSError, subprocess.SubprocessError):
+                    # launchctl did not answer: keep the agent path, which fails and says so, as before.
+                    self._headless = False
+        return self._headless
+
+    @property
+    def definition(self) -> Path:
+        """Where the definition lives: ~/Library/LaunchAgents, or the background folder when headless."""
+        if self.headless():
+            import machine_identity
+            return machine_identity.background_dir(Path.home()) / f"{self.label}.plist"
+        return self.plist
 
     def document(self) -> dict:
         env = self.launch.environment()
         # PATH comes from whoever runs the installer, and a terminal and an agent session
         # differ: an installed job keeps the PATH it has, so the definition does not flip
         # (and get reloaded) with each caller (review F1).
-        if self.installed():
+        source = self.definition if self.definition.is_file() else self.plist
+        if source.is_file():
             try:
-                kept = (plistlib.loads(self.plist.read_bytes()).get("EnvironmentVariables") or {}).get("PATH")
+                kept = (plistlib.loads(source.read_bytes()).get("EnvironmentVariables") or {}).get("PATH")
             except (OSError, ValueError, plistlib.InvalidFileException):
                 kept = None
             if kept:
@@ -1406,10 +1501,23 @@ class LaunchdSchedule:
         }
 
     def installed(self) -> bool:
-        return self.plist.is_file()
+        return self.definition.is_file()
+
+    def system_daemon(self) -> bool:
+        """Root's space_daemons.py runs this label as a system daemon of this account (OBS-361 part 2).
+        False where it cannot be asked (Windows, launchctl that did not answer)."""
+        if not hasattr(os, "getuid"):
+            return False
+        import machine_move
+        try:
+            return machine_move._system_daemon_loaded(self.runner or subprocess.run, self.label, self.launch.uid())
+        except (OSError, subprocess.SubprocessError):
+            return False
 
     def loaded(self) -> bool:
-        return self.launch.job_loaded(self.label)
+        if self.headless():
+            return self.system_daemon()
+        return self.launch.job_loaded(self.label) or self.system_daemon()
 
     def install(self) -> dict:
         doc = self.document()
@@ -1417,19 +1525,21 @@ class LaunchdSchedule:
         if problems:
             raise config.ConfigurationError("; ".join(problems))
         self.launch.prepare_logs((f"{self.job}.log", f"{self.job}.err"), self.base / "store" / "logs")
+        if self.headless():
+            return self._install_background(doc)
+        if self.system_daemon():
+            # Root's daemon of this account runs it already (a space signed in at the screen later):
+            # an agent loaded too would run every pass twice (OBS-361 part 2), so it is booted out.
+            if self.launch.job_loaded(self.label):
+                self.launch.stop_job(self.label)
+            return {"schedule": self.kind, "label": self.label, "changed": False, "domain": "system",
+                    "load": "loaded"}
         current = plistlib.loads(self.plist.read_bytes()) if self.installed() else None
         pending = self.base / "store" / "maintenance-reload-pending"
         if current == doc and self.loaded() and (self.job != "maintain" or not pending.exists()):
             return {"schedule": self.kind, "label": self.label, "changed": False}
         self.plist.parent.mkdir(parents=True, exist_ok=True)
-        if self.plist.is_symlink():
-            raise config.ConfigurationError("LaunchAgent plist cannot be a symbolic link")
-        tmp = self.plist.with_suffix(".plist.tmp")
-        tmp.unlink(missing_ok=True)
-        fd = osprivacy.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | osprivacy.NOFOLLOW, 0o600)
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(plistlib.dumps(doc))
-        os.replace(tmp, self.plist)
+        self._write(self.plist, doc)
         if self.loaded():
             if self.job == "maintain" and pass_running(self.base):
                 # Booting the job out now would kill the pass that is running — perhaps the
@@ -1445,19 +1555,105 @@ class LaunchdSchedule:
             pending.unlink(missing_ok=True)
         return {"schedule": self.kind, "label": self.label, "changed": True}
 
+    @staticmethod
+    def _write(target: Path, doc: dict) -> None:
+        if target.is_symlink():
+            raise config.ConfigurationError("LaunchAgent plist cannot be a symbolic link")
+        tmp = target.with_suffix(".plist.tmp")
+        tmp.unlink(missing_ok=True)
+        fd = osprivacy.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | osprivacy.NOFOLLOW, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(plistlib.dumps(doc))
+        os.replace(tmp, target)
+
+    def _install_background(self, doc: dict) -> dict:
+        """`install` with no GUI session (OBS-361 part 2): the definition goes to the background folder, and the
+        administrator loads it with space_daemons.py. A copy left in ~/Library/LaunchAgents by an earlier
+        attempt is removed, so a later sign-in at the screen never starts the job a second time."""
+        import machine_identity
+        import machine_move
+        home, uid = Path.home(), self.launch.uid()
+        machine_identity.ensure_private_dir(machine_identity.background_dir(home), home)
+        target = self.definition
+        try:
+            current = plistlib.loads(target.read_bytes()) if target.is_file() else None
+        except (OSError, ValueError, plistlib.InvalidFileException):
+            current = None
+        changed = current != doc
+        if changed:
+            self._write(target, doc)
+        elif target.is_file() and not target.is_symlink():
+            # Root refuses a definition anyone but this account can change (space_daemons.py).
+            target.chmod(target.stat().st_mode & 0o7755 & ~0o022)
+        loaded = self.loaded()
+        # launchctl also answers 125 for an ordinary account signed out at the screen but reached over SSH:
+        # its LaunchAgents copy loads at the next sign-in, so it is kept, and refreshed, until root's daemon
+        # runs; only then is it removed, so a sign-in never starts the job a second time.
+        agent_copy = self.plist.is_file() and not self.plist.is_symlink()
+        if agent_copy and loaded:
+            self.plist.unlink()
+        elif agent_copy:
+            try:
+                if plistlib.loads(self.plist.read_bytes()) != doc:
+                    self._write(self.plist, doc)
+            except (OSError, ValueError, plistlib.InvalidFileException):
+                self._write(self.plist, doc)
+        out = {"schedule": self.kind, "label": self.label, "changed": changed, "domain": "system",
+               "definition": str(target), "load": "loaded" if loaded else "waiting-for-root",
+               **({"removed_agent_copy": str(self.plist)} if agent_copy and loaded else {}),
+               **({"agent_copy_kept": str(self.plist)} if agent_copy and not loaded else {})}
+        if loaded and not changed:
+            return out
+        # root's apply refuses a label that is already loaded: a new definition is removed, then applied.
+        steps = ([machine_move.root_step("remove", self.label, uid)] if loaded else []) + [
+            machine_move.root_step("apply", self.label, uid)]
+        out["load"] = "waiting-for-root"
+        out["result"] = "waiting-for-root"
+        out["next"] = steps
+        out["human_steps"] = ["if the administrator has not installed it on this computer yet: "
+                              + "; ".join(machine_move.install_steps())] + [
+            f"then: {step}  (this account has no GUI session, so the job runs as a system daemon with "
+            "UserName set to this account, never as root)" for step in steps]
+        return out
+
     def kick(self) -> dict:
         """Run the job now (`launchctl kickstart`, no `-k`: a running pass is left alone)."""
+        if self.headless() or self.system_daemon():
+            # A system daemon: only root can kickstart it, and the pass runs at its next interval anyway.
+            return {"result": "failed", "detail": f"{self.label} is a system daemon of this account; "
+                                                  f"it runs at its next interval (sudo launchctl kickstart system/{self.label} "
+                                                  "starts it now)"}
         ok, detail = self.launch.kick_job(self.label)
         return {"result": "started" if ok else "failed", **({} if ok else {"detail": detail[:200]})}
 
     def uninstall(self) -> dict:
+        if self.headless() or self.system_daemon():
+            import machine_move
+            if self.launch.job_loaded(self.label):
+                self.launch.stop_job(self.label)
+            loaded = self.system_daemon()
+            self.definition.unlink(missing_ok=True)
+            self.plist.unlink(missing_ok=True)
+            out = {"schedule": self.kind, "label": self.label, "removed": True, "domain": "system"}
+            if loaded:
+                out["next"] = [machine_move.root_step("remove", self.label, self.launch.uid())]
+            return out
         if self.loaded():
             self.launch.stop_job(self.label)
         self.plist.unlink(missing_ok=True)
         return {"schedule": self.kind, "label": self.label, "removed": True}
 
     def status(self) -> dict:
-        return {"kind": self.kind, "label": self.label, "installed": self.installed(), "loaded": self.loaded()}
+        out = {"kind": self.kind, "label": self.label, "installed": self.installed(), "loaded": self.loaded()}
+        if not self.headless():
+            if out["loaded"] and self.system_daemon():
+                out.update(installed=True, domain="system")
+            return out
+        out["domain"] = "system"
+        if out["installed"] and not out["loaded"]:
+            import machine_move
+            out["next"] = machine_move.root_step("apply", self.label, self.launch.uid())
+        return out
 
 
 class SystemdSchedule:
@@ -1637,6 +1833,8 @@ class Schedules:
     def status(self) -> dict:
         main, check = self.main.status(), self.check.status()
         out = {**main, "check": check}
+        if not out.get("next") and check.get("next"):
+            out["next"] = check["next"]
         for key in ("installed", "loaded", "active"):
             if key in main and main[key] is not None:
                 out[key] = bool(main[key]) and bool(check.get(key))
@@ -1696,6 +1894,9 @@ def unschedule(base: Path, *, schedule=None) -> dict:
 
 # --- what doctor and the Health page read -------------------------------------------
 
+#: Backup warning codes a maintenance item already says in its own words (OBS-349).
+BACKUP_TWINS = frozenset({"backups-no-passphrase", "backups-unencrypted-local"})
+
 def status(base: Path, *, schedule=None) -> dict:
     """Whether updates and backups run by themselves, and what they last found. No value."""
     state = read_state(base)
@@ -1723,11 +1924,18 @@ def status(base: Path, *, schedule=None) -> dict:
                              "themselves: `project-observatory full maintain ensure`")
     elif sched.get("probed") is False:
         pass
+    elif not scheduled and sched.get("domain") == "system" and sched.get("installed"):
+        warn("waiting-for-root", "updates and daily backups wait for an administrator: this account has no GUI "
+                                 f"session, so its job runs as a system daemon once root loads it: {sched.get('next')}",
+             step=sched.get("next"))
     elif not scheduled:
         warn("not-scheduled", "updates and daily backups are not scheduled on this machine yet: "
                               "`project-observatory full maintain ensure`")
     if not auto_enabled(base):
         warn("auto-off", f"{SWITCH_LABEL}: off — new releases wait for you: `project-observatory full auto-update on`")
+    available = available_update(base)
+    if available:
+        warn("update-available", announcement(available["version"]), version=available["version"])
     update = state.get("update") or {}
     if state.get("services_not_restarted") or update.get("result") == "updated-services-not-restarted":
         # This engine's own interpreter, as the dashboard's commands carry it: a Mac has no
@@ -1787,6 +1995,20 @@ def status(base: Path, *, schedule=None) -> dict:
     for item in machine.get("warning_items") or []:
         warnings.append(item["text"])
         items.append(item)
+    # The backups' own warnings (OBS-349), with their codes, except the two a maintenance item
+    # above already says: no passphrase (`passphrase`, `not-encrypted`) and unencrypted local
+    # copies (`not-encrypted`). The rest (a secret store left out of the snapshot, a copy left by a
+    # rolled-back update, a root inside the workspace) no other item names.
+    try:
+        import backup_vault
+        backups = backup_vault.status(base)
+    except Exception:  # noqa: BLE001: a status never fails doctor
+        backups = {}
+    for item in backups.get("warning_items") or []:
+        if item.get("code") in BACKUP_TWINS:
+            continue
+        warnings.append(item["text"])
+        items.append(item)
     versions = {"engine": config.VERSION}
     if sys.platform == "darwin":
         try:
@@ -1804,19 +2026,38 @@ def status(base: Path, *, schedule=None) -> dict:
             "snapshot": state.get("snapshot"), "snapshot_failure": state.get("snapshot_failure"),
             "machine_backup": machine,
             "app": state.get("app"), "log_retention": retention,
+            **({"available": available} if available else {}),
             "warnings": warnings, "warning_items": items}
 
 
 # --- a reinstall restores ------------------------------------------------------------
 
 def restore_latest(base: Path, *, store=None, label: str | None = None, same_machine: bool | None = None,
-                   second_machine: bool | None = None, unknown: str = "second") -> dict:
+                   second_machine: bool | None = None, unknown: str = "second", stdin_value: str | None = None,
+                   ask: bool = False, secret_store: str = "auto", secret_store_names: bool = False,
+                   secret_store_target: str | None = None) -> dict:
     """Restore the newest backup a workspace at this path left (D7). Only into an empty home.
 
     When backups of more than one workspace exist under this name (a reinstall that could
     not find its passphrase starts a second, empty workspace with its own daily backups),
     nothing is chosen: the answer lists them and `--label` picks one (audit A06). Within
-    one workspace the newest snapshot that opens is restored, falling back to older ones."""
+    one workspace the newest snapshot that opens is restored, falling back to older ones.
+
+    Each snapshot is opened with `backup_vault.open_with`: OBSERVATORY_BACKUP_PASSPHRASE,
+    `stdin_value` (`--passphrase-stdin`) and every passphrase the OS store keeps under the
+    folder's label. A backup copied from another machine sits under THAT machine's label,
+    which this store does not hold (OBS-348): with `ask` (`full restore --latest`, never
+    `init`) and a terminal, the person is asked once per label and that label's snapshots are
+    tried again with the answer. The value is used for this restore and kept nowhere.
+
+    Nothing found for this exact path: the answer is `no-backup`, plus `elsewhere` when the
+    same workspace left backups under another home (`backup_vault.elsewhere`, OBS-347), with
+    the explicit-file step; nothing is chosen.
+
+    `secret_store` is the policy for a secret store the snapshot carried (OBS-350): `full init` passes
+    `keep`, so a reinstall over a surviving store never fails or overwrites it. A refusal of the store
+    (`secret-store-not-empty`, ...) is raised as it is: an older backup would meet the same store."""
+    import secret_store_carry
     import workspace_upgrade
     if base.exists() and any(p.name != ".workspace.lock" for p in base.iterdir()):
         raise config.ConfigurationError("Restore requires a new empty destination; existing state is never overwritten")
@@ -1826,7 +2067,15 @@ def restore_latest(base: Path, *, store=None, label: str | None = None, same_mac
         if not found:
             return {"status": "no-backup", "detail": f"no backups under the label {label!r}"}
     if not found:
-        return {"status": "no-backup", "detail": f"no backups of a workspace named {base.name!r} were found"}
+        out = {"status": "no-backup", "detail": f"no backups of a workspace named {base.name!r} were found"}
+        other = backup_vault.elsewhere(base)
+        if other:
+            snap = other[0]["newest"]
+            out.update({"elsewhere": other,
+                        "detail": out["detail"] + " at this path; the same workspace left backups under another "
+                                                  "home, listed in `elsewhere`, and none is chosen",
+                        "next": f"project-observatory full restore '{snap}'"})
+        return out
     labels: dict[str, dict] = {}
     for c in found:  # newest first, so the first one seen per label is its newest
         entry = labels.setdefault(c["label"], {"label": c["label"], "newest": str(c["snapshot"]),
@@ -1838,43 +2087,84 @@ def restore_latest(base: Path, *, store=None, label: str | None = None, same_mac
                 "next": "project-observatory full restore --latest --label LABEL"}
     # OBSERVATORY_SYSTEM_SETUP=0 keeps this process away from the Keychain (audit A25);
     # a store handed in by the caller is its own choice and is used.
-    env_secret = os.environ.get(backup_vault.PASS_ENV)
-    if store is None and os.environ.get("OBSERVATORY_SYSTEM_SETUP") == "0":
-        secrets_for = lambda _label: [env_secret] if env_secret else []  # noqa: E731
-    else:
-        store = store or backup_vault.SecretStore()
-        secrets_for = lambda lbl: ([env_secret] if env_secret else []) + backup_vault.stored_passphrases(store, lbl)  # noqa: E731
+    use_store = store if store is not None or os.environ.get("OBSERVATORY_SYSTEM_SETUP") == "0" \
+        else backup_vault.SecretStore()
     problems: list[dict] = []
     tried_any = False
-    for candidate in found:
-        for secret in secrets_for(candidate["label"]):
-            tried_any = True
-            try:
-                result = workspace_upgrade.restore(candidate["snapshot"], base, secret=secret,
-                                                   same_machine=same_machine, second_machine=second_machine,
-                                                   unknown=unknown)
-            except (backup_vault.BackupError, config.ConfigurationError, OSError) as exc:
-                # A wrong passphrase, a damaged copy or one that needs a newer release: try
-                # the next passphrase, then the next older backup (review F10).
-                problems.append({"snapshot": candidate["snapshot"].name, "detail": str(exc)[:200]})
-                if not base.exists() or not any(p.name != ".workspace.lock" for p in base.iterdir()):
-                    continue
+
+    def attempt(candidate: dict, typed: str | None = None) -> dict | None:
+        """The restore of one snapshot, or None after recording why it did not happen."""
+        nonlocal tried_any
+        try:
+            if typed is None:
+                secret, _, source = backup_vault.open_with(
+                    candidate["snapshot"], base=None, label=candidate["label"] if use_store is not None else None,
+                    stdin_value=stdin_value, store=use_store, verify=False)
+            elif backup_vault.opens(candidate["snapshot"], typed):
+                secret, source = typed, "prompt"
+            else:
+                problems.append({"snapshot": candidate["snapshot"].name, "code": "passphrase-refused",
+                                 "detail": "the passphrase typed does not open it"})
+                return None
+        except backup_vault.BackupError as exc:
+            tried_any = tried_any or bool(getattr(exc, "tried", None))
+            problems.append({"snapshot": candidate["snapshot"].name, "code": exc.code or "unreadable",
+                             "detail": str(exc)[:200]})
+            return None
+        tried_any = True
+        try:
+            result = workspace_upgrade.restore(candidate["snapshot"], base, secret=secret, prompt=False,
+                                               same_machine=same_machine, second_machine=second_machine,
+                                               unknown=unknown, secret_store=secret_store,
+                                               secret_store_names=secret_store_names,
+                                               secret_store_target=secret_store_target)
+        except secret_store_carry.CarryRefused as exc:
+            if exc.code != "secret-store-manifest-mismatch":
                 raise
-            result.update({"status": "restored", "from": str(candidate["snapshot"]), "label": candidate["label"]})
-            if problems:
-                result["skipped"] = problems
+            problems.append({"snapshot": candidate["snapshot"].name, "code": exc.code, "detail": str(exc)[:200]})
+            return None
+        except (backup_vault.BackupError, config.ConfigurationError, OSError) as exc:
+            # A damaged copy or one that needs a newer release: try the next older backup (review F10).
+            problems.append({"snapshot": candidate["snapshot"].name, "detail": str(exc)[:200]})
+            if not base.exists() or not any(p.name != ".workspace.lock" for p in base.iterdir()):
+                return None
+            raise
+        result.update({"status": "restored", "from": str(candidate["snapshot"]), "label": candidate["label"],
+                       "passphrase_source": source})
+        if problems:
+            result["skipped"] = problems
+        return result
+
+    for candidate in found:
+        result = attempt(candidate)
+        if result is not None:
             return result
+    refused = {p["snapshot"] for p in problems if p.get("code") == "passphrase-refused"}
+    locked = [lbl for lbl in labels if any(c["snapshot"].name in refused for c in found if c["label"] == lbl)]
+    if ask and locked:
+        for lbl in locked:   # newest first; one question per label, never one per snapshot
+            typed = backup_vault.ask(lbl)
+            if not typed:
+                continue
+            for candidate in (c for c in found if c["label"] == lbl):
+                result = attempt(candidate, typed)
+                if result is not None:
+                    return result
     newest = found[0]
     # The command a person can run as given: an EMPTY home (a fresh `init` already made
-    # this one non-empty), and no passphrase on the command line — `restore` asks for it
-    # at a terminal (audit A05).
+    # this one non-empty), and no passphrase on the command line: `restore` asks for it
+    # at a terminal (audit A05), or reads it from a file on stdin (OBS-348).
     by_hand = f"project-observatory --home NEW_EMPTY_HOME full restore '{newest['snapshot']}'"
-    if tried_any and not all("authentication" in p["detail"] for p in problems):
+    by_stdin = f"project-observatory --home NEW_EMPTY_HOME full restore '{newest['snapshot']}' --passphrase-stdin < FILE"
+    if tried_any and not all(p.get("code") == "passphrase-refused" or "authentication" in p["detail"]
+                             for p in problems):
         return {"status": "restore-failed", "newest": str(newest["snapshot"]), "skipped": problems,
                 "next": "`project-observatory full init --fresh` starts empty; the backups are left as they are"}
     return {"status": "backups-found-locked", "newest": str(newest["snapshot"]),
-            "detail": "no passphrase that opens these backups was found in the OS credential store",
-            "next": by_hand + " (it asks for the passphrase)"}
+            "detail": "no passphrase that opens these backups was found in the OS credential store; a backup "
+                      "another machine took opens with that machine's passphrase",
+            "next": by_hand + " (it asks for the passphrase at a terminal); without a terminal, redirect the "
+                              "other machine's passphrase file: " + by_stdin}
 
 
 # --- CLI ------------------------------------------------------------------------------
@@ -1895,11 +2185,17 @@ def hook(base: Path) -> dict:
 
     It schedules the job where nothing is scheduled yet (respecting `maintain uninstall`),
     and where no scheduler exists — Linux without a systemd user manager — it runs the
-    pass itself, which is cheap when nothing is due."""
+    pass itself, which is cheap when nothing is due. With automatic updates off the pass
+    looks for nothing, so the hook also runs the check there: a newer version is still
+    announced (OBS-333), and the check never starts or installs anything while off."""
     result = ensure(base)
     sched = result.get("schedule") or {}
-    if sched.get("result") == "unscheduled":
+    # In an account with no GUI session the job waits for root's space_daemons.py (OBS-361 part 2);
+    # until root loads it, the hook keeps running the pass, as it does where nothing is scheduled.
+    if sched.get("result") in ("unscheduled", "waiting-for-root"):
         result["pass"] = run_pass(base)
+        if not auto_enabled(base):
+            result["check"] = check_pass(base)
     return result
 
 
@@ -1964,7 +2260,11 @@ def auto_update_main(argv: list[str]) -> int:
         if a.action in ("on", "off"):
             write_switch(base, a.action == "on")
             update_events.emit("auto_update", a.action, base=base)
+            settle_available(base)
         result = {"auto_update": auto_enabled(base), "switch": switch_status(base)}
+        available = available_update(base)
+        if available:
+            result["available"] = available
         if a.action == "on" and system_setup_allowed(base):
             result["ensure"] = ensure(base, explicit=True)
         elif a.action == "status":

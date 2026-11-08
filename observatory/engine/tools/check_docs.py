@@ -100,6 +100,8 @@ PATH_PREFIX_ALLOWLIST = {
 }
 
 PATH_ALLOWLIST = {
+    "store/update-check.json": "the update check job's record, written into the workspace by "
+                               "maintenance.check_pass (OBS-333 names its `available` key)",
     "store/scrub-watermark.json": "written into the workspace by tools/scrub_companion.py",
     "store/tick-rotation.json": "written into the workspace by tools/tick.py, a per-collector record of start, finish, outcome, not-started streak and last run",
     # Generated or volatile, and gitignored: a fresh clone has none of these.

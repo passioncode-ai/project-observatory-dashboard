@@ -435,6 +435,67 @@ class Taking(Machine):
         self.assertEqual((listed['count'], listed['newest']), (MB.KEEP, found[-1].name))
 
 
+class ExternalSecretStore(Base):
+    """OBS-350: a secret store kept outside the workspace travels encrypted in the workspace snapshot, so
+    the machine bundle never carries a second copy that could drift, even when an include names it."""
+
+    def setUp(self):
+        super().setUp()
+        from secret_store_fixture import make_external_store, all_values
+        self.values = all_values()
+        vault.set_passphrase(self.ws, PASS)
+        self.store = make_external_store(self.user / '.config' / 'example-store')
+        self.write('.config/example-agent/agent.toml', 'operator extra\n')
+        doc = config.read_json(self.ws / 'config' / 'settings.json')
+        doc.setdefault('sources', {})['secret_store'] = str(self.store)
+        workspace.write_json(self.ws / 'config' / 'settings.json', doc)
+        self.settings({'include': ['~/.config'], 'roots': []})
+
+    def test_an_include_inside_the_external_store_is_skipped_with_its_reason(self):
+        self.take(at=AT)
+        stage, manifest = self.open(MB.newest(self.ws))
+        self.addCleanup(shutil.rmtree, stage, True)
+        self.assertIn({'source': '~/.config/example-store',
+                       'reason': 'carried encrypted in the workspace snapshot (sources.secret_store)'},
+                      manifest['skipped'])
+        carried = [p for p in stage.rglob('*') if p.is_file()]
+        self.assertTrue(any(p.name == 'agent.toml' for p in carried), 'the rest of the include travels')
+        for path in carried:
+            self.assertNotIn('example-store', path.as_posix())
+            for value in self.values:
+                self.assertNotIn(value.encode(), path.read_bytes(), path)
+
+    def test_the_workspace_pointer_names_where_the_store_travels(self):
+        pointer = MB.workspace_pointer(self.ws, self.user)
+        self.assertEqual(pointer['secret_store'],
+                         {'external': True, 'carried_in': 'workspace snapshot', 'newest_snapshot_carried': None})
+        record = self.ws / 'store' / 'raw' / 'secret-store-carry.json'
+        record.parent.mkdir(parents=True, exist_ok=True)
+        record.write_text(json.dumps({'at': '2026-11-06T00:00:00Z', 'kind': 'daily', 'file': 'daily-x.obsnap',
+                                      'state': 'carried', 'reason': None, 'files': 9, 'size': 120}))
+        self.assertTrue(MB.workspace_pointer(self.ws, self.user)['secret_store']['newest_snapshot_carried'])
+        record.write_text(json.dumps({'at': '2026-11-06T00:00:00Z', 'state': 'not-carried', 'reason': 'no-passphrase'}))
+        self.assertFalse(MB.workspace_pointer(self.ws, self.user)['secret_store']['newest_snapshot_carried'])
+        doc = config.read_json(self.ws / 'config' / 'settings.json')
+        doc['sources'].pop('secret_store')
+        workspace.write_json(self.ws / 'config' / 'settings.json', doc)
+        self.assertEqual(MB.workspace_pointer(self.ws, self.user)['secret_store'], {'external': False})
+
+    def test_a_store_no_snapshot_carries_is_not_skipped(self):
+        # A setting naming a folder that holds the workspace is never carried by the snapshot; the
+        # bundle must not drop what its entries name because of it.
+        doc = config.read_json(self.ws / 'config' / 'settings.json')
+        doc['sources']['secret_store'] = str(self.base)
+        workspace.write_json(self.ws / 'config' / 'settings.json', doc)
+        self.assertEqual(MB.workspace_pointer(self.ws, self.user)['secret_store'],
+                         {'external': True, 'carried_in': None, 'reason': 'contains-workspace'})
+        self.take(at=AT)
+        stage, manifest = self.open(MB.newest(self.ws))
+        self.addCleanup(shutil.rmtree, stage, True)
+        self.assertFalse([s for s in manifest['skipped'] if 'workspace snapshot' in s['reason']], manifest['skipped'])
+        self.assertTrue(any(p.name == 'agent.toml' for p in stage.rglob('*')))
+
+
 class Refusals(Base):
     def test_without_a_passphrase_nothing_is_written_anywhere(self):
         self.write('.ssh/id_example', SECRET_MARKER, 0o600)
@@ -621,9 +682,23 @@ class Restore(Machine):
         root = MB.stage_root(self.ws)
         self.assertTrue(list(root.rglob('id_example')), 'the plaintext exists while the restore runs')
         child.send_signal(sig)
-        child.wait(30)
-        child.stdout.close()
+        # OBS-392: a loaded CI runner took over 30 s to finish a child that had caught SIGTERM
+        # (run 42413575669), and `wait(30)` raised before the restore's cleanup could be judged.
+        # The bound only catches a hang: `communicate` also drains stdout, so the child never
+        # waits on a full pipe, and a child still alive at the bound is killed and named.
+        try:
+            child.communicate(timeout=self.KILLED_BOUND)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.communicate()
+            self.fail(f'the restore was still running {self.KILLED_BOUND} s after signal {sig}')
+        # Caught signals end through SystemExit(128 + signum) (raise_on_signals), so the
+        # cleanup in every `finally` ran; SIGKILL cannot be caught.
+        self.assertEqual(child.returncode, -sig if sig == signal.SIGKILL else 128 + sig, sig)
         return root
+
+    #: How long a signalled restore may take to clean up and exit before it counts as hung.
+    KILLED_BOUND = 300
 
     def test_a_restore_killed_by_sigterm_or_sighup_leaves_no_plaintext(self):
         for sig in (signal.SIGTERM, signal.SIGHUP):
@@ -1474,6 +1549,70 @@ class MachineMove(Base):
             MM.cutover(JOB_LABEL, self.home, runner=Recorder(), platform='darwin', uid=501, confirm=YES)
         self.assertEqual(live.read_bytes(), b'mine')
 
+    # OBS-390: a definition staged by a restore days ago may name a release folder that a newer release
+    # has since replaced; cutover refuses it by name instead of loading a job that cannot start.
+    def test_with_program_set_argv0_is_only_a_name(self):
+        # Review of OBS-390: launchd runs Program; ProgramArguments[0] is then only argv[0], so a cosmetic
+        # absolute argv0 that does not exist is no reason to refuse the definition.
+        import plistlib
+        plist = self.base / 'argv0.plist'
+        plist.write_bytes(plistlib.dumps({'Label': JOB_LABEL, 'Program': '/usr/bin/true',
+                                          'ProgramArguments': [str(self.base / 'no-such' / 'argv0')]}))
+        self.assertEqual(MM.stale_paths(plist), [])
+
+    def test_a_stale_staged_plist_is_refused_before_anything_moves(self):
+        import plistlib
+        gone = self.base / 'releases' / 'old-release' / 'bin' / 'run'
+        cases = {'program': ({'ProgramArguments': [str(gone), '--serve']}, str(gone)),
+                 'Program key': ({'Program': str(gone), 'ProgramArguments': [str(gone)]}, str(gone)),
+                 'working directory': ({'ProgramArguments': ['/usr/bin/true'],
+                                        'WorkingDirectory': str(self.base / 'releases' / 'old-release')},
+                                       str(self.base / 'releases' / 'old-release'))}
+        for name, (doc, missing) in cases.items():
+            with self.subTest(name):
+                staged = self.stage(data=plistlib.dumps({'Label': JOB_LABEL, **doc}))
+                run = Recorder({('launchctl', 'print'): 113})
+                asked = []
+                with self.allow, self.assertRaises(MM.MachineMoveError) as caught:
+                    MM.cutover(JOB_LABEL, self.home, runner=run, platform='darwin', uid=501,
+                               confirm=lambda *a: asked.append(a) or True)
+                message = str(caught.exception)
+                self.assertIn('staged-plist-stale', message)
+                self.assertIn(missing, message)
+                self.assertIn(str(MI.staging_dir(self.home)), message, 'the remedy names the staging folder')
+                self.assertIn('cutover again', message)
+                self.assertEqual(asked, [], 'refused before the person is asked')
+                self.assertTrue(staged.is_file(), 'the staged definition stays where it was')
+                self.assertFalse((self.home / 'Library/LaunchAgents' / staged.name).exists())
+                self.assertNotIn('bootstrap', [c[1] for c in run.calls])
+                self.assertEqual([e['label'] for e in MI.read_placement(self.home)['elsewhere']], [JOB_LABEL])
+                staged.unlink()
+
+    def test_a_fresh_staged_plist_whose_paths_exist_is_loaded(self):
+        import plistlib
+        release = self.base / 'releases' / 'new-release'
+        (release / 'bin').mkdir(parents=True)
+        program = release / 'bin' / 'run'
+        program.write_text('#!/bin/sh\n')
+        program.chmod(0o755)
+        data = plistlib.dumps({'Label': JOB_LABEL, 'ProgramArguments': [str(program)], 'WorkingDirectory': str(release)})
+        self.stage(data=data)
+        run = Recorder({('launchctl', 'print'): 113})
+        with self.allow:
+            result = MM.cutover(JOB_LABEL, self.home, runner=run, platform='darwin', uid=501, confirm=YES)
+        self.assertEqual(result['load'], 'loaded')
+        self.assertEqual((self.home / 'Library/LaunchAgents' / f'{JOB_LABEL}.plist').read_bytes(), data)
+
+    def test_a_definition_already_in_the_job_folder_is_not_judged_as_staged(self):
+        # Only a staged copy can be days old; this machine's own definition keeps today's path.
+        import plistlib
+        live = self.home / 'Library/LaunchAgents' / f'{JOB_LABEL}.plist'
+        live.parent.mkdir(parents=True)
+        live.write_bytes(plistlib.dumps({'Label': JOB_LABEL, 'ProgramArguments': [str(self.base / 'absent')]}))
+        MI.place_elsewhere([{'label': JOB_LABEL, 'placedOn': ALPHA, 'by': 'machine-restore'}], self.home)
+        result = MM.cutover(JOB_LABEL, self.home, runner=Recorder(), platform='darwin', uid=501, confirm=YES)
+        self.assertEqual(result['definition'], str(live))
+
     def test_leave_stops_the_job_stages_it_and_names_where_it_runs(self):
         live = self.home / 'Library/LaunchAgents' / f'{JOB_LABEL}.plist'
         live.parent.mkdir(parents=True)
@@ -1595,6 +1734,281 @@ class MachineMove(Base):
         with contextlib.redirect_stdout(out):
             self.assertEqual(workspace.main(['machine-move', 'show']), 0)
         self.assertEqual(json.loads(out.getvalue())['machine'], ALPHA)
+
+
+class Launchd:
+    """A stand-in for subprocess.run for launchctl alone: `print gui/UID` answers `gui` (112 is launchctl's
+    "could not find domain", 125 "Domain does not support specified action"), `print gui/UID/LABEL` 113, `print system/LABEL` 0 for a label in `system`."""
+
+    def __init__(self, gui=112, system=()):
+        self.calls, self.gui, self.system = [], gui, set(system)
+
+    def __call__(self, argv, **kw):
+        self.calls.append(list(argv))
+        code = 0
+        if argv[:2] == ['launchctl', 'print']:
+            target = argv[2]
+            if target.startswith('system/'):
+                code = 0 if target[len('system/'):] in self.system else 113
+            elif target.count('/') == 1:
+                code = self.gui
+            else:
+                code = 113
+        return subprocess.CompletedProcess(argv, code, '', '')
+
+
+@unittest.skipIf(sys.platform == 'win32', 'no launchd jobs on Windows')
+class HeadlessSpace(Base):
+    """OBS-361 part 1: an account with no GUI session runs its jobs as system daemons root loads."""
+
+    UID = 501
+
+    def setUp(self):
+        super().setUp()
+        self.home = self.user
+        self.sysroot = self.base / 'system'
+        self.allow = patch.dict(os.environ, {'OBSERVATORY_SYSTEM_SETUP': '1',
+                                             'OBSERVATORY_SPACE_DAEMONS_FOR_TESTS': '1',
+                                             'OBSERVATORY_SPACE_DAEMONS_TEST_ROOT': str(self.sysroot)})
+        self.allow.start()
+        self.addCleanup(self.allow.stop)
+        name = patch.object(MM, 'account_name', return_value='space')
+        name.start()
+        self.addCleanup(name.stop)
+
+    def plist(self):
+        import plistlib
+        return plistlib.dumps({'Label': JOB_LABEL, 'ProgramArguments': ['/usr/bin/true']})
+
+    def stage(self):
+        folder = MI.staging_dir(self.home)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f'{JOB_LABEL}.plist').write_bytes(self.plist())
+        MI.place_elsewhere([{'label': JOB_LABEL, 'placedOn': BETA, 'by': 'machine-restore'}], self.home)
+        return folder / f'{JOB_LABEL}.plist'
+
+    def register(self, uid=UID, label=JOB_LABEL):
+        path = self.sysroot / 'Library/Application Support/ProjectObservatory/space-daemons.json'
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({'schema': 'observatory-space-daemons/1', 'entries': [
+            {'label': label, 'user': 'space', 'uid': uid, 'source': '/var/empty/space/x.plist', 'sourceSha256': '0',
+             'written': f'/Library/LaunchDaemons/{label}.plist', 'writtenSha256': '0',
+             'at': '2026-11-07T00:00:00Z'}]}))
+
+    def cutover(self, run):
+        return MM.cutover(JOB_LABEL, self.home, runner=run, platform='darwin', uid=self.UID, confirm=YES)
+
+    def test_without_a_gui_session_cutover_places_the_job_and_waits_for_root(self):
+        staged = self.stage()
+        run = Launchd()
+        result = self.cutover(run)
+        background = MI.background_dir(self.home) / staged.name
+        self.assertEqual(background.read_bytes(), self.plist())
+        self.assertEqual(stat.S_IMODE(background.stat().st_mode) & 0o022, 0, 'root reads it only unwritable by others')
+        self.assertEqual(stat.S_IMODE(background.parent.stat().st_mode), 0o700)
+        self.assertFalse(staged.exists())
+        self.assertFalse((self.home / 'Library/LaunchAgents' / staged.name).exists())
+        self.assertNotIn('bootstrap', [c[1] for c in run.calls], 'no agent load is tried in a domain that is absent')
+        step = (f'sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user space '
+                f'--label {JOB_LABEL}')
+        self.assertEqual((result['state'], result['load'], result['domain']),
+                         ('waiting-for-root', 'waiting-for-root', 'system'))
+        self.assertEqual(result['next'][0], step)
+        install = '\n'.join(result['human_steps'][:-1])
+        self.assertEqual(result['human_steps'][:-1], MM.install_steps())
+        for part in ("gh release download vX.Y.Z -R passioncode-ai/project-observatory-dashboard -p 'SHA256SUMS*' "
+                     "-p '*.whl'", 'curl -LO https://github.com/passioncode-ai/project-observatory-dashboard/releases/'
+                     'download/vX.Y.Z/SHA256SUMS', 'shasum -a 256 -c SHA256SUMS --ignore-missing',
+                     'passioncode-release-signing.asc', 'gpg is not on macOS by default',
+                     'unzip -p project_observatory-X.Y.Z-py3-none-any.whl observatory/engine/tools/space_daemons.py',
+                     'sudo install -d -o root -g wheel -m 0755 /usr/local/libexec',
+                     'sudo install -o root -g wheel -m 0755 space_daemons.py '
+                     '/usr/local/libexec/observatory-space-daemons', 'OWN account', 'project-observatory full-path'):
+            self.assertIn(part, install)
+        self.assertIn(step, result['human_steps'][-1])
+        self.assertTrue(result['was_elsewhere'])
+        self.assertEqual(MI.read_placement(self.home)['elsewhere'], [], 'placed here, as a cutover that loads')
+        self.assertEqual(MM.show(self.home, platform='darwin', runner=run, uid=self.UID)['background'],
+                         [{'label': JOB_LABEL, 'file': staged.name, 'daemon': 'waiting-for-root'}])
+        self.assertEqual(MM.defined_jobs(self.home, 'darwin'), ([JOB_LABEL], None))
+        with patch.object(MM.osprivacy, 'account', return_value=str(self.UID)):
+            self.assertEqual(MM._space_evidence(self.home, 'darwin'), [f'{JOB_LABEL} waits for root: {step}'])
+
+    def test_the_install_steps_pin_the_engines_release_key(self):
+        import release_signature
+        fingerprint = release_signature.PINNED[0]['fingerprint']
+        self.assertEqual(MM.release_key_fingerprint(), fingerprint)
+        steps = '\n'.join(MM.install_steps())
+        self.assertIn(f'gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS | grep -q "VALIDSIG {fingerprint}"', steps)
+        self.assertNotRegex(steps, r'gpg --verify SHA256SUMS\.asc SHA256SUMS(?! \|)', 'never a bare gpg --verify')
+
+    def test_once_root_loaded_it_cutover_and_show_say_it_runs(self):
+        self.stage()
+        self.register()
+        run = Launchd(system={JOB_LABEL})
+        result = self.cutover(run)
+        self.assertEqual((result['state'], result['load']), ('complete', 'loaded'))
+        self.assertNotIn('human_steps', result)
+        self.assertEqual(MM.show(self.home, platform='darwin', runner=run, uid=self.UID)['background'][0]['daemon'],
+                         'loaded')
+        self.assertTrue(MM._loaded(run, 'launchd', JOB_LABEL, self.UID))
+        self.assertFalse(MM._loaded(run, 'launchd', JOB_LABEL, self.UID + 1), 'another account\'s daemon')
+        with patch.object(MM.osprivacy, 'account', return_value=str(self.UID)):
+            self.assertEqual(MM._space_evidence(self.home, 'darwin'),
+                             [f'{JOB_LABEL} runs as a system daemon of this account (registered by root)'])
+
+    def test_a_system_daemon_of_another_account_is_not_this_ones(self):
+        self.stage()
+        self.register(uid=self.UID + 1)
+        result = self.cutover(Launchd(system={JOB_LABEL}))
+        self.assertEqual(result['state'], 'waiting-for-root')
+
+    def test_leave_is_refused_while_registered_even_unloaded_and_in_a_sandbox(self):
+        self.stage()
+        self.cutover(Launchd())
+        self.register()
+        for sandbox in ('1', '0'):
+            with self.subTest(sandbox=sandbox), patch.dict(os.environ, {'OBSERVATORY_SYSTEM_SETUP': sandbox}), \
+                    self.assertRaisesRegex(MM.MachineMoveError, 'registered by root'):
+                MM.leave(JOB_LABEL, BETA, self.home, runner=Launchd(), platform='darwin', uid=self.UID)
+        self.assertTrue((MI.background_dir(self.home) / f'{JOB_LABEL}.plist').is_file())
+
+    def test_cutover_refuses_what_root_would_refuse_and_moves_nothing(self):
+        import plistlib
+        folder = MI.staging_dir(self.home)
+        folder.mkdir(parents=True)
+        staged = folder / f'{JOB_LABEL}.plist'
+        staged.write_bytes(plistlib.dumps({'Label': JOB_LABEL, 'ProgramArguments': ['/usr/bin/true'],
+                                           'Sockets': {'Listener': {'SockServiceName': '80'}}}))
+        MI.place_elsewhere([{'label': JOB_LABEL, 'placedOn': BETA}], self.home)
+        with self.assertRaisesRegex(MM.MachineMoveError, 'would refuse .*key_not_allowed \\(Sockets\\)'):
+            self.cutover(Launchd())
+        self.assertTrue(staged.is_file(), 'it stays where it was')
+        self.assertFalse(MI.background_dir(self.home).exists())
+        self.assertEqual([e['label'] for e in MI.read_placement(self.home)['elsewhere']], [JOB_LABEL])
+        colon = 'org.example:job'
+        (folder / f'{colon}.plist').write_bytes(plistlib.dumps({'Label': colon, 'ProgramArguments': ['/usr/bin/true']}))
+        with self.assertRaisesRegex(MM.MachineMoveError, 'label_shape'):
+            MM.cutover(colon, self.home, runner=Launchd(), platform='darwin', uid=self.UID, confirm=YES)
+
+    def test_a_stale_staged_plist_never_waits_for_root(self):
+        # OBS-390: root's tool would answer program_missing; cutover names the stale staged copy first.
+        import plistlib
+        gone = self.base / 'releases' / 'old-release' / 'bin' / 'run'
+        staged = self.stage()
+        staged.write_bytes(plistlib.dumps({'Label': JOB_LABEL, 'ProgramArguments': [str(gone)]}))
+        with self.assertRaises(MM.MachineMoveError) as caught:
+            self.cutover(Launchd())
+        message = str(caught.exception)
+        self.assertIn('staged-plist-stale', message)
+        self.assertIn(str(gone), message)
+        self.assertNotIn('program_missing', message)
+        self.assertTrue(staged.is_file(), 'it stays where it was')
+        self.assertFalse(MI.background_dir(self.home).exists())
+        self.assertEqual([e['label'] for e in MI.read_placement(self.home)['elsewhere']], [JOB_LABEL])
+
+    def test_cutover_parses_and_trusts_as_root_will(self):
+        folder = MI.staging_dir(self.home)
+        folder.mkdir(parents=True)
+        (folder / 'renamed.plist').write_bytes(
+            b'<?xml version="1.0" encoding="UTF-8"?>\n<plist version="1.0"><dict>'
+            b'<!-- run with --install-launchd --><key>Label</key><string>' + JOB_LABEL.encode() +
+            b'</string><key>ProgramArguments</key><array><string>/usr/bin/true</string></array></dict></plist>\n')
+        sd = MM._space_daemons_module()
+        with patch.object(sd, 'read_trust', wraps=sd.read_trust) as read_trust:
+            result = MM.cutover('renamed.plist', self.home, runner=Launchd(), platform='darwin', uid=self.UID,
+                                confirm=YES)
+        self.assertTrue(read_trust.called, 'the trust file is read, read-only')
+        self.assertEqual(result['state'], 'waiting-for-root')
+        self.assertEqual(result['definition'], str(MI.background_dir(self.home) / f'{JOB_LABEL}.plist'),
+                         'named after the Label the comment-tolerant parse found')
+        (folder / 'open.plist').write_bytes(b'<?xml version="1.0"?><plist><dict><!-- never closed </dict></plist>')
+        with self.assertRaisesRegex(MM.MachineMoveError, 'xml_comment'):
+            MM.cutover('open.plist', self.home, runner=Launchd(), platform='darwin', uid=self.UID, confirm=YES)
+        self.assertTrue((folder / 'open.plist').is_file())
+
+    def test_a_homebrew_label_moves_and_is_named_after_its_label(self):
+        import plistlib
+        label = 'homebrew.mxcl.postgresql@14'
+        folder = MI.staging_dir(self.home)
+        folder.mkdir(parents=True)
+        (folder / 'postgres.plist').write_bytes(plistlib.dumps({'Label': label, 'ProgramArguments': ['/usr/bin/true']}))
+        result = MM.cutover(label, self.home, runner=Launchd(), platform='darwin', uid=self.UID, confirm=YES)
+        self.assertEqual(result['state'], 'waiting-for-root')
+        self.assertEqual(result['definition'], str(MI.background_dir(self.home) / f'{label}.plist'))
+        self.assertEqual(sorted(p.name for p in MI.background_dir(self.home).iterdir()), [f'{label}.plist'])
+
+    def test_a_job_defined_twice_is_refused_with_both_files_named(self):
+        staged = self.stage()
+        live = self.home / 'Library/LaunchAgents' / staged.name
+        live.parent.mkdir(parents=True)
+        live.write_bytes(self.plist())
+        with self.assertRaises(MM.MachineMoveError) as caught:
+            self.cutover(Launchd())
+        self.assertIn(str(live), str(caught.exception))
+        self.assertIn(str(staged), str(caught.exception))
+        self.assertTrue(staged.is_file() and live.is_file())
+
+    def test_both_answers_of_an_absent_gui_domain_wait_for_root(self):
+        # 112 "could not find domain"; 125 "Domain does not support specified action", measured on macOS 26.6 for
+        # an account nobody has logged in to graphically, where `bootstrap gui/UID` fails with the same 125.
+        for code in (112, 125):
+            with self.subTest(code=code):
+                staged = self.stage()
+                run = Launchd(gui=code)
+                result = self.cutover(run)
+                self.assertEqual(result['state'], 'waiting-for-root')
+                self.assertTrue((MI.background_dir(self.home) / staged.name).is_file())
+                self.assertNotIn('bootstrap', [c[1] for c in run.calls])
+                (MI.background_dir(self.home) / staged.name).unlink()
+
+    def test_other_answers_of_print_gui_keep_the_agent_path(self):
+        for code in (1, 5, 113):
+            with self.subTest(code=code):
+                staged = self.stage()
+                run = Launchd(gui=code)
+                result = self.cutover(run)
+                live = self.home / 'Library/LaunchAgents' / staged.name
+                self.assertTrue(live.is_file())
+                self.assertIn(['launchctl', 'bootstrap', f'gui/{self.UID}', str(live)], run.calls)
+                self.assertNotIn('state', result)
+                live.unlink()
+
+    def test_with_a_gui_session_cutover_is_unchanged(self):
+        staged = self.stage()
+        run = Launchd(gui=0)
+        result = self.cutover(run)
+        live = self.home / 'Library/LaunchAgents' / staged.name
+        self.assertTrue(live.is_file())
+        self.assertIn(['launchctl', 'bootstrap', f'gui/{self.UID}', str(live)], run.calls)
+        self.assertEqual(result['load'], 'loaded')
+        self.assertNotIn('state', result)
+        self.assertFalse(MI.background_dir(self.home).exists())
+
+    def test_a_custom_xdg_data_home_is_refused_before_anything_moves(self):
+        with patch.dict(os.environ, {'XDG_DATA_HOME': str(self.base / 'xdg')}):
+            staged = self.stage()
+            with self.assertRaisesRegex(MM.MachineMoveError, 'XDG_DATA_HOME'):
+                self.cutover(Launchd())
+            self.assertTrue(staged.is_file())
+
+    def test_leave_is_refused_while_root_runs_it_then_works_from_the_background_folder(self):
+        self.stage()
+        self.register()
+        run = Launchd(system={JOB_LABEL})
+        self.cutover(run)
+        with self.assertRaisesRegex(MM.MachineMoveError, 'only root removes: sudo /usr/bin/python3 -I '
+                                    '/usr/local/libexec/observatory-space-daemons remove --user space '
+                                    f'--label {JOB_LABEL}'):
+            MM.leave(JOB_LABEL, BETA, self.home, runner=run, platform='darwin', uid=self.UID)
+        self.assertTrue((MI.background_dir(self.home) / f'{JOB_LABEL}.plist').is_file(), 'nothing moved')
+        run.system.clear()  # root ran `remove`: unloaded, and out of the registry
+        (self.sysroot / 'Library/Application Support/ProjectObservatory/space-daemons.json').unlink()
+        result = MM.leave(JOB_LABEL, BETA, self.home, runner=run, platform='darwin', uid=self.UID)
+        self.assertEqual(result['stop'], 'stopped')
+        self.assertFalse((MI.background_dir(self.home) / f'{JOB_LABEL}.plist').exists())
+        self.assertTrue((MI.staging_dir(self.home) / f'{JOB_LABEL}.plist').is_file())
+        self.assertEqual([e['placedOn'] for e in MI.read_placement(self.home)['elsewhere']], [BETA])
 
 
 def job_file(home: Path, label: str, *, disabled: bool = False) -> Path:
@@ -2232,6 +2646,24 @@ class Schedule(Base):
         self.assertIn('machine-backup-missing', [w['code'] for w in status['warning_items']])
         self.assertIn('machine_backup', workspace.doctor(self.ws))
 
+    def test_maintenance_status_joins_backup_items(self):
+        # OBS-349: the backup warnings no maintenance item already says reach Health and doctor's
+        # verdict; the two with a maintenance twin (`passphrase`, `not-encrypted`) do not repeat.
+        import maintenance as M
+        store = self.base / 'external-store'
+        store.mkdir()
+        file = self.ws / 'config' / 'settings.json'
+        doc = json.loads(file.read_text())
+        doc.setdefault('sources', {})['secret_store'] = str(store)
+        file.write_text(json.dumps(doc))
+        self.assertIn('backups-no-passphrase', [w['code'] for w in vault.status(self.ws)['warning_items']])
+        status = M.status(self.ws)
+        codes = [w['code'] for w in status['warning_items']]
+        self.assertIn('backups-vault-store-not-carried', codes)
+        self.assertNotIn('backups-no-passphrase', codes)
+        self.assertNotIn('backups-unencrypted-local', codes)
+        self.assertEqual(len(status['warnings']), len(status['warning_items']))
+
 
 class _NoCommands:
     def apply(self, *args, **kw):
@@ -2257,6 +2689,12 @@ class _Store:
         return "file"
 
 
+def cli_refusal(argv):
+    sys.path.insert(0, str(ROOT))
+    import observatory as cli
+    return cli.refusal(argv)
+
+
 class CommandLine(Base):
     def test_the_full_cli_routes_both_commands(self):
         sys.path.insert(0, str(ROOT))
@@ -2271,6 +2709,29 @@ class CommandLine(Base):
         with contextlib.redirect_stdout(out):
             self.assertEqual(workspace.main(['machine-backup', 'status']), 0)
         self.assertIsNone(json.loads(out.getvalue())['newest'])
+
+    def test_machine_restore_reads_the_passphrase_from_stdin(self):
+        # OBS-348: an agent hands another machine's passphrase over on stdin (a file or an ssh channel),
+        # never in argv; it is used for this restore and kept nowhere.
+        vault.set_passphrase(self.ws, PASS)
+        self.write('.zshrc', 'export EXAMPLE=1\n')
+        self.take(at=AT)
+        bundle = MB.newest(self.ws)
+        vault.passphrase_file(self.ws).unlink()   # this workspace no longer holds it
+        out, err = io.StringIO(), io.StringIO()
+        stdin = io.TextIOWrapper(io.BytesIO((PASS + '\n').encode()), encoding='utf-8')
+        with patch.object(sys, 'stdin', stdin), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(workspace.main(['machine-restore', str(bundle), '--passphrase-stdin']), 0, err.getvalue())
+        self.assertEqual(json.loads(out.getvalue())['passphrase_source'], 'stdin')
+        self.assertNotIn(PASS, out.getvalue() + err.getvalue())
+        self.assertFalse(vault.passphrase_file(self.ws).exists(), 'nothing is stored')
+        out, err = io.StringIO(), io.StringIO()
+        stdin = io.TextIOWrapper(io.BytesIO(b'a wrong value, long enough\n'), encoding='utf-8')
+        with patch.object(sys, 'stdin', stdin), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.assertEqual(workspace.main(['machine-restore', str(bundle), '--passphrase-stdin']), 2)
+        self.assertIn('passphrase-refused', err.getvalue())
+        self.assertIn('stdin', err.getvalue())
+        self.assertEqual(cli_refusal(['machine-restore', '--latest', '--passphrase-stdin']), '')
 
 
 if __name__ == '__main__':

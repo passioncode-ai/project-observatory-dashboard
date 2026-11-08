@@ -27,7 +27,7 @@ Observatory in advance.
 
 | Route | Auth | Answer |
 |---|---|---|
-| `GET /.well-known/fabric-service` | none; the Host/Origin/`Sec-Fetch-Site` guard applies | identity, build, pid, start time, status, `degraded`, up to six tiles, surfaces |
+| `GET /.well-known/fabric-service` | none; the Host/Origin/`Sec-Fetch-Site` guard applies | identity, build, pid, start time, status, `degraded`, up to six tiles, surfaces; under `extensions` the node.lifecycle entry and the connections declaration (`extensions/connections/0.1`, OBS-326: what Observatory uses, each with its state, from `service_connections.py`) |
 | `GET /fabric/v1/events?after=&limit=` | `Authorization: Bearer <token>` | a page of events, oldest first, with a cursor |
 | `GET /fabric/v1/usage` | `Authorization: Bearer <token>` | the usage report (contract DEC-0021, `service-usage.schema.json`): the last 31 UTC days of the assistant's paid model calls by provider and model, from the receipts `agent/providers.py` writes at each charge into `store/logs/fabric-usage.jsonl` — tokens and cost with its basis (`provider`, or `price-list` when estimated), never a prompt, an output or a caller (OBS-53) |
 | `/`, `/dashboard/*`, `/health`, `/remote`, `/leaks`, `/skills` | none, as before | unchanged; `/health` still recomputes its answer on every request |
@@ -57,9 +57,12 @@ the access model [ACCESS.md](ACCESS.md) already states for this server. No POST 
 2. **The well-known document is answered from memory.** The heartbeat thread computes a
    snapshot (`service_health.snapshot`) every 20 seconds; the route reads it under a lock and
    never calls the `/health` computation. Registry documents are parsed again only when their
-   mtime or size moved.
+   mtime or size moved. The connections declaration (`service_connections.py`) is rebuilt when a
+   file it reads moved or when the ten-minute clock bucket (`clock_bucket`) changes: a receipt's
+   state depends on its age (OBS-339), so an unchanged file must still turn stale.
    - `test_the_route_reads_memory_only`, `test_a_registry_is_parsed_once_until_it_changes`,
-     `test_well_known_is_valid_fast_and_names_this_process` (schema-valid, median under 100 ms).
+     `test_well_known_is_valid_fast_and_names_this_process` (schema-valid, median under 100 ms),
+     `test_a_receipt_turns_stale_through_the_cache_when_the_clock_moves_on`.
 3. **`degraded` says why the picture is partial.** One row per collector receipt that reports
    degraded sources (`degradations.every_collector()` plus `model.json`), a row for a tick that
    was interrupted, went stale or runs too long (`tick_health`), and a row for a registry, findings
@@ -142,13 +145,31 @@ the access model [ACCESS.md](ACCESS.md) already states for this server. No POST 
     - `test_the_conformance_probe_passes`; the kit's and the probe's bytes are checked against
       the digests in their headers by `test_kit_and_probe_are_the_upstream_bytes`.
 
+11. **On a host with several OS accounts, another account's connection is refused before it is
+    read** (OBS-355; [ACCESS.md](ACCESS.md) rule 10). Loopback is one per machine, so before
+    `BaseHTTPRequestHandler` reads a request line, `Handler.handle()` asks `peer_check` which
+    account the peer is and answers another account's or the system's process
+    `403 {"error":"peer-foreign-account"}`, an owner it cannot read `403 {"error":"peer-unverified"}`,
+    with `Connection: close`. Every route, `/.well-known/fabric-service` included: a host such as
+    Fabric Dashboards running as this account is served, another account's is refused. The check
+    is active when the host has more than one person's account or `config/local.json` sets
+    `loopback.peerCheck` to `always`; on a one-account host it costs a clock comparison per
+    connection and the answers are byte for byte the ones before. Active, it costs one read of the
+    socket table per connection: measured on macOS about 5 ms through `sysctl` (about 20 ms through
+    the `netstat` fallback), inside the contract's 100 ms for the well-known document. Refusals are
+    counted in the receipt under `peer`, which the change comparison ignores.
+    - `test_foreign_and_unverified_are_refused_before_the_request_line`,
+      `test_one_account_serves_as_before`, `test_counters_ride_the_receipt_but_never_cause_a_write`.
+
 ## Vendored parts
 
 | File | Upstream |
 |---|---|
 | `observatory/engine/fabric_service.py` | `passioncode-ai/fabric-agent-adapter` `f31c2b2792f7` (v0.5.0), `building-fabric-services/scripts/fabric_service.py` |
 | `observatory/engine/tests/check_service.py`, `observatory/engine/tests/fabric_interop.py` | the same commit, `scripts/check_service.py` and `scripts/fabric_interop.py` (the probe imports it) |
+| `observatory/engine/fabric/interop-schemas/service-connections-extension.schema.json` | the contract pin, by `tools/vendor_contract_schemas.py` with the folder's other schemas: the connections declaration (DEC-0096) is checked against it before it is published (`service_connections.check`, OBS-326). The kit's `fabric_connections` module is not vendored: its secret detector's docstrings hold sample credential URLs the public release scan refuses |
 | `observatory/engine/fabric/service-schemas/*.schema.json` | `passioncode-ai/fabric-agent-contract` `7931c1d`, `schemas/`; not at the contract pin until OBS-212 (the folder's README says why and records the digests) |
+| `observatory/engine/fabric/ops-digest/` | `passioncode-ai/fabric-agent-contract` at its release tag `v0.1.0+2026-11-06.1` (DEC-0153): the two digest schemas, the folds' vectors and the hourly and daily fixtures, which `ops.digest.record` (OBS-330) reads every line with; not at the contract pin, which predates them (the folder's README records the commit and the digests) |
 
 Never edit them here: update upstream, copy again, and the digest test says whether the copy is
 whole.

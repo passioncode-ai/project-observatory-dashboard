@@ -137,6 +137,9 @@ PIN_CHECK_EXCLUDES: dict[str, str] = {
     "fabric/service-schemas": "vendored at `7931c1d`: at the pin `service-descriptor.schema.json` names a word the "
                               "maintainer's private identifier list holds, so the public-release privacy gate refuses "
                               "the copy until that word is reviewed (OBS-212)",
+    "fabric/ops-digest": "vendored at the contract's release tag v0.1.0+2026-11-06.1 (DEC-0153, OBS-330): the "
+                         "operations digests' schemas, vectors and fixtures, which the pin predates; moving the pin "
+                         "re-vendors every other folder and is its own review",
 }
 
 
@@ -232,6 +235,8 @@ VENDORED_AT_OTHER_COMMITS: dict[str, dict[str, str]] = {
     "fabric/memory-schemas": {
         "aa2f0977bbbb32e9940e16b2654af84960abfb54":
             "both schemas differ at the pin, and `mcp/memory_wire.py` validates every memory call against them."},
+    "fabric/ops-digest": {
+        "eac1a594aa131851f079da8bb7b2149e1951f35f": PIN_CHECK_EXCLUDES["fabric/ops-digest"]},
 }
 
 

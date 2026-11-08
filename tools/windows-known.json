@@ -236,6 +236,12 @@
       "failing": [
         "BeforeUpdateInventory.test_local_update_is_counted_with_and_without_passphrase",
         "BeforeUpdateInventory.test_update_migrates_encrypted_and_restores_while_foreign_kind_stays",
+        "ForeignPassphrase.test_a_snapshot_of_another_workspace_opens_with_a_value_on_stdin_and_nothing_is_stored",
+        "ForeignPassphrase.test_a_wrong_candidate_costs_one_chunk_not_a_whole_file",
+        "ForeignPassphrase.test_restore_latest_asks_once_per_foreign_label",
+        "ForeignPassphrase.test_the_command_line_refuses_an_empty_stdin_and_restores_with_a_value",
+        "ForeignPassphrase.test_the_prompt_is_asked_once_and_only_after_every_other_candidate_failed",
+        "ForeignPassphrase.test_without_a_terminal_and_without_stdin_the_refusal_names_the_sources_tried",
         "Format.test_ciphertext_does_not_contain_plaintext",
         "Format.test_dropping_whole_final_chunks_refused",
         "Format.test_rewritten_header_field_refused",
@@ -246,17 +252,28 @@
         "Migration.test_every_kind_a_snapshot_is_written_as_is_rotated",
         "Migration.test_moves_newest_legacy_and_removes_the_rest",
         "Passphrase.test_set_status_and_modes",
+        "RotationOrder.test_a_clock_set_back_never_drops_the_backup_just_written",
+        "RotationOrder.test_a_restore_offers_the_newest_first",
+        "RotationOrder.test_the_newest_machine_bundle_is_the_last_made",
+        "RotationOrder.test_the_newest_of_several_in_one_second_survives_rotation",
+        "RotationOrder.test_without_a_readable_header_the_mtime_orders_them",
         "Snapshots.test_decrypt_takes_the_bare_name_backups_status_prints",
         "Snapshots.test_encrypted_rotation_keeps_newest",
         "Snapshots.test_encrypted_snapshot_restores_identically",
         "Snapshots.test_export_failure_keeps_local_copy",
+        "Snapshots.test_latest_under_another_home_names_the_backups_it_found_elsewhere",
         "Snapshots.test_restore_without_passphrase_refused_cleanly",
         "Snapshots.test_upgrade_exports_before_upgrade_snapshot",
         "Snapshots.test_upgrade_survives_export_failure",
         "Snapshots.test_without_passphrase_stays_local_and_rotates",
         "StoreCopies.test_encrypted_daily_copy_and_rotation",
         "StoreCopies.test_encrypted_stamp_older_than_the_kept_window_is_refused",
-        "StoreCopies.test_if_due_skips_a_fresh_copy"
+        "StoreCopies.test_if_due_skips_a_fresh_copy",
+        "ThisMachineOnly.test_a_mark_that_does_not_read_keeps_the_slot_here",
+        "ThisMachineOnly.test_a_marked_slot_is_left_out_and_named",
+        "ThisMachineOnly.test_a_rotated_kept_slot_leaves_its_archives_behind_too",
+        "ThisMachineOnly.test_the_mark_survives_a_new_value",
+        "ThisMachineOnly.test_unmarking_carries_the_slot_in_the_next_snapshot"
       ]
     },
     "checkout_inventory": {
@@ -855,6 +872,9 @@
         "TIMEOUT"
       ],
       "failing": [
+        "CommandLine.test_machine_restore_reads_the_passphrase_from_stdin",
+        "ExternalSecretStore.test_a_store_no_snapshot_carries_is_not_skipped",
+        "ExternalSecretStore.test_an_include_inside_the_external_store_is_skipped_with_its_reason",
         "Refusals.test_transcripts_are_carried_only_when_asked",
         "Restore.test_a_backup_sweeps_what_a_killed_one_left",
         "Restore.test_a_conflict_is_kept_unless_overwrite_moves_it_aside",
@@ -951,6 +971,7 @@
         "Pass.test_the_switch_set_to_off_stops_checks_downloads_and_installs_the_apps_too",
         "Pass.test_turned_off_means_no_check_and_the_backup_still_runs",
         "Pass.test_up_to_date_checks_on_its_cadence_and_takes_the_daily_backup",
+        "Passphrase.test_a_keychain_that_refuses_keeps_it_in_the_owner_only_file_and_says_so",
         "Passphrase.test_one_is_generated_by_default_and_kept_outside",
         "Passphrase.test_the_file_store_is_owner_only_outside_the_workspace",
         "Reinstall.test_a_backup_taken_before_a_passphrase_change_still_restores",
@@ -1222,6 +1243,7 @@
         "CliTests.test_a_re_enrolled_id_never_reuses_a_policy_revision",
         "CliTests.test_enroll_verifies_the_named_path_and_records_what_starting_it_does",
         "ConfigTests.test_a_document_others_may_read_or_a_link_is_refused_whole",
+        "HTTPTests.test_guards_apply_to_well_known_and_mcp",
         "ObservabilityTests.test_obs2_the_machine_log_is_private_rotated_and_structured"
       ]
     },
@@ -1461,6 +1483,11 @@
         "the Stop hook itself says nothing to the person"
       ]
     },
+    "space_daemons": {
+      "expect": "SKIP",
+      "row": "OBS-278",
+      "reason": "the root-side installer for a macOS space with nobody logged in (OBS-361) is macOS-only (launchd, pwd, grp, os.fchown, POSIX paths), so the suite skips as a whole on Windows"
+    },
     "ssh_keys": {
       "expect": "FAIL",
       "row": "OBS-278",
@@ -1678,6 +1705,9 @@
         "ReviewFindings.test_m3_a_future_answer_is_unreachable_naming_the_clock",
         "ReviewFindings.test_m4_deeply_nested_json_is_refused",
         "ReviewFindings.test_r2_1_an_extreme_rotation_time_never_crashes_the_view",
+        "ThisMachineOnly.test_a_peers_kept_slot_reads_only_on_that_machine_on_purpose",
+        "ThisMachineOnly.test_a_slot_kept_here_reads_only_here_on_purpose",
+        "ThisMachineOnly.test_the_text_view_names_the_machine_a_peer_keeps_it_on",
         "VaultDigestsTests.test_a_rotation_marks_the_other_copies_stale",
         "VaultDigestsTests.test_a_slot_marked_different_on_purpose",
         "VaultDigestsTests.test_all_matching_is_one_line",
@@ -1691,9 +1721,10 @@
     "workflow_memory": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "FAILED (errors=1)",
+      "reason": "FAILED (errors=1); times out on windows-latest in some runs (runs 42175857857 and 42178294453, 2026-11-06)",
       "statuses": [
-        "FAIL"
+        "FAIL",
+        "TIMEOUT"
       ],
       "failing": [
         "ReviewFindings.test_h10_references_survive_and_the_report_names_fields"
@@ -1763,7 +1794,16 @@
         "TIMEOUT"
       ],
       "failing": [
+        "HomeRelativeSources.test_a_prefix_by_string_only_is_not_rewritten",
+        "HomeRelativeSources.test_a_snapshot_names_its_home",
+        "HomeRelativeSources.test_a_value_outside_the_old_home_is_kept_and_named_when_missing",
+        "HomeRelativeSources.test_an_older_snapshot_without_a_home_rewrites_nothing_and_names_what_is_missing",
+        "HomeRelativeSources.test_an_unreadable_declaration_is_named_and_the_restore_completes",
+        "HomeRelativeSources.test_restore_under_another_home_rewrites_settings_backup_and_tracked_paths",
+        "HomeRelativeSources.test_the_same_home_restores_settings_byte_for_byte",
+        "HomeRelativeSources.test_without_a_home_a_snapshot_and_a_restore_still_work",
         "WorkspaceUpgrade.test_a_failed_live_migration_puts_the_files_back",
+        "WorkspaceUpgrade.test_a_second_machine_never_takes_the_snapshots_backup_passphrase",
         "WorkspaceUpgrade.test_a_settings_file_changed_while_staged_still_refuses",
         "WorkspaceUpgrade.test_a_snapshot_names_the_machine_it_was_taken_on",
         "WorkspaceUpgrade.test_a_snapshot_naming_no_machine_is_another_machines_unless_asked",

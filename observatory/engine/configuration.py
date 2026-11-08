@@ -5,7 +5,7 @@ import os
 import re
 from pathlib import Path
 
-VERSION = "0.32.0"
+VERSION = "0.35.5"
 CONFIG_VERSION = 1
 WORKSPACE_VERSION = 1
 SOURCE = Path(__file__).resolve().parent
@@ -43,12 +43,18 @@ def _code_roots(here: Path) -> tuple[Path, ...]:
     The code directory, the installed ``observatory`` package that contains it,
     and the Git work tree of a source checkout. Data there is deleted by an
     upgrade or uninstall, or ends up one ``git add`` away from being published.
+
+    An installed engine (under ``site-packages`` or ``dist-packages``) has no source checkout: the walk for a
+    ``.git`` stops there, so a repository that happens to sit above the environment (a home folder someone
+    made a repository) never refuses every home under it.
     """
     roots = [here]
     package = here if here.name == "observatory" else here.parent
     if package.name == "observatory" and (package / "__init__.py").is_file():
         roots.append(package)
     for parent in (here, *here.parents):
+        if parent.name in ("site-packages", "dist-packages"):
+            break
         if (parent / ".git").exists():
             roots.append(parent)
             break
@@ -124,6 +130,11 @@ STORAGE_SETTINGS = ("backups",)
 #: the next `full auto-update` command moves it into the file. An older reader never
 #: reads the key.
 UPDATE_SETTINGS = ("auto", "scheduled")
+
+#: What `learning_review` in settings.json may hold (learning_review.py, OBS-331), each an hour of the day in UTC:
+#: `settle_hour_utc`, the hour of D+1 at which the daily learning review of day D is due (6 when absent). An older
+#: reader never reads the section.
+LEARNING_REVIEW_SETTINGS = ("settle_hour_utc",)
 
 #: Every switch and source the engine reads. `configure` refuses any other name:
 #: a typo used to be answered "configured" and then did nothing. The workspace
@@ -265,6 +276,15 @@ def load(base: Path | None = None) -> dict:
             raise ConfigurationError(f"Unknown updates setting: {key}")
         if type(value) is not bool:
             raise ConfigurationError(f"Updates {key} must be true or false")
+    # LEARNING_REVIEW is optional and ignored by releases before OBS-331 (they never read it).
+    review = doc.get("learning_review", {})
+    if not isinstance(review, dict):
+        raise ConfigurationError("Configuration learning_review must be an object")
+    for key, value in review.items():
+        if key not in LEARNING_REVIEW_SETTINGS:
+            raise ConfigurationError(f"Unknown learning_review setting: {key}")
+        if type(value) is not int or not 0 <= value <= 23:
+            raise ConfigurationError(f"learning_review {key} must be a whole hour from 0 to 23")
     required = doc.get("must_understand", [])
     if not isinstance(required, list) or required:
         raise ConfigurationError("Configuration requires unsupported capabilities")
@@ -279,10 +299,20 @@ def source_path(name: str, fallback: str, env: str | None = None) -> Path:
     value = load().get("sources", {}).get(name)
     return Path(value).expanduser() if value else home() / "unconfigured" / fallback
 
-def enabled(name: str, section: str = "integrations") -> bool:
-    if section == "integrations" and os.environ.get("OBSERVATORY_OFFLINE") == "1":
+def offline(environ=None) -> bool:
+    """`OBSERVATORY_OFFLINE=1`: every integration reads as off for this process (`local` and the demo run so)."""
+    return (os.environ if environ is None else environ).get("OBSERVATORY_OFFLINE") == "1"
+
+
+def enabled(name: str, section: str = "integrations", *, settings: dict | None = None, environ=None) -> bool:
+    """Whether `name` is on in `section`. An integration is off while `offline(environ)`, whatever the settings say.
+    `settings` is a document `load()` returned (default: load it now); `environ` the process environment (default
+    `os.environ`). The collectors and the connections declaration (service_connections.py, OBS-340) both ask here,
+    so they cannot disagree about what runs."""
+    if section == "integrations" and offline(environ):
         return False
-    return load().get(section, {}).get(name, False) is True
+    doc = load() if settings is None else (settings or {})
+    return (doc.get(section) or {}).get(name, False) is True
 
 REGISTRY_VERSIONS = {"projects.json": 2, "repositories.json": 2, "relations.json": 2}
 

@@ -58,6 +58,72 @@ purpose}` — and every read and handoff reports where each one is now
 to read is state that silently does not travel. The body is at most 64 KiB; a log is linked as
 an artifact, not pasted. `checkpoint_body` in `store/workflow.py` holds every bound.
 
+### A session Fabric starts for a board request (OBS-323)
+
+When a board request reaches a project with no live responder, Fabric may start a session that does it, reports and
+ends (Fabric's on-demand sessions specification, §3.4). Fabric writes the workflow as `service:fabric`, and its
+checkpoint `artifacts` carry references only, each `{"kind": "other", "ref": …}`: `board-request:<uuid>`,
+`board-thread:<uuid>`, `capability:<name>`, `fabric-project:<uuid>`, `deadline:<ISO 8601 UTC>`, and
+`run-ends-at:<ISO 8601 UTC>` on each dispatch's own checkpoint. `dispatch_packet.validate` (called by
+`checkpoint_body`) refuses a ref in another shape, a ref with any other member (no note, path or text), a prefix
+named twice and an absolute path anywhere in such a packet; a workflow without those refs is not touched. The
+redactor keeps the three UUID refs whole (`memory_redact.KEEP`), as it keeps `session:` and `commit:`.
+
+The packet is frozen when the dispatcher writes it. Every checkpoint stores its body whole, and the run the packet
+constrains writes the next one, so the refs (all but `run-ends-at`) and the body's `credentials` are read from the
+workflow's first revision, the checkpoint Fabric's dispatcher writes to start it, before any handoff
+(`dispatch_packet.packet_of`). Nothing checks who wrote that revision: any caller may start a workflow with
+`observatory_checkpoint_write` and hold its lease, so a run can start its own workflow with a packet; this stays a guard
+for a cooperating run, as the next section says, not a proof that the packet came from Fabric. A later checkpoint may leave them out, and the packet stands; one that names a frozen
+ref with another value, adds a ref the packet did not carry, or names another set of credentials is refused with
+`PacketFrozen` (`dispatch_packet.check_write`, called by `checkpoint_write`).
+
+Only that first revision carries a packet (OBS-343). The dispatcher writes the packet in the checkpoint that starts
+the workflow; a workflow whose first checkpoint carries none is a plain workflow, and the run holding its lease
+writes everything after. A later checkpoint that brings a frozen ref into it is refused with `PacketNotFirst` (a
+`PacketFrozen`, so a caller that catches that one catches this too), so that run cannot write itself a packet with
+any credentials and a week's deadline. A row written before that check, whose packet refs first appear in a later
+revision, is no packet: `observatory_checkpoint_latest` and `observatory_workflow_list` show no `dispatch` for it,
+and the gate refuses with `packet-not-first` (`dispatch_packet.late_packet` names the revision). A plain workflow's
+own `credentials`, without the refs, are no packet and are written as before. The dispatcher's deadline is at most seven days after
+its write, the board's own limit on a request (`DeadlineTooFar`). `run-ends-at` stays per dispatch: the last one
+written is shown, and nothing reads it as a permission, so it cannot widen the deadline, and nothing ends a run at
+that time either: the run keeps it.
+
+`observatory_checkpoint_latest` and `observatory_workflow_list` add `dispatch`, read from the frozen packet: the
+request, its thread, the capability, Fabric's project id, the deadline, the run's end and `keys` (`state` `open` or
+`closed`, the `reason` when closed: `packet-incomplete`, `deadline-too-far`, `deadline-passed`, `workflow-closed`,
+`no-credentials`, and from `dispatch_packet.keys_state` also `packet-not-first`; the slots by name; `until`). A row written before the shapes were checked, whose deadline does
+not read as a UTC time, reads as `packet-incomplete` rather than failing the read.
+
+The keys: `use_secret.py run --workflow wf_… --env ENV PROJECT NAME -- …` (or with `FABRIC_DISPATCH_WORKFLOW` set
+by Switchboard) releases a value only through `dispatch_packet.authorize`: to the holder of the workflow's lease;
+only for a slot the frozen `credentials` name in that environment; only from the project `fabric-project` resolves
+to (its `fabric:<uuid>`, as Observatory pulled it from Fabric's hub); only until the deadline; never after the
+final checkpoint closed the workflow; never to a packet without the request, the project or the deadline. The lease
+is presented in `OBSERVATORY_WORKFLOW_LEASE`, or in a file `OBSERVATORY_WORKFLOW_LEASE_FILE` names, read only when it
+is a regular file of this user that nobody else may read (mode 600 on POSIX; a link is never followed). Those checks
+are made on the opened descriptor, not on the path beforehand (OBS-344): the file is opened without following a link
+and without waiting on a FIFO, `fstat` and the owner and mode (the access list on Windows) are read from that
+descriptor, and at most 4 KiB are read from it, so a file swapped in between a look and the open is never read. On
+Windows the link refusal itself is a look at the path before the open, as `osprivacy.open` documents. Both are
+taken out of `use_secret.py`'s environment before anything runs. A refusal exits 2 with its code
+(`workflow-unknown`, `packet-incomplete`, `no-credentials`, `workflow-closed`, `deadline-too-far`,
+`deadline-passed`, `not-lease-holder`, `slot-not-named`, `project-unresolved`, `project-mismatch`, and from the
+command itself `env-required`, `share-refused`, `lease-file-refused`, `store-unreadable`), and the journal
+`secret-use.jsonl` records each release with its workflow and request and each refusal with its code, never a value
+or the lease.
+
+What the gate is, and is not. It is a guard for a cooperating run: it holds a session that names its workflow to
+the slots, project and deadline Fabric wrote. It is not containment. It applies only when `--workflow` or
+`FABRIC_DISPATCH_WORKFLOW` is set, and a session that unsets the variable takes the ordinary path of
+`use_secret.py run`, with the vault's ordinary rules. Which children lack the lease is narrow too: a command
+`use_secret.py` runs inherits neither lease variable, so a nested `use_secret.py` call from it is refused, but a
+process the session starts by any other route inherits whatever the session's own environment holds. Real
+containment is the vault's `slotsRequireGrant: always` with a hub-minted delegation token scoped to the packet
+(`FABRIC_DELEGATION_TOKEN`, [the meter, M5](METER.md)): then no slot is released without a grant whose limits name
+it, whatever the session sets.
+
 ## One executor at a time
 
 The lease token (`leaseId`, `wl_…`) is the only thing that tells two sessions apart. Both are
@@ -388,6 +454,32 @@ that turns out to be project knowledge — something the project's people, not o
 should keep — will have an export path to Fabric project memory once that memory exists; this
 store is its source, and the seam is the lesson record as written here (its body, its state and
 its corroboration). Nothing exports a lesson today, and nothing here moves project memory.
+
+**The daily review (OBS-331).** Once a UTC day, `learning_review.py` (the tick's step
+`learning-review`, or `full learning-review run`) reads every revision of every unerased lesson
+and places each on the UTC day of its `created_at`: `lesson-new`, `lesson-revised` (a later
+revision of the same record), `lesson-replaced` (an archived revision and the proposal that
+replaced it, a new commit), `lesson-promoted` (a revision the lesson corroborator moved to
+`observed`) and `observation-invalidated` (a replacement by revalidation, the same commit). A
+class whose current lessons come from two or more distinct origin keys is `class-repeated`,
+with the corroborator's outcome for it. The review promotes nothing by a rule of its own: it
+calls `corroborate_lessons`, for real when the corroborator's receipt is absent or older than
+yesterday (no tick that refreshed the registry ran it within a day), else dry. It hands the
+corroborator the one bounded sweep of the clones' root commits it already made and a deadline
+(`keys`, `deadline`), and `revalidate=False`: run by the review, the corroborator may promote,
+but archiving an observation whose support is gone stays the tick's run after a registry
+refresh. Out of time, its outcome is not used and the report is partial
+(`corroborator-failed`). A lesson's project is named only through a registered clone that
+carries its key and the project that clone's repository implements; otherwise
+`project: null`. The lesson fields a report carries (`classKey`, `title`, `origin.projectId`,
+`origin.commit`) and the corroborator's reasons are scrubbed again (`memory_redact`) before they
+enter it, because the known-value list grows after a lesson is written; `trigger`, `check` and
+`nouns` are not carried. The report and its page stay under `<state>/learning-review/`. The
+review writes no ledger row itself; the corroborator it runs may write promotions (never, run
+from the review, revalidation archives). No wiki page, board message or Fabric call is written.
+`tests/test_learning_review.py` (`Lessons`, `Bounded`, `Privacy`) verifies the codes, the promotion rule,
+the bounds and the scrub. An identical repeat writes nothing (`store/lessons.py`), so the review cannot
+count it, and the report says so.
 
 ## MCP tools
 

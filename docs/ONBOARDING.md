@@ -147,8 +147,9 @@ came from (your file wins where both give one), and how many commits the source'
 and never writes to either repository. An entry it cannot stand behind (an unknown repository, a
 repository derived from itself, a cycle, two sources for one copy, a move with `sync_base`) is
 refused by name in `degraded` and in `full copies list`, never repaired. The findings
-`copy.behind_source`, `copy.relation_unrecorded`, `copy.record_differs` and
-`copy.moved_source_open` say what each relation owes; `observatory_project` shows it both ways
+`copy.behind_source`, `copy.relation_unrecorded`, `copy.record_differs`, `copy.moved_source_open`
+and `copy.name_unprefixed` (the copy lacks the prefix its entry's `name_prefix` names) say what each
+relation owes; `observatory_project` shows it both ways
 (`derived_from`, `copies`). To carry a copy forward,
 `project-observatory full copies plan repository:example-org/alpha-agent` prints the steps (the
 copy's builder at both commits, the diff without the deny paths, `git apply --3way` on a branch
@@ -177,6 +178,23 @@ folders under the projects root and `config/folder_exclusions.json` as declared 
 `production`, `staging`, `review`, `development`, `test` and `local` are recognised (`prod` and
 `stage` are read as their full names). An app with neither is listed as `unassigned` in
 `registry/environments.json`. Its name is never read as a hint.
+
+**One verdict** (OBS-349). `full doctor` ends with `attention` and `clean`. Each `attention` row names its
+`area` (`backups`, `machine_backup`, `maintenance`, `sources` or `tick`), its `code`, a `severity`, the sentence and
+the `step` that fixes it (`null` when the fix is by hand); a code is listed once, each missing source is its own
+`source-missing` row with the `configure sources` command, and a tick that is `interrupted`, `stale` or
+`running-long` (below) is a `tick-<verdict>` row with the tick's own reason. `clean` is true when no row is a `warning`: a release
+announced (`update-available`), automatic updates or the schedule turned off on purpose (`auto-off`,
+`schedule-off`) and an update waiting for a quiet moment (`deferred`) are `info`, so a deliberate setting does not
+keep doctor from reading clean. `clean` does not cover the other sections yet: an expiring or removed
+organization certificate (`organizations`), a meter without an issuer (`meter`), refused session servers
+(`session_servers`), `analytics`, the review policy (`review`) and the embedding and vector state keep their own
+fields, so read those too before taking `clean` as the whole answer. Doctor is a report, not a gate: it exits 0
+either way. To read the verdict alone:
+
+```sh
+project-observatory full doctor | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d["clean"], [a["code"] for a in d["attention"]])'
+```
 
 `full doctor` also reports whether the scheduled tick is alive (`tick.verdict`): `disabled` while
 `features.scheduler` is off (the default), `never` before the first tick, `running` during one and
@@ -255,6 +273,14 @@ nothing rather than failing. Each row carries two exact commands: `fix`
 (`project-observatory full configure integrations NAME false`, or `features` for a feature).
 The `projects` source is the exception: the filesystem scan always runs, so a missing
 `projects` source is a row with `fix` and no `disable`.
+
+A path under your home folder is stored home-relative: `configure sources projects ~/src` (or the
+same path written out in full) is saved as `~/src`, and the answer says `"stored_as":
+"home-relative"`. A path outside the home (`/Volumes/Work/src`) is stored as given
+(`"stored_as": "absolute"`). So a workspace restored under another home, another user name or
+another platform's home layout, still finds its sources. `full doctor` names each configured
+source's `form`; a value an earlier release stored absolute is not changed by itself, and
+configuring it again stores it home-relative.
 
 | Source | What it points at | Read by |
 |---|---|---|
@@ -1132,6 +1158,20 @@ server; `--uninstall` removes it. The server keeps one copy per workspace
 (`service.lock`; a second copy exits 75) and creates `service.token` for its
 events feed. See the [service design](design/FABRIC-SERVICE.md).
 
+Its well-known document also says what Observatory uses (`extensions/connections/0.1`),
+so a host can draw the chain from one agent to the next: Fabric's hub (asked which Fabric
+project each folder is), the release feed (the update check), one connector for each
+provider integration you turned on (GitHub, Bitbucket, Cloudflare, Heroku, DigitalOcean,
+Google, OpenRouter, domains, the MCP servers your agents' configs declare) and, while anonymous usage data is
+collected, the analytics host. Each carries its state (`ok`, `degraded`, `down`, `unknown`)
+and when it last ran, from the collector's own receipt in `store/raw`; an integration you
+never turned on is not listed, and one that never ran reads `unknown`. A receipt older than three
+times its collector's interval in the tick, and never less than six hours, reads `degraded`: its
+collector has stopped running, and the tick's log says why. With `OBSERVATORY_OFFLINE=1` set for the
+server no provider is listed, as no collector runs. Fabric's hub reads `unknown` when Fabric is not
+installed and `degraded` when the hub refused anything else. No key, URL with a
+key, path or name is in it. Not declared yet (OBS-338): git remotes (`ls-remote`), remote environments, GA4, Search Console, Cloudflare analytics, the assistant's model provider, the organization server, relay and mailbox, and release downloads (only the feed is declared).
+
 ```sh
 project-observatory full configure features scheduler true
 ENGINE="$(project-observatory full-path)"
@@ -1246,8 +1286,9 @@ The agent your own configuration starts over stdio is the **local agent**. It re
 project and writes only proposals, as before. Any other caller reaches memory only through a
 **binding** you issue at your terminal (PB-137 N-008). A binding names one principal, its
 projects, its scopes, the highest class it may read and whether it may write proposals, and
-it always expires. It reaches only the memory tools. Everything else (the estate, credentials,
-the machine) stays with the local agent.
+it always expires. It reaches only the memory tools, and, with the scope `ops.digest.record`,
+the one tool that records a product's daily operations digests (below). Everything else (the
+estate, credentials, the machine) stays with the local agent.
 
 ```sh
 project-observatory full access-binding show                        # who may reach memory; nobody by default
@@ -1278,6 +1319,101 @@ project-observatory full access-binding revoke BINDING_ID           # refused fr
   ([design/HTTP-TRANSPORT.md](design/HTTP-TRANSPORT.md)).
 
 Rules and reasons: [design/ACCESS-BINDING.md](design/ACCESS-BINDING.md).
+
+### Products' daily operations digests: ops.digest.record
+
+A product that keeps an operations log folds each closed UTC day into one line of counts,
+`ops.digest.daily@1` (fabric-agent-contract DEC-0153): operations by outcome, the operations
+whose failures rose, and nothing else. Fabric collects those lines on the machine and sends
+each one to Observatory with the MCP tool `ops.digest.record` (shown as `ops_digest_record`
+where a client turns dots into underscores). Its input is `digest` (the line as a JSON object),
+`source` (the label the line was read under, `app` by default) and an optional `service`
+(`{id, instance}`, the Fabric service it came from).
+
+The project is never an argument; it comes from the connection:
+
+- **Over stdio**, from an access binding you issue for that one project, with the scope and the
+  effect the tool needs. `issue` prints the server line that goes with it:
+
+  ```sh
+  project-observatory full access-binding issue service:fabric --project PROJECT --scope ops.digest.record --effect propose --days 365 --token-file PATH
+  # then the connection starts the server with: .../mcp/server.py --stdio --binding-token-file PATH
+  ```
+
+  A stdio server started without `--binding-token-file` (your own agent's, for one) answers
+  `binding-required`: the local agent is not a product and names no project.
+  `issue` refuses such a binding when it names more than one project.
+- **On the memory-http door**, from a delegation token Fabric's hub minted for
+  `project-observatory` with the scope `ops.digest.record` and the project the lines are of:
+  a `project:<slug>` this registry holds, or the `fabric:<uuid>` Fabric's own attribution
+  records for one project (a curated alias is not taken, and the review policy never accepts
+  an alias for a `fabric:` name by itself: it waits for you). Without a token, the answer is
+  `delegation-required`.
+
+Observatory checks every line against the contract (its closed schema, the arithmetic of
+`FAC-SEM-166`, and `FAC-SEM-167`: no operation named like a key or a home folder), takes only
+closed days within the last 400, and checks that a named `service` is one the registry
+attributes to that project. It keeps one record per project, service, source and day under
+`store/ops-digests/` (owner-only): the same line again changes nothing (`repeated: true`), a
+different one becomes the next revision, and the first one is the day's line. A record keeps
+at most 16 revisions (`revisions-exhausted`), a project's day at most 8 source labels
+(`sources-exhausted`) and a month file at most 64 MiB (`store-full`). Days older than 400 are
+dropped. In those counts, the `ok` of a host's `retro-after-work` operation counts the
+retro requests answered by a retro the host saw written, never the retros themselves.
+
+The daily learning review (next section) is the reader of these lines.
+
+### The daily learning review: what agents learned, what failed
+
+Once a UTC day the tick writes one local report of what agents recorded about what they
+learned and what failed, by arithmetic and with no model. It reads:
+
+- **lessons** (`observatory_lesson`): each lesson minted, revised, replaced, promoted or
+  invalidated that day, with its class, its pseudonymous project key, the project the key's
+  clone belongs to when a registered clone carries it, and its record
+  (`ledger:<memoryId>@<revision>`, readable with `observatory_recall`);
+- **classes held by two or more projects** (`class-repeated`), with what the corroborator says
+  of them: promoted, waiting for a second project, not resolvable here, or contradicted by git.
+  Only the corroborator promotes a lesson, by its own rule. When no tick that refreshed the
+  registry ran it within a day, the review runs it (bounded in time; it promotes there but never
+  archives an observation), so a lesson two projects hold is promoted at least daily;
+- **products' daily digests** (previous section): every rise the product itself recorded in an
+  hour (`risen-in-hour`), an operation whose failures reached at least 10 and at least twice the
+  day before (`rose-since-yesterday`), and one that rose on at least 3 of the last 7 days
+  (`rising-repeatedly`); a line sent after its day's report was written is reported once, in
+  the next report (`arrived-late`). Only the first revision of a day's line is read;
+- per project, the lessons recorded and the `retro-after-work` counts as asked, answered by a
+  retro the host saw written, refused and not seen. They are never read as retros written.
+
+The day is a UTC day, as a digest's is. The report of a day is due at 06:00 UTC the next day,
+so an overnight machine's catch-up arrives first; the hour is a setting:
+
+```sh
+project-observatory full configure learning_review settle_hour_utc 9
+```
+
+A complete report is never rewritten by the tick. A report a source could not be read for is
+`partial`, says which source and why, and is written again when what it reads changes (or every
+6 hours) until it is complete or until a day later. A damaged digest month that only the search
+for late lines reaches is named without making the report partial, and a report file that no
+longer reads is moved aside as `<day>.damaged-<n>.json` before the day is written again. After the machine was off, up to 7 missing days are written, oldest first;
+older ones are named under "days not reviewed". To read and run it:
+
+```sh
+project-observatory full learning-review show              # the newest report; prints where its page is
+project-observatory full learning-review show --json       # the report itself
+project-observatory full learning-review list              # the last 14 days: state, revision, counts
+project-observatory full learning-review run               # write what is due now
+project-observatory full learning-review run --day 2026-11-05 --again   # a new revision, keeping the previous
+```
+
+The report is `store/learning-review/<YYYY-MM>/<YYYY-MM-DD>.json` with the same report as a
+self-contained page beside it (`.html`, no script and nothing loaded from elsewhere),
+owner-only, kept 400 days. Every item names its source. The report carries no path, account or
+person, a lesson's text is scrubbed again of known values before it enters, and nothing is sent
+anywhere: not to the registry, the wiki, the board or Fabric. Not yet read: the `insights/`
+lines and the digest lines Observatory refused (the report's notes say so); the review is not
+yet on Health, in `doctor`, in the findings or over MCP.
 
 ### Give an agent a key without pasting it into a chat: the secret prompt
 
@@ -2161,7 +2297,8 @@ project-observatory full backups migrate           # move the newest legacy copi
 
 The root is chosen in this order:
 1. `OBSERVATORY_BACKUPS`;
-2. `project-observatory full configure storage backups /absolute/path`;
+2. `project-observatory full configure storage backups /absolute/path` (a path under your home is
+   stored as `~/...`, like a source, and `doctor` names its `form` under `backups`);
 3. the platform default. On macOS that is `~/Documents/Project Observatory/Backups` when
    `~/Documents` exists; iCloud Desktop & Documents can sync it off the machine.
    Elsewhere, or with no `~/Documents`, it is
@@ -2191,6 +2328,124 @@ which is why nothing reaches the root unencrypted: **without a passphrase,
 copies stay inside the workspace, plaintext, on this disk only**, and `full
 doctor` says so under `backups.warnings`.
 
+Each of those sentences has a code under `backups.warning_items`, with its step (`backups-no-passphrase`,
+`backups-root-inside-workspace`, `backups-failed-update-copy`, `backups-unencrypted-local`, and
+`backups-root-unusable` or `backups-passphrase-unreadable` when the root or the passphrase file is refused).
+
+**A secret store outside the workspace** (`sources.secret_store`, else `sources.secrets`, when either names a
+folder outside the workspace) is not part of the workspace, so it travels beside it: an encrypted workspace
+snapshot (the daily one, `full workspace-backup` without `--output`, with a backup passphrase set) carries
+it in `external/<setting>/`, next to the home in `data/`. Every slot, the movement journal, the leak
+register, the estate digest key and the doors' stashes go with it, copied under the vault's own lock and
+listed in the snapshot's manifest by relative path, size, mode and SHA-256, never by value. A snapshot
+that stays plaintext never holds it: `--output DIR` (reason `plaintext-output`), no passphrase
+(`no-passphrase`), an export that failed or was interrupted and left the copy in the workspace
+(`export-failed`: the store is removed from that copy before the failure goes on), and the snapshots an
+update takes before it installs and upgrades (`update-snapshot`). Each snapshot first removes the store
+from any snapshot copy a killed run left under the workspace's `backups/` (a folder named for a snapshot
+kind, or whose manifest lists `externals`; a folder of your own there is never touched), and removes that
+run's unfinished `.snapshot-*` folders once they are an hour old. A copy it cannot clean (an entry it may
+not delete) stops nothing: the snapshot goes on, its answer names the folder under `secret_store_sweep`,
+the carry record counts it as `sweep_failed`, and the next snapshot tries again. Nor is a store carried when it is over 256 MB
+(`too-large`), kept changing during two copies (`changed-during-copy`), cannot be read (`unreadable`,
+`missing`), or holds the workspace itself (`contains-workspace`): each is named in the manifest and the
+snapshot itself still succeeds. Lock files, temporaries, a link leaving the store, a socket and a slot kept
+here on purpose (below) stay behind; a link inside the store is recorded, not followed. Each snapshot the
+backups keep or export leaves `store/raw/secret-store-carry.json` (when, which file, carried or not and
+why, how many files and bytes, how many entries stayed behind), the record doctor reads; a record that
+cannot be written is said on stderr and in the answer's `carry_record_error`. The daily run also keeps the
+state in its maintenance record. The machine bundle skips a store the snapshot carries, naming it in its
+`skipped` list, so no second copy can drift; a store the snapshot never carries (`contains-workspace`) is
+walked like any other path.
+
+**Putting the store back.** `full restore` writes a carried store into the folder the restored settings
+name for it (after the home rewrite, so `~/...` lands under this machine's home), before the home itself
+is put in place. What it does when that folder already holds a store is the `--secret-store` policy:
+
+| The folder | `auto` (default) | `keep` | `merge` | `replace` | `skip` |
+|---|---|---|---|---|---|
+| absent, or empty (lock files and temporaries only, kept aside) | written whole | written whole | written whole | written whole | nothing |
+| holds every carried file, the same | `same` | `same` | `same` | `same` | nothing |
+| differs | refused, nothing written (`secret-store-not-empty`) | left as it is (`kept-existing`) | the missing files written, the rest kept (`merged`) | moved aside to `<folder>.before-restore-<time>-<hex>`, never deleted, then written whole (`replaced`) | nothing |
+
+Files only in the folder are never removed (only `replace` moves the whole folder aside) and are counted as
+`only_here`; a journal (`*.jsonl`) that has grown since the snapshot reads the same. No folder is ever deleted: an
+empty one is moved aside to `<folder>.before-restore-<time>-<hex>` like a replaced store, and a folder holding any
+subfolder (even one named `x.lock` or `keys.tmp`) is not empty. The restore holds the vault's own lock in that folder
+while it writes. It never writes into the home itself, `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`,
+`~/Library/LaunchAgents` or `~/Library/Keychains` (`secret-store-target-refused`), and `merge` refuses a folder
+holding files but no `projects/`. A snapshot taken on another machine or under another home writes its store only
+where this machine's own workspace settings name the same folder, or where you confirm it with
+`--secret-store-target PATH` (the refusal `secret-store-target-unconfirmed` shows the exact command).
+`--same-machine` (at a terminal) under the same home path counts as this machine's and needs no confirmation.
+Another spelling of a protected folder (`~/.SSH` on macOS) or a link to one is refused the same way. Under `keep`,
+which `full init` passes, none of these stops the restore: the store is answered `skipped` with its reason and a
+`next` command, `full init` shows it, and `full doctor` keeps the warning `backups-secret-store-not-restored` with
+that command until a store is in that folder again, however it got there. A skip you chose with
+`--secret-store skip` raises no warning. A whole store is written
+into a sibling folder `.<name>.restore-<hex>` (folders 0700, files 0600, every SHA-256 checked again) and
+renamed into place in one step; a merge writes each missing file atomically and never over an existing one;
+missing parent folders are created 0700. A store that could not be written is left as it was and the home is
+not restored (`secret-store-write-failed`, exit 1); a refusal (`secret-store-not-empty`,
+`secret-store-unresolved` when the restored settings name no folder for it, `secret-store-target-inside-home`
+when that folder lies inside the new home, `secret-store-manifest-mismatch`) is exit 2 and writes nothing.
+`--json` turns either into `{"error": {"code": "...", "message": "..."}}` on stdout. A link inside the store is
+recreated as a link (on Windows it is named `link-not-supported` instead); a link leaving the store and a
+special file were never carried and are named. A write appends one `restore-store` line to the store's own
+movement journal (`vault.py`; names and counts, never a value). The answer's `secret_store` says what
+happened (`written`, `same`, `merged`, `replaced`, `kept-existing`, `skipped`, `not-in-snapshot` for a
+snapshot that did not carry it, `not-applicable` for a workspace with no external store), with counts;
+`--secret-store-names` adds the conflicting and not restored files by relative path. A `.<name>.restore-<hex>`
+folder a killed restore left is removed by the next restore once it is an hour old. `full init` on an empty
+home restores with `keep`, so a reinstall over a surviving store never fails or overwrites it; an update's
+rollback never touches the store (`skip`).
+
+For a workspace an older release restored, or a restore stopped between the store and the home, write the
+stores alone into the folders THIS workspace's settings name; the home is not touched:
+
+```sh
+project-observatory full restore SNAPSHOT --secret-store-only [--secret-store POLICY] [--json]
+```
+
+Without a release that does this, `full backups decrypt FILE DIR` opens the snapshot and
+`DIR/external/secret_store/` is the store to copy into place by hand; such a copy must recreate each link the
+manifest lists under `externals[].links` (`ln -s TARGET PATH` inside the store: links are recorded, never
+stored as links), and then delete `DIR`, which holds every key in plaintext.
+
+**A slot that stays on this machine on purpose** (a root seed, an administrator token whose single home is
+this machine) is marked once, and no snapshot carries it from then on:
+
+```sh
+project-observatory full vault-digests keep-here PROJECT ENV NAME --why "..."   # why, 8 to 200 characters
+project-observatory full vault-digests unkeep-here PROJECT ENV NAME            # the next snapshot carries it again
+```
+
+The mark lives in the slot's metadata, survives a new value, and is journaled; the snapshot leaves the slot,
+its metadata and every archive `vault.py rotate` kept of it (`NAME.retired-*`) behind, names each with the
+reason `this-machine-only`, and still reads as carried. A slot whose metadata does not read (not JSON, not
+UTF-8, over 64 KiB, not a regular file) stays behind the same way with the reason `unreadable`: a mark that
+cannot be read may be a mark. `full vault-digests` shows it as `only here
+on purpose` here and `only on <machine> on purpose` on the other machine, neither of which counts as a
+difference.
+
+`backups.secret_store` in `full doctor` and `full backups status` names it (`path`, `settings_keys`, `exists`),
+the newest record of a snapshot carrying it (`last_carry`, read from `store/raw/secret-store-carry.json`) and of the
+last restore of one (`last_restore`, from `store/raw/secret-store-restore.json`), and four warnings follow from it:
+
+| Code | When | Step |
+|---|---|---|
+| `backups-vault-store-not-carried` | the store exists and no snapshot carried it, the last one did not (its reason), or the last carry is more than 48 hours old | `full workspace-backup --writers-stopped`, or `full backup-passphrase set` when the reason is `no-passphrase`; a release whose snapshots do not carry the store names a copy by hand instead |
+| `backups-secret-store-not-restored` | the last restore skipped the store the backup carried (its reason: a folder not confirmed, refused, busy or unwritable) | the restore's `next`, for example `full restore SNAPSHOT --secret-store-only --secret-store-target PATH` |
+| `backups-secret-store-missing` | the folder the settings name does not exist on this machine | `full configure sources secret_store PATH` (or `secrets`, the setting that names it) |
+| `backups-secret-store-env-override` | the environment moves the vault away from the folder the settings choose: `OBSERVATORY_VAULT_DIR` names another slot folder than `<store>/projects`, or `OBSERVATORY_SECRETS` names another folder while `sources.secret_store` is unset (with it set, `OBSERVATORY_SECRETS` moves nothing) | `full configure sources secret_store PATH`: the daily job may not share the shell's environment, and only the folder the settings name is carried |
+
+Until the first snapshot taken by this release, an external store reads `backups-vault-store-not-carried` with the
+reason "no snapshot has carried it yet" and the step `full workspace-backup --writers-stopped`. A store inside the workspace reads `{"external": false}` and is carried with it. With no
+setting naming a store and `OBSERVATORY_SECRETS` pointing outside the workspace, the section reports that folder
+as external, with `settings_keys: []` and `environment: "OBSERVATORY_SECRETS"`, and only the env-override row. These
+codes, except the two a maintenance row already says (no passphrase, unencrypted local copies), join `full maintain
+status` and the Health page's maintenance rows, and so doctor's `attention`.
+
 **From 0.17.0 a passphrase exists by default.** When none is configured, the maintenance job
 (or `full init` in a terminal) generates one from 32 random bytes. The passphrase lives in
 `<home>/secrets/backup-passphrase` (mode 600) and is **also kept outside the workspace**, so
@@ -2198,7 +2453,7 @@ a deleted workspace or a reinstall can still open its backups:
 
 | Platform | Where the copy is kept |
 |---|---|
-| macOS | the login Keychain, item "Project Observatory backups", account `<home-name>-<instance>` |
+| macOS | the login Keychain, item "Project Observatory backups", account `<home-name>-<instance>`; an account with no login Keychain to write to (a headless one) keeps it in `~/.config/project-observatory/backup-passphrases/<label>` (mode 600), and the answer names `file` |
 | Linux | the Secret Service through `secret-tool`; without it, `~/.config/project-observatory/backup-passphrases/<label>` (mode 600) |
 
 The value goes to the Keychain on `security -i`'s stdin and to `secret-tool` on stdin,
@@ -2206,8 +2461,10 @@ never as an argument. A passphrase you set yourself is copied there too. One sup
 `OBSERVATORY_BACKUP_PASSPHRASE` is yours to keep and is not copied.
 
 `backup-passphrase show` prints it only to a terminal. Keep a copy off the machine as well:
-restoring on another machine needs it unless iCloud Keychain carries it there, and nothing
-can recover it.
+restoring this machine's backups on another machine needs it unless iCloud Keychain carries it
+there, and nothing can recover it. Each machine keeps its own passphrase: never set this
+machine's on another one to open a backup there (that replaces the other machine's own); give
+it to the restore once instead, as below.
 
 **The kept copy is never written over.** If `secrets/backup-passphrase` is lost while the
 kept copy exists, the job restores the file from it instead of generating a new passphrase.
@@ -2225,18 +2482,72 @@ backup, `init` creates the workspace and prints the backup it found and a comman
 it into another, empty home.
 
 ```sh
-# On another machine: restore asks for the passphrase at a terminal
+# On another machine: restore asks for the first machine's passphrase once, at a terminal
 project-observatory --home NEW_EMPTY_HOME full restore snapshot-….obsnap
 project-observatory full backups decrypt observatory-db-….obsdb ./copy.db
 ```
+
+**Another machine's backup opens with its passphrase given once, and nothing stores it.** A
+restore tries, in order: `OBSERVATORY_BACKUP_PASSPHRASE`, a value read with `--passphrase-stdin`,
+this workspace's own passphrase, the ones this machine's credential store keeps for the backups
+folder's label, and last, at a terminal, one prompt that names the folder
+(`Backup passphrase for <label>: `). A wrong candidate costs one chunk of the file. The value
+that opens it is used for that restore only: it is not written to the workspace, to settings, to
+the Keychain or any other store, to a log or to the answer, which says only where it came from
+(`passphrase_source`: `given`, `environment`, `stdin`, `this-workspace`, `stored`,
+`stored-previous` or `prompt`). `full restore --latest` asks once per backups folder when no
+kept passphrase opens it; `full machine-restore` takes `--passphrase-stdin` too.
+
+`--passphrase-stdin` reads at most 4096 bytes of UTF-8 from a file or a pipe and removes one
+trailing newline. It refuses a terminal (`passphrase-stdin-terminal`: there the prompt is the
+route, and it shows nothing typed), an empty value (`passphrase-stdin-empty`), a longer one
+(`passphrase-stdin-too-long`) and bytes that are not text (`passphrase-stdin-not-text`). When no
+candidate opens the file the refusal is `passphrase-refused` and names the sources it tried, never
+a value. Each is exit 2 before anything is written.
+
+An agent with shell access to the first machine hands the passphrase over without seeing it,
+redirecting the first machine's passphrase file into the second machine's command over SSH
+(never `ssh -t`, so the remote stdin is the file and not a terminal, and never `echo` or an
+argument). The default home is `~/.local/share/project-observatory-full`; use the first
+machine's `OBSERVATORY_HOME` when it set one:
+
+```sh
+ssh SECOND 'project-observatory --home NEW_EMPTY_HOME full restore ~/obs-transfer/daily-XXXX.obsnap --passphrase-stdin' \
+    < ~/.local/share/project-observatory-full/secrets/backup-passphrase
+```
+
+Without such access, the person at the second machine types it once at the prompt.
+
+**A restore under another home rewrites the old home's paths.** A snapshot records the home it
+was taken under (`home_path` in its manifest). Restored under another home, every source and the
+backups root (`config/settings.json`) and every `include` and `roots` entry of
+`config/machine-backup.json` that named the old home become `~/...`, and each folder declared in
+`config/tracked.json` moves to the same place under the new home, still absolute and resolved, as
+`full track` writes it. A home behind a symbolic link is matched as recorded and resolved. A value
+outside the old home is kept as given; `/Users/ann` never matches `/Users/anna`, and a value that
+leaves the home through `..` is outside it. The answer's `paths`
+block lists what was rewritten and, in `unresolved`, every declared folder (with
+`full track local-folder PATH`), source or backups root that does not
+exist afterwards (`reason: missing-after-restore`) with the exact `configure` step that points it
+elsewhere; a declaration file that cannot be read is named there too and left as it is. A missing
+source is not a refusal: the restore completes and `doctor`'s `coverage_warnings` keeps naming it.
+A same-home restore keeps `settings.json` byte for byte. When `restore --latest` finds no backup
+of a workspace at this path but the same workspace left backups under another home (its owner
+file names `<other home>/<the same path under the home>`), the `no-backup` answer lists them under
+`elsewhere`, never chooses one, and `next` names `full restore 'FILE'` for the newest.
 
 A rolled-back update keeps the changed workspace beside the restored one as
 `<home>.failed-update-…`: a full, unencrypted copy with `secrets/`. Nothing removes it;
 `backups status` and `doctor` name it, and you delete it once the restored workspace is
 confirmed.
 
-`workspace-backup --output DIR` still writes a plaintext snapshot directory
-where you name it; that is an explicit choice and it is not encrypted.
+`workspace-backup --output DIR` writes a plaintext snapshot directory where you name it; it is
+not encrypted. Since OBS-389 it refuses when the workspace holds secrets (a secret store inside the
+workspace, such as `secrets/`, with a file in it) and names two ways forward: run `workspace-backup`
+without `--output`, which exports the snapshot encrypted once a backup passphrase is set, or add
+`--plaintext` to write the plaintext copy anyway. With `--plaintext` the answer carries
+`"plaintext": true` and a `warnings` line; keep that folder as private as the vault and delete it when
+done. A workspace without secrets writes `--output DIR` as before.
 
 ### This machine's agent setup, and moving to a new machine
 
@@ -2267,7 +2578,8 @@ A symbolic link is recorded as a link with its target, never followed. Left out 
 and named in the bundle's `MANIFEST.json` under `skipped`: agent transcripts
 (`~/.claude/projects`, opt-in), plugin caches and marketplace clones, `.DS_Store`, sockets.
 Git-ignored files in checkouts (build output, a local `.env`) are not carried: credentials
-belong in the vault, which the workspace snapshot carries.
+belong in the vault, which the encrypted workspace snapshot carries, inside the workspace or outside it
+(a secret store kept outside the workspace is skipped here and named in `skipped`).
 
 The caps, each a key of `limits` (below): `file_mb` 16 MB (one file), `entry_mb` 128 MB (one
 entry, such as `~/.claude/skills`), `total_mb` 320 MB (every file copy together), `bundle_mb`
@@ -2389,13 +2701,28 @@ of that:
   `node/shares/` (a key someone shared with you is sealed to the machine that accepted it, so
   they share it again to the second machine if it needs it; the shares you sent are renewed and
   revoked from the machine that made them), `config/cloud.json` (the second machine deploys its
-  own mailbox with `full cloud deploy` if it sends shares) and `<home>/store/maintenance.json`. It
+  own mailbox with `full cloud deploy` if it sends shares), `<home>/store/maintenance.json` and
+  `secrets/backup-passphrase` (OBS-348: each machine keeps its own backup passphrase; a
+  same-machine restore keeps the snapshot's). Until the second machine makes its own, every
+  snapshot it takes, `secrets/` included, stays unencrypted inside the workspace: run
+  `project-observatory full maintain ensure`, which the restore's `next` names (a `full init` at a
+  terminal does it too; one run over SSH without a terminal does not). Until then `doctor` shows
+  `backups.encrypted: false`, `backups.passphrase: missing` and a warning that names the same step.
+  The first machine's passphrase does not travel either, so its backups, the snapshot just
+  restored included, open only with it: if that machine may be retired, keep its passphrase
+  somewhere off both machines now (the restore answer's `machine.notes` says so). It
   turns `features.scheduler` off, holds off every app enrolled `always_on` (the restore names the
   `full lifecycle policy` step that turns it back on, to run on one machine only) and gives the
   workspace its own `instance_id`, so the second machine's daily backups go to their own folder of
   the backups root and never rotate the first machine's. The vault and everything else, the CLI
   logins the machine bundle carries included, are restored: they are your own credentials and
-  work on both machines.
+  work on both machines. A vault kept outside the workspace is carried in the encrypted snapshot
+  and written where the restored settings name it (see "Putting the store back" above), and a slot
+  marked `keep-here` never leaves the first machine. The first machine's own vault digest manifest
+  (`<state>/vault-digests/local.json`) becomes a peer here, `peers/<its machine>.json` (or
+  `peers/peer-<hex>.json` when its name is this machine's), so this machine's first
+  `vault-digests write` makes its own under the carried estate key and the view compares against the
+  first machine at once; the answer's `digest_manifest` says where it went.
 - **Which machine is which.** Each machine has an id derived from its platform identifier (never
   written). A snapshot or bundle that names another machine, or names none, is restored the
   second-machine way; `--same-machine` at a terminal restores one whole. `full init` on an empty
@@ -2412,7 +2739,7 @@ project-observatory full machine-restore --latest --packages
 project-observatory full ssh-keys rekey NAME --fingerprint SHA256:...          # the plan for this machine's own SSH key, as `ssh_keys` names it
 project-observatory full ssh-keys rekey NAME --fingerprint SHA256:... --apply  # before --clone: make it, send it to GitHub and each server, verify
 project-observatory full machine-restore --latest --clone
-project-observatory full restore --latest                         # the workspace, without the node identity
+project-observatory full restore --latest                         # the workspace, without the node identity; asks once for the first machine's passphrase
 project-observatory full node --init                              # this machine's own device id
 project-observatory full machine-move show                        # this machine's id and the staged jobs
 ```
@@ -2508,6 +2835,142 @@ second machine's `elsewhere`; a load that fails puts the plist back in staging. 
 on the old machine needs nothing: on the second machine it stays staged and named as running
 elsewhere.
 
+A staged plist can be days old: the restore staged it, and a service released anew since then lives
+in a new release folder. Before it moves anything or asks you, `cutover` checks that the staged plist's
+`Program`, `ProgramArguments[0]` and `WorkingDirectory` exist on this machine; when one does not, it
+refuses that label with `staged-plist-stale`, naming the missing path (OBS-390). Write the job's current
+plist into `~/.local/share/project-observatory/machine-move/LaunchAgents/` (replacing the stale one),
+then run `cutover` again.
+
+**An account nobody logs in to** (macOS, OBS-361 part 1). An OS account with no graphical login, such
+as a second "space" on a shared computer, has no `gui/<uid>` launchd domain, and launchd refuses its
+agents even when root asks. When `launchctl print gui/<uid>` answers that the domain does not exist,
+`cutover` runs the same checks, then moves the plist into
+`~/.local/share/project-observatory/background/LaunchAgents/` (owner-only, the plist made unwritable by
+group and others) instead of `~/Library/LaunchAgents`, removes the job from `elsewhere`, and answers
+`"state": "waiting-for-root"` with `human_steps` and `next` naming the one command an administrator
+runs:
+
+```sh
+sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL
+```
+
+That command writes the job to `/Library/LaunchDaemons/LABEL.plist` with `UserName` and `GroupName`
+set to the account (launchd.plist(5): they apply only in the system domain), so it runs as that
+account, never as root, and starts again after a reboot with nobody logged in. Root never runs a file
+the account can write, so the administrator first installs a root-owned copy once per computer, from
+the release itself, downloaded and verified in the administrator's OWN account (never copied from the
+space account's folders, which that account could have changed), with the release's version for
+`X.Y.Z`:
+
+```sh
+gh release download vX.Y.Z -R passioncode-ai/project-observatory-dashboard -p 'SHA256SUMS*' -p '*.whl'
+#   without gh: curl -LO https://github.com/passioncode-ai/project-observatory-dashboard/releases/download/vX.Y.Z/SHA256SUMS
+#   and the same for SHA256SUMS.asc and project_observatory-X.Y.Z-py3-none-any.whl
+shasum -a 256 -c SHA256SUMS --ignore-missing          # the wheel matches the release's sums
+curl -LO https://raw.githubusercontent.com/passioncode-ai/.github/main/release-signing/passioncode-release-signing.asc
+gpg --import passioncode-release-signing.asc          # gpg is not on macOS by default: brew install gnupg
+gpg --status-fd 1 --verify SHA256SUMS.asc SHA256SUMS | grep -q "VALIDSIG 63B30DC324BD697487AA31944FAFB8AEC803B6A7" && echo signed
+unzip -p project_observatory-X.Y.Z-py3-none-any.whl observatory/engine/tools/space_daemons.py > space_daemons.py
+sudo install -d -o root -g wheel -m 0755 /usr/local/libexec
+sudo install -o root -g wheel -m 0755 space_daemons.py /usr/local/libexec/observatory-space-daemons
+```
+
+The signature is checked against the organization's pinned release key, the same fingerprint
+`full update` checks (`release_signature.py`, `PINNED`; the key is published in the organization's
+[release-signing](https://github.com/passioncode-ai/.github/tree/main/release-signing) folder): a bare
+`gpg --verify` would accept any key in the keyring. Without gpg, the administrator's own Observatory
+install checks the same pinned key:
+
+```sh
+python3 -c 'import sys; sys.path.insert(0, sys.argv[1]); import release_signature as r; sys.exit(r.verify(open("SHA256SUMS", "rb").read(), open("SHA256SUMS.asc").read()) != sys.argv[2])' "$(project-observatory full-path)" 63B30DC324BD697487AA31944FAFB8AEC803B6A7 && echo signed
+```
+
+`observatory-space-daemons --version` prints the version and the file's sha256 for information only:
+the verification is the lines above. `machine-move cutover` names the same steps in `human_steps`.
+
+The `-I` in the command is required: in isolated mode Python leaves the script's folder and the user's
+site-packages out of its module path and ignores every `PYTHON*` variable, so nothing the account
+wrote is imported as root. `apply` and `remove` refuse without it (`not-isolated`, naming the command)
+and from a copy that is not root's alone (owned by root, not writable by group or others, not a link,
+in folders only root can write). Still check the folder before the copy goes in (`ls -ld /usr/local
+/usr/local/libexec`: owned by root, not writable by group or others); where a package manager owns
+`/usr/local`, use another root-only folder and the same command with its path. `plan --user ACCOUNT [--from
+background|staged] [--json]` shows what `apply` would write for each plist and why one is refused,
+and loads nothing; `status --user ACCOUNT` lists the daemons it wrote, loaded or not, and whether the
+file is still as written. A plist is refused, never partly installed, unless it keeps to the allowed
+keys (`Label`, `ProgramArguments`, `Program`, `EnvironmentVariables` without `DYLD_*`, `WorkingDirectory`, `RunAtLoad`,
+`KeepAlive` (a bool, or `SuccessfulExit`, `Crashed`, `AfterInitialDemand`, and `PathState` with paths
+inside the home; not `OtherJobEnabled`), `StartInterval`, `StartCalendarInterval`, `StandardOutPath`, `StandardErrorPath`,
+`ThrottleInterval`, `ProcessType`, `Nice` of 0 or more, `LowPriorityIO`, `ExitTimeOut`,
+`AbandonProcessGroup`, `Umask` of 0 to 0777, `SoftResourceLimits` of launchd's limit names to
+non-negative integers; `LimitLoadToSessionType` and `AssociatedBundleIdentifiers` are dropped, `plan`
+noting `stripped`; `HardResourceLimits` stays refused), its program is owned by root, the account or a
+trusted owner, in folders nobody else can write, its `WorkingDirectory` stays inside the account's home
+(a `WorkingDirectory` of `/` becomes the home, `plan` noting `working-directory-home`),
+every integer fits 0 to 2147483647, and the daemon it would become writes as a plist. Its label is
+letters and digits, then `. _ @ -` (at most 128; `com.apple.` refused), carried by no other plist in
+`/Library/LaunchDaemons` or `/System/Library/LaunchDaemons`; `cutover` checks the same rules before it
+moves anything (it names each problem and leaves the plist where it was) and names the moved file
+`LABEL.plist`, and refuses when the job is defined both in `~/Library/LaunchAgents` and in staging or
+the background folder.
+**Logs** go to a folder root owns, never where the plist said: launchd may open
+`StandardOutPath` and `StandardErrorPath` with root's rights, and a link in a folder the account
+controls could make root write elsewhere. The daemon writes
+`/Library/Logs/ProjectObservatory/ACCOUNT/LABEL.out.log` and `LABEL.err.log`; `apply` makes
+`/Library/Logs/ProjectObservatory` root:wheel 0755 and `ACCOUNT` in it root:wheel 0700, clears any ACL
+on both (`/bin/chmod -N`), adds one inherited entry that lets the account read (`/bin/chmod +a "ACCOUNT
+allow list,search,read,readattr,readextattr,readsecurity,file_inherit,directory_inherit"`), checks that
+only that entry is there, and refuses,
+installing nothing, when such a folder exists as a link or is not root's. It then creates both log
+files ahead of launchd (a new file, never through a link), owned by the account, mode 0600. Inside the
+root-owned 0700 folder the account can read and append to its files but cannot create, rename, link
+or unlink anything there, so they are safe whichever credentials launchd uses to open them, and the
+account cannot replace them. A log file already there is kept only when it is a regular file with one
+link, owned by the account (or by root, then given to the account) and not writable by group or
+others; otherwise that job is refused (`log-file`) and nothing is installed for it. `remove` leaves
+the log files in place and says so. `plan` notes `logs-moved` for a plist that named its own log
+paths. A file in
+`/Library/LaunchDaemons` the tool did not write is never replaced: what it wrote is recorded in
+`/Library/Application Support/ProjectObservatory/space-daemons.json` (a stable interface, readable
+without root; its format is in COMPATIBILITY.md). One copy only: a label already loaded as an agent in
+the account's GUI domain (`loaded-in-gui`), or held by another account's entry, is refused. Once root loaded the job, a
+second `cutover` answers `"state": "complete"`, and `machine-move show` lists it under `background`
+as `loaded` (`registered` when root wrote it and it is not loaded, `waiting-for-root` before).
+`leave` refuses while root's registry names the job for this account, loaded or not, and names `sudo
+... remove --user ACCOUNT --label LABEL`; after it, `leave` stages the plist from the background folder
+as usual. `apply` writes the registry entry before the plist, so a crash between the two leaves an
+entry whose plist is missing: `apply` writes it again, `remove` cleans it, `status` shows it as
+`missing`. `remove` deletes only a file whose bytes are what it wrote or whose label is the job's.
+An XML comment holding `--` (which launchd and plutil accept and XML forbids) is tolerated: the
+comments are removed from the bytes in one pass and the plist parsed again, so nothing inside a comment
+becomes a key. This is close to launchd's reading, not proven identical, so a comment that never closes,
+or comments beside a CDATA section, are refused as `xml_comment`.
+
+**Trusted owners** (space daemons 1.1.0). On a Mac where Homebrew's prefix is owned by the host's admin
+account and its folders are group-writable by `admin`, every program there would be refused
+(`program_owner`, `program_dir_writable`). The administrator may name, in a root-owned trust file,
+the accounts and groups whose files and folders a program path may belong to besides root:
+
+```sh
+sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons trust set --owner ADMIN --group admin
+/usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons trust show --user ACCOUNT
+```
+
+Only accounts that already hold root through sudo, and groups whose members all do, belong there:
+`trust set` takes only `wheel` or `admin` as groups and only owners that are members of `admin`
+(`dsmemberutil checkmembership -U NAME -G admin`), and refuses when membership cannot be told. Every
+read checks the same again, so a demoted owner, or a name or group added by hand, stops being trusted at
+once, with a warning. **What trusting costs:** any process running as that admin account, even without
+its sudo password, can replace the programs in those folders and so run code as every space that uses
+them. Trust the admin only when the spaces are less trusted than the admin. A folder writable by
+everyone is still refused unless sticky. The space account is never trusted for its own jobs (that entry is
+left out, with a warning). A trust file that is not root's alone (owner root, not writable by group or
+others, a real file in a root-only folder, at most 64 KiB) is ignored with a warning, never trusted.
+`cutover` reads the same file, read-only, so it accepts what `apply` will. One
+definition that fails in `apply` is reported as `failed` with its error, and the others go on. Root cannot see the account's
+`XDG_DATA_HOME`, so `cutover` refuses, before moving anything, in such an account with a custom one.
+
 **The placement file**, `${XDG_DATA_HOME:-~/.local/share}/project-observatory/placement.json`,
 owner-only and written atomically, says which jobs this machine holds for another one, until the
 estate record carries placement:
@@ -2570,6 +3033,10 @@ format cannot carry keeps its fingerprint under a masked name, a job label it ca
 and `omitted` (and a line on stderr) says how many. Status writes nothing and starts, stops or asks
 launchctl about no job; on a machine with no platform identifier and no kept id it does not make one
 either, and names this machine `unknown` (`full machine-move show` makes the id).
+
+An agent reads the same checklist over MCP: `observatory_machine` with `section: "move"` returns it under `move`
+(with `measuredAt` and `degraded` as every answer), from the same function and the same peers folder, and writes
+nothing. Every step it names stays a command a person or an agent runs.
 
 For an original installation whose state lived beside source, set a new home
 and run `full migrate-local ORIGINAL_DIRECTORY` to preview. Apply requires
@@ -2640,7 +3107,10 @@ runs beside this one" above. To start the second machine empty, on the new machi
 Each machine has its own vault. `project-observatory full vault-digests` shows every vault slot per
 machine as `same`, `differs`, `only here`, `missing` or `unreachable` (with the time of that
 machine's last answer), and one line when all match. Machines compare keyed HMAC-SHA-256 digests
-under one estate key, never values, so both need the same key once:
+under one estate key, never values, so both need the same key once. The key lives at the top of the
+secret store, so a second machine restored from an encrypted snapshot that carried the store has it
+already (and the first machine's manifest as a peer); `key export` and `key import` are needed only when the
+store did not come from a snapshot:
 
 ```sh
 project-observatory full vault-digests key export /path/to/new-file    # on the first machine
@@ -2651,7 +3121,8 @@ project-observatory full vault-digests write                          # on each:
 Until machines exchange manifests by themselves (OBS-194, step 2), copy the second machine's
 `<state>/vault-digests/local.json` into the first machine's `<state>/vault-digests/peers/` under the
 second machine's name, for example `machine-b.json`. A slot meant to differ is marked with
-`full vault-digests mark PROJECT ENV NAME --why "..."`; a `vault.py rotate` makes the other
+`full vault-digests mark PROJECT ENV NAME --why "..."`, and a slot meant to stay on one machine with
+`full vault-digests keep-here PROJECT ENV NAME --why "..."`; a `vault.py rotate` makes the other
 machines' copies read as stale. `observatory_credentials` names, for each vault row, the machines
 that hold it. The design: [docs/design/VAULT-DIGESTS.md](design/VAULT-DIGESTS.md).
 
@@ -2685,7 +3156,7 @@ names, anything from the registry or the store, URLs, prompts, arguments, messag
 **How it travels:** a command or tool call appends one line to a local queue and returns; it never waits on the
 network. The maintenance job (every 15 minutes) sends the queue to `https://analytics.sshlg.me` in batches of at most
 25 and drops events older than 23 hours; a failure is counted in `store/analytics/counters.json` and never shown as
-an error. A flush takes at most 30 seconds and stops at the first batch the host does not take; the rest waits
+an error. A count that cannot be written is named in `full analytics status` under `degraded`, whichever process failed to write it (the reason is kept beside the counters until the next update is written). A flush takes at most 30 seconds and stops at the first batch the host does not take; the rest waits
 for the next pass. `full analytics send` sends the queue now. The first time a command runs at your terminal after
 this release, it prints a one-time notice saying this; the dashboard's Home shows it until you first open Home
 through the local server and for a week after that, and Health shows the switch with the command that changes it.
@@ -2749,14 +3220,22 @@ excluded. Synthetic evidence: `test_lifecycle.LogRetentionEvidence` and the
 **The switch, "Install updates automatically"**, is the file `auto-update` in the workspace
 home. Without it, updates are on; only the word `off` in it turns them off. The commands
 below write it, and you can write it yourself. An update, a reinstall or an uninstall never
-writes it, neither `on` nor `off`. Off stops the checks, the downloads and the installs, the
-Mac app's included; the daily backup keeps running. An install that turned updates off before
+writes it, neither `on` nor `off`. Off stops the downloads and the installs, the Mac app's
+included; the daily backup keeps running. Off still tells you when a newer version exists: the
+check job keeps reading the release feed every five minutes, never downloads or installs, and
+announces each newer version once (the job's log line, `full auto-update status`,
+`full doctor`, a calm row on the dashboard's Home and on Health, and the Mac app's menu), with
+the command that installs it when you choose, `project-observatory full update --apply`. The
+version it found is kept as `available` in `store/update-check.json`: `full update --apply`
+removes it when it installs that version or a later one, `full auto-update on` removes it at
+once, and otherwise the next check does. Off by the older `updates.auto: false` counts the
+same. The Mac app shows its menu item exactly while that key is there. An install that turned updates off before
 0.19.0 did it with `updates.auto: false` in `config/settings.json`: that still counts as off,
 and the next `auto-update` command moves it into the file and says so.
 
 ```sh
-project-observatory full auto-update status   # on or off, last check, last result, warnings
-project-observatory full auto-update off      # writes `off`; new releases wait for you, the daily backup keeps running
+project-observatory full auto-update status   # on or off, last check, last result, warnings, a newer version waiting
+project-observatory full auto-update off      # writes `off`; new releases wait for you and are announced, the daily backup keeps running
 project-observatory full auto-update on
 project-observatory full maintain status      # everything the job last did
 project-observatory full maintain run         # one pass now
@@ -2775,7 +3254,8 @@ How the job gets scheduled:
 - `full upgrade --apply` (run by `full update`) schedules the job when it runs from a
   terminal.
 - The `observatory-log` plugin's session hook schedules it where it is missing. On Linux
-  without a systemd user manager, the hook runs the pass itself.
+  without a systemd user manager, the hook runs the pass itself, and the check too while
+  updates are off.
 
 `OBSERVATORY_SYSTEM_SETUP=0` in the environment keeps every one of these away from launchd,
 systemd, Task Scheduler and the credential store: `full init` answers `not-scheduled-here`,

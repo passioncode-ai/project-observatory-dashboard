@@ -6,7 +6,7 @@ Each OSS id is defined once, as a table row or a `### OSS-n:` heading; a heading
 `### OSS-n, in detail:`. A new scenario takes the next free id and moves this line
 (the repository's `ScenarioIds` test checks both, and that every id below it is defined or vacant).
 
-**Next free OSS id:** `OSS-98`
+**Next free OSS id:** `OSS-102`
 
 **Vacant OSS ids:** `OSS-59` (claimed by an open pull request on 2026-10-18 when the SSH-key scenarios took OSS-62; never written)
 
@@ -157,6 +157,7 @@ claim that only the code shows.
 | OSS-95 | Set up a second machine from this one's backups while this one keeps running | A machine bundle and a workspace snapshot name the machine they were taken on (`machine_id`, `machine_identity.py`). Restored on another machine, or naming none, `full machine-restore` writes `~/.ssh/config`, `known_hosts`, `authorized_keys`, `allowed_signers` and every `*.pub` but no private key (each withheld key directly in `~/.ssh` gets two steps in `ssh_keys` and `next`, `full ssh-keys rekey NAME --fingerprint SHA256:...` and the same with `--apply`, before `--clone`, the fingerprint read from the bundle's public half and `--server ALIAS` for a Host whose line is not `~/.ssh/NAME`, OBS-300), stages every launchd plist (systemd user unit off macOS) but this engine's own (each machine installs its own) in `${XDG_DATA_HOME:-~/.local/share}/project-observatory/machine-move/` where nothing loads it at login, and names each in `placement.json` (`observatory-placement/1`) as running on the other machine; `full restore` leaves out `node/device/`, `node/orgs/`, `node/records/` and `<home>/store/maintenance.json`, turns `features.scheduler` off and gives the workspace its own `instance_id`, so `full node --init` makes this machine's own device id. `full machine-move leave LABEL --to ID` on the old machine, then `full machine-move cutover LABEL` on the new one, moves one job so it never runs on both (`machine_backup.py`, `machine_move.py`, `workspace_upgrade.py`). A partial move (OBS-282): every plan row names its category and the answer's `categories` says per category what an `--apply` would write; `--only` or `--skip` (`ssh-private`, `ssh-config`, `launchd`, `cli-logins`, `claude`, `codex`, `git`, `shell`, `fabric-services`, `packages`, `agents`, `operator`) limit what is written and `--projects` limits `--clone`; each writing step leaves `machine-move/restore.json`. `full machine-move status` (OBS-286) prints the checklist M1 to M4 (one release, the restore complete, its own SSH key, its own device id, every vault slot `same`, no job defined on both), each `ok`, `missing` with its step, or `unknown`, against the other machine's facts (`full machine-move facts --out FILE` there, `--peer FILE` here) | `--same-machine` restores whole and is refused away from a terminal; a file whose text is a private key is withheld under any name; a job this machine already defines is left as it is; a load that fails puts the plist back in staging; a placement file that is not this schema is refused, never replaced; a same-machine restore and an update's rollback are unchanged. `tests/test_machine_backup.py` SecondMachine (`test_another_machine_gets_no_private_key_and_no_loaded_job`, `test_the_same_machine_keeps_todays_behaviour`, `test_a_bundle_that_names_no_machine_is_another_machines`), SecondMachineKeys (`test_one_rekey_step_takes_the_place_of_create_and_send`, `test_the_rekey_step_carries_the_other_keys_fingerprint_from_its_public_half`, `test_without_its_fingerprint_the_plan_says_how_github_learns_it`, `test_a_host_rekey_would_not_see_is_named_to_it_with_server`, `test_the_fingerprint_is_read_from_the_private_files_clear_header`, `test_the_emitted_step_parses_as_rekey_with_its_name_and_fingerprint`), MachineMove, MachineId; `tests/test_workspace_upgrade.py` `test_another_machine_never_takes_the_node_identity_or_the_schedules`, `test_then_node_init_makes_this_machines_own_device_id`, `test_the_same_machine_restores_the_whole_snapshot_as_before`, `test_a_snapshot_naming_no_machine_is_another_machines_unless_asked`. An unknown category is refused with the list, `--only` with `--skip` is refused, `--packages` with `packages` left out is refused, a private key stays withheld on a second machine whatever `--only` names, a folder holding a selected key keeps its mode, a project no checkout matches is refused before anything is written, and a worktree brings its main checkout; status never guesses: with no facts, or facts older than 48 hours, the cross-machine items read `unknown`, it writes nothing and never creates the estate key. `tests/test_machine_backup.py` SecondMachine (`test_only_writes_the_named_categories_and_the_plan_says_what_each_would_write`, `test_ssh_private_stays_withheld_on_a_second_machine_whatever_only_says`, `test_a_receipt_names_the_restore_and_the_other_machines_keys`), Restore (`test_projects_clones_only_the_named_checkouts`), MoveStatus, MoveStatusVault |
 | OSS-96 | Give a second machine its own SSH key everywhere the other machine's key is accepted | `full ssh-keys rekey OLD` plans, reading only: this machine's key `~/.ssh/OLD` (made, or already here and reused; `--name NEW` for another name), the GitHub account gh is signed in to, and each place the other machine's key is registered with why: GitHub sign-in and signing only where that account holds the other key's fingerprint (`--fingerprint`, or `OLD.pub` when it is here); each Host of `~/.ssh/config` naming `~/.ssh/OLD` and each `--server ALIAS` that is neither GitHub nor a `git` login. With `Match exec` in the config the plan never runs `ssh -G`. `--apply` creates the key, sends it with `send --to github --as USE` and `send --to server:ALIAS --verify`, and ends with what still accepts only the other machine's key, each with its reason and next steps (`ssh_keys.py` `rekey_plan`, `cmd_rekey`) | The other key's private file is never read or named to a tool; nothing is removed anywhere; a step that fails does not stop the others, and a key ssh-keygen did not make is never sent; a Host pattern, a `Match` block, hosts using a default key without an IdentityFile line and unread GitHub lists are named with the command that makes them known, never guessed; this machine's own key is never taken for the other one; a passphrase is refused away from a terminal before anything runs. `tests/test_ssh_keys.py` Rekey (`test_apply_creates_sends_and_verifies_everywhere`, `test_a_server_that_does_not_let_this_machine_in_is_listed_with_its_next_steps`, `test_the_other_machines_identity_is_read_from_its_public_half_only`, `test_without_the_old_fingerprint_github_is_never_a_target`, `test_a_key_the_signed_in_account_does_not_hold_is_not_uploaded_to_it`, `test_a_config_with_match_exec_is_never_handed_to_ssh_g`, `test_a_git_service_host_is_not_a_shell_target`, `test_a_second_run_reuses_this_machines_key_and_adds_nothing`) |
 | OSS-97 | Know what anonymous usage data the product sends, and turn it off | The first `full` command at my terminal after the release prints once what is sent (command, tool and tick names, outcomes, durations, error class names, versions, platform, a random install id) and what never is (keys, paths, names, workspace content), and how to turn it off; the dashboard's Home shows the same for a week and Health shows the switch with its command; `full analytics status|on|off|send`, `full doctor` and the apps' Settings switch read and change it (`usage_analytics.py`) | On by default, also after an update; off is the file `analytics` in the workspace home and survives updates, and it deletes the queue and the install id; `OBSERVATORY_ANALYTICS=off` or `DO_NOT_TRACK=1` stops one process; a build without an App-Key collects nothing; no command waits on the network, and a failure is a local counter. `tests/test_usage_analytics.py` (Switch, Record, Sink, Flush, Notice, Hooks), `tests/test_analytics_catalogue.py` in the repository |
+| OSS-98 | Follow a session Fabric started for a board request, and know it got only the keys the request needs | `observatory_workflow_list` and `observatory_checkpoint_latest` show `dispatch` for such a workflow, read from the packet as Fabric wrote it in the workflow's first checkpoint: the request, its thread, the capability, Fabric's project id, the deadline, the run's end and the key window (`open`, or `closed` with its reason). `use_secret.py run --workflow wf_…` releases a slot only to the workflow's lease holder (`OBSERVATORY_WORKFLOW_LEASE`, or a private file named in `OBSERVATORY_WORKFLOW_LEASE_FILE`), only when the frozen packet names it, only from the project `fabric-project` resolves to, only until the deadline (`dispatch_packet.py`). A guard for a cooperating run, not containment: a session that unsets `FABRIC_DISPATCH_WORKFLOW` takes the ordinary path, and containment is the vault's `slotsRequireGrant: always` with a delegation token | A malformed packet ref, a ref with other members, a repeated one and an absolute path in a packet are refused on write; a later checkpoint that changes the packet's refs or credentials is refused (`PacketFrozen`) and one that leaves them out keeps the keys, across a handoff too; a later checkpoint that adds packet refs to a workflow that started without them is refused (`PacketNotFirst`), and an older row whose packet first appears after revision 1 is no packet and gets no keys (`packet-not-first`); a deadline more than seven days after the packet's write is refused (`DeadlineTooFar`), and an earlier row with such a deadline or an unreadable one gets no keys; every refused release exits 2 with its code and is journalled by code, never with a value or the lease; a lease file that is not this user's private regular file is refused, judged on the opened descriptor rather than the path beforehand (a link and a FIFO are refused without being followed or waited on); a nested `use_secret.py` call that inherits only `FABRIC_DISPATCH_WORKFLOW` gets nothing. `tests/test_dispatch_packet.py` (Packet, View, Gate, Frozen), `tests/test_use_secret.py::test_a_dispatched_run_gets_only_its_packets_keys`, `tests/test_use_secret.py::test_the_lease_file_is_judged_on_its_opened_descriptor` |
 
 
 ## Offline verification receipts
@@ -1063,3 +1064,168 @@ Coverage: `tests/test_node_ceremony.py` (`ScreensFromTheVectors` over the contra
 the Windows and Linux app `desktop/src-tauri/src/main.rs` `the_pairing_window_sends_only_the_ceremonys_steps` and
 `tests/test_desktop_app.py`. Status: built against the contract fixtures (OBS-197); the live ceremony waits for the
 hub's side; product outcome unobserved.
+
+## Doctor's verdict and the move checklist for agents (OBS-349 part 1, 2026-11-06)
+
+### OSS-99: know in one answer whether this setup needs me, and whether my keys would follow me
+
+Trigger: "is my Observatory clean?", or the move runbook's proof step "`full doctor` clean".
+
+Funnel: `full doctor` ends with `attention` (each row: area, code, severity, sentence, step) and `clean`. A row is a
+`warning` unless it is news or a choice the person made (`update-available`, `auto-off`, `deferred`,
+`schedule-off`, decision WA-5), so a deliberate setting never keeps doctor from reading clean; a dead, interrupted
+or stuck tick is a warning. The verdict does not read the organizations, meter, session servers, analytics or review
+sections yet; they keep their own fields. A secret store the
+settings name outside the workspace is named under `backups.secret_store`, with a warning when no recent encrypted
+snapshot carried it, when the folder is missing here, or when the environment points the vault elsewhere; the
+same rows appear on Health under "maintenance", in the reader's language, with the step as a command. An agent
+reads the move checklist with `observatory_machine` and `section: "move"`, the answer `full machine-move status
+--json` gives.
+
+Failure paths: a carry record that does not read cannot prove the store was carried, so the warning stays; a release
+whose snapshots do not carry the store says to copy it by hand rather than sending the person to take a snapshot that
+would not carry it either; a server built before this release refuses `section: "move"` through its schema, and the
+agent runs `full machine-move status --json`.
+
+Acceptance: doctor exits 0 whatever the verdict; every existing doctor key and backup sentence is unchanged; the move
+section writes nothing and makes no machine id.
+Coverage: `tests/test_workspace.py` (`test_doctor_attention_unions_maintenance_items_and_coverage_by_code`,
+`test_doctor_attention_takes_each_code_once_from_its_first_area`, `test_doctor_is_clean_with_only_info_items`,
+`test_a_dead_or_stuck_tick_is_a_warning_and_a_fresh_one_is_not`);
+`tests/test_backup_vault.py` Doctor (`test_an_external_store_not_carried_is_a_coded_warning`,
+`test_without_a_carrier_the_step_says_the_store_is_copied_by_hand`, `test_a_carried_store_is_not`,
+`test_a_missing_configured_store_is_named_with_its_configure_step`, `test_nested_settings_name_the_outer_store_once`,
+`test_existing_backup_warnings_keep_their_text_and_gain_codes`, `test_the_environment_override_is_named`,
+`test_observatory_secrets_moves_nothing_while_secret_store_is_set`,
+`test_observatory_secrets_moves_the_vault_when_only_secrets_is_set`, `test_a_vault_dir_elsewhere_is_named`,
+`test_a_store_only_the_environment_names_is_reported_as_external`);
+`tests/test_machine_backup.py` Schedule `test_maintenance_status_joins_backup_items`; `tests/test_mcp_wire.py`
+(the move section is the CLI's checklist and writes nothing); `tests/test_dashboard_render.py`
+`test_the_health_page_names_versions_kinds_and_dollars` (the secret store row in Russian). Status: built (OBS-349
+part 1); the restore and CLI sign-in items wait for parts 2 and 3; product outcome unobserved.
+
+## The secret store travels with the encrypted snapshot (OBS-350 part 1, 2026-11-06)
+
+### OSS-100: my keys kept outside the workspace reach my other machine in the same backup, except the ones I keep here
+
+Trigger: the vault lives outside the workspace (`sources.secret_store`), and I am about to set up a second machine
+from this one's backups; or a slot (a root seed, an administrator token) must never leave this machine.
+
+Funnel: the daily encrypted snapshot, or `full workspace-backup --writers-stopped` with a passphrase, carries the
+store in `external/secret_store/` beside the home, under the vault's own lock, listed by relative path, size, mode and
+digest; doctor's `backups.secret_store.last_carry` reads `carried` and the not-carried warning goes away. `full
+vault-digests keep-here PROJECT ENV NAME --why "..."` keeps one slot here: the snapshot names it
+`this-machine-only` and still reads as carried, and `full vault-digests` shows `only here on purpose` here and
+`only on <machine> on purpose` on the other machine, neither of which is a difference. `unkeep-here` lets the next
+snapshot carry it. The machine bundle skips the store and says it travels in the workspace snapshot. On the other
+machine `full restore SNAPSHOT` writes the store where the restored settings name it (under this machine's home after
+the home rewrite), before the home, and answers `secret_store.state` `written`; a folder already holding the same
+files reads `same`. `--secret-store keep|merge|replace|skip` chooses what happens to a different store already there;
+`--secret-store-only` writes the stores alone into the folders this workspace's settings name. The first machine's
+digest manifest becomes a peer, so `full vault-digests` compares against it at once.
+
+Failure paths: a plaintext `--output` snapshot, no passphrase, a failed export, the pre-update snapshot, a store over
+256 MB, one that changed during two copies, or one that cannot be read is never carried, and the snapshot, the carry
+record and doctor name the reason; the snapshot itself never fails because of the store. An interrupt inside
+the encryption, or a run killed there, never leaves the store in the plaintext copy: it is removed at once, or
+by the next snapshot. A kept slot's rotation archives stay with it, and a slot whose metadata does not read
+stays here (`unreadable`). A link leaving the store,
+a socket and lock files stay behind; a link inside it is recorded, never followed or written. A damaged or unlisted
+carried file is refused at verification (`secret-store-manifest-mismatch`). Marking a slot this machine does not
+hold, or clearing a mark that is not there, exits 2. On restore, a different store already in the folder is refused
+under the default `auto` with counts and the policy flags (`secret-store-not-empty`, exit 2, nothing written); a
+folder the settings do not name, or one inside the new home, is refused the same way (`secret-store-unresolved`,
+`secret-store-target-inside-home`) and the message names the `configure sources` and `--secret-store-only` steps; a
+store that cannot be written is left as it was and the home is not restored (`secret-store-write-failed`, exit 1);
+`replace` moves the old store aside and never deletes it, and no folder is ever deleted; a target in the home
+itself or a sensitive folder (`~/.ssh` and the like) is refused (`secret-store-target-refused`); a snapshot from
+another machine or home writes only where `--secret-store-target` or this machine's settings confirm it
+(`secret-store-target-unconfirmed`); `--json` gives each as `{"error": {"code", "message"}}`.
+`full init` on an empty home keeps a surviving store, and an update's rollback never touches it; a store init
+skipped (a folder not confirmed, refused, busy or unwritable) is in its answer with the exact `next` command, and
+doctor keeps `backups-secret-store-not-restored` with that command until a store is in that folder again, however
+it got there; a skip chosen with `--secret-store skip` raises no warning.
+
+Acceptance: no value reaches a manifest, an answer, a record or a command's output; a store inside the workspace
+travels in `data/` exactly as before; an older engine restores the home and ignores `external/`.
+Coverage: `tests/test_workspace_upgrade.py` ExternalSecretStore (`test_an_external_store_is_carried_into_an_encrypted_snapshot`,
+`test_lock_files_and_temporaries_are_not_carried`, `test_a_plaintext_output_never_carries_the_store`,
+`test_without_a_passphrase_the_store_stays_where_it_is`, `test_a_failed_export_keeps_no_store_in_the_plaintext_copy`,
+`test_the_vault_lock_is_held_while_the_store_is_copied`, `test_a_store_that_changes_during_the_copy_is_named_not_carried`,
+`test_one_change_is_retried_and_the_second_pass_carries`, `test_a_link_inside_the_store_is_recorded_and_one_outside_is_named`,
+`test_a_store_over_the_cap_is_named_too_large`, `test_verify_refuses_an_unlisted_or_changed_store_file`,
+`test_a_restore_by_this_release_restores_the_home_and_leaves_the_store_alone`,
+`test_a_store_inside_the_workspace_travels_in_data_as_before`, `test_the_update_snapshot_never_carries_the_store`,
+`test_the_environment_override_is_named_in_the_manifest`,
+`test_the_daily_maintenance_record_says_whether_the_store_was_carried`,
+`test_an_interrupt_inside_the_encryption_leaves_no_store_in_plaintext`,
+`test_a_snapshot_first_sweeps_stores_and_dead_stages_from_the_workspace_backups`,
+`test_a_failed_carry_record_is_said_not_swallowed`, `test_the_carry_record_counts_what_stayed_behind`,
+`test_a_setting_that_holds_the_workspace_is_never_copied_into_its_own_snapshot`,
+`test_an_undeletable_leftover_is_named_and_the_snapshot_goes_on`,
+`test_a_failing_strip_never_hides_the_original_interrupt`, `test_the_sweep_touches_only_snapshot_folders`);
+`tests/test_backup_vault.py`
+ThisMachineOnly (`test_a_rotated_kept_slot_leaves_its_archives_behind_too`,
+`test_a_mark_that_does_not_read_keeps_the_slot_here` among them);
+`tests/test_vault_digests.py` ThisMachineOnly; `tests/test_machine_backup.py` ExternalSecretStore;
+`tests/test_workspace_upgrade.py` RestoreSecretStore (`test_restore_writes_the_store_where_the_restored_settings_point`,
+`test_auto_refuses_a_different_existing_store_before_writing_anything`, `test_keep_merge_replace_and_skip_follow_the_table`,
+`test_the_store_is_written_before_the_home_and_a_failed_store_write_leaves_both_unchanged`,
+`test_secret_store_only_writes_the_store_into_the_current_settings_target`,
+`test_the_first_machines_digest_manifest_becomes_a_peer_on_a_second_machine`,
+`test_init_on_an_empty_home_keeps_a_surviving_store`,
+`test_the_command_line_takes_the_policy_and_answers_a_refusal_as_json` among them). Status: built (OBS-350 parts 1
+and 2); product outcome unobserved.
+
+### OSS-101: a job moved into an account nobody logs in to runs there, and comes back after a reboot
+
+Trigger: on a Mac, a second OS account (a "space") received this machine's jobs through a second-machine restore,
+and nobody ever signs in to it graphically, so it has no `gui/<uid>` launchd domain and launchd refuses its agents.
+
+Funnel: in that account, `full machine-move cutover LABEL` runs its checks as always, finds `launchctl print gui/<uid>`
+answering "could not find domain" (exit 112) or, once anything runs as the account, "Domain does not support
+specified action" (exit 125, since 0.35.1), moves the plist into `~/.local/share/project-observatory/background/LaunchAgents/`
+and answers `state: waiting-for-root` with the one command an administrator runs:
+`sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons apply --user ACCOUNT --label LABEL` (after
+installing that root-owned copy once from the release, downloaded with `gh release download` and verified with
+`shasum -a 256 -c` and the signature against the pinned release key (`gpg --status-fd 1 --verify` matched to its
+`VALIDSIG` fingerprint, or `release_signature.verify` from the administrator's own install) in the administrator's
+own account, never copied from the space's folders). The job then runs as a system daemon with `UserName`
+set to the account, never as root, and starts again after every reboot with nobody logged in. A second `cutover`
+answers `state: complete`; `machine-move show` lists it under `background` as `loaded`.
+
+Failure paths: `cutover` refuses, naming each problem and moving nothing, a plist the administrator's tool would
+refuse, and a job defined both in `~/Library/LaunchAgents` and in staging; a plist with a key that would act with root's reach (`UserName`, `Sockets`, `MachServices`, ...), a
+program or a path someone else could change, a label under `com.apple.`, a symlinked, oversized or group-writable
+plist, or a folder others can write is refused and named by `plan` and `apply`, never partly installed; a file in
+`/Library/LaunchDaemons` the tool did not write, a label someone else loaded or any other daemon plist carries, and
+another account's daemon are never replaced; `DYLD_*` variables, `KeepAlive.OtherJobEnabled`, a `PathState` path
+outside the home, an integer outside 0..2147483647 and a daemon that would not write as a plist are refused; one
+definition's failure is `failed` and the others go on; a crash between the registry and the plist leaves an entry
+`status` shows as `missing`; a label already loaded as an agent in the account's GUI domain is refused (`loaded-in-gui`, one copy only);
+the plist's own log paths are ignored (`logs-moved`) and the logs go to root's
+`/Library/Logs/ProjectObservatory/ACCOUNT/` (0700, read ACL for the account), the two files created ahead and owned by
+the account (0600); a link, a hard link, another account's file or a folder that is not root's is refused; a failed load puts back what was there. `apply` and `remove` refuse without root, outside Python's isolated mode
+(`not-isolated`) and from a copy that is not root's alone. `leave` refuses while root's daemon runs and names the `remove` command. An account with a custom
+`XDG_DATA_HOME` is refused before anything moves (part 1).
+
+Since space daemons 1.1.0: a program under a prefix owned by the host's admin account (Homebrew) passes once the
+administrator lists that account and its `admin` group in the root-owned trust file (`trust set`: only wheel or admin,
+only current members of admin, rechecked at every read), never the space account itself, and a trust file that is not root's alone is ignored with a warning; `Umask` and
+`SoftResourceLimits` are kept, `AssociatedBundleIdentifiers` stripped, a `WorkingDirectory` of `/` made the home, and an
+XML comment holding `--` parsed as launchd does, with nothing inside a comment becoming a key
+(`tests/test_space_daemons.py` Trusting, Rules, Reading; `tests/test_machine_backup.py` HeadlessSpace
+`test_cutover_parses_and_trusts_as_root_will`).
+
+Acceptance: an account with a GUI session moves its jobs exactly as before; the engine never writes a system file and
+only reads root's registry. Coverage: `tests/test_space_daemons.py` (Rules, Reading, Accounts, Applying, CommandLine,
+Pure); `tests/test_machine_backup.py` HeadlessSpace
+(`test_without_a_gui_session_cutover_places_the_job_and_waits_for_root`,
+`test_once_root_loaded_it_cutover_and_show_say_it_runs`, `test_a_system_daemon_of_another_account_is_not_this_ones`,
+`test_with_a_gui_session_cutover_is_unchanged`, `test_a_custom_xdg_data_home_is_refused_before_anything_moves`,
+`test_leave_is_refused_while_registered_even_unloaded_and_in_a_sandbox`,
+`test_cutover_refuses_what_root_would_refuse_and_moves_nothing`, `test_a_homebrew_label_moves_and_is_named_after_its_label`,
+`test_a_job_defined_twice_is_refused_with_both_files_named`, `test_other_answers_of_print_gui_keep_the_agent_path`,
+`test_leave_is_refused_while_root_runs_it_then_works_from_the_background_folder`) and MachineMove. Status: built
+(OBS-361 part 1); the tick, server and maintenance of such an account, and a passphrase store with no login
+keychain, are later parts; product outcome unobserved.

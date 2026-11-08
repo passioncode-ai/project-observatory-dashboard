@@ -15,6 +15,7 @@
 "Ask about your projects (⇧⌘A)" = "Спросить о проектах (⇧⌘A)";
 "Ask about your projects…" = "Спросите о проектах…";
 "Assistant" = "Ассистент";
+"Automatic updates are off, so this version waits for you. Run {command} in a terminal to install it." = "Автоматические обновления выключены, поэтому эта версия ждёт вас. Чтобы установить её, выполните {command} в терминале.";
 "Back" = "Назад";
 "Back (⌘[)" = "Назад (⌘[)";
 "Both screens must show the same six digits. If they differ, someone may be in between: stop the pairing." = "На обоих экранах должны быть одни и те же шесть цифр. Если они различаются, между машинами может быть посторонний. Остановите подключение.";
@@ -192,6 +193,7 @@
 "This slot already holds a value, last changed {when}. Saving replaces it; the old value is archived." = "В этой ячейке уже есть значение, последнее изменение: {when}. Сохранение заменит его, а старое значение уйдёт в архив.";
 "This workspace has no dashboard yet" = "У этой папки данных ещё нет дашборда";
 "Too many recent requests are still tracked. Try again later." = "Слишком много недавних запросов ещё отслеживается. Попробуйте позже.";
+"Version {version} is available: copy the install command" = "Доступна версия {version}: скопировать команду установки";
 "Version {version} is downloaded and verified. Restart Project Observatory now to finish updating, or later: it also installs when you quit." = "Версия {version} загружена и проверена. Перезапустите Project Observatory сейчас, чтобы завершить обновление, или позже: оно также установится при выходе.";
 "Version {version} is ready. Restart to update; it also installs when you quit." = "Версия {version} готова. Перезапустите приложение, чтобы обновить его; иначе обновление установится при выходе.";
 "Wait for the answer before deleting this conversation." = "Дождитесь ответа, прежде чем удалять диалог.";

@@ -69,7 +69,8 @@ SAMPLES = {
     "ID,ID": "example/model-a,example/model-b", "CEILING": "daily_ceiling", "ACTION": "status",
     "{p['id']}": "alpha-plugin", "{release.version}": "0.12.0", "{latest}": "0.12.0",
     "{doc['engine_version']}": "0.12.0", "{source}": "projects", "{section}": "integrations",
-    "{name}": "github", "{k}": "daily_ceiling",
+    "{name}": "github", "{k}": "daily_ceiling", "{setting}": "secret_store",
+    "{shlex.quote(snapshot)}": "/srv/example-ws/snapshot",
     "WORKFLOW_ID": "wf_0123456789abcdef", "{kept}": "wf_0123456789abcdef",
     "PROVIDER": "anthropic", "REASON": "limit", "WHY": "abandoned",
     "{wid}": "wf_0123456789abcdef",
@@ -338,6 +339,20 @@ class HandedCommands(unittest.TestCase):
                      ["cleanup", "--apply", "--include", "manual"], ["google", "--help"]):
             with self.subTest(argv):
                 self.assertEqual(cli.refusal(argv), "", f"{argv} was refused")
+
+    def test_a_restores_unresolved_paths_hand_steps_the_dispatcher_accepts(self):
+        # OBS-347: every source or backups root a restore could not find carries the exact step
+        # that points it elsewhere; each is checked, not only the ones the scanner happens to see.
+        import configuration
+        import workspace_upgrade
+        settings = [f"sources.{name}" for name in sorted(configuration.KNOWN_SOURCES)] + ["storage.backups"]
+        for setting in settings:
+            fix = workspace_upgrade.fix_for(setting)
+            with self.subTest(setting):
+                self.assertTrue(fix.startswith(COMMAND), fix)
+                words, unknown = concrete(tuple(fix[len(COMMAND):].split()))
+                self.assertEqual(unknown, [], fix)
+                self.assertEqual(cli.refusal(words), "", fix)
 
     def test_the_scanner_reads_prose_the_way_a_person_copies_it(self):
         text = ("run `project-observatory full scan-vault`, then project-observatory "

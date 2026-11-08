@@ -62,6 +62,45 @@ public enum UpdateState {
     }
 }
 
+/// A newer version the engine's update check found while automatic updates are off (OBS-333):
+/// announced, never downloaded or installed by the app.
+public struct AvailableUpdate: Equatable, Sendable {
+    public let version: String
+    public init(version: String) { self.version = version }
+}
+
+extension UpdateState {
+    /// What installs a release while automatic updates are off.
+    public static let installCommand = "project-observatory full update --apply"
+
+    /// The check job's record (`maintenance.check_pass`), beside the pass's.
+    public static func checkFile(workspace: String) -> URL {
+        URL(fileURLWithPath: workspace).appendingPathComponent("store/update-check.json")
+    }
+
+    /// The version the check record names as `available`. That key is the engine's own decision
+    /// (`maintenance.check_pass`, `settle_available`): written only while automatic updates are off,
+    /// by the switch file or the legacy `updates.auto: false`, and dropped once the engine runs that
+    /// version or updates are on. So the app compares nothing with its own version: the engine may
+    /// lag the app, and only the engine knows. Only a version the releases can carry is read.
+    public static func available(_ data: Data?) -> AvailableUpdate? {
+        guard let data, let doc = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let found = doc["available"] as? [String: Any], let version = found["version"] as? String,
+              AppVersion.parse(version) != nil else { return nil }
+        return AvailableUpdate(version: version)
+    }
+
+    /// Reads the workspace's check record. A symbolic link or a file over 1 MB is not read.
+    public static func readAvailable(workspace: String) -> AvailableUpdate? {
+        guard workspace.hasPrefix("/") else { return nil }
+        let url = checkFile(workspace: workspace)
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: url.path),
+              attrs[.type] as? FileAttributeType == .typeRegular,
+              (attrs[.size] as? NSNumber)?.intValue ?? .max <= 1_048_576 else { return nil }
+        return available(try? Data(contentsOf: url))
+    }
+}
+
 /// When an unattended app may restart itself to activate a staged update.
 public enum IdleRestart {
     /// No window on screen and no input for this long.
