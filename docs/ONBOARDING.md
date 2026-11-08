@@ -2424,16 +2424,21 @@ project-observatory full restore SNAPSHOT --secret-store-only --secret-store-ver
 Each carried store is written into `DIR/<name>/` (folders 0700, files 0600) and read back: every file's size
 and SHA-256 against the snapshot's manifest, every folder and link, nothing unlisted. The answer's
 `secret_store` reads `verified` with `files`, `bytes`, `links`, `directories`, `skipped` (files the snapshot did
-not carry, and links a system without them cannot make), `left_at` and `into`; `stores` lists each when there
-are several. The folder the settings name is never written, locked or swept, so a snapshot from another
+not carry, and links a system without them cannot make), `left_at` and `into`, and `verified`, the number of
+stores verified; `stores` lists each when there are several. With `--secret-store-only`, a snapshot that carried
+no store answers `status: nothing-to-verify` and writes nothing. The folder the settings name is never written, locked or swept, so a snapshot from another
 machine needs no `--secret-store-target`, and the restore record doctor reads is not written: a verification
 neither raises nor clears `backups-secret-store-not-restored`. With `--secret-store-only` no workspace is
 needed. The verified copy stays in `DIR`, every key in plaintext, for you to remove when the check is done; a copy that fails to verify
-is removed at once (`secret-store-verify-failed`, exit 1, and no home is restored). Refused, exit 2, nothing
+is removed at once (`secret-store-verify-failed`, exit 1, and no home is restored), and a restore that fails
+after the copy removes it and the folders it made for `DIR`. The temporary home's restored settings still name
+the live store, so run no other command against that home, and remove it with `DIR` once the check is done. Refused, exit 2, nothing
 written: `secret-store-verify-into-not-empty` (DIR holds something, or is a link or a file),
-`secret-store-verify-into-refused` (DIR is, holds or lies inside the new home or this workspace, the snapshot,
-a folder the snapshot's or this workspace's settings name for a store, `OBSERVATORY_SECRETS` or
-`OBSERVATORY_VAULT_DIR`, or one of the places a store is never written), and
+`secret-store-verify-into-refused` (DIR is, holds or lies inside the new home, this workspace or the default
+one, the snapshot or the folder holding its file, a backups folder, a folder that the snapshot's settings or a
+workspace's settings name in `sources.secret_store` or `sources.secrets`, `OBSERVATORY_SECRETS` or
+`OBSERVATORY_VAULT_DIR`, or one of the places a store is never written; compared by name and by identity, so a
+linked parent or macOS's `/System/Volumes/Data/...` spelling of the same folder is refused too), and
 `secret-store-verify-into-conflict` (beside `--secret-store-target` or a `--secret-store` policy other than
 `auto`, which only mean something when the store is written in place). A tampered carried file is refused
 before anything is written (`secret-store-manifest-mismatch`).

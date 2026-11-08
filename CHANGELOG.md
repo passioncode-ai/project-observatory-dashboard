@@ -10,13 +10,14 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **`full restore --secret-store-verify-into DIR` checks a backup's secret store without touching the live one**
   (OBS-394, `docs/COMPATIBILITY.md`, `docs/CLI-COMPATIBILITY.md`). Each store the snapshot carried is written into
   `DIR/<name>/` (folders 0700, files 0600) and read back against the snapshot's manifest, every SHA-256, size,
-  folder and link, and the answer reads `secret_store: verified` with `files`, `bytes`, `links`, `directories`
-  and `skipped`. The folder the snapshot's settings name is never written or locked, so a restore check into a
+  folder and link, and the answer reads `secret_store: verified` with `files`, `bytes`, `links`, `directories`,
+  `skipped` and `verified`, the number of stores verified. The folder the snapshot's settings name is never written or locked, so a restore check into a
   temporary home, from this machine's backup or another's, needs no `--secret-store-target`; the restore record
   doctor reads is not written. It works with a whole restore and with `--secret-store-only`, which then needs no
-  workspace. The copy stays in `DIR` for you to remove; one that fails to verify is removed
-  (`secret-store-verify-failed`, exit 1). A DIR that is not empty, or lies in the new home, the snapshot or a
-  secret store's folder, is refused (`secret-store-verify-into-not-empty`, `secret-store-verify-into-refused`),
+  workspace, and answers `nothing-to-verify` when the snapshot carried no store. The copy stays in `DIR` for you to
+  remove; one that fails to verify, or whose restore fails after it, is removed (`secret-store-verify-failed`,
+  exit 1). A DIR that is not empty, or lies in the new home, a workspace on this machine, the snapshot, a backups
+  folder or a secret store's folder (by name or by identity, `/System/Volumes/Data/...` included), is refused (`secret-store-verify-into-not-empty`, `secret-store-verify-into-refused`),
   as is the flag beside `--secret-store-target` or another `--secret-store` policy
   (`secret-store-verify-into-conflict`), all exit 2 with nothing written.
 

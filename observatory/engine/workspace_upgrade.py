@@ -946,8 +946,10 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
     if secret_store_verify_into is not None:
         # Refused before anyone is asked for a passphrase: what needs no snapshot is checked first.
         secret_store_carry.verify_conflict(secret_store, secret_store_target)
-        secret_store_carry.check_verify_into(secret_store_verify_into, [(destination, 'the new home')],
-                                             require_empty=False)
+        early = [(destination, 'the new home')]
+        if source.is_file():
+            early.append((Path(os.path.abspath(source)).parent, "the snapshot's folder"))
+        secret_store_carry.check_verify_into(secret_store_verify_into, early, require_empty=False)
     if source.is_file() and not source.is_symlink():
         # Refused before anyone is asked for a passphrase (the same refusal as below).
         if destination.exists() and not destination.is_symlink() and destination.is_dir() and any(destination.iterdir()):
@@ -984,11 +986,11 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
     if destination.exists() and any(destination.iterdir()):
         raise config.ConfigurationError('Restore requires a new empty destination; existing state is never overwritten')
     # The carried secret stores, decided before the home is staged: a refusal here changes nothing.
-    verify_into = None
+    verify_into = verify_avoid = verified = None
     if secret_store_verify_into is not None:
-        verify_into = _verify_into(secret_store_verify_into, source, manifest, destination,
-                                   [(restored_sources(source, manifest), "the snapshot's settings"),
-                                    (_current_sources(destination), "this machine's settings")])
+        verify_avoid = _verify_avoid(source, manifest, destination, snapshot_path,
+                                     [(restored_sources(source, manifest), "the snapshot's settings")])
+        verify_into = secret_store_carry.check_verify_into(secret_store_verify_into, verify_avoid)
         store_plan = None
     else:
         store_plan = secret_store_carry.restore_plan(
@@ -1014,7 +1016,7 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
             sync_tree(stage)
             # The stores before the home: a store that cannot be written leaves the home unwritten.
             if verify_into is not None:
-                verified = secret_store_carry.verify_into(source, manifest, verify_into)
+                verified = secret_store_carry.verify_into(source, manifest, verify_into, verify_avoid)
                 stores = []
             else:
                 stores = secret_store_carry.apply_plan(source, store_plan, secret_store,
@@ -1026,6 +1028,9 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
             sync_directory(destination.parent)
         except BaseException:
             shutil.rmtree(stage,ignore_errors=True)
+            # A verified copy goes with the home it came with, so DIR is left as it was found (and a
+            # `--latest` that falls back to an older snapshot meets it empty again).
+            secret_store_carry.discard_verified(verified)
             raise
     restored = len(manifest['files']) - (sum(1 for row in manifest['files'] if _left_out(row['path'])) if another else 0)
     result = {'status':'restored','files':restored,'scheduler_activated':False,
@@ -1044,13 +1049,46 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
     return result
 
 
-def _verify_into(into, source: Path, manifest: dict, home: Path, settings: list[tuple[dict, str]]) -> Path:
-    """The folder `--secret-store-verify-into` writes into, checked once the snapshot is read: never the new
-    home or the workspace, the snapshot, or a folder any of `settings` (or the environment) names for a
-    secret store (OBS-394)."""
-    avoid = [(home, 'the new home or this workspace'), (source, 'the snapshot')]
-    avoid += secret_store_carry.setting_folders(manifest, settings, home)
-    return secret_store_carry.check_verify_into(into, avoid)
+def _live_workspaces(destination: Path) -> list[Path]:
+    """The workspaces on this machine other than `destination` whose secret stores a verification must not
+    touch: the one this process runs for (`OBSERVATORY_HOME`, else the default), and the default one
+    (`osprivacy.default_home`), which `--home NEW full restore` points away from (OBS-394)."""
+    out: list[Path] = []
+    candidates = []
+    with contextlib.suppress(config.ConfigurationError, OSError, RuntimeError, KeyError):
+        candidates.append(config.home())
+    with contextlib.suppress(OSError, RuntimeError, KeyError):
+        candidates.append(osprivacy.default_home('project-observatory-full'))
+    for base in candidates:
+        try:
+            if (base / 'workspace.json').is_file() and not secret_store_carry._overlaps(base, destination) \
+                    and all(not secret_store_carry._overlaps(base, seen) for seen in out):
+                out.append(base)
+        except (OSError, RuntimeError):
+            continue
+    return out
+
+
+def _verify_avoid(source: Path, manifest: dict, home: Path, snapshot_path: str | None,
+                  settings: list[tuple[dict, str]]) -> list[tuple[Path | None, str]]:
+    """Every folder `--secret-store-verify-into` must stay clear of (OBS-394): the new home or this workspace,
+    the snapshot and the folder holding its file, each live workspace and the folders its settings name for a
+    secret store, each workspace's backups folder, and the folders `settings` (the snapshot's) and the
+    environment name."""
+    avoid: list[tuple[Path | None, str]] = [(home, 'the new home or this workspace'), (source, 'the snapshot')]
+    if snapshot_path:
+        avoid.append((Path(os.path.abspath(snapshot_path)).parent, "the snapshot's folder"))
+    settings = list(settings)
+    for base in [home, *_live_workspaces(home)]:
+        if (base / 'workspace.json').is_file():
+            avoid.append((base, 'a workspace on this machine'))
+            with contextlib.suppress(config.ConfigurationError, OSError, ValueError):
+                sources = config.load(base).get('sources')
+                if isinstance(sources, dict):
+                    settings.append((sources, f"the workspace at {backup_vault._display(base)}'s settings"))
+        with contextlib.suppress(config.ConfigurationError, OSError, ValueError, RuntimeError):
+            avoid.append((backup_vault.root_info(base)['path'].parent, 'the backups folder'))
+    return avoid + secret_store_carry.setting_folders(manifest, settings, home)
 
 
 def store_next_step(summary: dict, snapshot: str) -> str | None:
@@ -1138,8 +1176,10 @@ def restore_store_only(source: Path, base: Path, *, secret_store: str = 'auto', 
     verifying = secret_store_verify_into is not None
     if verifying:
         secret_store_carry.verify_conflict(secret_store, secret_store_target)
-        secret_store_carry.check_verify_into(secret_store_verify_into, [(base, 'the new home or this workspace')],
-                                             require_empty=False)
+        early = [(base, 'the new home or this workspace')]
+        if source.is_file():
+            early.append((Path(os.path.abspath(source)).parent, "the snapshot's folder"))
+        secret_store_carry.check_verify_into(secret_store_verify_into, early, require_empty=False)
     workspace.reject_symlinks(base)
     has_workspace = (base / 'workspace.json').is_file()
     if not has_workspace and not verifying:
@@ -1165,12 +1205,13 @@ def restore_store_only(source: Path, base: Path, *, secret_store: str = 'auto', 
     manifest = verify_snapshot(source)
     sources = (config.load(base).get('sources') or {}) if has_workspace else {}
     if verifying:
-        into = _verify_into(secret_store_verify_into, source, manifest, base,
-                            [(restored_sources(source, manifest), "the snapshot's settings"),
-                             (sources, "this workspace's settings")])
-        verified = secret_store_carry.verify_into(source, manifest, into)
-        # A verification is not a restore: doctor's restore record is left as it is.
-        return {'status':'store-verified', 'secret_store':secret_store_carry.verify_summary(verified)}
+        avoid = _verify_avoid(source, manifest, base, snapshot_path,
+                              [(restored_sources(source, manifest), "the snapshot's settings")])
+        into = secret_store_carry.check_verify_into(secret_store_verify_into, avoid)
+        summary = secret_store_carry.verify_summary(secret_store_carry.verify_into(source, manifest, into, avoid))
+        # A verification is not a restore: doctor's restore record is left as it is. A snapshot that carried no
+        # store says so in `status`, exit 0 like a restore of one (`not-in-snapshot`).
+        return {'status':'store-verified' if summary['verified'] else 'nothing-to-verify', 'secret_store':summary}
     with operation_lock(base):
         # A target given is a confirmation like a foreign snapshot's: it must be the folder the settings name.
         store_plan = secret_store_carry.restore_plan(source, manifest, sources, base, secret_store,

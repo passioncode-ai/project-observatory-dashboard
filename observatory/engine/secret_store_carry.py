@@ -1575,7 +1575,41 @@ def _overlaps(a: Path, b: Path) -> bool:
         except (OSError, RuntimeError):
             return Path(os.path.abspath(path))
     ra, rb = real(a), real(b)
-    return _inside_folded(ra, rb) or _inside_folded(rb, ra)
+    return _inside_folded(ra, rb) or _inside_folded(rb, ra) or _same_identity_overlap(a, b)
+
+
+def _identities(path: Path) -> list[tuple]:
+    """Keys for `path` (first) and each folder holding it, by identity rather than by name: an existing folder
+    is its (device, inode), following links; a missing one is its nearest existing folder's identity and the
+    missing names below it, case-folded where the file system folds case. Two spellings of one place (a
+    linked parent, macOS's `/System/Volumes/Data/...` view of the same folder) get the same keys, which
+    `resolve()` alone does not give a firmlink."""
+    path = Path(os.path.abspath(path))
+    try:
+        existing = _nearest_existing(path)
+        if existing is None:
+            return []
+        info = os.stat(existing)
+    except (OSError, RuntimeError, ValueError):
+        return []
+    rest = path.parts[len(existing.parts):]
+    base = (info.st_dev, info.st_ino)
+    keys = [(base, _fold(Path(*rest[:i]))) for i in range(len(rest), 0, -1)]
+    for folder in [existing, *existing.parents]:
+        try:
+            held = os.stat(folder)
+        except OSError:
+            continue
+        keys.append(((held.st_dev, held.st_ino), ()))
+    return keys
+
+
+def _same_identity_overlap(a: Path, b: Path) -> bool:
+    """Whether `a` is `b`, lies inside it or holds it, compared by identity (`_identities`)."""
+    ka, kb = _identities(a), _identities(b)
+    if not ka or not kb:
+        return False
+    return ka[0] in kb or kb[0] in ka
 
 
 def check_verify_into(into: str | os.PathLike, avoid: list[tuple[Path | None, str]], *,
@@ -1618,16 +1652,26 @@ def check_verify_into(into: str | os.PathLike, avoid: list[tuple[Path | None, st
 
 def setting_folders(manifest: dict, sources_list: list[tuple[dict, str]],
                     home: Path) -> list[tuple[Path | None, str]]:
-    """Every folder a setting names for a store the snapshot carried (`sources_list`: the settings' `sources`
-    and what they are, such as the snapshot's or this workspace's), and the folders the environment names."""
-    out: list[tuple[Path | None, str]] = []
+    """Every folder a setting names for a secret store, in each of `sources_list` (the settings' `sources` and
+    what they are: the snapshot's after the home rewrite, this workspace's, the default workspace's): every
+    non-empty `secret_store` and `secrets`, and every key a carried store was recorded under, expanded and
+    absolute (a relative value names no place and is left out). Then the folders the environment names."""
+    keys = ["secret_store", "secrets"]
     for entry in manifest.get("externals") or []:
-        if not isinstance(entry, dict):
-            continue
-        for sources, what in sources_list:
-            target, setting, _ = resolve_target(entry, sources or {}, home)
-            if target is not None:
-                out.append((target, f"the folder {what} sources.{setting} names"))
+        if isinstance(entry, dict):
+            keys += [k for k in entry.get("settings_keys") or [] if isinstance(k, str) and k not in keys]
+    out: list[tuple[Path | None, str]] = []
+    for sources, what in sources_list:
+        for key in keys:
+            value = (sources or {}).get(key)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            try:
+                path = Path(value).expanduser()
+            except (RuntimeError, KeyError):
+                continue
+            if path.is_absolute():
+                out.append((Path(os.path.abspath(path)), f"the folder {what} sources.{key} names"))
     for name in (backup_vault.SECRETS_ENV, backup_vault.VAULT_DIR_ENV):
         value = os.environ.get(name)
         if value and value.strip():
@@ -1668,59 +1712,109 @@ def _verify_copy(root: Path, entry: dict) -> None:
         raise _Unreadable("missing or unlisted files, folders or links")
 
 
-def verify_into(source: Path, manifest: dict, into: Path) -> dict:
+def _open_into(into: Path, avoid: list[tuple[Path | None, str]]) -> list[Path]:
+    """Make `into` ready right before the first write, checked again (a link or a file put there since the
+    plan is refused): an existing folder must still be a real, empty folder and still clear of `avoid`; a
+    missing one is made with a plain mkdir (0700), each missing parent too, so a name taken meanwhile fails
+    instead of being followed. Returns the folders made, outermost first."""
+    check_verify_into(into, avoid)
+    made: list[Path] = []
+    missing = []
+    current = into
+    while not os.path.lexists(current):
+        missing.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    try:
+        for folder in reversed(missing):
+            os.mkdir(folder, 0o700)
+            made.append(folder)
+            osprivacy.make_private(folder)
+        info = os.lstat(into)
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode) or any(into.iterdir()):
+            raise _Unreadable("the folder changed after it was checked")
+    except BaseException:
+        _remove_made(made)
+        raise
+    return made
+
+
+def _remove_made(made: list[Path]) -> None:
+    """Remove the folders a verification made, innermost first, only while empty."""
+    for folder in reversed(made):
+        with contextlib.suppress(OSError):
+            os.rmdir(folder)
+
+
+def discard_verified(result: dict | None) -> None:
+    """Remove what a verification wrote: each store's copy, then the folders it made for `into` (OBS-394). For a
+    restore that fails after the copy was verified, so it leaves `into` as it found it. Never raises."""
+    if not result:
+        return
+    for root in result.get("written") or []:
+        if os.path.lexists(root) and not root.is_symlink():
+            shutil.rmtree(root, ignore_errors=True)
+    _remove_made(result.get("made") or [])
+
+
+def verify_into(source: Path, manifest: dict, into: Path, avoid: list[tuple[Path | None, str]] = ()) -> dict:
     """Write each carried store of a verified snapshot into `into/<name>/` and read it back against the
-    manifest; `{"present": bool, "into": Path, "rows": [...]}`. Nothing is written when no store was carried.
-    Raises `CarryFailed` (`secret-store-verify-failed`, or `secret-store-write-failed` for a write that
-    failed); the store folder it was writing is removed first."""
+    manifest; `{"present", "into", "rows", "written", "made"}`. Nothing is written when no store was carried.
+    `into` is checked again against `avoid` right before the first write (`_open_into`). Raises `CarryFailed`
+    (`secret-store-verify-failed`, or `secret-store-write-failed` for a write that failed) after removing every
+    copy and folder this run made; an interrupt removes them too."""
     entries = manifest.get("externals")
-    if not isinstance(entries, list):
-        return {"present": False, "into": into, "rows": []}
-    rows = []
-    written: list[Path] = []
+    result = {"present": isinstance(entries, list), "into": into, "rows": [], "written": [], "made": []}
+    if not result["present"]:
+        return result
+    carried = [e for e in entries if isinstance(e, dict) and e.get("state") == "carried"]
     for entry in entries:
         name = entry.get("name")
         if entry.get("state") != "carried":
-            rows.append({"name": name, "state": "not-in-snapshot", "reason": entry.get("reason")})
+            result["rows"].append({"name": name, "state": "not-in-snapshot", "reason": entry.get("reason")})
             continue
         root = into / name
         shown = backup_vault._display(root)
         try:
-            if not os.path.lexists(into):
-                _make_parents(into)
+            if entry is carried[0]:
+                result["made"] = _open_into(into, list(avoid))
             if os.path.lexists(root):
                 raise _Unreadable("the folder for it already exists")
-            written.append(root)
+            result["written"].append(root)
             not_written = _write_tree(source / EXTERNAL / name, entry, root)
             _verify_copy(root, entry)
         except (OSError, _Unreadable) as exc:
             # Every copy this run made goes: a half-verified set of secrets is not left behind.
-            for made in written:
-                if os.path.lexists(made) and not made.is_symlink():
-                    shutil.rmtree(made, ignore_errors=True)
+            discard_verified(result)
             code = VERIFY_FAILED if isinstance(exc, _Unreadable) else "secret-store-write-failed"
             what = str(exc) if isinstance(exc, _Unreadable) else type(exc).__name__
             raise CarryFailed(code, (
                 f"The carried secret store {name} did not verify at {shown} ({what}); the copies this run made were "
                 "removed, the folder the settings name was not touched, and no home was restored")) from None
+        except BaseException:
+            discard_verified(result)
+            raise
         files = entry.get("files") or []
-        rows.append({"name": name, "state": "verified", "left_at": shown, "files": len(files),
-                     "bytes": sum(row["size"] for row in files),
-                     "links": len(entry.get("links") or []) - len(not_written),
-                     "directories": len(entry.get("directories") or []),
-                     "skipped": len(entry.get("not_carried") or []) + len(not_written)})
-    return {"present": True, "into": into, "rows": rows}
+        result["rows"].append({"name": name, "state": "verified", "left_at": shown, "files": len(files),
+                               "bytes": sum(row["size"] for row in files),
+                               "links": len(entry.get("links") or []) - len(not_written),
+                               "directories": len(entry.get("directories") or []),
+                               "skipped": len(entry.get("not_carried") or []) + len(not_written)})
+    return result
 
 
 def verify_summary(result: dict) -> dict:
-    """The answer's `secret_store` for a verification: the first store's row at the top, `into`, and `stores`
-    when there are several."""
+    """The answer's `secret_store` for a verification: the first store's row at the top, `verified` (how many
+    stores were verified, so a first store that was not carried does not read as nothing verified), `into`,
+    and `stores` when there are several."""
+    count = sum(1 for row in result["rows"] if row["state"] == "verified")
     if not result["present"]:
-        return {"state": "not-in-snapshot"}
+        return {"state": "not-in-snapshot", "verified": 0}
     if not result["rows"]:
-        return {"state": "not-applicable"}
-    first = dict(result["rows"][0])
-    if any(row["state"] == "verified" for row in result["rows"]):
+        return {"state": "not-applicable", "verified": 0}
+    first = {**dict(result["rows"][0]), "verified": count}
+    if count:
         first["into"] = backup_vault._display(result["into"])
     if len(result["rows"]) > 1:
         first["stores"] = [dict(row) for row in result["rows"]]

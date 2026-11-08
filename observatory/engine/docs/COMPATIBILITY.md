@@ -435,18 +435,30 @@ snapshot from another machine, and `store/raw/secret-store-restore.json` is neit
 `DIR`; the caller removes it. With `--secret-store-only` and the flag, no workspace is needed. The answer's
 `secret_store` reads `state` `verified` with `name`, `left_at` and `into` in display form and the counts `files`,
 `bytes`, `links`, `directories` and `skipped` (the snapshot's `not_carried` files plus links not made on
-Windows), `stores` when there are several, or `not-in-snapshot` / `not-applicable` as before; a whole restore
-answers `external_sources_included` false, and `--secret-store-only` answers `status` `store-verified`. Refusals,
-exit 2, nothing written: `secret-store-verify-into-refused` (DIR is, holds or lies inside the new home or the
-workspace, the snapshot, a folder the snapshot's settings or this workspace's settings name for a carried store,
-`OBSERVATORY_SECRETS` or `OBSERVATORY_VAULT_DIR`, or a place `secret-store-target-refused` names),
+Windows), `verified` (the number of stores verified, also beside `not-in-snapshot` and `not-applicable`),
+`stores` when there are several, or `not-in-snapshot` / `not-applicable` as before; a whole restore answers
+`external_sources_included` false, and `--secret-store-only` answers `status` `store-verified`, or
+`nothing-to-verify` (exit 0) when the snapshot carried no store. Refusals, exit 2, nothing written:
+`secret-store-verify-into-refused` (DIR is, holds or lies inside the new home or the workspace, the workspace
+`OBSERVATORY_HOME` names and the default one (`osprivacy.default_home`) when either is another folder, the
+snapshot and the folder holding its file, each of those workspaces' backups folder, any folder the snapshot's
+settings (after the home rewrite) or one of those workspaces' settings name in `sources.secret_store`,
+`sources.secrets` or a key a carried store was recorded under, `OBSERVATORY_SECRETS` or `OBSERVATORY_VAULT_DIR`,
+or a place `secret-store-target-refused` names; compared resolved and case-folded, and by identity: each
+existing folder's device and inode, so a linked parent or macOS's `/System/Volumes/Data/...` view of a folder
+is the same folder),
 `secret-store-verify-into-not-empty` (DIR holds anything, or is a link or a file) and
 `secret-store-verify-into-conflict` (with `--secret-store-target` or a `--secret-store` other than `auto`); a
-tampered carried file stays `secret-store-manifest-mismatch`. Failure, exit 1, every copy the run made removed
-and no home restored: `secret-store-verify-failed` (a written file or link that does not match), or
-`secret-store-write-failed` (a write that failed). `workspace_upgrade.restore` and `restore_store_only` and
+tampered carried file stays `secret-store-manifest-mismatch`. The place and the contradiction are checked before a
+passphrase is asked (`full restore --latest` included), and DIR is checked again right before the first write;
+a missing DIR is made with a plain mkdir (0700, each missing parent too). Failure, exit 1, every copy the run
+made removed and no home restored: `secret-store-verify-failed` (a written file or link that does not match), or
+`secret-store-write-failed` (a write that failed); a restore that fails after the copy (an interrupt
+included) removes it and the folders it made, so `--latest` falling back to an older snapshot finds DIR as it
+was. `workspace_upgrade.restore` and `restore_store_only` and
 `maintenance.restore_latest` gain the keyword `secret_store_verify_into`; `secret_store_carry` gains
-`verify_into`, `verify_summary`, `check_verify_into`, `verify_conflict` and `setting_folders`. Without the flag
+`verify_into`, `verify_summary`, `discard_verified`, `check_verify_into`, `verify_conflict` and
+`setting_folders`. Without the flag
 every command line answers as before.
 
 ## Migration checksums: the same under every Python (OBS-387, 0.35.4)

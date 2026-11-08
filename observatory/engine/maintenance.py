@@ -2063,6 +2063,10 @@ def restore_latest(base: Path, *, store=None, label: str | None = None, same_mac
     import workspace_upgrade
     if base.exists() and any(p.name != ".workspace.lock" for p in base.iterdir()):
         raise config.ConfigurationError("Restore requires a new empty destination; existing state is never overwritten")
+    if secret_store_verify_into is not None:
+        # Before any passphrase is asked (OBS-394): a contradiction and a place that is never written.
+        secret_store_carry.verify_conflict(secret_store, secret_store_target)
+        secret_store_carry.check_verify_into(secret_store_verify_into, [(base, "the new home")], require_empty=False)
     found = backup_vault.candidates(base)
     if label:
         found = [c for c in found if c["label"] == label]
