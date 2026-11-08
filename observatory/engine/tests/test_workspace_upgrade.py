@@ -2119,6 +2119,87 @@ class RestoreSecretStore(unittest.TestCase):
             result=workspace._init(empty)
         self.assertEqual(result['secret_store'],canned['secret_store'])
 
+    def test_a_deliberate_skip_and_a_store_written_by_hand_raise_no_warning(self):
+        import backup_vault
+        snapshot,_=self.snapshot_and_move_store_away()
+        new=self.base/'restored'
+        result=self.restore(snapshot,new,secret_store='skip')
+        self.assertEqual((result['secret_store']['state'],result['secret_store']['reason']),('skipped',None))
+        section,items=backup_vault.secret_store(new)
+        self.outputs.append(json.dumps([section,items]))
+        self.assertEqual(section['last_restore']['state'],'skipped-by-choice')
+        self.assertFalse([i for i in items if i['code']=='backups-secret-store-not-restored'],'a choice is no warning')
+        # A skip with a reason warns, until the folder holds a store, however it got there.
+        shutil.rmtree(new)
+        shutil.rmtree(self.home)
+        with patch.dict(os.environ,{'OBSERVATORY_MACHINE_ID':BETA}):
+            result=self.restore(snapshot,new,secret_store='keep')
+        self.assertEqual(result['secret_store']['reason'],'secret-store-target-unconfirmed')
+        self.assertTrue([i for i in backup_vault.secret_store(new)[1] if i['code']=='backups-secret-store-not-restored'])
+        shutil.copytree(self.base/'first-machine-store',self.store,symlinks=True)   # copied by hand
+        section,items=backup_vault.secret_store(new)
+        self.assertEqual(section['last_restore']['state'],'skipped')
+        self.assertFalse([i for i in items if i['code']=='backups-secret-store-not-restored'],
+                         'a store in place, written by hand or by vault.py, clears the warning')
+
+    def test_the_restore_record_never_travels_and_every_restore_rewrites_it(self):
+        snapshot,_=self.snapshot_and_move_store_away()
+        new=self.base/'restored'
+        self.restore(snapshot,new,secret_store='skip')
+        record=new/'store/raw/secret-store-restore.json'
+        self.assertTrue(record.is_file())
+        self.assertTrue(upgrade.excluded(Path('store/raw/secret-store-restore.json')),'never in a snapshot')
+        out=self.base/'plain'
+        upgrade.snapshot(new,out,writers_stopped=True,plaintext=True)
+        self.assertFalse((out/'data/store/raw/secret-store-restore.json').exists())
+        # A restore of a snapshot that carried no store leaves no record of another run behind.
+        workspace.write_json(self.home/'store/raw/secret-store-restore.json',
+                             {'state':'skipped','reason':'secret-store-write-failed'})
+        file=self.home/'config/settings.json'
+        doc=config.read_json(file)
+        doc['sources'].pop('secret_store')
+        workspace.write_json(file,doc)
+        plain=self.base/'no-store-snapshot'
+        upgrade.snapshot(self.home,plain,writers_stopped=True,plaintext=True)
+        again=self.base/'again'
+        result=self.restore(plain,again)
+        self.assertEqual(result['secret_store']['state'],'not-applicable')
+        self.assertFalse((again/'store/raw/secret-store-restore.json').exists())
+
+    def test_every_store_is_recorded_and_any_skipped_one_warns(self):
+        import backup_vault
+        rows=[{'name':'secret_store','state':'written','reason':None,'target':'~/first','files':3},
+              {'name':'secrets','state':'skipped','reason':'secret-store-write-failed','target':str(self.base/'second'),
+               'files':0}]
+        summary={**rows[0],'stores':rows}
+        said=upgrade._said(summary,str(self.base/'snap.obsnap'))
+        self.assertIn('--secret-store-only',said['stores'][1]['next'])
+        new=self.base/'restored-ws'
+        workspace.initialize(new)
+        doc=config.read_json(new/'config/settings.json')
+        doc.setdefault('sources',{})['secret_store']=str(self.store)
+        workspace.write_json(new/'config/settings.json',doc)
+        upgrade._record_restore(new,said,'snap.obsnap')
+        record=config.read_json(new/'store/raw/secret-store-restore.json')
+        self.assertEqual([r['state'] for r in record['stores']],['written','skipped'])
+        section,items=backup_vault.secret_store(new)
+        self.outputs.append(json.dumps([section,items]))
+        [item]=[i for i in items if i['code']=='backups-secret-store-not-restored']
+        self.assertEqual(item['step'],said['stores'][1]['next'])
+
+    def test_a_target_whose_place_cannot_be_checked_is_refused_and_skipped_under_keep(self):
+        import secret_store_carry
+        entry={'name':'secret_store','settings_keys':['secret_store'],'state':'carried','files':[],
+               'directories':[],'links':[],'not_carried':[]}
+        args=(self.base,{'externals':[entry]},{'secret_store':str(self.base/'somewhere')},self.base/'new-home')
+        with patch.object(secret_store_carry,'_nearest_existing',side_effect=PermissionError(13,'denied')):
+            self.assertIn('could not be checked',secret_store_carry.refused_location(self.base/'somewhere'))
+            with self.assertRaises(secret_store_carry.CarryRefused) as caught:
+                secret_store_carry.restore_plan(*args,'auto')
+            self.assertEqual(caught.exception.code,'secret-store-target-refused')
+            row=secret_store_carry.restore_plan(*args,'keep')['rows'][0]
+        self.assertEqual((row['state'],row['reason']),('skipped','secret-store-target-refused'))
+
 
 if __name__=='__main__':
     unittest.main()

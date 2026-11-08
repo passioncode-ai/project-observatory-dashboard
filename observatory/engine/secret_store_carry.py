@@ -941,6 +941,15 @@ def refused_location(target: Path) -> str | None:
     home = _user_home()
     if home is None:
         return None
+    try:
+        return _refused_location(home, target)
+    except OSError as exc:
+        # Python 3.11 raises from `exists()` and `is_dir()` under a folder this account may not read: a place
+        # that cannot be checked is refused, never written, and under keep it is a skipped row.
+        return f"a place that could not be checked ({type(exc).__name__})"
+
+
+def _refused_location(home: Path, target: Path) -> str | None:
     h, t = home.resolve(), target.resolve()
     if _inside_folded(h, t):
         return "the home folder itself, or a folder holding it"

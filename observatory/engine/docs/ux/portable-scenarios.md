@@ -1143,7 +1143,8 @@ another machine or home writes only where `--secret-store-target` or this machin
 (`secret-store-target-unconfirmed`); `--json` gives each as `{"error": {"code", "message"}}`.
 `full init` on an empty home keeps a surviving store, and an update's rollback never touches it; a store init
 skipped (a folder not confirmed, refused, busy or unwritable) is in its answer with the exact `next` command, and
-doctor keeps `backups-secret-store-not-restored` with that command until a store is written.
+doctor keeps `backups-secret-store-not-restored` with that command until a store is in that folder again, however
+it got there; a skip chosen with `--secret-store skip` raises no warning.
 
 Acceptance: no value reaches a manifest, an answer, a record or a command's output; a store inside the workspace
 travels in `data/` exactly as before; an older engine restores the home and ignores `external/`.
