@@ -88,7 +88,7 @@ project to a **joined** organization: it now only proposes (ORG-R28).
    personal value ever reaches the organization, leaving never requires rotating a personal key.
 4. **The space that becomes the organization's device is chosen before anything enrolls.**
 5. **Every step can be undone, and says how.** The one step that cannot be undone is revoking a personal key at its
-   provider; it runs last, only after the replacement works, and only when the person chose it.
+   provider; it runs last, only after the replacement works (as the person confirms, ORG-R08), and only when the person chose it.
 6. **Every button is also an agent's tool** (contract DEC-0121, the operator's rule of 2026-11-07). An agent does
    each step on the person's word and records it; only the steps that need a person's body stay with them.
 
@@ -106,7 +106,7 @@ slot) or an account.
 | ORG-R05 | A project belongs to one context. This is fabric-workspace's invariant I-1, assumed here; the contract has not decided a context on a project, CT-141 is open, and the operator asked (N-19) for a project in Personal and further organizations. Until CT-141, a project two joined organizations claim waits for the person and is shown as a conflict. | the selection refuses a project chosen for two organizations, naming CT-141 |
 | ORG-R06 | A key's proposal combines its project's organization and its issuing account's organization (from the door's record). Both agree: proposed for that organization. They disagree, the account is shared, or the issuer is unknown while the project is the organization's: **ambiguous**, stays where it is until chosen. | `full org keys` over fixtures of each case |
 | ORG-R07 | A provider admin or provisioning key a door keeps (the Cloudflare and Heroku admin tokens, the OpenRouter provisioning key, a DigitalOcean team token) is never handed over. The organization's space stashes its own; once it has, a personal copy of a token for an account that belongs to the organization is revoked, not handed over. | the key list marks door admin keys `not movable` with the reason and, for an organization's account, `revoke after the organization's space stashes its own` |
-| ORG-R08 | Handing a key over is a rotation: a credential request goes to the organization from the space that will hold the key, the replacement arrives into that space's organization context sealed to its enrollment (DEC-0111, OBS-191 parts 2 and 3) with its provenance (OBS-360), its consumers switch, then the personal value is revoked at the provider with proof, unless the person keeps using it personally. | a hand-over that would place the same value in two contexts is refused |
+| ORG-R08 | Handing a key over is a rotation: a credential request goes to the organization from the space that will hold the key, the replacement arrives into that space's organization context sealed to its enrollment (DEC-0111, OBS-191 parts 2 and 3) with its provenance (OBS-360), its consumers switch, then the personal value is revoked at the provider with proof, unless the person keeps using it personally. "The replacement works" is a local signal only where both contexts share a space (the journal reads the replacement received and its consumers switched); in the separate-space layout the personal space cannot read the organization's (ORG-R20), so the revocation waits for the person's confirmation that Acme's space works (a relayed step). | a hand-over that would place the same value in two contexts is refused; in a separate-space fixture the revocation stays `waiting for your confirmation` until the person's recorded words arrive |
 | ORG-R09 | A value present twice is found inside one space only, by comparing values in memory at classification time; no digest under a key shared between contexts is ever written (two contexts must stay unlinkable, DEC-0128). The person's own vault digests (OBS-194) compare only the person's own personal spaces. A duplicate is a finding until rotated into two values; it is never resolved by deleting one copy silently. | a planted duplicate in a mixed space raises the finding; the org space's files hold no cross-context digest |
 | ORG-R10 | A name already present in the target context is never overwritten. Equal values: nothing to do, recorded as already there. Different values: the organization's stays, the personal one stays personal, and the person may request one under another name. | apply over a fixture with a conflicting slot leaves both untouched |
 | ORG-R11 | The person's choices are one local record, `org-selection/1`: who decided (the person, or an agent with the person's words, time and place, in DEC-0121's decision shape), when, which space it was made in and which space it serves, each item with its decision and why (the rule, or by hand), and the digest of the record it replaces. Owner-only, never sent, never signed by a device key. It is the preview and journal of what Observatory does on this computer; the project items go to Fabric's adaptation plan (TP-04), which owns their preview and journal there. | the record verifies against its digest; no code path sends it |
@@ -121,11 +121,11 @@ slot) or an account.
 | ORG-R20 | A space bound to a context (OBS-359) refuses items of any other context; a mixed space keeps a context on every project and slot and the organization sees only its own (mode C, DEC-0118). | context check over a bound and a mixed fixture |
 | ORG-R21 | A computer token enrolls one space as one device; a second space needs its own token. A fleet token (the hub's "Enroll a fleet", for managed computers) is the administrator's and enrolls many. | a second enroll with a used computer token is refused by the server and named |
 | ORG-R22 | A key keeps its environment. Until environments are data (OBS-234) the environments are `local`, `stage` and `prod`; a slot in another environment is shown as such and needs a choice. | classification of a slot in `qa` reads `environment not declared` |
-| ORG-R23 | Every action of the screens has a CLI command and an MCP tool with the same effect and the same refusals, and a gate class (none, relayed, human; contract DEC-0121). An agent acting on the person's word records the decision in DEC-0121's shape: `{by: operator, via: relayed-instruction, action, target, instruction (the words verbatim), at, source}`. The human steps are named once each: registering the passkey from the hub's invitation; comparing the root fingerprint and signing the pin with the passkey in Fabric; acknowledging the notice in the hub; the administrator preparing a computer token for the space (an administrator's step, possibly another person); the macOS administrator password when a new OS account is created. | the parity test: every screen action maps to a door with its gate class; the gate list is the same in the screen, the CLI help and the tool descriptions |
+| ORG-R23 | Every action of the screens has a CLI command and an MCP tool with the same effect and the same refusals, and a gate class (none, relayed, human; contract DEC-0121). An agent acting on the person's word records the decision in DEC-0121's shape: `{by: operator, via: relayed-instruction, action, target, instruction (the words verbatim), at, source}`. The human steps are named once each: registering the passkey from the hub's invitation; comparing the root fingerprint and signing the pin with the passkey in Fabric; signing, with the passkey in Fabric, the estate revision that places the chosen projects in the organization's context (R1-D12: a project enters an organization by its person's own passkey, contract ADR-0178 point 7 and membership OM-7); acknowledging the notice in the hub; the administrator preparing a computer token for the space (an administrator's step, possibly another person); the macOS administrator password when a new OS account is created. | the parity test: every screen action maps to a door with its gate class; the gate list is the same in the screen, the CLI help and the tool descriptions |
 | ORG-R24 | Offline: accounts, rules, the selection and its preview work without the network; local moves between the person's own spaces work offline; anything for the server waits in its outbox and the screen says "waiting to send", never "done". | the apply journal with the server unreachable |
 | ORG-R25 | A partial result is never shown as success: the result screen counts done, failed and waiting per kind, and each failed item names its step and command. | a fixture where one key's provider refuses the revocation |
-| ORG-R26 | A project's proposal comes from all its accounts together: its repositories, its deploys (DigitalOcean apps, Heroku apps) and its zones. All point to one organization: proposed for it. They point to two organizations, or to an organization and Personal (a repository in Acme's GitHub, its deploy in the person's own team): **ambiguous**, decided by the person. | fixtures of each mix |
-| ORG-R27 | A personal key never disappears. When a space becomes the organization's, each personal slot found there is carried into the person's personal space and verified there before it is deleted here (OBS-426); a key is never "forgotten". Projects' curated entries may be forgotten here only after their import elsewhere is confirmed (OBS-372). | a conversion fixture: every personal slot reads `same` in the personal space before it is gone here |
+| ORG-R26 | A project's proposal comes from all its accounts together: its repositories, its deploys (DigitalOcean apps, Heroku apps) and its zones. An account with no rule contributes `none`, never the default organization. All accounts with a rule point to one organization: proposed for it. They point to two organizations, or to an organization and Personal (a repository in Acme's GitHub, its deploy in the person's own team): **ambiguous**, decided by the person. | fixtures of each mix |
+| ORG-R27 | A personal key never disappears, and nothing personal stays behind. When a space becomes the organization's, every personal kind is carried into the person's personal space and verified there, or removed with its reason, before the space is bound (OBS-426): vault slots (carried and verified by digest); the vault-digests estate key with `vault-digests/local.json` and `peers/` (removed, since the personal space has its own); the person's SSH keys (carried with `full ssh-keys`, removed here); the person's estate record, pairing and device keys under `node/` (removed; the space pairs again as the organization's device); shares received (removed, the sender shares again to the personal space); agent memory and ledger records of personal projects (exported, then removed); the workspace's own encrypted snapshot settings (pointed at a new destination; personal snapshots are never restored into it). A key is never "forgotten"; projects' curated entries may be forgotten only after their import elsewhere is confirmed (OBS-372). | a conversion fixture: every personal slot reads `same` in the personal space before it is gone here, and the bound space holds none of the listed kinds |
 | ORG-R28 | Readers of a project's organization (the session-start line naming its analytics account and design team, the analytics findings) read the decided answer, not a bare rule: a rule that maps a project to a joined organization yields `proposed` until the person chose it (`selected`), and a `proposed` project gets no account of that organization in the session-start line or the findings: the line says it is proposed and to ask before creating anything. Local organizations keep today's rule answer. | a rule-mapped, unchosen project: the session-start line names no Acme account and the analytics check skips it |
 | ORG-R29 | The layout (where the organization's work lives) is chosen before any enrollment. In the separate-space layout the current space never enrolls in the organization: the join and every key receipt run in the new space; the selection is made in the space that holds the items and names the space it serves. | the separate-space path over a fixture: the personal space has no enrollment for Acme at any step |
 
@@ -137,8 +137,8 @@ decision of 2026-11-06); joining adds an organization beside `personal` and neve
 
 | Layout | What happens | When it fits | Costs |
 |---|---|---|---|
-| **A separate space** (recommended) | A new OS account (or VM) on this computer, or another computer, becomes a space bound to `org:<id>` (OBS-362, OBS-359) and enrolls with its own computer token; the current personal space does not enroll. The selection is made in the personal space (it holds the projects and keys); the chosen projects' curated entries are exported into the new space (OBS-364); the new space requests the organization's keys through its own enrollment (ORG-R08); after the import is confirmed, the personal space forgets the curated entries that moved (OBS-372) and revokes the personal keys the person chose to revoke. | the person works for the organization on a machine that is also theirs | a second login; the macOS administrator password once; a second computer token from the administrator |
-| **This space is the organization's** | The OS account Observatory runs in is used only for the organization. Personal keys found in it move to the person's personal space first (ORG-R27, OBS-426); personal projects' curated entries are exported there; then the space is bound to `org:<id>` and enrolls. | a work account or a VM made for the organization | personal items must leave first; the selection shows them as "moves out" |
+| **A separate space** (recommended) | A new OS account (or VM) on this computer, or another computer, becomes a space bound to `org:<id>` (OBS-362, OBS-359) and enrolls with its own computer token; the current personal space does not enroll. The selection is made in the personal space (it holds the projects and keys); the chosen projects' curated entries are exported into the new space (OBS-364); the new space requests the organization's keys through its own enrollment (ORG-R08); after the import is confirmed, the personal space forgets the curated entries that moved (OBS-372) and revokes the personal keys the person chose to revoke, each once the person confirms Acme's replacement works (ORG-R08). | the person works for the organization on a machine that is also theirs | a second login; the macOS administrator password once; a second computer token from the administrator |
+| **This space is the organization's** | The OS account Observatory runs in is used only for the organization. Every personal kind found in it (keys, digest key and manifests, SSH keys, estate record and pairing, shares received, memory, snapshot settings) moves to the person's personal space or is removed first (ORG-R27, OBS-426); personal projects' curated entries are exported there; then the space is bound to `org:<id>` and enrolls. | a work account or a VM made for the organization | personal items must leave first; the selection shows them as "moves out" |
 | **Both in one space** | One workspace keeps both contexts and enrolls; every project and slot carries its context; the organization sees only its own (mode C). | a single-account machine where a second login is not possible | the person must keep the contexts apart; the organization's notice may say that two organizations on one computer can be linked (DEC-0154) |
 
 **Machines enrolled before this design** (`full org enroll`, since 0.27.0) keep their enrollment. Once OBS-413 links
@@ -182,7 +182,7 @@ Needs a decision (4)
 | Empty | Personal only, with the accounts found; "You are not in any organization. Projects and keys are all personal." and [Join an organization] |
 | Loading | the groups as skeletons of their final size; a provider still scanning shows "reading" on its rows |
 | Partial | a provider that could not be read keeps its rows with "not read since TIME" and the reason; others render |
-| Error | the organizations file does not read: the screen says which line and offers the fix; projects keep their last emitted answer, none moves into a joined organization (ORG-R01) |
+| Error | the organizations file does not read: the screen says which line and offers the fix; projects keep their last emitted answer and none moves into a joined organization (ORG-R01). Today an unreadable file loads as empty and the next rebuild drops every project's organization field; OBS-412 changes that |
 | Offline | rows from the last scan with their time; join and hub suggestions disabled with "needs the network" |
 | Success | as drawn; "Nothing needs a decision" when the list is empty |
 
@@ -236,7 +236,7 @@ Shown in the space that holds the projects; its header names the space it serves
 What goes to Acme                                         step 1 of 3: projects
   Proposed by your rules (12)                                          [None]
    [x] acme-web         GitHub acme-inc/acme-web       rule: GitHub organization acme-inc
-       label for Acme:  [acme-web____________]   (what Acme will read; leave empty to send no name)
+       label for Acme:  [____________________]   (what Acme will read; leave empty to send no name)
    [x] acme-api         GitHub acme-inc/acme-api       rule: GitHub organization acme-inc
    ...
   Needs you (3)
@@ -289,14 +289,17 @@ Review                                                     step 3 of 3
   On this computer
      a new space "work-acme" (macOS user)          needs the administrator password once
      a computer token for it                       your administrator prepares it in the hub
-     3 of your keys are revoked, each only after Acme's replacement works   (cannot be undone)
+     3 of your keys are revoked, each after you confirm Acme's replacement works   (cannot be undone)
+  In Fabric
+     your passkey signs the revision that places the 12 projects in Acme's context
   Stays personal and is never sent: 38 projects, 57 keys, 5 accounts
   Recorded here as: org-selection/1, revision 1, decided by you, 2026-11-08 10:31 UTC
                                                      [Back]  [Apply]
 ```
 
-Apply hands the project items to Fabric's adaptation plan (Fabric shows its own preview and sends it with the
-person's credential) and starts the local journal. States: a record changed since the preview (refused, ORG-R14,
+Apply hands the project items to Fabric's adaptation plan (Fabric shows its own preview, asks the person's passkey to
+sign the estate revision that places the projects in Acme's context, and sends the plan with the person's credential)
+and starts the local journal. States: a record changed since the preview (refused, ORG-R14,
 "Review again"); waiting (for the new space, its token, Acme's replacements: each named); offline (the record is
 saved; "Will continue when online"); success (ORG-W8).
 
@@ -324,8 +327,12 @@ the space reads as `removed` (OSS-74, OSS-108).
 
 ### Fabric
 
-Joining in Fabric: Fabric reads the organization's root, shows its fingerprint, the person compares it with the
-administrator's invitation over a second channel, and their passkey signs the estate revision that pins it (OM-2).
+Joining in Fabric: Fabric reads the organization's root, shows its fingerprint, the person compares it with the one
+the administrator sends over a second channel, and their passkey signs the estate revision that pins it (OM-2). The
+hub does not show an organization's root fingerprint to its administrator yet (its invitation is a link only), so
+the comparison has no source until it does (hub row in the gap map); until then Fabric's pin rests on the root it
+read, and the screen says the fingerprint was not compared. Fabric also asks the person's passkey to sign the estate
+revision that places each chosen project in the organization's context (R1-D12, ADR-0178 point 7).
 Fabric owns the adaptation plan (TP-04): its preview, its journal and sending `org-adaptation/1` with the person's
 credential; and leaving: withdrawing the plan, then unpinning (OM-5, AD-6).
 
@@ -352,8 +359,8 @@ words), **human** (a person's body is needed; the agent prepares everything and 
 | join with a computer token | `full org join --org ID` (the token on stdin) | `observatory_org_join` | relayed; the token itself is made by an administrator (human) | OBS-414 |
 | admission and notice state | `full org status --org ID` (`admission`, `notice`) | `observatory_org_status` | none; the pin and the acknowledgement are human, in Fabric and the hub | OBS-414 |
 | classify keys | `full org keys --org ID` | `observatory_org_keys` | none | OBS-415 |
-| choose, preview, apply, undo | `full org select --org ID plan, show, apply, undo` | `observatory_org_selection` | relayed | OBS-417 |
-| hand a key over, revoke the personal value | part of apply | `observatory_org_selection` | relayed | OBS-416 |
+| choose, preview, apply, undo | `full org select --org ID plan, show, apply, undo` | `observatory_org_selection` | relayed; the passkey signing the projects' estate revision in Fabric is human | OBS-417 |
+| hand a key over, revoke the personal value | part of apply; `full org select --org ID confirm-replacement KEY` | `observatory_org_selection` | relayed (the person's confirmation that the replacement works, in the separate-space layout) | OBS-416 |
 | move personal keys out of a space becoming the organization's | part of apply | `observatory_org_selection` | relayed | OBS-426 |
 | take a project back, leave | `full org unassign PROJECT --org ID`, `full org leave --org ID --plan` then `--apply` | `observatory_org_leave` | relayed | OBS-419 |
 | everything above as tools, with the gate column | | the tools above | | OBS-420 |
@@ -373,6 +380,8 @@ named by its owner.
 | OSS-103, ORG-R28: readers of the organization answer | `proposed` and `selected` sources; the session-start line and the analytics findings read them | `organizations.py` assigns by rule at once; `tools/session_start.py` and `tools/google_findings.py` read that | **OBS-412**, **OBS-413** |
 | OSS-104: invitation and passkey | the hub's invitation | the hub (built) | hub |
 | OSS-104: admission (fingerprint and pin) | Fabric's join and the passkey's signature over the estate revision (OM-2) | Fabric | Fabric |
+| OSS-104: a source for the root fingerprint | the hub shows the organization's root fingerprint to its administrator (and on the invitation page) so it can be sent over a second channel | the root is registered at the organization's onboarding; nothing shows its fingerprint; the comparison waits | hub |
+| OSS-105: a project enters by the person's passkey | Fabric asks the passkey to sign the estate revision placing the projects in the organization's context (R1-D12) | contract ADR-0178 point 7 | Fabric |
 | OSS-104: the notice acknowledgement | the hub's signed-in page (DEC-0052) | the hub | hub |
 | OSS-104: computer token | the hub's Computers page; an agent door for tokens is a hub proposal (VES-ENROLL-PROPOSE) | the hub (built) | hub |
 | OSS-104: join from a computer token, admission and notice state | `full org join`: token to the vault on stdin, enroll, read admission and notice | `full org enroll --token-slot` (OBS-161, done) | **OBS-414** |
