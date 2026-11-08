@@ -21,7 +21,9 @@ expectation. It changes test evidence and documentation, not the published engin
 0.30.0): `full restore` puts the secret store kept outside the workspace back on another computer, under a policy for
 one already there, with `--secret-store-only` and doctor's not-restored warning (OBS-350 part 2).
 
-Next: tag `v0.35.5`, verify and install (receipts in the record); then the «machine lost» drill with the second Mac.
+Released 2026-11-08 (tag `v0.35.5` on `633f1b60`; the release run's Windows arm64 job needed one rerun after a 504 from
+github.com), verified and installed on the second Mac; receipts in the record. Next: 0.35.6 with OBS-393 (PR #474),
+then the «machine lost» drill with the second Mac.
 
 [2026-11-08: release 0.35.4](runs/2026-11-08-release-0.35.4/README.md): engine 0.35.4 (`observatory-log` stays
 0.30.0): migration checksums the same under every Python (OBS-387), the maintenance schedule in an account with no
