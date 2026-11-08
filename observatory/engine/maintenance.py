@@ -2034,7 +2034,7 @@ def status(base: Path, *, schedule=None) -> dict:
 
 def restore_latest(base: Path, *, store=None, label: str | None = None, same_machine: bool | None = None,
                    second_machine: bool | None = None, unknown: str = "second", stdin_value: str | None = None,
-                   ask: bool = False) -> dict:
+                   ask: bool = False, secret_store: str = "auto", secret_store_names: bool = False) -> dict:
     """Restore the newest backup a workspace at this path left (D7). Only into an empty home.
 
     When backups of more than one workspace exist under this name (a reinstall that could
@@ -2051,7 +2051,12 @@ def restore_latest(base: Path, *, store=None, label: str | None = None, same_mac
 
     Nothing found for this exact path: the answer is `no-backup`, plus `elsewhere` when the
     same workspace left backups under another home (`backup_vault.elsewhere`, OBS-347), with
-    the explicit-file step; nothing is chosen."""
+    the explicit-file step; nothing is chosen.
+
+    `secret_store` is the policy for a secret store the snapshot carried (OBS-350): `full init` passes
+    `keep`, so a reinstall over a surviving store never fails or overwrites it. A refusal of the store
+    (`secret-store-not-empty`, ...) is raised as it is: an older backup would meet the same store."""
+    import secret_store_carry
     import workspace_upgrade
     if base.exists() and any(p.name != ".workspace.lock" for p in base.iterdir()):
         raise config.ConfigurationError("Restore requires a new empty destination; existing state is never overwritten")
@@ -2109,7 +2114,13 @@ def restore_latest(base: Path, *, store=None, label: str | None = None, same_mac
         try:
             result = workspace_upgrade.restore(candidate["snapshot"], base, secret=secret, prompt=False,
                                                same_machine=same_machine, second_machine=second_machine,
-                                               unknown=unknown)
+                                               unknown=unknown, secret_store=secret_store,
+                                               secret_store_names=secret_store_names)
+        except secret_store_carry.CarryRefused as exc:
+            if exc.code != "secret-store-manifest-mismatch":
+                raise
+            problems.append({"snapshot": candidate["snapshot"].name, "code": exc.code, "detail": str(exc)[:200]})
+            return None
         except (backup_vault.BackupError, config.ConfigurationError, OSError) as exc:
             # A damaged copy or one that needs a newer release: try the next older backup (review F10).
             problems.append({"snapshot": candidate["snapshot"].name, "detail": str(exc)[:200]})
