@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The application release is **0.35.6**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
+The application release is **0.35.7**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
 
 ## SQLite runtime prerequisite
 
@@ -487,7 +487,28 @@ clears it (doctor lists the folder's top level, never reads a file). An older en
 `tool` `workspace_upgrade.py`, `snapshot`, `taken_on`, `files`, `state`; never a value), which an older `vault.py`
 reads as any other movement. An older engine reading a snapshot this release writes still restores the home only.
 
-## Workspace restore: verifying a carried secret store into a disposable folder (OBS-394, the release after 0.35.6)
+## Reloading a repaired job waits for launchd (OBS-410, 0.35.7)
+
+No migration. 0.35.6 rewrote a drifted job definition and reloaded the job with `launchctl bootout` then
+`bootstrap`; launchd refuses a bootstrap while the bootout of the same label is still finishing (the server is
+given 40 s to exit), so after `full update` to 0.35.6 the server could stay unloaded, and a pass leaves an unloaded
+job alone. From 0.35.7 a reload waits until the label is gone (up to 45 s) and retries a bootstrap launchd refuses
+for now (exits 5, 37 and 125) up to five times; a reload that still fails answers `jobs.result: reload-failed`,
+naming the jobs it left `unloaded` and those still running their old definition (`not_reloaded`); `full update`
+checks the jobs it started once `maintain ensure` has run and loads one that is gone, or names it under
+`services_not_restarted`. A workspace that was updated to 0.35.6 (its `store/logs/update.jsonl` says so) and whose
+server has its launchd definition and Fabric descriptor in place but is not loaded gets the server loaded again,
+once, by the first `maintain ensure` or pass of 0.35.7 (the update to 0.35.7 runs `maintain ensure`), answered
+under `jobs.recovered`; the new file `store/raw/server-recovery-obs410.json` records the first decided outcome
+(`loaded`, `loaded-again`, `no-server`, `disabled`), after which the check never runs again, so a server a person
+boots out later stays out; only a load launchd refuses is tried again at the next pass. A server turned off with
+`serverd.py --uninstall` (which removes the definition and the descriptor) or stopped in Fabric Dashboards (a
+disabled label) is never loaded; one booted out by hand with a plain `launchctl bootout` before the update to 0.35.6
+cannot be told from a lost one and is loaded once. A workspace whose schedule was turned off with
+`maintain uninstall` has no pass and is not recovered. By hand:
+`OBSERVATORY_SYSTEM_SETUP=1 python "$(project-observatory full-path)/tools/serverd.py" --install`.
+
+## Workspace restore: verifying a carried secret store into a disposable folder (OBS-394, 0.35.7)
 
 Additive; the snapshot format stays 1 and nothing migrates. `full restore` takes `--secret-store-verify-into DIR`,
 with a whole restore and with `--secret-store-only`: each store the snapshot carried is written into

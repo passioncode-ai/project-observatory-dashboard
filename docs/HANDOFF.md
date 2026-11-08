@@ -17,6 +17,13 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-11-08: release 0.35.7](runs/2026-11-08-release-0.35.7/README.md): engine 0.35.7 (`observatory-log` stays
+0.35.6): `full restore --secret-store-verify-into DIR` verifies a backup's carried secret store in a disposable
+folder without touching the live one (OBS-394).
+
+Next: tag `v0.35.7`, verify and install it on both Macs (receipts in the record); then the «machine lost» drill with
+the second Mac.
+
 [2026-11-08: release 0.35.6](runs/2026-11-08-release-0.35.6/README.md): engine 0.35.6 and `observatory-log` 0.35.6:
 background jobs, plugin hooks and the installed manifest name no Python release, so a venv rebuilt on another Python
 keeps them working; `full maintain ensure` repairs the pass, the check, the tick and the server (OBS-393).

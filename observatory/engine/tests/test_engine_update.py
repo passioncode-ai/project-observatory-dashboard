@@ -1177,6 +1177,32 @@ class UpdateTest(unittest.TestCase):
         self.assertEqual(doc["status"], "updated")
         self.assertIn("server", json.dumps(doc["services_not_restarted"]))
 
+    def test_a_job_the_schedule_repair_left_unloaded_is_loaded_again(self):
+        # 2026-11-08, 0.35.6: `maintain ensure` rewrote the server's definition and reloaded it with a
+        # bootstrap launchd refused while its bootout was still finishing; the server stayed unloaded and
+        # the update reported nothing. The update now checks the jobs it started once ensure has run.
+        def ensure_that_drops_the_server():
+            self.services.state["server"] = False
+            return 0, ""
+        self.engine.ensure_maintenance = ensure_that_drops_the_server
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply")
+        self.assertEqual(code, 0, doc)
+        self.assertTrue(self.services.state["server"])
+        self.assertIn("started-again", [s.get("step") for s in doc["steps"]])
+        self.assertNotIn("services_not_restarted", doc)
+
+    def test_a_job_that_cannot_be_loaded_again_after_ensure_is_reported(self):
+        def ensure_that_drops_the_server():
+            self.services.state["server"] = False
+            self.services.start_fails = {"server"}
+            return 0, ""
+        self.engine.ensure_maintenance = ensure_that_drops_the_server
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply")
+        self.assertEqual(code, self.mod.EXIT_SERVICES, doc)
+        self.assertIn("server", json.dumps(doc["services_not_restarted"]))
+
     def test_a_job_someone_loaded_during_the_update_is_restarted_on_the_new_code(self):
         # 2026-10-08, installing 0.19.3 by hand: while the update had the server
         # stopped, something loaded it again; the update's own bootstrap then failed
@@ -1340,10 +1366,14 @@ class RealSeams(unittest.TestCase):
         self.assertEqual([j["name"] for j in jobs], ["tick", "server"])
         self.assertTrue(all(j["label"] == launch.instance_label(j["name"]) for j in jobs))
         self.assertTrue(all(j["plist"].endswith(j["label"] + ".plist") for j in jobs))
-        seen = []
+        seen, booted_out = [], []
         def run(argv, **kw):
             seen.append(argv)
-            return subprocess.CompletedProcess(argv, 0, "", "")
+            if argv[1] == "bootout":
+                booted_out.append(True)
+            # Once booted out, `print` finds no such service (113), which `stop_job` waits for.
+            code = 113 if argv[1] == "print" and booted_out else 0
+            return subprocess.CompletedProcess(argv, code, "", "")
         with patch.object(launch.subprocess, "run", run):
             self.assertTrue(launch.job_loaded(jobs[0]["label"]))
             self.assertEqual(launch.stop_job(jobs[0]["label"]), (True, ""))
@@ -1351,6 +1381,7 @@ class RealSeams(unittest.TestCase):
         uid = os.getuid()
         self.assertEqual(seen, [["launchctl", "print", f"gui/{uid}/{jobs[0]['label']}"],
                                 ["launchctl", "bootout", f"gui/{uid}/{jobs[0]['label']}"],
+                                ["launchctl", "print", f"gui/{uid}/{jobs[0]['label']}"],
                                 ["launchctl", "bootstrap", f"gui/{uid}", jobs[0]["plist"]]])
 
     def test_default_release_source_is_the_plugin_repository(self):

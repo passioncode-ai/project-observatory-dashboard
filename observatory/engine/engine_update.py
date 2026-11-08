@@ -1472,6 +1472,30 @@ class Transaction:
         self.stopped = []
         return failed
 
+    def recheck_writers(self, restarted: list[dict], failed: list[dict]) -> list[dict]:
+        """A job this update started that is no longer loaded once `maintain ensure` ran.
+
+        Ensure rewrites a drifted definition and reloads the job; until 0.35.7 that reload could leave the
+        server unloaded (a bootstrap sent while launchd was still finishing the bootout), and the next pass
+        leaves an unloaded job alone. So the update loads it once more and names it when it cannot."""
+        done = {f["service"] for f in failed}
+        again = []
+        for job in restarted:
+            if job["name"] in done:
+                continue
+            try:
+                if self.deps.services.loaded(job["label"]):
+                    continue
+                ok, detail = self.deps.services.start(job["plist"])
+            except Exception as exc:  # noqa: BLE001 — the update is done; this is a recheck
+                ok, detail = False, type(exc).__name__
+            self.step("started-again" if ok else "start-failed", service=job["name"])
+            if not ok:
+                fix = (self.deps.services.fix(job) if hasattr(self.deps.services, "fix")
+                       else f"launchctl bootstrap gui/{os.getuid()} {job['plist']}")
+                again.append({"service": job["name"], "detail": redact_tail(detail, 300), "fix": fix})
+        return again
+
     # after the point of change ----------------------------------------------------------
 
     def undo(self, error: str, rollback: Path | None, snapshot: Path | None, before: dict | None) -> tuple[int, dict]:
@@ -1678,6 +1702,7 @@ class Transaction:
         if self.stopped:
             # Activation: the tick and the server start again on the new code.
             self.event("update_restart", "requested")
+        restarted = list(self.stopped)
         failed = self.start_writers() if self.stopped else []
         if self.has_ws:
             engine = self.deps.engine(self.base)
@@ -1694,6 +1719,7 @@ class Transaction:
                     report["maintenance_detail"] = detail
                 else:
                     report["maintenance"] = "scheduled" if code == 0 else f"not scheduled: {detail or f'exit {code}'}"
+            failed += self.recheck_writers(restarted, failed)
         if failed:
             report["services_not_restarted"] = failed
             report["human_steps"] = [f["fix"] for f in failed]
