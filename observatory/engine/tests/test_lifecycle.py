@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import ast
 import importlib
+import io
 import json
 import contextlib
 import os
@@ -1161,12 +1162,19 @@ class DefinitionsNameNoPythonRelease(PlistsCarryAStablePath):
         self.assertIn("not the engine's virtual environment", il.interpreter_problem("/usr/bin/python3"))
         with self.assertRaises(il.configuration.ConfigurationError):
             il.build(1800, python="/usr/bin/python3")
-        jobs, tick, _ = self.stale()
+        # A recorded home that is gone while bin/python3 still starts (a Homebrew `opt` link kept it
+        # working) is no reason to refuse (round 2, finding 4); a broken bin/python3 link is.
         (self.fake / "venv" / "pyvenv.cfg").write_text(f"home = {self.fake / 'gone'}\n")
+        self.assertIsNone(il.interpreter_problem(str(python)))
+        self.assertEqual(il.build(1800, python=str(python))["ProgramArguments"][0], str(python))
+        jobs, tick, _ = self.stale()
+        python.unlink()
+        os.symlink(self.fake / "gone" / "python3.99", python)
+        self.assertIn("a link to a Python that is gone", il.interpreter_problem(str(python)))
         with self.assertRaises(il.configuration.ConfigurationError):
             il.build(1800, python=str(python))
         rows = {r["name"]: r for r in il.repair_definitions(str(python))}
-        self.assertIn("pyvenv.cfg home", rows["tick"]["skipped"], "a drift that cannot be mended is named")
+        self.assertIn("does not start", rows["tick"]["skipped"], "a drift that cannot be mended is named")
         self.assertTrue(rows["tick"]["missing"])
         self.assertIn("python3.14", plistlib.dumps(plistlib.loads(tick.read_bytes())).decode(), "and left as it is")
 
@@ -1194,6 +1202,46 @@ class DefinitionsNameNoPythonRelease(PlistsCarryAStablePath):
         tick.write_bytes(plistlib.dumps(after))
         self.assertEqual([r for r in il.repair_definitions(str(python), write=False) if r["name"] == "tick"], [],
                          "only a key the installer writes is a drift")
+
+    def test_a_retired_key_is_dropped_by_the_repair(self):
+        # Server plists from before the server ran as a Standard job carry LowPriorityIO and Nice 5,
+        # the throttling that starved it; a merge kept them (round 2, finding 1).
+        _, python = self.engine()
+        il = self.il = self.reload("install_launchd")
+        _, _, server = self.stale()
+        doc = plistlib.loads(server.read_bytes())
+        server.write_bytes(plistlib.dumps({**il.wanted_definition("server", doc, python=str(python)),
+                                           "LowPriorityIO": True, "Nice": 5, "Disabled": False}))
+        rows = {r["name"]: r for r in il.repair_definitions(str(python))}
+        self.assertEqual(rows["server"]["changed"], ["LowPriorityIO", "Nice"])
+        after = plistlib.loads(server.read_bytes())
+        self.assertNotIn("LowPriorityIO", after)
+        self.assertNotIn("Nice", after)
+        self.assertEqual(after["Disabled"], False, "a key that was never the installer's stays")
+        self.assertEqual(il.repair_definitions(str(python)), [])
+
+    def test_status_and_uninstall_need_no_buildable_job(self):
+        # With a broken venv the builders refuse, and `install_launchd.py status|uninstall` and
+        # `serverd.py --uninstall` refused with them (round 2, finding 2).
+        import osschedule
+        calls = []
+
+        class Handle:
+            kind = "systemd"
+            def status(self): calls.append("status"); return {"installed": True}
+            def uninstall(self): calls.append("uninstall"); return {"unit": "x.service", "removed": True}
+            def start(self): calls.append("start"); return True, ""
+
+        def broken(*a, **kw):
+            raise self.il.configuration.ConfigurationError("no job definition is written")
+        sd = self.reload("serverd")
+        with patch.object(osschedule, "handle", lambda name, workspace, **kw: calls.append(name) or Handle()), \
+                patch.object(self.il, "tick_job", broken), patch.object(sd, "server_job", broken), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(self.il.main_other("status", 1800), 0)
+            self.assertEqual(self.il.main_other("uninstall", 1800), 0)
+            self.assertEqual(sd.uninstall_other(), 0)
+        self.assertEqual(calls, ["tick", "status", "tick", "uninstall", "server", "uninstall"])
 
     def test_labels_follow_the_workspace_asked_about(self):
         other = self.base / "another workspace"

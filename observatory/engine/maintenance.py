@@ -2121,9 +2121,9 @@ def status(base: Path, *, schedule=None) -> dict:
     venv = _venv_problem()
     if venv:
         # No step: the engine cannot rebuild the environment it runs in; a person recreates it.
-        warn("venv-home-missing", f"{venv}: no job of this environment can start. Recreate the environment from an "
-                                  "installed Python and install the engine into it again, then run "
-                                  "`project-observatory full maintain ensure`")
+        warn("venv-home-missing", f"{venv}. Its interpreter may still start through another link; if the jobs "
+                                  "fail, recreate the environment from an installed Python, install the engine into "
+                                  "it again, then run `project-observatory full maintain ensure`")
     if not auto_enabled(base):
         warn("auto-off", f"{SWITCH_LABEL}: off — new releases wait for you: `project-observatory full auto-update on`")
     available = available_update(base)

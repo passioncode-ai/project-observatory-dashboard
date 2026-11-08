@@ -1162,7 +1162,8 @@ def install_other(wait_seconds: float = 30.0) -> int:
 def uninstall_other() -> int:
     import osschedule
     try:
-        job = osschedule.supervisor(server_job())
+        # The task's name only: with a venv whose interpreter is gone the builder refuses (OBS-393).
+        job = osschedule.handle("server", paths.HOME)
         result = job.uninstall()
     except (osschedule.ScheduleError, configuration.ConfigurationError) as exc:
         print(f"Not removed: {exc}", file=sys.stderr)

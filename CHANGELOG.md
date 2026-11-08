@@ -18,7 +18,7 @@ account with no GUI session also needs the administrator's two steps it prints).
   venv keep naming their files. No definition is written for an interpreter that cannot start it.
 - **Repair compares the whole definition**, not only the interpreter, on macOS and, new, for the systemd tick and
   server on Linux, keeping the tick's interval, the server's port, its `PATH` and anything the installer does not
-  write; a job that was not loaded stays unloaded; `full maintain ensure` repairs the tick and the server too. A
+  write (in a systemd unit, its `Environment=` variables), and dropping the server's old `LowPriorityIO` and `Nice`; a job that was not loaded stays unloaded; `full maintain ensure` repairs the tick and the server too. A
   daemon root runs from an older definition keeps answering `waiting-for-root` until root applies the new one.
 - **Doctor names `job-path-missing` and `venv-home-missing`.**
 - **The plugin hooks find the engine after a venv rebuild**, and `full maintain ensure` refreshes their settings

@@ -162,14 +162,12 @@ def engine_venv(root: pathlib.Path | None = None) -> pathlib.Path | None:
 def interpreter_problem(python: str, root: pathlib.Path | None = None) -> str | None:
     """Why PYTHON must not be written into a job definition for the engine at ROOT, or None.
 
-    A venv whose base Python is gone (`pyvenv.cfg` home missing) has a `bin/python3` that is a
-    broken link; `configuration.engine_python` then falls back to whatever interpreter runs this
+    A venv whose base Python is gone has a `bin/python3` that is a broken link; `configuration.engine_python` then falls back to whatever interpreter runs this
     process, and a definition naming it would start the launcher where the package is not
     installed. Only the engine venv's own interpreter, existing, is written (OBS-393)."""
     root = root or engine_root()
-    problem = venv_home_problem(root)
-    if problem:
-        return problem
+    # A recorded `home` that is gone is not checked here: bin/python3 may still start (a Homebrew
+    # `opt` link kept it working), and only the interpreter itself decides; doctor names the home.
     venv = engine_venv(root)
     if venv is None:
         return None
@@ -229,7 +227,7 @@ def venv_home_problem(root: pathlib.Path | None = None) -> str | None:
             if key.strip().lower() == "home" and value.strip():
                 home = value.strip()
                 if not os.path.isdir(home):
-                    return (f"the engine's virtual environment {parent} was made from a Python that is gone "
+                    return (f"the engine's virtual environment {parent} records a Python folder that is gone "
                             f"(pyvenv.cfg home {home} does not exist)")
                 return None
         return None
@@ -497,10 +495,16 @@ def _wanted(name: str, installed: dict, python: str | None) -> tuple[dict | None
     return doc, None
 
 
-def merged_definition(installed: dict, wanted: dict) -> dict:
+#: Keys an earlier installer wrote and this one no longer does, per job: a repair drops them. The
+#: server ran as a Background job with LowPriorityIO and Nice 5 until macOS starved it under load
+#: (see `server_document`); a merge must not keep that throttling.
+RETIRED_KEYS = {"server": ("LowPriorityIO", "Nice"), "tick": ()}
+
+
+def merged_definition(installed: dict, wanted: dict, name: str | None = None) -> dict:
     """WANTED's keys over INSTALLED: a key the builder does not write (Disabled, a person's
-    KeepAlive tweak, a SoftResourceLimits) stays as installed."""
-    out = dict(installed)
+    KeepAlive tweak, a SoftResourceLimits) stays as installed, except job NAME's retired keys."""
+    out = {k: v for k, v in installed.items() if k not in RETIRED_KEYS.get(name or "", ()) or k in wanted}
     out.update(wanted)
     return out
 
@@ -510,7 +514,7 @@ def wanted_definition(name: str, installed: dict, python: str | None = None) -> 
     the tick keeps its interval, the server its port, both their caller's environment entries and any
     key or variable the builder does not write. None when it cannot be built here."""
     doc, _ = _wanted(name, installed, python)
-    return None if doc is None else merged_definition(installed, doc)
+    return None if doc is None else merged_definition(installed, doc, name)
 
 
 def _drift(installed: dict, wanted: dict) -> tuple[str, str]:
@@ -558,7 +562,7 @@ def repair_definitions(expected: str | None = None, *, write: bool = True,
         if not isinstance(doc, dict):
             continue
         built, why = _wanted(job["name"], doc, expected)
-        wanted = None if built is None else merged_definition(doc, built)
+        wanted = None if built is None else merged_definition(doc, built, job["name"])
         if wanted is not None and wanted == doc:
             continue
         problems = lint_plist(wanted) if wanted is not None else [why or "no definition"]
@@ -722,7 +726,10 @@ def main_other(action: str, interval: int) -> int:
     """install | uninstall | status | run-now on Windows (Task Scheduler) and Linux (systemd)."""
     import osschedule
     try:
-        job = osschedule.supervisor(tick_job(interval))
+        # Status, uninstall and run-now need the task's name only, never a buildable job: with a venv
+        # whose interpreter is gone the builder refuses, and the job must still be read and removed.
+        job = (osschedule.handle("tick", paths.HOME) if action in ("status", "uninstall", "run-now")
+               else osschedule.supervisor(tick_job(interval)))
         if action == "status":
             print(job.status())
             log = LOG_DIR / "tick.log"

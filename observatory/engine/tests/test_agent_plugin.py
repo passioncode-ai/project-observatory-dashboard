@@ -471,6 +471,31 @@ class VersionFreeHookEnv(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertFalse(marker.exists(), "a relative interpreter is never followed")
 
+    @unittest.skipIf(os.name == "nt", "the hooks are bash")
+    def test_the_session_hook_falls_back_when_the_named_release_folder_is_absent(self):
+        # pyvenv.cfg names 3.15 but the folder is lib/python3.15t (free-threaded), or names a
+        # release with no folder at all: the hook looks for the one there is (round 2, finding 3).
+        hook = ROOT / "skill/plugins/observatory-log/hooks/session-start.sh"
+        for folder, version in (("python3.15t", "3.15.0"), ("python3.15", "3.16.1")):
+            venv = self.base / f"venv-{folder}-{version}"
+            engine = venv / "lib" / folder / "site-packages/observatory/engine"
+            (engine / "tools").mkdir(parents=True)
+            (venv / "bin").mkdir()
+            (venv / "pyvenv.cfg").write_text(f"home = /usr/bin\nversion_info = {version}.final.0\n")
+            os.symlink(sys.executable, venv / "bin/python3")
+            marker = venv / "ran"
+            (engine / "observatory.py").write_text("")
+            (engine / "tools/session_start.py").write_text(
+                f"import pathlib\npathlib.Path({str(marker)!r}).write_text(__file__)\n")
+            (engine / "tools/maintain.py").write_text("")
+            env = {"PATH": "/usr/bin:/bin", "HOME": str(self.base), "XDG_STATE_HOME": str(self.base / "state"),
+                   "OBSERVATORY_PYTHON": str(venv / "bin/python3")}
+            p = subprocess.run(["/bin/bash", str(hook)], env=env, input="", capture_output=True, text=True,
+                               timeout=60)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(marker.read_text() if marker.exists() else None,
+                             str(engine / "tools/session_start.py"), folder)
+
 
 if __name__ == "__main__":
     unittest.main()

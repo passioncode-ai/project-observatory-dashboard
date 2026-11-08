@@ -29,9 +29,12 @@ case "${OBSERVATORY_PYTHON:-}" in
       v="$(dirname "$(dirname "$OBSERVATORY_PYTHON")")"
       mm="$(sed -n 's/^version[_a-z]* *= *\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' "$v/pyvenv.cfg" 2>/dev/null | head -n 1)"
       if [ -n "$mm" ]; then
-        c="$v/lib/python$mm/site-packages/observatory/engine"
-        [ -f "$c/observatory.py" ] && root="$c"
-      else
+        for c in "$v/lib/python$mm" "$v/lib/python${mm}t"; do
+          [ -f "$c/site-packages/observatory/engine/observatory.py" ] && { root="$c/site-packages/observatory/engine"; break; }
+        done
+      fi
+      if [ -z "$root" ]; then
+        # No version recorded, or no folder for it: the one there is.
         for c in "$v"/lib/python3*/site-packages/observatory/engine; do
           [ -f "$c/observatory.py" ] && root="$c"
         done

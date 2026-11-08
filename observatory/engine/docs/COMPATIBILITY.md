@@ -370,15 +370,20 @@ launchd failed every run with exit 78, and the repair rewrote only the interpret
   name no Python release, keeps naming its files as before; so does a Windows venv (`Lib\site-packages` names no
   release). A root-owned `space_daemons.py` accepts the new definitions unchanged: the program is still the venv's
   interpreter, and the workspace home is inside the account's home.
-- No definition names an interpreter that cannot start the launcher: when the engine's `pyvenv.cfg` names a `home`
-  that is gone, or the interpreter is not the engine venv's own existing `bin/python3`, installing or repairing a
-  job is refused with that reason (`maintain ensure` answers `unscheduled`, a repair answers `skipped`).
+- No definition names an interpreter that cannot start the launcher: when the interpreter is not the engine venv's
+  own `bin/python3`, or that is a link to a Python that is gone, installing or repairing a job is refused with that
+  reason (`maintain ensure` answers `unscheduled`, a repair answers `skipped`). A `pyvenv.cfg` `home` that is gone
+  while `bin/python3` still starts is not refused; doctor names it. `install_launchd.py status|uninstall|run-now` and
+  `serverd.py --uninstall` on Linux and Windows need no buildable job, so they work with such a venv.
 - Repair compares every key the installer writes with the installed definition. `install_launchd.repair_definitions`
   (the old name `repair_interpreters` still answers) mends the tick and the server on macOS, and
   `install_launchd.repair_systemd` their systemd user units on Linux (then `daemon-reload`); each keeps the tick's
   interval, the server's port, the installed `PATH` (without a Homebrew Cellar folder or one another account can
-  write) and probe limit, and every key and variable the installer does not write (`Disabled`, `HTTPS_PROXY`,
-  `SSL_CERT_FILE`, ...). A found row gains `changed` and `missing`; a drift that cannot be mended here is answered
+  write) and probe limit. In a plist every key and variable the installer does not write stays (`Disabled`,
+  `HTTPS_PROXY`, `SSL_CERT_FILE`, ...), except keys an earlier installer wrote and this one drops (the server's
+  `LowPriorityIO` and `Nice`, the throttling that starved it under load). In a systemd unit only `Environment=`
+  variables stay; any other directive of a person's goes in a drop-in (`systemctl --user edit <unit>`, a
+  `<unit>.d/*.conf` file), which a rewrite never touches. A found row gains `changed` and `missing`; a drift that cannot be mended here is answered
   under `skipped` with its reason. The maintenance pass applies it: a running tick waits for the next pass, a launchd
   job is reloaded only when it was loaded, and a running systemd server is restarted. `full maintain ensure` now does
   the same for the tick and the server after scheduling its own two jobs, answering `jobs`, and refreshes the hooks'
@@ -391,7 +396,8 @@ launchd failed every run with exit 78, and the repair rewrote only the interpret
 - Doctor and `full maintain status` name `job-path-missing` (a launchd definition of the pass, the check, the tick
   or the server, or a systemd unit of any of the four, whose program, an argument or its folder does not exist; Task
   Scheduler's are not read; step `project-observatory full maintain ensure`) and `venv-home-missing` (the engine's
-  `pyvenv.cfg` names a `home` that is gone, so no job of that venv can start; no step: a person recreates the venv).
+  `pyvenv.cfg` names a `home` that is gone: its interpreter may still start through another link, and if the jobs fail a
+  person recreates the venv; no step).
 - The plugin hooks: `full agent install` still writes `OBSERVATORY_ROOT` (hooks of every plugin version read it) and
   now names the venv's stable interpreter (`<venv>/bin/python3`, the one the jobs name) in `OBSERVATORY_PYTHON`
   rather than the installer's `sys.executable`. `full maintain ensure` rewrites both when they name a path that is
