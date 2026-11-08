@@ -947,29 +947,29 @@
     {
       "path": "docs/CLI-COMPATIBILITY.md",
       "source_sha256": "4ec1878cbc8ff9d68bd37a6e9902d3c50180b91093a4c20d59230b41de4a29c2",
-      "export_sha256": "1fabc40217ff8b31a24db19cbfbae3ed359b527a731c9323e195e60110e3862d",
-      "bytes": 17737,
+      "export_sha256": "66d254cd1f8b95f2b908bd32781ae6d5a5d1180aa7133e681dba7626b226b5a3",
+      "bytes": 18487,
       "upstream_modified": true
     },
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "f5b9dcb238ecd7e0d77b7c6d0a9297ad2f315887961ca228505d33cc0b5b8c57",
-      "bytes": 105120,
+      "export_sha256": "205506f1eacf751dbbc2b35c136de9466a635fa8fb44083de80b3a34a12e3c23",
+      "bytes": 109267,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "c43385ac42010394a87b51b20e727d44c0ff0398b564847807261475b7094d25",
-      "bytes": 284716,
+      "export_sha256": "f6b6f652a55e2bbabccb75da460c2a7c9e35fb319647dee6bf95c8f3bb42ee4b",
+      "bytes": 287812,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "7712d19aebcc76d641cf742ac647004974bd1ba2ce5427222ff4d9728d330590",
-      "bytes": 203552,
+      "export_sha256": "36243af4f6a1d3637eab7bb62fbe1b359ca38f35c0838dfdeb30fedc338e9c98",
+      "bytes": 204260,
       "upstream_modified": true
     },
     {
@@ -3174,8 +3174,8 @@
       "path": "maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f3f395533e7341c2ae8e19c56a8163d7171bbc91da45ca5211ba1827401aa89e",
-      "bytes": 131734
+      "export_sha256": "74b9374d387ec0f64e5a2b47a077a00614254dbfee97ffdac5b8478e5fe00660",
+      "bytes": 132335
     },
     {
       "path": "mcp/capability_tools.py",
@@ -3840,8 +3840,8 @@
       "path": "secret_store_carry.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "955d33d693ba3f175dc2904035b80aa975f64fb5cffaa58dddbd68137e98bdcc",
-      "bytes": 71336
+      "export_sha256": "6ce4409ed21213bce9152258d97de1a4a58d70570337c18b020bcabe6e4aef14",
+      "bytes": 87794
     },
     {
       "path": "service_connections.py",
@@ -5101,8 +5101,8 @@
       "path": "tests/test_handed_commands.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4adb1bcbbee08ad3b2fc13a384578088a18a03038f19b207d64f43d2d152d7ce",
-      "bytes": 26434
+      "export_sha256": "7323cffe4eefd93d1d715d18f4e3f17ef81755bf10ae528cd865ccb7c5cdf661",
+      "bytes": 26569
     },
     {
       "path": "tests/test_handoff.py",
@@ -6642,8 +6642,8 @@
     {
       "path": "tests/test_workspace_upgrade.py",
       "source_sha256": "baf6fb326428105e87a6acab67b3f89adc29038c5df488c822ab210c3e65fea3",
-      "export_sha256": "d17e4c2daf161db807473e5cd9c3cecca5d77738cdc2682ef1f67f88fc55e31c",
-      "bytes": 129305,
+      "export_sha256": "6f20c73ed2b29135bc6cf3368ede2d8bc5201c7cbdc01cb3de93eab6f339dba4",
+      "bytes": 153839,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -7665,8 +7665,8 @@
     {
       "path": "workspace_upgrade.py",
       "source_sha256": "d9816f9711b69badae87382cbae34e5a303e0942823587aecf4361026828277d",
-      "export_sha256": "e314f7469c0db6a8bc59f318dba6967e07ff55ff75a916df4d008ae70fed1755",
-      "bytes": 80981,
+      "export_sha256": "40268ad9f77e9c40fff22fefdc9d96059bfe2502ca36461d3ff8157f8c7a0068",
+      "bytes": 88866,
       "python_comments_removed": 5,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,

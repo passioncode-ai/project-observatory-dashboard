@@ -487,6 +487,49 @@ clears it (doctor lists the folder's top level, never reads a file). An older en
 `tool` `workspace_upgrade.py`, `snapshot`, `taken_on`, `files`, `state`; never a value), which an older `vault.py`
 reads as any other movement. An older engine reading a snapshot this release writes still restores the home only.
 
+## Workspace restore: verifying a carried secret store into a disposable folder (OBS-394, the release after 0.35.6)
+
+Additive; the snapshot format stays 1 and nothing migrates. `full restore` takes `--secret-store-verify-into DIR`,
+with a whole restore and with `--secret-store-only`: each store the snapshot carried is written into
+`DIR/<name>/` (folders 0700, files 0600 through osprivacy) and read back against the manifest (every file's size
+and SHA-256, every folder, every link's target on POSIX, nothing unlisted), instead of into the folder the
+settings name. That folder is never written, locked, swept or recorded, so no confirmation is asked for a
+snapshot from another machine, and `store/raw/secret-store-restore.json` is neither written nor removed (doctor's
+`backups-secret-store-not-restored` is not raised or cleared by a verification). The verified copy is left in
+`DIR`; the caller removes it. With `--secret-store-only` and the flag, no workspace is needed. The answer's
+`secret_store` reads `state` `verified` with `name`, `left_at` and `into` in display form and the counts `files`,
+`bytes`, `links`, `directories` and `skipped` (the snapshot's `not_carried` files plus links not made on
+Windows), `verified` (the number of stores verified, also beside `not-in-snapshot` and `not-applicable`),
+`stores` when there are several, or `not-in-snapshot` / `not-applicable` as before; a whole restore answers
+`external_sources_included` false, and `--secret-store-only` answers `status` `store-verified`, or
+`nothing-to-verify` (exit 0) when the snapshot carried no store. Refusals, exit 2, nothing written:
+`secret-store-verify-into-refused` (DIR is, holds or lies inside the new home or the workspace, the workspace
+`OBSERVATORY_HOME` names and the default one (`osprivacy.default_home`) when either is another folder, the
+snapshot and its file (not the folder holding the file), each of those workspaces' backups folder, any folder the snapshot's
+settings (after the home rewrite) or one of those workspaces' settings name in `sources.secret_store`,
+`sources.secrets` or a key a carried store was recorded under, `OBSERVATORY_SECRETS` or `OBSERVATORY_VAULT_DIR`,
+or a place `secret-store-target-refused` names; compared resolved and case-folded, and by identity: each
+existing folder's device and inode, so a linked parent or macOS's `/System/Volumes/Data/...` view of a folder
+is the same folder, except on a volume that reports inode 0 (FAT, exFAT, some network shares on Windows), where
+the resolved-name compare decides alone), `secret-store-verify-into-unchecked` (a workspace on this machine,
+the destination or one of the live ones, whose settings do not read: its store folders are unknown, so the
+verification refuses rather than skipping it),
+`secret-store-verify-into-not-empty` (DIR holds anything, or is a link or a file) and
+`secret-store-verify-into-conflict` (with `--secret-store-target` or a `--secret-store` other than `auto`); a
+tampered carried file stays `secret-store-manifest-mismatch`. The place and the contradiction are checked before a
+passphrase is asked (`full restore --latest` included), and DIR is checked again right before the first write;
+a missing DIR is made with a plain mkdir (0700, each missing parent too), and each `DIR/<name>/` the same way: one
+that appears between the check and that mkdir is refused (`secret-store-verify-into-not-empty`) and left as it
+is, never removed by the cleanup. Failure, exit 1, every copy the run
+made removed and no home restored: `secret-store-verify-failed` (a written file or link that does not match), or
+`secret-store-write-failed` (a write that failed); a restore that fails after the copy (an interrupt
+included) removes it and the folders it made, so `--latest` falling back to an older snapshot finds DIR as it
+was. `workspace_upgrade.restore` and `restore_store_only` and
+`maintenance.restore_latest` gain the keyword `secret_store_verify_into`; `secret_store_carry` gains
+`verify_into`, `verify_summary`, `discard_verified`, `check_verify_into`, `verify_conflict` and
+`setting_folders`. Without the flag
+every command line answers as before.
+
 ## Migration checksums: the same under every Python (OBS-387, 0.35.4)
 
 No migration and no new file. Until 0.35.3 the checksum recorded for each applied migration (`migration_checksums`)
