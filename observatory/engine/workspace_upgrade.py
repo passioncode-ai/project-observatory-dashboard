@@ -908,7 +908,7 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
             second_machine: bool | None = None, unknown: str = 'second', stdin_value: str | None = None,
             prompt: bool = True, secret_store: str = 'auto', secret_store_names: bool = False,
             snapshot_name: str | None = None, secret_store_target: str | None = None,
-            snapshot_path: str | None = None) -> dict:
+            snapshot_path: str | None = None, secret_store_verify_into: str | os.PathLike | None = None) -> dict:
     """A snapshot directory, or an encrypted `.obsnap` file from the backups root.
 
     The encrypted file is authenticated in full and decrypted beside the new home. Its
@@ -935,9 +935,19 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
     before the home is renamed into place (a store that could not be written leaves no home). The
     answer's `secret_store` gives counts, and relative paths only with `secret_store_names`. A snapshot
     taken on another machine or under another home writes its store only where this machine's own
-    settings name the same folder, or where `secret_store_target` (`--secret-store-target`) names it."""
+    settings name the same folder, or where `secret_store_target` (`--secret-store-target`) names it.
+
+    `secret_store_verify_into` (`--secret-store-verify-into DIR`, OBS-394) writes each carried store into
+    `DIR/<name>/` instead and reads it back against the manifest (`secret_store_carry.verify_into`): the folder
+    the settings name is never written, locked or recorded, no confirmation is asked, and the restore record
+    is not written. A policy other than `auto` or a `secret_store_target` beside it is refused."""
     if secret_store not in secret_store_carry.POLICIES:
         raise config.ConfigurationError(f"--secret-store takes one of {', '.join(secret_store_carry.POLICIES)}")
+    if secret_store_verify_into is not None:
+        # Refused before anyone is asked for a passphrase: what needs no snapshot is checked first.
+        secret_store_carry.verify_conflict(secret_store, secret_store_target)
+        secret_store_carry.check_verify_into(secret_store_verify_into, [(destination, 'the new home')],
+                                             require_empty=False)
     if source.is_file() and not source.is_symlink():
         # Refused before anyone is asked for a passphrase (the same refusal as below).
         if destination.exists() and not destination.is_symlink() and destination.is_dir() and any(destination.iterdir()):
@@ -952,7 +962,8 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
             result = restore(stage, destination, same_machine=same_machine, second_machine=second_machine,
                              unknown=unknown, secret_store=secret_store, secret_store_names=secret_store_names,
                              snapshot_name=snapshot_name or source.name, secret_store_target=secret_store_target,
-                             snapshot_path=snapshot_path or str(source.resolve()))
+                             snapshot_path=snapshot_path or str(source.resolve()),
+                             secret_store_verify_into=secret_store_verify_into)
         finally:
             shutil.rmtree(stage, ignore_errors=True)
         result['passphrase_source'] = opened_by
@@ -973,10 +984,17 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
     if destination.exists() and any(destination.iterdir()):
         raise config.ConfigurationError('Restore requires a new empty destination; existing state is never overwritten')
     # The carried secret stores, decided before the home is staged: a refusal here changes nothing.
-    store_plan = secret_store_carry.restore_plan(
-        source, manifest, restored_sources(source, manifest), destination, secret_store,
-        foreign=placing['mode'] != 'same-machine' or _another_home(manifest), confirm=secret_store_target,
-        current_sources=_current_sources(destination))
+    verify_into = None
+    if secret_store_verify_into is not None:
+        verify_into = _verify_into(secret_store_verify_into, source, manifest, destination,
+                                   [(restored_sources(source, manifest), "the snapshot's settings"),
+                                    (_current_sources(destination), "this machine's settings")])
+        store_plan = None
+    else:
+        store_plan = secret_store_carry.restore_plan(
+            source, manifest, restored_sources(source, manifest), destination, secret_store,
+            foreign=placing['mode'] != 'same-machine' or _another_home(manifest), confirm=secret_store_target,
+            current_sources=_current_sources(destination))
     with operation_lock(destination, existing=False):
         if destination.exists() and any(destination.iterdir()):
             raise config.ConfigurationError('Restore destination changed')
@@ -995,9 +1013,13 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
             preflight(stage)
             sync_tree(stage)
             # The stores before the home: a store that cannot be written leaves the home unwritten.
-            stores = secret_store_carry.apply_plan(source, store_plan, secret_store,
-                                                   snapshot=snapshot_name or source.name,
-                                                   taken_on=manifest.get('machine_id'))
+            if verify_into is not None:
+                verified = secret_store_carry.verify_into(source, manifest, verify_into)
+                stores = []
+            else:
+                stores = secret_store_carry.apply_plan(source, store_plan, secret_store,
+                                                       snapshot=snapshot_name or source.name,
+                                                       taken_on=manifest.get('machine_id'))
             if destination.exists():
                 destination.rmdir()
             os.rename(stage,destination)
@@ -1009,13 +1031,26 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
     result = {'status':'restored','files':restored,'scheduler_activated':False,
               'external_sources_included':bool(stores) and all(r['state'] in ('written','same','merged','replaced')
                                                               for r in stores),
-              'machine':{**placing, **(machine or {})}, 'paths':paths,
-              'secret_store':_said(secret_store_carry.restore_summary(store_plan, stores, names=secret_store_names),
-                                   snapshot_path or str(source))}
-    _record_restore(destination, result['secret_store'], snapshot_name or source.name)
+              'machine':{**placing, **(machine or {})}, 'paths':paths}
+    if verify_into is not None:
+        # A verification is not a restore: doctor's restore record is neither written nor removed.
+        result['secret_store'] = secret_store_carry.verify_summary(verified)
+    else:
+        result['secret_store'] = _said(secret_store_carry.restore_summary(store_plan, stores, names=secret_store_names),
+                                       snapshot_path or str(source))
+        _record_restore(destination, result['secret_store'], snapshot_name or source.name)
     if digests is not None:
         result['digest_manifest'] = digests
     return result
+
+
+def _verify_into(into, source: Path, manifest: dict, home: Path, settings: list[tuple[dict, str]]) -> Path:
+    """The folder `--secret-store-verify-into` writes into, checked once the snapshot is read: never the new
+    home or the workspace, the snapshot, or a folder any of `settings` (or the environment) names for a
+    secret store (OBS-394)."""
+    avoid = [(home, 'the new home or this workspace'), (source, 'the snapshot')]
+    avoid += secret_store_carry.setting_folders(manifest, settings, home)
+    return secret_store_carry.check_verify_into(into, avoid)
 
 
 def store_next_step(summary: dict, snapshot: str) -> str | None:
@@ -1086,28 +1121,41 @@ def _record_restore(base: Path, summary: dict, snapshot: str, *, full: bool = Tr
 def restore_store_only(source: Path, base: Path, *, secret_store: str = 'auto', secret_store_names: bool = False,
                        secret: str | None = None, stdin_value: str | None = None, prompt: bool = True,
                        snapshot_name: str | None = None, secret_store_target: str | None = None,
-                       snapshot_path: str | None = None) -> dict:
+                       snapshot_path: str | None = None,
+                       secret_store_verify_into: str | os.PathLike | None = None) -> dict:
     """Write only the secret stores a snapshot carried, into the folders the CURRENT workspace's settings
     name (`full restore SNAPSHOT --secret-store-only`, OBS-350). For a workspace an older engine restored,
     a restore interrupted between the store and the home, or a store a restore skipped. The home is never
     written, except its restore record. `secret_store_target`, when given, must name that folder (the
-    confirmation a skipped restore's step carries); another folder is refused, never ignored."""
+    confirmation a skipped restore's step carries); another folder is refused, never ignored.
+
+    `secret_store_verify_into` (OBS-394) verifies instead of writing: each store goes into `DIR/<name>/` and is
+    read back against the manifest, the settings' folders are never written or locked, the restore record is
+    left as it is, and no workspace is needed here (one that is there adds its settings' folders to those DIR
+    may not touch)."""
     if secret_store not in secret_store_carry.POLICIES:
         raise config.ConfigurationError(f"--secret-store takes one of {', '.join(secret_store_carry.POLICIES)}")
+    verifying = secret_store_verify_into is not None
+    if verifying:
+        secret_store_carry.verify_conflict(secret_store, secret_store_target)
+        secret_store_carry.check_verify_into(secret_store_verify_into, [(base, 'the new home or this workspace')],
+                                             require_empty=False)
     workspace.reject_symlinks(base)
-    if not (base / 'workspace.json').is_file():
+    has_workspace = (base / 'workspace.json').is_file()
+    if not has_workspace and not verifying:
         raise config.ConfigurationError('--secret-store-only writes the stores of an existing workspace; there is '
                                         'none here: restore the whole snapshot into a new empty home instead')
     if source.is_file() and not source.is_symlink():
         secret, _header, opened_by = backup_vault.open_with(
-            source.resolve(), base=base, label=source.resolve().parent.name, given=secret, stdin_value=stdin_value,
-            prompt=prompt, verify=False)
+            source.resolve(), base=base if has_workspace else None, label=source.resolve().parent.name, given=secret,
+            stdin_value=stdin_value, prompt=prompt, verify=False)
         stage = backup_vault.extract_tree(source.resolve(), base.resolve().parent, secret)
         try:
             result = restore_store_only(stage, base, secret_store=secret_store, secret_store_names=secret_store_names,
                                         snapshot_name=snapshot_name or source.name,
                                         secret_store_target=secret_store_target,
-                                        snapshot_path=snapshot_path or str(source.resolve()))
+                                        snapshot_path=snapshot_path or str(source.resolve()),
+                                        secret_store_verify_into=secret_store_verify_into)
         finally:
             shutil.rmtree(stage, ignore_errors=True)
         result['passphrase_source'] = opened_by
@@ -1115,7 +1163,14 @@ def restore_store_only(source: Path, base: Path, *, secret_store: str = 'auto', 
     workspace.reject_symlinks(source)
     source, base = source.resolve(), base.resolve()
     manifest = verify_snapshot(source)
-    sources = config.load(base).get('sources') or {}
+    sources = (config.load(base).get('sources') or {}) if has_workspace else {}
+    if verifying:
+        into = _verify_into(secret_store_verify_into, source, manifest, base,
+                            [(restored_sources(source, manifest), "the snapshot's settings"),
+                             (sources, "this workspace's settings")])
+        verified = secret_store_carry.verify_into(source, manifest, into)
+        # A verification is not a restore: doctor's restore record is left as it is.
+        return {'status':'store-verified', 'secret_store':secret_store_carry.verify_summary(verified)}
     with operation_lock(base):
         # A target given is a confirmation like a foreign snapshot's: it must be the folder the settings name.
         store_plan = secret_store_carry.restore_plan(source, manifest, sources, base, secret_store,
@@ -1324,6 +1379,11 @@ def parser() -> argparse.ArgumentParser:
     res.add_argument('--secret-store-target',metavar='PATH',
                      help='confirm where a snapshot taken on another machine or under another home writes its '
                           'secret store: must equal the folder its settings name, as the refusal shows it')
+    res.add_argument('--secret-store-verify-into',metavar='DIR',
+                     help='verify the carried secret stores instead of putting them back: write each into DIR/<name>/ '
+                          '(DIR empty or absent, outside the workspace and every secret store) and check every '
+                          'SHA-256 against the snapshot; the folder the settings name is never touched, and the '
+                          'verified copy is left in DIR for you to remove')
     res.add_argument('--secret-store-names',action='store_true',
                      help='name the store\'s conflicting and not restored files by relative path (default: counts)')
     res.add_argument('--json',action='store_true',
@@ -1358,7 +1418,8 @@ def main(argv: list[str]) -> int:
                                                 '--same-machine or --second-machine')
             result = restore_store_only(args.snapshot, base, secret_store=args.secret_store,
                                         secret_store_names=args.secret_store_names, stdin_value=stdin_value,
-                                        secret_store_target=args.secret_store_target)
+                                        secret_store_target=args.secret_store_target,
+                                        secret_store_verify_into=args.secret_store_verify_into)
         elif getattr(args, 'same_machine', False) and getattr(args, 'second_machine', False):
             raise config.ConfigurationError('Give --same-machine or --second-machine, not both')
         # A terminal the person types in (a real console on Windows, where NUL also reads as a tty).
@@ -1373,7 +1434,8 @@ def main(argv: list[str]) -> int:
                                                 second_machine=args.second_machine or None,
                                                 stdin_value=stdin_value, ask=True, secret_store=args.secret_store,
                                                 secret_store_names=args.secret_store_names,
-                                                secret_store_target=args.secret_store_target)
+                                                secret_store_target=args.secret_store_target,
+                                                secret_store_verify_into=args.secret_store_verify_into)
             if result.get('status') != 'restored':
                 print(json.dumps(result,indent=2))
                 return 2
@@ -1383,7 +1445,8 @@ def main(argv: list[str]) -> int:
             result = restore(args.snapshot,base,same_machine=args.same_machine or None,
                              second_machine=args.second_machine or None,stdin_value=stdin_value,
                              secret_store=args.secret_store,secret_store_names=args.secret_store_names,
-                             secret_store_target=args.secret_store_target)
+                             secret_store_target=args.secret_store_target,
+                             secret_store_verify_into=args.secret_store_verify_into)
         print(json.dumps(result,indent=2))
         return 0
     # The same voice as every other command: `Observatory: <reason>`. A refusal

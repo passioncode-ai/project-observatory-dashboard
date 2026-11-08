@@ -2412,6 +2412,32 @@ Without a release that does this, `full backups decrypt FILE DIR` opens the snap
 manifest lists under `externals[].links` (`ln -s TARGET PATH` inside the store: links are recorded, never
 stored as links), and then delete `DIR`, which holds every key in plaintext.
 
+**Checking a backup's store without touching the live one.** A restore check (a weekly restore of the newest
+backup into a temporary home, say) proves the store opens without writing where the settings point, which on
+the machine that took the backup is the store in use:
+
+```sh
+project-observatory --home NEW_EMPTY_HOME full restore SNAPSHOT --secret-store-verify-into DIR [--json]
+project-observatory full restore SNAPSHOT --secret-store-only --secret-store-verify-into DIR [--json]
+```
+
+Each carried store is written into `DIR/<name>/` (folders 0700, files 0600) and read back: every file's size
+and SHA-256 against the snapshot's manifest, every folder and link, nothing unlisted. The answer's
+`secret_store` reads `verified` with `files`, `bytes`, `links`, `directories`, `skipped` (files the snapshot did
+not carry, and links a system without them cannot make), `left_at` and `into`; `stores` lists each when there
+are several. The folder the settings name is never written, locked or swept, so a snapshot from another
+machine needs no `--secret-store-target`, and the restore record doctor reads is not written: a verification
+neither raises nor clears `backups-secret-store-not-restored`. With `--secret-store-only` no workspace is
+needed. The verified copy stays in `DIR`, every key in plaintext, for you to remove when the check is done; a copy that fails to verify
+is removed at once (`secret-store-verify-failed`, exit 1, and no home is restored). Refused, exit 2, nothing
+written: `secret-store-verify-into-not-empty` (DIR holds something, or is a link or a file),
+`secret-store-verify-into-refused` (DIR is, holds or lies inside the new home or this workspace, the snapshot,
+a folder the snapshot's or this workspace's settings name for a store, `OBSERVATORY_SECRETS` or
+`OBSERVATORY_VAULT_DIR`, or one of the places a store is never written), and
+`secret-store-verify-into-conflict` (beside `--secret-store-target` or a `--secret-store` policy other than
+`auto`, which only mean something when the store is written in place). A tampered carried file is refused
+before anything is written (`secret-store-manifest-mismatch`).
+
 **A slot that stays on this machine on purpose** (a root seed, an administrator token whose single home is
 this machine) is marked once, and no snapshot carries it from then on:
 

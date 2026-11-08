@@ -1527,3 +1527,201 @@ def restore_summary(plan_: dict | None, results: list[dict], *, names: bool = Fa
     if len(results) > 1:
         first["stores"] = [one(r) for r in results]
     return first
+
+
+# --- verifying a carried store without putting it back (OBS-394) ---------------------------------------
+#
+# WHY. A weekly restore check restores the newest backup into a temporary home to prove it opens. The carried
+# store could only be checked by writing it where the snapshot's settings name it, which on the machine the
+# backup came from is the live store, and on another machine needs `--secret-store-target` for that same
+# folder. `full restore --secret-store-verify-into DIR` writes each carried store into `DIR/<name>/` instead,
+# checks every file against the manifest's SHA-256 and size, every folder and link, and nothing more, and
+# answers `verified` with counts. The folder the settings name is never written, locked, swept or recorded:
+# nothing live changes, so no confirmation is asked even for a snapshot from another machine.
+#
+# WHAT IS LEFT. The verified copy stays at `DIR/<name>/` (folders 0700, files 0600 through osprivacy) and the
+# caller removes it; a copy that fails is removed at once. The restore record doctor reads
+# (`store/raw/secret-store-restore.json`) is not written: a verification is not a restore, and it must neither
+# clear nor raise `backups-secret-store-not-restored`. The answer is the only report.
+
+#: The refusals of `--secret-store-verify-into` (exit 2, nothing written) and its failure (exit 1).
+VERIFY_NOT_EMPTY = "secret-store-verify-into-not-empty"
+VERIFY_REFUSED = "secret-store-verify-into-refused"
+VERIFY_CONFLICT = "secret-store-verify-into-conflict"
+VERIFY_FAILED = "secret-store-verify-failed"
+_VERIFY_STEP = ("Choose an empty or absent folder outside the workspace and outside every secret store, and run "
+                "project-observatory full restore SNAPSHOT --secret-store-verify-into DIR")
+
+
+def verify_conflict(policy: str, target: str | None) -> None:
+    """Refuse a verification combined with a choice about the live folder: a policy other than the default
+    (`--secret-store keep|merge|replace|skip`) or `--secret-store-target`, which only mean something when the
+    store is written there."""
+    given = [f"--secret-store {policy}"] if policy != "auto" else []
+    given += ["--secret-store-target"] if target else []
+    if given:
+        raise CarryRefused(VERIFY_CONFLICT, (
+            f"--secret-store-verify-into writes the carried store only into the folder it names and never where the "
+            f"settings point, so {' and '.join(given)} has nothing to act on; nothing was written. Give "
+            "--secret-store-verify-into DIR alone to verify, or leave it out to restore the store"))
+
+
+def _overlaps(a: Path, b: Path) -> bool:
+    """Whether one folder is the other or lies inside it, compared resolved and case-folded where the file
+    system folds case; a path that cannot be resolved is compared as written."""
+    def real(path: Path) -> Path:
+        try:
+            return path.resolve()
+        except (OSError, RuntimeError):
+            return Path(os.path.abspath(path))
+    ra, rb = real(a), real(b)
+    return _inside_folded(ra, rb) or _inside_folded(rb, ra)
+
+
+def check_verify_into(into: str | os.PathLike, avoid: list[tuple[Path | None, str]], *,
+                      require_empty: bool = True) -> Path:
+    """The absolute folder a verification writes into, or `CarryRefused`.
+
+    Refused, in this order: a place no store is ever written to (`refused_location`), and a folder that is,
+    holds or lies inside one of `avoid`: the new home, the snapshot, and every folder a setting names for a
+    secret store (`secret-store-verify-into-refused`); then a folder that holds anything, or a link or file at
+    that path (`secret-store-verify-into-not-empty`). `require_empty` false checks the place alone: the restore
+    does so before a passphrase is asked, when the settings' folders are not known yet."""
+    try:
+        path = Path(os.path.abspath(Path(into).expanduser()))
+    except (RuntimeError, KeyError):
+        raise CarryRefused(VERIFY_REFUSED, f"--secret-store-verify-into {into} cannot be expanded; nothing was "
+                                           f"written. {_VERIFY_STEP}") from None
+    shown = backup_vault._display(path)
+    why = refused_location(path)
+    if why is None:
+        for folder, what in avoid:
+            if folder is not None and _overlaps(path, folder):
+                why = f"{what} ({backup_vault._display(folder)}), or a folder holding it or inside it"
+                break
+    if why:
+        raise CarryRefused(VERIFY_REFUSED, (
+            f"--secret-store-verify-into {shown} is {why}; a verified copy is never written there, so the live "
+            f"store and the workspace stay as they are, and nothing was written. {_VERIFY_STEP}"))
+    if require_empty and os.path.lexists(path):
+        try:
+            busy = path.is_symlink() or not path.is_dir() or any(path.iterdir())
+        except OSError:
+            busy = True
+        if busy:
+            raise CarryRefused(VERIFY_NOT_EMPTY, (
+                f"--secret-store-verify-into {shown} is not an empty folder (it holds something, or is a link or a "
+                "file); a verified copy is only written where nothing is, and nothing was written. "
+                f"{_VERIFY_STEP}"))
+    return path
+
+
+def setting_folders(manifest: dict, sources_list: list[tuple[dict, str]],
+                    home: Path) -> list[tuple[Path | None, str]]:
+    """Every folder a setting names for a store the snapshot carried (`sources_list`: the settings' `sources`
+    and what they are, such as the snapshot's or this workspace's), and the folders the environment names."""
+    out: list[tuple[Path | None, str]] = []
+    for entry in manifest.get("externals") or []:
+        if not isinstance(entry, dict):
+            continue
+        for sources, what in sources_list:
+            target, setting, _ = resolve_target(entry, sources or {}, home)
+            if target is not None:
+                out.append((target, f"the folder {what} sources.{setting} names"))
+    for name in (backup_vault.SECRETS_ENV, backup_vault.VAULT_DIR_ENV):
+        value = os.environ.get(name)
+        if value and value.strip():
+            try:
+                out.append((Path(os.path.abspath(Path(value).expanduser())), f"the folder {name} names"))
+            except (RuntimeError, KeyError):
+                continue
+    return out
+
+
+def _verify_copy(root: Path, entry: dict) -> None:
+    """Read the copy back: every listed file a regular file of its size and SHA-256, every listed folder a
+    folder, every link (POSIX) its recorded target, and nothing unlisted. Raises `_Unreadable`."""
+    files = {row["path"]: row for row in entry.get("files") or []}
+    dirs = {row["path"] for row in entry.get("directories") or []}
+    links = {} if osprivacy.WINDOWS else {row["path"]: row["target"] for row in entry.get("links") or []}
+    seen_files, seen_dirs, seen_links = set(), set(), set()
+    for current, children, names in os.walk(root, followlinks=False):
+        here = Path(current)
+        for name in [*children, *names]:
+            path = here / name
+            rel = path.relative_to(root).as_posix()
+            info = path.lstat()
+            if stat.S_ISLNK(info.st_mode):
+                seen_links.add(rel)
+                if links.get(rel) != os.readlink(path):
+                    raise _Unreadable("a link's target differs")
+            elif stat.S_ISDIR(info.st_mode):
+                seen_dirs.add(rel)
+            elif stat.S_ISREG(info.st_mode):
+                seen_files.add(rel)
+                row = files.get(rel)
+                if row is None or info.st_size != row["size"] or _digest_file(path)[1] != row["sha256"]:
+                    raise _Unreadable("a file's size or SHA-256 differs from the manifest")
+            else:
+                raise _Unreadable("a special file")
+    if seen_files != set(files) or seen_links != set(links) or seen_dirs != dirs:
+        raise _Unreadable("missing or unlisted files, folders or links")
+
+
+def verify_into(source: Path, manifest: dict, into: Path) -> dict:
+    """Write each carried store of a verified snapshot into `into/<name>/` and read it back against the
+    manifest; `{"present": bool, "into": Path, "rows": [...]}`. Nothing is written when no store was carried.
+    Raises `CarryFailed` (`secret-store-verify-failed`, or `secret-store-write-failed` for a write that
+    failed); the store folder it was writing is removed first."""
+    entries = manifest.get("externals")
+    if not isinstance(entries, list):
+        return {"present": False, "into": into, "rows": []}
+    rows = []
+    written: list[Path] = []
+    for entry in entries:
+        name = entry.get("name")
+        if entry.get("state") != "carried":
+            rows.append({"name": name, "state": "not-in-snapshot", "reason": entry.get("reason")})
+            continue
+        root = into / name
+        shown = backup_vault._display(root)
+        try:
+            if not os.path.lexists(into):
+                _make_parents(into)
+            if os.path.lexists(root):
+                raise _Unreadable("the folder for it already exists")
+            written.append(root)
+            not_written = _write_tree(source / EXTERNAL / name, entry, root)
+            _verify_copy(root, entry)
+        except (OSError, _Unreadable) as exc:
+            # Every copy this run made goes: a half-verified set of secrets is not left behind.
+            for made in written:
+                if os.path.lexists(made) and not made.is_symlink():
+                    shutil.rmtree(made, ignore_errors=True)
+            code = VERIFY_FAILED if isinstance(exc, _Unreadable) else "secret-store-write-failed"
+            what = str(exc) if isinstance(exc, _Unreadable) else type(exc).__name__
+            raise CarryFailed(code, (
+                f"The carried secret store {name} did not verify at {shown} ({what}); the copies this run made were "
+                "removed, the folder the settings name was not touched, and no home was restored")) from None
+        files = entry.get("files") or []
+        rows.append({"name": name, "state": "verified", "left_at": shown, "files": len(files),
+                     "bytes": sum(row["size"] for row in files),
+                     "links": len(entry.get("links") or []) - len(not_written),
+                     "directories": len(entry.get("directories") or []),
+                     "skipped": len(entry.get("not_carried") or []) + len(not_written)})
+    return {"present": True, "into": into, "rows": rows}
+
+
+def verify_summary(result: dict) -> dict:
+    """The answer's `secret_store` for a verification: the first store's row at the top, `into`, and `stores`
+    when there are several."""
+    if not result["present"]:
+        return {"state": "not-in-snapshot"}
+    if not result["rows"]:
+        return {"state": "not-applicable"}
+    first = dict(result["rows"][0])
+    if any(row["state"] == "verified" for row in result["rows"]):
+        first["into"] = backup_vault._display(result["into"])
+    if len(result["rows"]) > 1:
+        first["stores"] = [dict(row) for row in result["rows"]]
+    return first

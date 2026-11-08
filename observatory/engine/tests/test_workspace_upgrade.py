@@ -2247,5 +2247,192 @@ class RestoreSecretStore(unittest.TestCase):
         self.assertEqual((row['state'],row['reason']),('skipped','secret-store-target-refused'))
 
 
+
+@unittest.skipIf(os.name=='nt','OBS-278: a workspace snapshot and its restore stop at a bad file descriptor on '
+                                 'Windows before their own checks; this class runs once that row lands')
+class VerifySecretStoreInto(unittest.TestCase):
+    """OBS-394: `full restore --secret-store-verify-into DIR` writes each carried store into a disposable
+    folder, checks every SHA-256 against the snapshot manifest and answers `verified`, and never touches,
+    locks or records anything at the folder the settings name."""
+
+    setUp=ExternalSecretStore.setUp
+    tearDown=ExternalSecretStore.tearDown
+    encrypted=ExternalSecretStore.encrypted
+    restore=RestoreSecretStore.restore
+    assert_store_is_the_snapshot=RestoreSecretStore.assert_store_is_the_snapshot
+
+    def take(self):
+        result,opened,manifest=self.encrypted()
+        self.opened=opened
+        return Path(result['snapshot']),manifest
+
+    def live_state(self):
+        """The live store as the settings name it: every entry with its bytes, and the folders' mtimes."""
+        times={rel:os.lstat(self.store/rel).st_mtime_ns for rel in ('','projects')}
+        siblings=sorted(p.name for p in self.store.parent.iterdir() if self.store.name in p.name)
+        return _tree(self.store),times,siblings
+
+    def test_a_foreign_snapshot_is_verified_without_touching_the_live_store(self):
+        import secret_store_carry
+        snapshot,manifest=self.take()
+        [entry]=manifest['externals']
+        # The live store moves on after the snapshot and has no lock file: a write, a lock or a stage would show.
+        (self.store/'projects/alpha/prod/API_KEY').write_text('fixture-value-020\n')
+        (self.store/'projects/.vault.lock').unlink()
+        before=self.live_state()
+        into=self.base/'verify-here'
+        new=self.base/'restored'
+        with patch.dict(os.environ,{'OBSERVATORY_MACHINE_ID':BETA}), \
+                patch.object(secret_store_carry,'vault_lock',side_effect=AssertionError('a lock was taken')):
+            result=self.restore(snapshot,new,secret_store_verify_into=str(into))
+        self.assertEqual(result['status'],'restored')
+        block=result['secret_store']
+        self.assertEqual((block['state'],block['name']),('verified','secret_store'))
+        self.assertEqual(block['files'],len(entry['files']))
+        self.assertEqual(block['bytes'],sum(r['size'] for r in entry['files']))
+        self.assertEqual((block['links'],block['skipped']),(len(entry['links']),len(entry['not_carried'])))
+        self.assertEqual(block['left_at'],backup_display(into/'secret_store'))
+        self.assertEqual(block['into'],backup_display(into))
+        self.assertFalse(result['external_sources_included'],'nothing was put in place')
+        self.assertEqual(self.live_state(),before,'the live store is untouched, unlocked, with no stage beside it')
+        self.assert_store_is_the_snapshot(into/'secret_store')
+        self.assertEqual(stat.S_IMODE((into/'secret_store').stat().st_mode),0o700)
+        self.assertEqual(stat.S_IMODE((into/'secret_store/projects/alpha').stat().st_mode),0o700)
+        self.assertEqual(stat.S_IMODE((into/'secret_store/projects/alpha/prod/API_KEY').stat().st_mode),0o600)
+        self.assertFalse(os.path.lexists(new/'store/raw/secret-store-restore.json'),
+                         'a verification is not a restore: doctor\'s record is not written')
+        # With this machine's workspace gone the snapshot is unconfirmed, and still needs no confirmation.
+        shutil.rmtree(self.home)
+        shutil.rmtree(self.store)
+        with patch.dict(os.environ,{'OBSERVATORY_MACHINE_ID':BETA}):
+            again=self.restore(snapshot,self.base/'restored-2',secret_store_verify_into=str(self.base/'verify-2'))
+        self.assertEqual(again['secret_store']['state'],'verified')
+        self.assertFalse(os.path.lexists(self.store),'the folder the settings name is never created')
+
+    def test_a_carried_file_that_differs_from_the_manifest_is_refused_before_anything_is_written(self):
+        import secret_store_carry
+        self.take()
+        (self.opened/'external/secret_store/projects/alpha/prod/API_KEY').write_text('fixture-value-021\n')
+        into=self.base/'verify-here'
+        with self.assertRaises(secret_store_carry.CarryRefused) as caught:
+            upgrade.restore(self.opened,self.base/'restored',secret_store_verify_into=str(into))
+        self.assertEqual(caught.exception.code,'secret-store-manifest-mismatch')
+        self.assertFalse(os.path.lexists(into))
+        self.assertFalse(os.path.lexists(self.base/'restored'))
+
+    def test_a_copy_whose_digest_differs_once_written_fails_and_is_removed(self):
+        import secret_store_carry
+        snapshot,_=self.take()
+        real=secret_store_carry._copy_file
+
+        def damaged(source,target):
+            out=real(source,target)
+            if target.name=='API_KEY':
+                with open(target,'ab') as stream:
+                    stream.write(b'x')
+            return out
+        into=self.base/'verify-here'
+        new=self.base/'restored'
+        out=io.StringIO()
+        with patch.dict(os.environ,{'OBSERVATORY_HOME':str(new),'OBSERVATORY_BACKUP_PASSPHRASE':PASSPHRASE}), \
+                patch.object(secret_store_carry,'_copy_file',damaged),contextlib.redirect_stdout(out):
+            code=upgrade.main(['restore',str(snapshot),'--secret-store-verify-into',str(into),'--json'])
+        self.outputs.append(out.getvalue())
+        self.assertEqual(code,1)
+        self.assertEqual(json.loads(out.getvalue())['error']['code'],'secret-store-verify-failed')
+        self.assertFalse(os.path.lexists(into/'secret_store'),'a copy that failed is removed, never left')
+        self.assertFalse(os.path.lexists(new),'the home is not restored either')
+
+    def test_a_folder_that_is_not_empty_inside_the_store_or_protected_is_refused(self):
+        import secret_store_carry
+        snapshot,_=self.take()
+        full=self.base/'not-empty'
+        full.mkdir()
+        (full/'notes.txt').write_text('a person\'s own file')
+        fake_home=self.base/'fake-home'
+        (fake_home/'.ssh').mkdir(parents=True)
+        cases={'secret-store-verify-into-not-empty':[full],
+               'secret-store-verify-into-refused':[self.store,self.store/'check',self.base/'restored'/'check',
+                                                   fake_home/'.ssh'/'verify',self.base]}
+        before=_tree(self.store)
+        with patch.object(secret_store_carry,'_user_home',lambda: fake_home):
+            for code,folders in cases.items():
+                for folder in folders:
+                    with self.subTest(str(folder.relative_to(self.base))):
+                        with self.assertRaises(secret_store_carry.CarryRefused) as caught:
+                            self.restore(snapshot,self.base/'restored',secret_store_verify_into=str(folder))
+                        self.assertEqual(caught.exception.code,code)
+                        self.assertIn('--secret-store-verify-into',str(caught.exception))
+                        self.assertFalse(os.path.lexists(self.base/'restored'))
+        self.assertEqual(_tree(self.store),before)
+        self.assertEqual([p.name for p in full.iterdir()],['notes.txt'])
+        self.assertFalse(os.path.lexists(fake_home/'.ssh'/'verify'))
+
+    def test_a_contradictory_combination_is_refused_on_the_command_line(self):
+        snapshot,_=self.take()
+        into=self.base/'verify-here'
+        new=self.base/'restored'
+        for extra in (['--secret-store-target',str(self.store)],['--secret-store','merge'],
+                      ['--secret-store','skip'],['--secret-store-only','--secret-store-target',str(self.store)]):
+            with self.subTest(' '.join(extra[:2])):
+                out=io.StringIO()
+                with patch.dict(os.environ,{'OBSERVATORY_HOME':str(new),'OBSERVATORY_BACKUP_PASSPHRASE':PASSPHRASE}), \
+                        contextlib.redirect_stdout(out):
+                    code=upgrade.main(['restore',str(snapshot),'--secret-store-verify-into',str(into),*extra,
+                                       '--json'])
+                self.outputs.append(out.getvalue())
+                self.assertEqual(code,2)
+                self.assertEqual(json.loads(out.getvalue())['error']['code'],'secret-store-verify-into-conflict')
+                self.assertFalse(os.path.lexists(into))
+                self.assertFalse(os.path.lexists(new))
+        out=io.StringIO()
+        with patch.dict(os.environ,{'OBSERVATORY_HOME':str(new),'OBSERVATORY_BACKUP_PASSPHRASE':PASSPHRASE}), \
+                contextlib.redirect_stdout(out):
+            code=upgrade.main(['restore',str(snapshot),'--secret-store-verify-into',str(into),'--json'])
+        self.outputs.append(out.getvalue())
+        self.assertEqual(code,0)
+        self.assertEqual(json.loads(out.getvalue())['secret_store']['state'],'verified')
+
+    def test_secret_store_only_verifies_and_leaves_the_doctor_record_alone(self):
+        snapshot,_=self.take()
+        new=self.base/'restored'
+        first=self.restore(snapshot,new,secret_store='skip')
+        self.assertEqual(first['secret_store']['state'],'skipped')
+        record=new/'store/raw/secret-store-restore.json'
+        recorded=record.read_bytes()
+        before=_tree(self.store)
+        home_before=_tree(new)
+        into=self.base/'verify-here'
+        out=io.StringIO()
+        with patch.dict(os.environ,{'OBSERVATORY_HOME':str(new),'OBSERVATORY_BACKUP_PASSPHRASE':PASSPHRASE}), \
+                contextlib.redirect_stdout(out):
+            code=upgrade.main(['restore',str(snapshot),'--secret-store-only','--secret-store-verify-into',str(into),
+                               '--json'])
+        self.outputs.append(out.getvalue())
+        self.assertEqual(code,0)
+        answer=json.loads(out.getvalue())
+        self.assertEqual((answer['status'],answer['secret_store']['state']),('store-verified','verified'))
+        self.assert_store_is_the_snapshot(into/'secret_store')
+        self.assertEqual(_tree(self.store),before)
+        self.assertEqual(record.read_bytes(),recorded,'the restore record doctor reads is left as it was')
+        self.assertEqual({k:v for k,v in _tree(new).items() if not k.endswith('.lock')},
+                         {k:v for k,v in home_before.items() if not k.endswith('.lock')},'the home is not touched')
+        # A folder inside this workspace's own settings' store is refused the same way.
+        import secret_store_carry
+        with patch.dict(os.environ,{'OBSERVATORY_BACKUP_PASSPHRASE':PASSPHRASE}):
+            with self.assertRaises(secret_store_carry.CarryRefused) as caught:
+                upgrade.restore_store_only(snapshot,new,secret_store_verify_into=str(self.store/'inside'))
+        self.assertEqual(caught.exception.code,'secret-store-verify-into-refused')
+
+    def test_a_snapshot_that_carried_no_store_verifies_nothing_and_writes_nothing(self):
+        out=self.base/'plain-snapshot'
+        upgrade.snapshot(self.home,out,writers_stopped=True,plaintext=True)
+        into=self.base/'verify-here'
+        result=self.restore(out,self.base/'r-plain',secret_store_verify_into=str(into))
+        self.assertEqual((result['secret_store']['state'],result['secret_store']['reason']),
+                         ('not-in-snapshot','plaintext-output'))
+        self.assertFalse(os.path.lexists(into))
+
+
 if __name__=='__main__':
     unittest.main()

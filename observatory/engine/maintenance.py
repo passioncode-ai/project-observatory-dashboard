@@ -2035,7 +2035,7 @@ def status(base: Path, *, schedule=None) -> dict:
 def restore_latest(base: Path, *, store=None, label: str | None = None, same_machine: bool | None = None,
                    second_machine: bool | None = None, unknown: str = "second", stdin_value: str | None = None,
                    ask: bool = False, secret_store: str = "auto", secret_store_names: bool = False,
-                   secret_store_target: str | None = None) -> dict:
+                   secret_store_target: str | None = None, secret_store_verify_into=None) -> dict:
     """Restore the newest backup a workspace at this path left (D7). Only into an empty home.
 
     When backups of more than one workspace exist under this name (a reinstall that could
@@ -2056,7 +2056,9 @@ def restore_latest(base: Path, *, store=None, label: str | None = None, same_mac
 
     `secret_store` is the policy for a secret store the snapshot carried (OBS-350): `full init` passes
     `keep`, so a reinstall over a surviving store never fails or overwrites it. A refusal of the store
-    (`secret-store-not-empty`, ...) is raised as it is: an older backup would meet the same store."""
+    (`secret-store-not-empty`, ...) is raised as it is: an older backup would meet the same store.
+    `secret_store_verify_into` verifies the carried stores into that folder instead (OBS-394,
+    `workspace_upgrade.restore`)."""
     import secret_store_carry
     import workspace_upgrade
     if base.exists() and any(p.name != ".workspace.lock" for p in base.iterdir()):
@@ -2117,7 +2119,8 @@ def restore_latest(base: Path, *, store=None, label: str | None = None, same_mac
                                                same_machine=same_machine, second_machine=second_machine,
                                                unknown=unknown, secret_store=secret_store,
                                                secret_store_names=secret_store_names,
-                                               secret_store_target=secret_store_target)
+                                               secret_store_target=secret_store_target,
+                                               secret_store_verify_into=secret_store_verify_into)
         except secret_store_carry.CarryRefused as exc:
             if exc.code != "secret-store-manifest-mismatch":
                 raise

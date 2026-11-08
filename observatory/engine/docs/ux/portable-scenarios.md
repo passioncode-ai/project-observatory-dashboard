@@ -1122,7 +1122,10 @@ machine `full restore SNAPSHOT` writes the store where the restored settings nam
 the home rewrite), before the home, and answers `secret_store.state` `written`; a folder already holding the same
 files reads `same`. `--secret-store keep|merge|replace|skip` chooses what happens to a different store already there;
 `--secret-store-only` writes the stores alone into the folders this workspace's settings name. The first machine's
-digest manifest becomes a peer, so `full vault-digests` compares against it at once.
+digest manifest becomes a peer, so `full vault-digests` compares against it at once. A restore check that must not touch the
+live store adds `--secret-store-verify-into DIR`: each store is written into `DIR/<name>/`, read back against the
+snapshot's SHA-256 manifest and answered `verified` with counts, the folder the settings name is never written or
+locked, and the copy is left in `DIR` for the caller to remove.
 
 Failure paths: a plaintext `--output` snapshot, no passphrase, a failed export, the pre-update snapshot, a store over
 256 MB, one that changed during two copies, or one that cannot be read is never carried, and the snapshot, the carry
@@ -1140,7 +1143,11 @@ store that cannot be written is left as it was and the home is not restored (`se
 `replace` moves the old store aside and never deletes it, and no folder is ever deleted; a target in the home
 itself or a sensitive folder (`~/.ssh` and the like) is refused (`secret-store-target-refused`); a snapshot from
 another machine or home writes only where `--secret-store-target` or this machine's settings confirm it
-(`secret-store-target-unconfirmed`); `--json` gives each as `{"error": {"code", "message"}}`.
+(`secret-store-target-unconfirmed`); `--json` gives each as `{"error": {"code", "message"}}`. A
+verification into a folder that is not empty, or inside the new home, the snapshot or a secret store's folder, is
+refused (`secret-store-verify-into-not-empty`, `secret-store-verify-into-refused`), as is one beside
+`--secret-store-target` or another policy (`secret-store-verify-into-conflict`); a copy that does not match is
+removed (`secret-store-verify-failed`, exit 1).
 `full init` on an empty home keeps a surviving store, and an update's rollback never touches it; a store init
 skipped (a folder not confirmed, refused, busy or unwritable) is in its answer with the exact `next` command, and
 doctor keeps `backups-secret-store-not-restored` with that command until a store is in that folder again, however
