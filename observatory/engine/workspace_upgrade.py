@@ -815,6 +815,31 @@ def rewrite_home_paths(stage: Path, *, old_home: str | None, new_home: Path | No
     return {'home_from': old_home or None, 'home_to': new, 'rewritten': rewritten, 'unresolved': unresolved}
 
 
+def _another_home(manifest: dict) -> bool:
+    """Whether the snapshot names a home other than this process's (a snapshot naming none is this home's)."""
+    old, new = manifest.get('home_path'), this_home()
+    if not isinstance(old, str) or not old or new is None or old == str(new):
+        return False
+    try:
+        return Path(old).resolve() != new.resolve()
+    except (OSError, RuntimeError):
+        return True
+
+
+def _current_sources(destination: Path) -> dict:
+    """This machine's own settings' `sources`, from the workspace this process runs for when it is another
+    folder than the restore's destination (an empty home has none). A foreign snapshot's store is written
+    without `--secret-store-target` only where these name the same folder."""
+    try:
+        base = config.home()
+        if base.resolve() == destination.resolve() or not (base / 'workspace.json').is_file():
+            return {}
+        sources = config.load(base).get('sources')
+        return dict(sources) if isinstance(sources, dict) else {}
+    except (config.ConfigurationError, OSError, RuntimeError):
+        return {}
+
+
 def restored_sources(source: Path, manifest: dict) -> dict:
     """The snapshot's `sources` as `rewrite_home_paths` will leave them, computed without writing: the
     restore decides where a carried secret store goes before the home is staged (OBS-350)."""
@@ -876,7 +901,7 @@ def digest_manifest_to_peers(stage: Path) -> dict | None:
 def restore(source: Path, destination: Path, *, secret: str | None = None, same_machine: bool | None = None,
             second_machine: bool | None = None, unknown: str = 'second', stdin_value: str | None = None,
             prompt: bool = True, secret_store: str = 'auto', secret_store_names: bool = False,
-            snapshot_name: str | None = None) -> dict:
+            snapshot_name: str | None = None, secret_store_target: str | None = None) -> dict:
     """A snapshot directory, or an encrypted `.obsnap` file from the backups root.
 
     The encrypted file is authenticated in full and decrypted beside the new home. Its
@@ -901,7 +926,9 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
     name it, under `secret_store` (`auto`, `keep`, `merge`, `replace`, `skip`; `secret_store_carry`):
     decided after verification and before the home is staged (a refusal writes nothing), and written
     before the home is renamed into place (a store that could not be written leaves no home). The
-    answer's `secret_store` gives counts, and relative paths only with `secret_store_names`."""
+    answer's `secret_store` gives counts, and relative paths only with `secret_store_names`. A snapshot
+    taken on another machine or under another home writes its store only where this machine's own
+    settings name the same folder, or where `secret_store_target` (`--secret-store-target`) names it."""
     if secret_store not in secret_store_carry.POLICIES:
         raise config.ConfigurationError(f"--secret-store takes one of {', '.join(secret_store_carry.POLICIES)}")
     if source.is_file() and not source.is_symlink():
@@ -917,7 +944,7 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
         try:
             result = restore(stage, destination, same_machine=same_machine, second_machine=second_machine,
                              unknown=unknown, secret_store=secret_store, secret_store_names=secret_store_names,
-                             snapshot_name=snapshot_name or source.name)
+                             snapshot_name=snapshot_name or source.name, secret_store_target=secret_store_target)
         finally:
             shutil.rmtree(stage, ignore_errors=True)
         result['passphrase_source'] = opened_by
@@ -938,8 +965,10 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
     if destination.exists() and any(destination.iterdir()):
         raise config.ConfigurationError('Restore requires a new empty destination; existing state is never overwritten')
     # The carried secret stores, decided before the home is staged: a refusal here changes nothing.
-    store_plan = secret_store_carry.restore_plan(source, manifest, restored_sources(source, manifest),
-                                                 destination, secret_store)
+    store_plan = secret_store_carry.restore_plan(
+        source, manifest, restored_sources(source, manifest), destination, secret_store,
+        foreign=placing['mode'] != 'same-machine' or _another_home(manifest), confirm=secret_store_target,
+        current_sources=_current_sources(destination))
     with operation_lock(destination, existing=False):
         if destination.exists() and any(destination.iterdir()):
             raise config.ConfigurationError('Restore destination changed')
@@ -1208,6 +1237,9 @@ def parser() -> argparse.ArgumentParser:
     res.add_argument('--secret-store-only',action='store_true',
                      help='write only the snapshot\'s carried secret stores, into the folders THIS workspace\'s '
                           'settings name; the home is not touched')
+    res.add_argument('--secret-store-target',metavar='PATH',
+                     help='confirm where a snapshot taken on another machine or under another home writes its '
+                          'secret store: must equal the folder its settings name, as the refusal shows it')
     res.add_argument('--secret-store-names',action='store_true',
                      help='name the store\'s conflicting and not restored files by relative path (default: counts)')
     res.add_argument('--json',action='store_true',
@@ -1255,7 +1287,8 @@ def main(argv: list[str]) -> int:
             result = maintenance.restore_latest(base, label=args.label, same_machine=args.same_machine or None,
                                                 second_machine=args.second_machine or None,
                                                 stdin_value=stdin_value, ask=True, secret_store=args.secret_store,
-                                                secret_store_names=args.secret_store_names)
+                                                secret_store_names=args.secret_store_names,
+                                                secret_store_target=args.secret_store_target)
             if result.get('status') != 'restored':
                 print(json.dumps(result,indent=2))
                 return 2
@@ -1264,7 +1297,8 @@ def main(argv: list[str]) -> int:
                 raise config.ConfigurationError('Name a snapshot, or pass --latest')
             result = restore(args.snapshot,base,same_machine=args.same_machine or None,
                              second_machine=args.second_machine or None,stdin_value=stdin_value,
-                             secret_store=args.secret_store,secret_store_names=args.secret_store_names)
+                             secret_store=args.secret_store,secret_store_names=args.secret_store_names,
+                             secret_store_target=args.secret_store_target)
         print(json.dumps(result,indent=2))
         return 0
     # The same voice as every other command: `Observatory: <reason>`. A refusal

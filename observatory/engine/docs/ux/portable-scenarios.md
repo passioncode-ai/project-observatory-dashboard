@@ -1137,7 +1137,10 @@ under the default `auto` with counts and the policy flags (`secret-store-not-emp
 folder the settings do not name, or one inside the new home, is refused the same way (`secret-store-unresolved`,
 `secret-store-target-inside-home`) and the message names the `configure sources` and `--secret-store-only` steps; a
 store that cannot be written is left as it was and the home is not restored (`secret-store-write-failed`, exit 1);
-`replace` moves the old store aside and never deletes it; `--json` gives each as `{"error": {"code", "message"}}`.
+`replace` moves the old store aside and never deletes it, and no folder is ever deleted; a target in the home
+itself or a sensitive folder (`~/.ssh` and the like) is refused (`secret-store-target-refused`); a snapshot from
+another machine or home writes only where `--secret-store-target` or this machine's settings confirm it
+(`secret-store-target-unconfirmed`); `--json` gives each as `{"error": {"code", "message"}}`.
 `full init` on an empty home keeps a surviving store, and an update's rollback never touches it.
 
 Acceptance: no value reaches a manifest, an answer, a record or a command's output; a store inside the workspace

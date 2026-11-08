@@ -2034,7 +2034,8 @@ def status(base: Path, *, schedule=None) -> dict:
 
 def restore_latest(base: Path, *, store=None, label: str | None = None, same_machine: bool | None = None,
                    second_machine: bool | None = None, unknown: str = "second", stdin_value: str | None = None,
-                   ask: bool = False, secret_store: str = "auto", secret_store_names: bool = False) -> dict:
+                   ask: bool = False, secret_store: str = "auto", secret_store_names: bool = False,
+                   secret_store_target: str | None = None) -> dict:
     """Restore the newest backup a workspace at this path left (D7). Only into an empty home.
 
     When backups of more than one workspace exist under this name (a reinstall that could
@@ -2115,7 +2116,8 @@ def restore_latest(base: Path, *, store=None, label: str | None = None, same_mac
             result = workspace_upgrade.restore(candidate["snapshot"], base, secret=secret, prompt=False,
                                                same_machine=same_machine, second_machine=second_machine,
                                                unknown=unknown, secret_store=secret_store,
-                                               secret_store_names=secret_store_names)
+                                               secret_store_names=secret_store_names,
+                                               secret_store_target=secret_store_target)
         except secret_store_carry.CarryRefused as exc:
             if exc.code != "secret-store-manifest-mismatch":
                 raise
