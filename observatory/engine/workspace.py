@@ -1000,6 +1000,10 @@ def _init(base: Path, *, fresh: bool = False) -> dict:
     if restored and restored.get("status") == "restored":
         result = {**result, "status": "restored", "restored_from": restored.get("from"),
                   "files": restored.get("files"), "machine": restored.get("machine")}
+        # What happened to a secret store the snapshot carried: under keep a folder not confirmed, busy or
+        # unwritable is skipped, and its `next` names the exact command that writes it (OBS-350).
+        if "secret_store" in restored:
+            result["secret_store"] = restored["secret_store"]
         if (restored.get("machine") or {}).get("mode") == "unknown":
             snap = restored.get("from")
             result["machine"]["next"] = [

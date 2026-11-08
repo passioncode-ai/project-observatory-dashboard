@@ -1267,6 +1267,9 @@ CARRY_RECORD = ("store", "raw", "secret-store-carry.json")
 #: A carry older than this proves nothing about the store as it is now: two daily snapshots.
 CARRY_FRESH = datetime.timedelta(hours=48)
 CARRY_FIELDS = ("at", "kind", "file", "state", "reason", "files", "size", "not_carried", "sweep_failed")
+#: What the newest restore did with a carried store (OBS-350 part 2), written by `workspace_upgrade`.
+RESTORE_RECORD = ("store", "raw", "secret-store-restore.json")
+RESTORE_FIELDS = ("at", "snapshot", "state", "reason", "target", "files", "next")
 #: The environment can point the vault somewhere the settings do not; the maintenance job does
 #: not share a person's shell, so only the folder the settings name can be carried.
 VAULT_DIR_ENV, SECRETS_ENV = "OBSERVATORY_VAULT_DIR", "OBSERVATORY_SECRETS"
@@ -1360,6 +1363,23 @@ def _last_carry(base: Path) -> dict | None:
             else None for key in CARRY_FIELDS}
 
 
+def _last_restore(base: Path) -> dict | None:
+    """The newest restore record, or None; `{"state": "unknown"}` when it does not read."""
+    file = base.joinpath(*RESTORE_RECORD)
+    if not file.exists() and not file.is_symlink():
+        return None
+    try:
+        if file.is_symlink() or not file.is_file() or file.stat().st_size > 65536:
+            raise ValueError("not a plain record")
+        doc = json.loads(file.read_text(encoding="utf-8"))
+        if not isinstance(doc, dict) or not isinstance(doc.get("state"), str):
+            raise ValueError("no state")
+    except (OSError, ValueError):
+        return {"state": "unknown"}
+    return {key: doc.get(key) if isinstance(doc.get(key), (str, int)) and not isinstance(doc.get(key), bool)
+            else None for key in RESTORE_FIELDS}
+
+
 def _parse_at(text) -> datetime.datetime | None:
     if not isinstance(text, str):
         return None
@@ -1404,8 +1424,18 @@ def secret_store(base: Path) -> tuple[dict, list[dict]]:
     shown = _display(path)
     exists = path.is_dir()
     last = _last_carry(base)
+    restored = _last_restore(base)
     section = {"external": True, "path": shown, "settings_keys": keys, "exists": exists,
                "env_override": bool(moved), "last_carry": last}
+    if restored is not None:
+        section["last_restore"] = restored
+        if restored.get("state") == "skipped":
+            why = restored.get("reason") or "skipped"
+            warn("backups-secret-store-not-restored",
+                 f"the last restore did not write the secret store {shown} its backup carried ({why}); its keys "
+                 "are not on this machine until it is written",
+                 restored.get("next") or "project-observatory full restore SNAPSHOT --secret-store-only",
+                 path=shown, reason=why)
     if not exists:
         source = keys[0]
         warn("backups-secret-store-missing", f"the configured secret store {shown} does not exist on this machine",
