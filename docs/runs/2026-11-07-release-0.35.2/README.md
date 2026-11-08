@@ -5,10 +5,9 @@ process sees only its own sockets in the kernel's connection table; then tag, ve
 
 ## State now
 
-- Open: this release PR, then the tag `v0.35.2`, its run, verification and the local install; then the announcement
-  with the sha256 of `observatory/engine/peer_owner.py`, which several local services vendor byte for byte.
-- Waits: none beyond the release run (watched by the releasing session's background job).
-- Next task: merge the release PR, push the tag, verify, install, record the receipts here.
+- Open: none in this record; `peer_owner` 1.3.1 followed in 0.35.3.
+- Waits: none.
+- Next task: none here; the current work is in the newest run record.
 
 ## What it releases
 
@@ -55,3 +54,13 @@ process sees only its own sockets in the kernel's connection table; then tag, ve
   table. Checked on macOS, on Linux (Python 3.11 container) and with `find_library` forced to None.
 - On the release branch: the root release suites, `tools/sync_engine_docs.py --check`, `tools/check_backlog.py`,
   `observatory/engine/tools/check_docs.py`, `check_paths.py` and the inventory check (results in the release PR).
+
+## Receipts
+
+- Tag `v0.35.2` (tag object `a06c4e58`) on `4dfe1484`, the merge of release PR #466 (which carried #465's commits; #465
+  closed as landed). The release run published 19 files on 2026-11-07T21:10:43Z.
+- Verified on the operator's machine: `shasum -a 256 -c SHA256SUMS` OK for the wheel, gpg `VALIDSIG
+  63B30DC324BD697487AA31944FAFB8AEC803B6A7`, `gh attestation verify` exit 0.
+- sha256 of `observatory/engine/peer_owner.py` 1.3.0 in the wheel: `cf97277eae907db75f231675c67a0be0e8362b5f06b388787c072d411c22307d`,
+  announced on the board (thread c1a45468); two projects that vendor it re-pinned it the same evening.
+- Installed: `project-observatory full update --version 0.35.2 --apply`, then `--version` answered 0.35.2.

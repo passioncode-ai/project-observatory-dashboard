@@ -6,11 +6,9 @@ install it.
 
 ## State now
 
-- Open: the release PR, then the tag `v0.35.4`, its run, verification and the local install; then the host agent of
-  the second Mac updates both spaces and puts them on one Python minor version.
-- Waits: none beyond the release run (watched by the releasing session's background job).
-- Next task: merge the release PR, push the tag, verify, install, record the receipts here; then OBS-350 part 2 (the
-  restore side of the carried secret store, the gap that keeps the «machine lost» drill open) and OBS-393.
+- Open: OBS-350 part 2 (the restore side of the carried secret store, PR #470 under review), then OBS-393.
+- Waits: none for this release.
+- Next task: OBS-350 part 2 to its release, then the «machine lost» drill on the second Mac with its host agent.
 
 ## What it changes
 
@@ -60,4 +58,18 @@ install it.
 
 ## Receipts
 
-To be recorded after the release run.
+- Release PR #469 merged as `87bff14b`. Hosted CI found two things the local runs had not: `tests/test_osprivacy.py`
+  allows `os.getuid()` only on macOS paths (fixed in `3fdd5e27`: the uid is read through `install_launchd.uid()`),
+  and new Windows failures in suites already known to fail there (OBS-278), added to `tools/windows-known.json` in
+  `43b3a49c`. The causes, read from that run's receipt: the Keychain-refusal test asserts mode 0600 where Windows
+  reports 0666 (the suite's known reason); the RotationOrder tests stop in `backup_vault._sync_dir`, which opens a
+  folder, something Windows refuses (so encrypted backups cannot be written on Windows: a row). The commit message's
+  "POSIX modes" was right only for the first.
+- Tag `v0.35.4` (tag object `14213393`) on `87bff14b`; the release run published 19 files on 2026-11-08T04:19:33Z.
+- Verified: SHA256SUMS OK, gpg `VALIDSIG 63B30DC324BD697487AA31944FAFB8AEC803B6A7`, attestation exit 0;
+  `tools/space_daemons.py` unchanged (sha256 `2940909a...`), so the root-owned copy on the second Mac stays.
+- Installed locally: `--version` answered 0.35.4.
+- On the second Mac (its host agent, commit `5528534` of its repository): 0.35.4 in three spaces and a Linux VM;
+  a space whose database was created under Python 3.14 was rebuilt on 3.15 and opens (OBS-387 on a live database);
+  the maintain and check jobs were applied as system daemons in three spaces, all loaded (OBS-361 part 2); in the
+  VM, `loginctl enable-linger` was needed before the systemd timers installed (a row: name it in the hint).
