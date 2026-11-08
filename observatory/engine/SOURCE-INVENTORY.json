@@ -73,8 +73,8 @@
       "path": "backup_vault.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4945312047aff32b3bdb61806ba395aadba8569b271504dd7461b1401629b758",
-      "bytes": 76045
+      "export_sha256": "d9d868304d13094f3c582577ae53b0daa8fcd7a38d1b83bd1a5eeb965998b742",
+      "bytes": 76295
     },
     {
       "path": "cache_coverage.py",
@@ -3840,8 +3840,8 @@
       "path": "secret_store_carry.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9ee259e8a076526b2dd488efc44ea351ecbbb67ed5d08bc117a3fecaefe3092d",
-      "bytes": 71082
+      "export_sha256": "955d33d693ba3f175dc2904035b80aa975f64fb5cffaa58dddbd68137e98bdcc",
+      "bytes": 71336
     },
     {
       "path": "service_connections.py",
@@ -6642,8 +6642,8 @@
     {
       "path": "tests/test_workspace_upgrade.py",
       "source_sha256": "baf6fb326428105e87a6acab67b3f89adc29038c5df488c822ab210c3e65fea3",
-      "export_sha256": "70bffbc966469404ce519f69125a19338fdca3bd6ba66839ee8b090db6f416db",
-      "bytes": 128987,
+      "export_sha256": "d17e4c2daf161db807473e5cd9c3cecca5d77738cdc2682ef1f67f88fc55e31c",
+      "bytes": 129305,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
