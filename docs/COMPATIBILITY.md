@@ -360,13 +360,27 @@ each optional, so every existing command line answers as before for a snapshot t
 SNAPSHOT into the folders the current workspace's settings name; the home is not touched; refused without a
 workspace), `--secret-store-names` (relative paths of conflicting and not restored files in the answer) and
 `--json` (a refusal or failure as `{"error": {"code", "message"}}` on stdout, exit 2 or 1; without it the
-message stays `Observatory: ...` on stderr). The policy decides what happens to a folder that already holds a
+message stays `Observatory: ...` on stderr) and `--secret-store-target PATH` (confirms where a snapshot taken on
+another machine or under another home writes its store; it must equal the folder the refusal shows). The policy decides what happens to a folder that already holds a
 store; it is computed after verification and before the home is staged, and the store is written before the
 home is renamed into place. Refusals, exit 2, nothing written: `secret-store-not-empty` (`auto` and a store that
 differs), `secret-store-unresolved` (no folder named, a relative one, or a link or file at that path),
-`secret-store-target-inside-home`, `secret-store-manifest-mismatch`; under `keep` an unresolved folder or one
-inside the home is not refused but answered as state `skipped` with that code as its `reason`. Failure, exit 1, the folder left as it was and the home not
-restored: `secret-store-write-failed`. A behaviour change for a snapshot taken by 0.34.0 or later that carried a
+`secret-store-target-inside-home`, `secret-store-target-refused` (the home itself or a folder holding it,
+`~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`, `~/Library/LaunchAgents`, `~/Library/Keychains` or a folder inside
+one, a start-up file of the home; and under `merge` a folder that holds files but no `projects/`, which does not
+look like a vault store), `secret-store-target-unconfirmed` (a snapshot taken on another machine or under another
+home, whose target neither `--secret-store-target` nor this machine's own workspace settings name),
+`secret-store-manifest-mismatch` (now also a link whose target passes through another link of the store). Under
+`keep` (what `full init` passes) none of these is a refusal: the store is answered as state `skipped` with the code
+as its `reason`, nothing is written, and the restore goes on. Failure, exit 1, the folder left as it was and the
+home not restored: `secret-store-write-failed` (under `keep`, again `skipped` with that reason). The target vault's
+own lock (`projects/.vault.lock`, as `tools/vault.py` takes it) is held while the store is read again and written.
+A folder holding only lock files and temporaries (regular files named like the ones the copy skips) is empty; any
+folder, a folder named like a skipped file included, makes it not empty. A folder that is replaced, empty or not,
+is moved aside, never deleted. A journal (`*.jsonl`) that only grew since the snapshot reads `same`: this departs
+from the spec's "journals that differ are conflicts", so that the restore's own `restore-store` line, or a vault
+write after the snapshot, does not make a rerun refuse. A file another writer creates while a merge writes it is a
+conflict and is never overwritten. A behaviour change for a snapshot taken by 0.34.0 or later that carried a
 store: `auto` now writes it where none is, and refuses the whole restore when a different store is there, where
 0.34.0 to 0.35.4 restored the home and left the store in the snapshot; `--secret-store skip` restores as they did.
 `full init` on an empty home passes `keep` and an update's rollback passes `skip`, so neither can fail or write
@@ -385,8 +399,9 @@ merged or replaced. A second-machine restore moves `<state>/vault-digests/local.
 `<state>/vault-digests/peers/<machine>.json` (or `peer-<hex8>.json`) and answers `digest_manifest` (`state`
 `moved-to-peers` with `file`, or `left` with `reason`). New files outside the workspace, both owner-only: the stage
 `<parent>/.<folder>.restore-<hex12>` (renamed into place, or removed; one a killed restore left is removed by the
-next restore after an hour) and, after `replace`, `<folder>.before-restore-<UTC stamp>-<hex6>`, which the engine
-never deletes. The store's `projects/movements.jsonl` gains one `restore-store` row per write (`secret` `store/*`,
+next restore after an hour) and, after `replace` or a write over an empty folder,
+`<folder>.before-restore-<UTC stamp>-<hex6>`, which the engine never deletes. The answer's `secret_store` may carry
+`notes` (for instance a folder fsync that failed after the store was put in place). The store's `projects/movements.jsonl` gains one `restore-store` row per write (`secret` `store/*`,
 `tool` `workspace_upgrade.py`, `snapshot`, `taken_on`, `files`, `state`; never a value), which an older `vault.py`
 reads as any other movement. An older engine reading a snapshot this release writes still restores the home only.
 
