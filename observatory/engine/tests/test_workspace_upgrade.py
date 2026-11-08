@@ -2228,7 +2228,10 @@ class RestoreSecretStore(unittest.TestCase):
         os.symlink(loop,loop)
         with patch.object(Path,'resolve',side_effect=RuntimeError('Symlink loop')):
             reason=carry.refused_location(loop/'store')
+            target,key,code=carry.resolve_target({'name':'secret_store','settings_keys':['secret_store']},
+                                                 {'secret_store':str(loop/'store')},self.base/'home')
         self.assertIn('could not be checked',reason)
+        self.assertEqual(code,'secret-store-target-refused','resolving the target refuses it, never raises')
 
     def test_a_target_whose_place_cannot_be_checked_is_refused_and_skipped_under_keep(self):
         import secret_store_carry

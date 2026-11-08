@@ -752,7 +752,12 @@ def resolve_target(entry: dict, sources: dict, home: Path) -> tuple[Path | None,
         if not path.is_absolute():
             return None, key, "secret-store-unresolved"
         path = Path(os.path.abspath(path))
-        if _within_either(path.resolve(), home.resolve()):
+        try:
+            inside = _within_either(path.resolve(), home.resolve())
+        except (OSError, RuntimeError):
+            # A link loop (RuntimeError on Python 3.11) or a folder that cannot be read: refused, never written.
+            return path, key, "secret-store-target-refused"
+        if inside:
             return path, key, "secret-store-target-inside-home"
         return path, key, None
     return None, (keys[0] if keys else "secret_store"), "secret-store-unresolved"

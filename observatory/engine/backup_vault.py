@@ -1308,7 +1308,11 @@ def _settings_stores(base: Path, doc: dict) -> tuple[Path, list[dict]]:
     for key in ("secret_store", "secrets"):
         value = sources.get(key)
         if isinstance(value, str) and value:
-            candidates.append((key, Path(value).expanduser().resolve()))
+            try:
+                candidates.append((key, Path(value).expanduser().resolve()))
+            except (OSError, RuntimeError):
+                # A link loop (RuntimeError on Python 3.11): named as written, never followed.
+                candidates.append((key, Path(os.path.abspath(Path(value).expanduser()))))
     effective = candidates[0][1] if candidates else home / "secrets"
     stores: list[dict] = []
     for key, path in candidates:
