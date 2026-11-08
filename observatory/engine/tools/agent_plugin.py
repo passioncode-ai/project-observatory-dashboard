@@ -4,7 +4,8 @@
 install  adds the GitHub marketplace, installs the plugin, turns plugin
          auto-update ON (pass --no-auto-update to keep it off) and sets
          OBSERVATORY_ROOT / OBSERVATORY_HOME / OBSERVATORY_PYTHON for the
-         plugin's hooks. It reports "installed" only when Claude Code's own
+         plugin's hooks (OBSERVATORY_ROOT only where its path names no Python
+         release, OBS-393). It reports "installed" only when Claude Code's own
          installed_plugins.json lists the plugin afterwards.
 status   reports the marketplace source, auto-update, installed version and
          whether the hooks can find this engine and workspace.
@@ -79,7 +80,7 @@ def manual_env_advice() -> str:
     which is silent until someone wonders why nothing was recorded."""
     names = ", ".join(ENV_KEYS)
     try:
-        values = json.dumps(workspace_env(), ensure_ascii=False)
+        values = json.dumps({k: v for k, v in workspace_env().items() if v is not None}, ensure_ascii=False)
         where = settings_path()
     except (configuration.ConfigurationError, OSError) as exc:
         return (f"That route leaves the hook environment ({names}) unset, and this workspace could not be "
@@ -220,18 +221,48 @@ def shipped_version() -> str:
     return json.loads(manifest.read_text(encoding="utf-8"))["version"]
 
 
+def _install_launchd():
+    sys.path.insert(0, str(ROOT / "tools"))
+    import install_launchd
+    return install_launchd
+
+
 def workspace_env() -> dict:
-    return {"OBSERVATORY_ROOT": str(ROOT), "OBSERVATORY_HOME": str(configuration.home()),
-            "OBSERVATORY_PYTHON": sys.executable}
+    """What the hooks read, version-free (OBS-393). `OBSERVATORY_PYTHON` is the engine's venv
+    interpreter as the background jobs name it (`<venv>/bin/python3`, never `python3.14`), and
+    `OBSERVATORY_ROOT` is None, meaning left unset, when the engine sits in a folder naming one
+    Python release (`lib/python3.14/site-packages`): a venv rebuilt on another release would leave
+    the hooks pointed at a folder that no longer exists, so they find the engine through the
+    interpreter's environment instead. A checkout's path names no release and is written."""
+    launch = _install_launchd()
+    try:
+        python = launch.stable_interpreter(configuration.engine_python())
+    except configuration.ConfigurationError:
+        python = configuration.engine_python()
+    return {"OBSERVATORY_ROOT": None if launch.version_bound(launch.engine_root()) else str(ROOT),
+            "OBSERVATORY_HOME": str(configuration.home()), "OBSERVATORY_PYTHON": python}
+
+
+def put_hook_env(settings: dict) -> dict:
+    """Write workspace_env() into SETTINGS: set each value, remove a key whose value is None (an
+    OBSERVATORY_ROOT an earlier release wrote). Returns the values it replaced or removed."""
+    wanted = workspace_env()
+    env = settings.setdefault("env", {})
+    previous = {k: env.get(k) for k in ENV_KEYS}
+    for key, value in wanted.items():
+        if value is None:
+            env.pop(key, None)
+        else:
+            env[key] = value
+    return {k: v for k, v in previous.items() if v and v != wanted[k]}
 
 
 def write_hook_env() -> dict:
     """Point the plugin's hooks at this engine and workspace; returns the replaced values."""
     settings = read_json(settings_path())
-    previous_env = {k: (settings.get("env") or {}).get(k) for k in ENV_KEYS}
-    settings.setdefault("env", {}).update(workspace_env())
+    replaced = put_hook_env(settings)
     write_json(settings_path(), settings)
-    return {k: v for k, v in previous_env.items() if v and v != workspace_env()[k]}
+    return replaced
 
 
 def install(auto_update: bool = True) -> dict:
@@ -290,8 +321,7 @@ def install(auto_update: bool = True) -> dict:
     settings.setdefault("extraKnownMarketplaces", {})[MARKETPLACE] = {
         "source": dict(SOURCE), "autoUpdate": auto_update}
     settings.setdefault("enabledPlugins", {})[PLUGIN] = True
-    previous_env = {k: (settings.get("env") or {}).get(k) for k in ENV_KEYS}
-    settings.setdefault("env", {}).update(workspace_env())
+    replaced = put_hook_env(settings)
     write_json(settings_path(), settings)
     known = read_json(known_path())
     if MARKETPLACE in known:
@@ -299,8 +329,7 @@ def install(auto_update: bool = True) -> dict:
         write_json(known_path(), known)
     steps.append(f"auto-update {'on' if auto_update else 'off'}")
     return {"status": "installed", "plugin": PLUGIN, "installed_version": have, "shipped_version": ship,
-            "source": SOURCE, "auto_update": auto_update, "env": workspace_env(), "replaced_env": {k: v for k, v in previous_env.items()
-                                                      if v and v != workspace_env()[k]},
+            "source": SOURCE, "auto_update": auto_update, "env": workspace_env(), "replaced_env": replaced,
             "steps": steps, "next": "Restart Claude Code sessions: plugins load at session start."}
 
 
@@ -340,7 +369,9 @@ def hook_env_problems(settings: dict) -> list[str]:
     env, wanted = settings.get("env") or {}, workspace_env()
     # "not set" for an absent variable: `None` is Python's word, not the user's.
     return [(f"{k} is {env[k]!r}" if env.get(k) is not None else f"{k} is not set")
-            + f" in Claude Code settings; hooks need {wanted[k]!r}"
+            + (f" in Claude Code settings; hooks need {wanted[k]!r}" if wanted[k] is not None else
+               " in Claude Code settings; hooks need it unset (it names a folder of one Python release; they "
+               "find the engine through OBSERVATORY_PYTHON): `project-observatory full agent install` removes it")
             for k in ENV_KEYS if env.get(k) != wanted[k]]
 
 
@@ -389,7 +420,7 @@ def uninstall() -> dict:
                      "and its hooks still read it")
     else:
         for k, v in workspace_env().items():
-            if (settings.get("env") or {}).get(k) == v:
+            if v is not None and (settings.get("env") or {}).get(k) == v:
                 changed = _drop(settings, "env", k) or changed
     if changed:
         write_json(settings_path(), settings)

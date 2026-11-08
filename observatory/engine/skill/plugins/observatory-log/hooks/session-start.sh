@@ -9,6 +9,8 @@
 set -uo pipefail
 if [ -t 0 ]; then payload=""; else payload=$(cat 2>/dev/null || true); fi
 root="${OBSERVATORY_ROOT:-}"
+# A root that is gone (a venv rebuilt on another Python release, OBS-393) is no root.
+[ -n "$root" ] && [ ! -d "$root" ] && root=""
 if [ -z "$root" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   c="${CLAUDE_PLUGIN_ROOT}"
   for _ in 1 2 3 4 5 6; do
@@ -16,6 +18,14 @@ if [ -z "$root" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
     n="$(cd "$c/.." 2>/dev/null && pwd)" || break
     [ "$n" = "$c" ] && break
     c="$n"
+  done
+fi
+if [ -z "$root" ] && [ -n "${OBSERVATORY_PYTHON:-}" ]; then
+  # The engine in the interpreter's own venv (OBS-393): `full agent install` names the venv's
+  # `bin/python3` and no folder of one Python release, which a rebuild on another one removes.
+  v="$(dirname "$(dirname "$OBSERVATORY_PYTHON")")"
+  for c in "$v"/lib/python3*/site-packages/observatory/engine; do
+    [ -f "$c/observatory.py" ] && root="$c"
   done
 fi
 if [ -z "$root" ] && command -v project-observatory >/dev/null 2>&1; then

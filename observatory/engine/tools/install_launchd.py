@@ -111,6 +111,97 @@ def stable_interpreter(executable: str) -> str:
         "instead; install it into a virtual environment and run the installer from there")
 
 
+#: A path component that names one Python release: `lib/python3.14/site-packages` on POSIX, and a
+#: per-user `Python314` folder on Windows. A venv rebuilt on another release no longer has it (OBS-393).
+_VERSIONED_PART = re.compile(r"python3\.?\d+t?", re.IGNORECASE)
+
+#: The module that starts an engine program by name (`observatory/job.py`), and its table:
+#: name -> (path inside the engine, how it runs). A test keeps the two tables equal.
+LAUNCHER = "observatory.job"
+JOB_TOOLS = {"maintain": ("tools/maintain.py", "python"), "tick": ("tools/tick.sh", "bash"),
+             "tick-py": ("tools/tick.py", "python"), "serverd": ("tools/serverd.py", "python"),
+             "mcp": ("mcp/server.py", "python")}
+
+
+def version_bound(path) -> bool:
+    """True when PATH has a component naming one Python release (`python3.14`)."""
+    return any(_VERSIONED_PART.fullmatch(part) for part in pathlib.PurePath(str(path)).parts)
+
+
+def engine_root() -> pathlib.Path:
+    """The engine's code folder, as the configuration module names it (tests move it)."""
+    return pathlib.Path(configuration.SOURCE)
+
+
+def job_argv(tool: str, *args: str, python: str | None = None) -> list[str]:
+    """The argv a job definition names to run engine program TOOL with ARGS (OBS-393).
+
+    An engine installed under `<venv>/lib/python3.X/site-packages` is started through the
+    package's launcher, `<venv>/bin/python3 -P -m observatory.job TOOL ARGS`: the definition names
+    the venv's stable interpreter and a program name, nothing a rebuild on another Python release
+    removes. A checkout's paths name no release, so its jobs keep naming the file itself."""
+    python = python or stable_interpreter(configuration.engine_python())
+    root = engine_root()
+    if version_bound(root):
+        return [python, "-P", "-m", LAUNCHER, tool, *args]
+    relative, kind = JOB_TOOLS[tool]
+    return (["/bin/bash", str(root / relative)] if kind == "bash" else [python, str(root / relative)]) + list(args)
+
+
+def job_cwd(workspace: pathlib.Path | str) -> pathlib.Path:
+    """A job's working folder: the workspace home when the engine sits in a versioned
+    site-packages folder (the launcher moves into the engine itself), else the engine as before."""
+    root = engine_root()
+    return pathlib.Path(workspace) if version_bound(root) else root
+
+
+#: Definition keys holding one path each; ProgramArguments is read separately.
+_PATH_KEYS = ("Program", "WorkingDirectory")
+
+
+def missing_paths(doc: dict) -> list[str]:
+    """The absolute paths a launchd definition names that do not exist (OBS-393): `Program`,
+    `ProgramArguments[0]`, every absolute argument after it, and `WorkingDirectory`. A bare
+    program name is launchd's PATH lookup, and an option (`-m`) is not a path."""
+    if not isinstance(doc, dict):
+        return []
+    args = doc.get("ProgramArguments")
+    named = [doc.get(key) for key in _PATH_KEYS]
+    if isinstance(args, list):
+        named += [a for a in args if isinstance(a, str)]
+    missing: list[str] = []
+    for value in named:
+        if isinstance(value, str) and value and os.path.isabs(value) and value not in missing \
+                and not os.path.exists(value):
+            missing.append(value)
+    return missing
+
+
+def venv_home_problem(root: pathlib.Path | None = None) -> str | None:
+    """The engine's virtual environment whose `pyvenv.cfg` `home` is gone, as a sentence; None when
+    there is no venv or its base interpreter's folder exists. Every interpreter link of that venv
+    points into the missing folder, so no job of it can start (OBS-393)."""
+    root = root or engine_root()
+    for parent in root.parents:
+        cfg = parent / "pyvenv.cfg"
+        if not cfg.is_file():
+            continue
+        try:
+            lines = cfg.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            return None
+        for line in lines:
+            key, _, value = line.partition("=")
+            if key.strip().lower() == "home" and value.strip():
+                home = value.strip()
+                if not os.path.isdir(home):
+                    return (f"the engine's virtual environment {parent} was made from a Python that is gone "
+                            f"(pyvenv.cfg home {home} does not exist)")
+                return None
+        return None
+    return None
+
+
 def lint_plist(doc: dict) -> list[str]:
     """What makes a plist unfit to install: a Cellar path in its program or environment (LC-05)."""
     problems = []
@@ -137,10 +228,10 @@ def _seconds(value: str) -> bool:
         return False
 
 
-def environment() -> dict[str, str]:
+def environment(python: str | None = None) -> dict[str, str]:
     # OBSERVATORY_PYTHON: the tick runs every step with the interpreter the engine
     # is installed in, not the installer's and not whatever python3 is first on PATH.
-    env = {"OBSERVATORY_PYTHON": stable_interpreter(configuration.engine_python()),
+    env = {"OBSERVATORY_PYTHON": python or stable_interpreter(configuration.engine_python()),
            "OBSERVATORY_HOME": str(paths.HOME)}
     if os.name != "nt":
         # A Windows task runs with the account's own environment, PATH and profile included;
@@ -186,17 +277,20 @@ def exit_timeout() -> int:
     return int(tick_lease.SUPERVISOR_GRACE + tick_lease.STEP_GRACE + 15)
 
 
-def build(interval: int) -> dict:
+def build(interval: int, python: str | None = None) -> dict:
     if interval < 60:
         raise ValueError("Tick interval must be at least 60 seconds")
-    env = environment()
+    python = python or stable_interpreter(configuration.engine_python())
+    env = environment(python)
     env["OBSERVATORY_TICK_CEILING_SECONDS"] = str(tick_ceiling(interval))
     return {
         "Label": LABEL,
-        "ProgramArguments": ["/bin/bash", str(ROOT / "tools/tick.sh")],
+        # Version-free (OBS-393): the venv's interpreter and the launcher's program name, or
+        # `/bin/bash tools/tick.sh` in a checkout, whose path names no Python release.
+        "ProgramArguments": job_argv("tick", python=python),
         "StartInterval": interval,
         "RunAtLoad": False,          # a login is not a reason to burn a scan
-        "WorkingDirectory": str(ROOT),
+        "WorkingDirectory": str(job_cwd(paths.HOME)),
         "StandardOutPath": str(LOG_DIR / "tick.log"),
         "StandardErrorPath": str(LOG_DIR / "tick.err"),
         "ProcessType": "Background",
@@ -209,6 +303,42 @@ def build(interval: int) -> dict:
         # time from the machine's secret store — see agent/providers.py
         # KEY_FILES, and tests/test_key.py which asserts this dict stays clean.
         "EnvironmentVariables": env,
+        "Umask": 0o077,
+    }
+
+
+#: The server's SIGTERM drain budget (tools/serverd.py EXIT_TIMEOUT); launchd's ExitTimeOut sits above it.
+SERVER_EXIT_TIMEOUT = 30
+
+
+def default_server_port() -> int:
+    return int(os.environ.get("OBSERVATORY_SERVER_PORT", "47311"))
+
+
+def server_document(port: int, python: str | None = None) -> dict:
+    """The server's launchd definition (tools/serverd.py `build_plist`), here so the maintenance
+    pass can rebuild it without importing the server."""
+    python = python or stable_interpreter(configuration.engine_python())
+    return {
+        "Label": instance_label("server"),
+        # The venv's interpreter or a keg's `opt` link, never a Cellar path (LC-05), and the
+        # launcher's program name, never a path naming one Python release (OBS-393).
+        "ProgramArguments": job_argv("serverd", "--run", "--port", str(port), python=python),
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        # fabric-service/0.1 supervisor rules: a crash loop is bounded, and
+        # SIGKILL comes only after the SIGTERM drain has had its time.
+        "ThrottleInterval": 10,
+        "ExitTimeOut": SERVER_EXIT_TIMEOUT + 10,
+        # STANDARD, NOT BACKGROUND. The server answers Fabric Dashboards' probe and
+        # every agent's MCP call while the Mac is busy. As a Background job with
+        # Nice 5 and low-priority I/O, macOS starved it under load: on 2026-10-01
+        # the host recorded it "not answering" 30 times in a day while the process
+        # ran without one restart. The tick stays background work; the server is not.
+        "ProcessType": "Standard",
+        "StandardErrorPath": str(paths.STATE / "logs/serverd.err"),
+        "StandardOutPath": str(paths.STATE / "logs/serverd.out"),
+        "EnvironmentVariables": environment(python),
         "Umask": 0o077,
     }
 
@@ -273,19 +403,69 @@ def _is_python(argument: str) -> bool:
     return pathlib.PurePath(str(argument)).name.startswith("python")
 
 
-def repair_interpreters(expected: str | None = None, *, write: bool = True,
-                        only: set[str] | None = None) -> list[dict]:
-    """The managed jobs whose plist names an interpreter other than the engine's.
+#: Environment entries that come from whoever runs the builder (a terminal, an agent session, the
+#: maintenance pass): a repair keeps the installed job's own, so a definition never flips with
+#: its caller (maintenance.py, review F1).
+CALLER_ENV = ("PATH", *TICK_LIMITS)
 
-    The tick's plist carries it in `OBSERVATORY_PYTHON`, the server's as its program.
-    Before 0.19.3 both were written with the INSTALLER's interpreter, which is not the
-    engine's when anything other than the engine's venv started the installer; a tick
-    on Homebrew's bare python then failed its backup on `No module named
-    'cryptography'` and nothing ever rewrote the plist — `full update` restarts the
-    jobs from the files as they are. With `write`, each such field is set to
-    `expected` (the engine's interpreter by default) and the file rewritten in place,
-    mode 0600; loading it is the caller's step. `only` names the jobs to look at.
-    A job without a plist is skipped."""
+
+def _port_of(doc: dict) -> int | None:
+    args = doc.get("ProgramArguments") or []
+    for i, arg in enumerate(args[:-1]):
+        if arg == "--port" and str(args[i + 1]).isdigit():
+            return int(args[i + 1])
+    return None
+
+
+def wanted_definition(name: str, installed: dict, python: str | None = None) -> dict | None:
+    """The definition the installer would write now for managed job NAME, fitted to what is
+    installed: the tick keeps its interval, the server its port, both their caller's environment
+    entries (CALLER_ENV). None when it cannot be built here (a refused interpreter path)."""
+    try:
+        if name == "tick":
+            interval = installed.get("StartInterval")
+            doc = build(interval if isinstance(interval, int) and interval >= 60 else 1800, python=python)
+        elif name == "server":
+            doc = server_document(_port_of(installed) or default_server_port(), python=python)
+        else:
+            return None
+    except (configuration.ConfigurationError, ValueError):
+        return None
+    env, have = doc["EnvironmentVariables"], installed.get("EnvironmentVariables") or {}
+    for key in CALLER_ENV:
+        if isinstance(have.get(key), str):
+            env[key] = have[key]
+        elif key != "PATH":
+            env.pop(key, None)
+    return doc
+
+
+def _drift(installed: dict, wanted: dict) -> tuple[str, str]:
+    """(was, now) for a report: the interpreter when that changed, else the program line."""
+    def python_of(doc):
+        env = doc.get("EnvironmentVariables") or {}
+        args = doc.get("ProgramArguments") or []
+        return env.get("OBSERVATORY_PYTHON") or (args[0] if args and _is_python(args[0]) else None)
+    old, new = python_of(installed), python_of(wanted)
+    if old and new and old != new:
+        return old, new
+    return (" ".join(map(str, installed.get("ProgramArguments") or [])),
+            " ".join(map(str, wanted.get("ProgramArguments") or [])))
+
+
+def repair_definitions(expected: str | None = None, *, write: bool = True,
+                       only: set[str] | None = None) -> list[dict]:
+    """The managed jobs (tick, server) whose installed plist differs from the one the installer
+    would write now, each rewritten in place with `write` (mode 0600; loading it is the caller's step).
+
+    The whole definition is compared, not one field. Before 0.19.3 the plists could name the
+    INSTALLER's interpreter (a tick on Homebrew's bare python failed its backup on `No module
+    named 'cryptography'`), and only the interpreter was repaired; a venv rebuilt on another
+    Python release (3.14 to 3.15) left every plist naming `lib/python3.14/site-packages/...`
+    files that no longer existed, and launchd failed each run with exit 78 (OBS-393). `full
+    update` restarts the jobs from the files as they are, so only this rewrite mends them.
+    `expected` is the interpreter the definitions name (the engine's by default); `only` names
+    the jobs to look at. A job without a plist, or with one that does not parse, is skipped."""
     expected = expected or stable_interpreter(configuration.engine_python())
     found = []
     for job in managed_jobs():
@@ -296,25 +476,25 @@ def repair_interpreters(expected: str | None = None, *, write: bool = True,
             doc = plistlib.loads(path.read_bytes())
         except (OSError, plistlib.InvalidFileException, ValueError):
             continue
-        before = []
-        env = doc.get("EnvironmentVariables") or {}
-        if env.get("OBSERVATORY_PYTHON") not in (None, expected):
-            before.append(env["OBSERVATORY_PYTHON"])
-            env["OBSERVATORY_PYTHON"] = expected
-        args = doc.get("ProgramArguments") or []
-        if args and _is_python(args[0]) and args[0] != expected:
-            before.append(args[0])
-            args[0] = expected
-        if not before:
+        if not isinstance(doc, dict):
             continue
-        found.append({"name": job["name"], "label": job["label"], "plist": str(path),
-                      "was": before[0], "now": expected})
+        wanted = wanted_definition(job["name"], doc, python=expected)
+        if wanted is None or wanted == doc or lint_plist(wanted):
+            continue
+        was, now = _drift(doc, wanted)
+        found.append({"name": job["name"], "label": job["label"], "plist": str(path), "was": was, "now": now,
+                      "changed": sorted(k for k in set(doc) | set(wanted) if doc.get(k) != wanted.get(k)),
+                      **({"missing": missing_paths(doc)} if missing_paths(doc) else {})})
         if write:
             fd = osprivacy.open(path, os.O_WRONLY | os.O_TRUNC | osprivacy.NOFOLLOW, 0o600)
             with os.fdopen(fd, "wb") as stream:
-                stream.write(plistlib.dumps(doc))
+                stream.write(plistlib.dumps(wanted))
             os.chmod(path, 0o600)
     return found
+
+
+#: The name the maintenance pass and older callers use; the comparison is the whole definition now.
+repair_interpreters = repair_definitions
 
 
 def tick_job(interval: int):
@@ -324,9 +504,8 @@ def tick_job(interval: int):
         raise ValueError("Tick interval must be at least 60 seconds")
     env = environment()
     env["OBSERVATORY_TICK_CEILING_SECONDS"] = str(tick_ceiling(interval))
-    return osschedule.Job(name="tick", workspace=paths.HOME,
-                          argv=(stable_interpreter(configuration.engine_python()), str(ROOT / "tools/tick.py")),
-                          env=tuple(sorted(env.items())), cwd=ROOT,
+    return osschedule.Job(name="tick", workspace=paths.HOME, argv=tuple(job_argv("tick-py")),
+                          env=tuple(sorted(env.items())), cwd=job_cwd(paths.HOME),
                           stdout=LOG_DIR / "tick.log", stderr=LOG_DIR / "tick.err",
                           interval_seconds=interval, time_limit_seconds=tick_ceiling(interval) + exit_timeout())
 

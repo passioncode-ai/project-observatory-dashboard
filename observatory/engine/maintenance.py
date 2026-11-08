@@ -771,13 +771,15 @@ def _services():
 
 
 def step_jobs(launch=None) -> dict:
-    """The tick and server jobs run on the engine's interpreter (0.19.3).
+    """The tick and server jobs run from the definition the installer would write now (0.19.3, OBS-393).
 
-    Before 0.19.3 their plists could name the installer's interpreter instead, and an
-    update restarts them from the files as they are, so an install that had it wrong
-    stayed wrong. A plist that names another interpreter is rewritten and reloaded —
-    the tick only while it is not running (otherwise the next pass), the server at
-    once, which costs its clients a reconnect."""
+    Before 0.19.3 their plists could name the installer's interpreter instead, and a venv rebuilt
+    on another Python release left them naming `lib/python3.X/site-packages` files that no longer
+    exist (OBS-393). An update restarts them from the files as they are, so an install that had
+    it wrong stayed wrong. A plist that differs from the installer's (`install_launchd.
+    repair_definitions`, the whole definition) is rewritten and reloaded: the tick only while it
+    is not running (otherwise the next pass), the server at once, which costs its clients a
+    reconnect."""
     if launch is None:
         if sys.platform != "darwin" or shutil.which("launchctl") is None:
             return {"result": "not-applicable"}
@@ -1452,12 +1454,16 @@ class LaunchdSchedule:
                     self._headless = False
         return self._headless
 
+    def background_definition(self) -> Path:
+        """The definition root's space_daemons.py loads: the account's background folder."""
+        import machine_identity
+        return machine_identity.background_dir(Path.home()) / f"{self.label}.plist"
+
     @property
     def definition(self) -> Path:
         """Where the definition lives: ~/Library/LaunchAgents, or the background folder when headless."""
         if self.headless():
-            import machine_identity
-            return machine_identity.background_dir(Path.home()) / f"{self.label}.plist"
+            return self.background_definition()
         return self.plist
 
     def document(self) -> dict:
@@ -1481,14 +1487,17 @@ class LaunchdSchedule:
             "Label": self.label,
             # RunAtLoad starts the pass at login with everything else; its check waits
             # FIRST_CHECK_DELAY seconds after the start (LC-16).
-            "ProgramArguments": [self.launch.stable_interpreter(engine_python()),
-                                 str(config.SOURCE / "tools" / "maintain.py"), JOBS[self.job]["action"],
-                                 *(["--first-check-delay", str(FIRST_CHECK_DELAY)] if self.job == "maintain" else [])],
+            # Version-free (OBS-393): the venv's stable interpreter and the launcher's program name,
+            # never a path inside `lib/python3.X/site-packages`, which a venv rebuilt on another Python
+            # release no longer has (launchd failed every run with exit 78). A checkout names the file.
+            "ProgramArguments": self.launch.job_argv("maintain", *self.arguments(),
+                                                     python=self.launch.stable_interpreter(engine_python())),
             "StartInterval": JOBS[self.job]["interval"],
             # The check job does not run at load: the pass does (its check 90 s after the login),
             # and the check's first run is one interval later, never the pass's moment (review H1).
             "RunAtLoad": self.job == "maintain",
-            "WorkingDirectory": str(config.SOURCE),
+            # The workspace home, never site-packages; the launcher starts the program in the engine.
+            "WorkingDirectory": str(self.launch.job_cwd(self.base)),
             "StandardOutPath": str(logs / f"{self.job}.log"),
             "StandardErrorPath": str(logs / f"{self.job}.err"),
             # Not "Background" with LowPriorityIO: on a loaded machine that throttling
@@ -1499,6 +1508,11 @@ class LaunchdSchedule:
             "EnvironmentVariables": env,
             "Umask": 0o077,
         }
+
+    def arguments(self) -> list[str]:
+        """The program's own arguments: the action, and for the pass its first-check delay."""
+        return [JOBS[self.job]["action"],
+                *(["--first-check-delay", str(FIRST_CHECK_DELAY)] if self.job == "maintain" else [])]
 
     def installed(self) -> bool:
         return self.definition.is_file()
@@ -1532,6 +1546,15 @@ class LaunchdSchedule:
             # an agent loaded too would run every pass twice (OBS-361 part 2), so it is booted out.
             if self.launch.job_loaded(self.label):
                 self.launch.stop_job(self.label)
+            background = self.background_definition()
+            try:
+                current = plistlib.loads(background.read_bytes()) if background.is_file() else None
+            except (OSError, ValueError, plistlib.InvalidFileException):
+                current = None
+            if current is not None and current != doc:
+                # Root's daemon was made from a definition the builder no longer writes (a path of a
+                # venv rebuilt on another Python, OBS-393): only root can replace it, remove then apply.
+                return self._install_background(doc, target=background)
             return {"schedule": self.kind, "label": self.label, "changed": False, "domain": "system",
                     "load": "loaded"}
         current = plistlib.loads(self.plist.read_bytes()) if self.installed() else None
@@ -1566,7 +1589,7 @@ class LaunchdSchedule:
             stream.write(plistlib.dumps(doc))
         os.replace(tmp, target)
 
-    def _install_background(self, doc: dict) -> dict:
+    def _install_background(self, doc: dict, target: Path | None = None) -> dict:
         """`install` with no GUI session (OBS-361 part 2): the definition goes to the background folder, and the
         administrator loads it with space_daemons.py. A copy left in ~/Library/LaunchAgents by an earlier
         attempt is removed, so a later sign-in at the screen never starts the job a second time."""
@@ -1574,7 +1597,7 @@ class LaunchdSchedule:
         import machine_move
         home, uid = Path.home(), self.launch.uid()
         machine_identity.ensure_private_dir(machine_identity.background_dir(home), home)
-        target = self.definition
+        target = target or self.definition
         try:
             current = plistlib.loads(target.read_bytes()) if target.is_file() else None
         except (OSError, ValueError, plistlib.InvalidFileException):
@@ -1676,7 +1699,9 @@ class SystemdSchedule:
         return f'"{value}"'
 
     def service_text(self) -> str:
-        python = _install_launchd().stable_interpreter(engine_python())
+        launch = _install_launchd()
+        argv = launch.job_argv("maintain", JOBS[self.job]["action"],
+                               python=launch.stable_interpreter(engine_python()))
         return "\n".join([
             "[Unit]",
             (f"Description=Project Observatory maintenance (updates and backups) for {self.base}"
@@ -1684,8 +1709,9 @@ class SystemdSchedule:
             "",
             "[Service]",
             "Type=oneshot",
-            f"ExecStart={self.quote(python)} {self.quote(str(config.SOURCE / 'tools' / 'maintain.py'))} "
-            f"{JOBS[self.job]['action']}",
+            # Version-free (OBS-393), as the launchd job: no path inside `lib/python3.X`.
+            "ExecStart=" + " ".join(self.quote(a) for a in argv[:-1]) + f" {argv[-1]}",
+            f"WorkingDirectory={self.quote(str(launch.job_cwd(self.base)))}",
             f"Environment={self.quote('OBSERVATORY_HOME=' + str(self.base))}",
             'Environment="OBSERVATORY_SYSTEM_SETUP=1"',
             "Nice=10",
@@ -1777,12 +1803,13 @@ class TaskSchedulerSchedule:
     def __init__(self, base: Path, runner=None, job: str = "maintain"):
         import osschedule
         self.base = base
-        python = _install_launchd().stable_interpreter(engine_python())
+        launch = _install_launchd()
+        python = launch.stable_interpreter(engine_python())
         job = osschedule.Job(
             name=job, workspace=base,
-            argv=(python, str(config.SOURCE / "tools" / "maintain.py"), JOBS[job]["action"]),
+            argv=tuple(launch.job_argv("maintain", JOBS[job]["action"], python=python)),
             env=(("OBSERVATORY_HOME", str(base)), ("OBSERVATORY_PYTHON", python), ("OBSERVATORY_SYSTEM_SETUP", "1")),
-            cwd=config.SOURCE, stdout=base / "store" / "logs" / f"{job}.log", stderr=base / "store" / "logs" / f"{job}.err",
+            cwd=launch.job_cwd(base), stdout=base / "store" / "logs" / f"{job}.log", stderr=base / "store" / "logs" / f"{job}.err",
             interval_seconds=JOBS[job]["interval"], at_login=True,
             first_delay_seconds=FIRST_CHECK_DELAY if job == "maintain" else CHECK_FIRST_DELAY,
             phase_seconds=0 if job == "maintain" else CHECK_FIRST_DELAY,
@@ -1872,12 +1899,18 @@ def ensure(base: Path, *, schedule=None, store=None, explicit: bool = False) -> 
         out["schedule"] = {"result": "off", "detail": "turned off with `maintain uninstall`; "
                                                      "`project-observatory full maintain ensure` turns it on"}
         return out
+    probe = schedule is None
     schedule = schedule or schedule_for(base)
     try:
         out["schedule"] = schedule.install()
     except (config.ConfigurationError, OSError) as exc:
         out["schedule"] = {"result": "unscheduled", "detail": str(exc)[:300],
                            "fallback": "the observatory-log plugin runs the pass at each new session"}
+    if probe and probes_allowed():
+        # The tick and the server too (OBS-393): a definition the installer would no longer write (a
+        # path of a venv rebuilt on another Python) is rewritten and reloaded here, so a person's
+        # `maintain ensure` mends every job, not only the two it schedules.
+        out["jobs"] = step_jobs()
     return out
 
 
@@ -1893,6 +1926,73 @@ def unschedule(base: Path, *, schedule=None) -> dict:
 
 
 # --- what doctor and the Health page read -------------------------------------------
+
+def _definition_files(base: Path) -> list[tuple[str, Path]]:
+    """(job, file) for every job definition of this workspace on this machine that exists: the pass and
+    the check (launchd's agent folder and the background folder root loads from, or systemd user units)
+    and, on macOS, the tick and the server."""
+    found: list[tuple[str, Path]] = []
+    if sys.platform == "darwin":
+        import machine_identity
+        background = machine_identity.background_dir(Path.home())
+        for job in JOBS:
+            label = f"org.project-observatory.{_instance_digest(base)}.{job}"
+            for folder in (Path.home() / "Library" / "LaunchAgents", background):
+                found.append((job, folder / f"{label}.plist"))
+        try:
+            launch = _install_launchd()
+            found += [(row["name"], Path(row["plist"])) for row in launch.managed_jobs()]
+        except Exception:  # noqa: BLE001 - a status never fails doctor
+            pass
+    elif sys.platform != "win32":
+        for job in JOBS:
+            units = SystemdSchedule(base, job=job)
+            found.append((job, units.units / f"{units.name}.service"))
+    return [(job, path) for job, path in found if path.is_file() and not path.is_symlink()]
+
+
+def _systemd_paths(text: str) -> dict:
+    """ExecStart's words and WorkingDirectory of a unit file, in the plist's shape, for the same check."""
+    doc: dict = {}
+    for line in text.splitlines():
+        key, _, value = line.partition("=")
+        if key == "ExecStart":
+            try:
+                doc["ProgramArguments"] = shlex.split(value)
+            except ValueError:
+                pass
+        elif key == "WorkingDirectory":
+            doc["WorkingDirectory"] = value.strip().strip('"')
+    return doc
+
+
+def stale_definitions(base: Path) -> list[dict]:
+    """The job definitions that name a program, an argument or a working folder that does not exist
+    (OBS-393): `[{job, definition, missing}]`. Read from the files; nothing is asked of launchd."""
+    out: list[dict] = []
+    try:
+        files = _definition_files(base)
+        launch = _install_launchd()
+    except Exception:  # noqa: BLE001 - a status never fails doctor
+        return out
+    for job, path in files:
+        try:
+            raw = path.read_bytes()
+            doc = plistlib.loads(raw) if path.suffix == ".plist" else _systemd_paths(raw.decode("utf-8", "replace"))
+        except (OSError, ValueError, plistlib.InvalidFileException):
+            continue
+        missing = launch.missing_paths(doc)
+        if missing:
+            out.append({"job": job, "definition": str(path), "missing": missing})
+    return out
+
+
+def _venv_problem() -> str | None:
+    try:
+        return _install_launchd().venv_home_problem()
+    except Exception:  # noqa: BLE001 - a status never fails doctor
+        return None
+
 
 #: Backup warning codes a maintenance item already says in its own words (OBS-349).
 BACKUP_TWINS = frozenset({"backups-no-passphrase", "backups-unencrypted-local"})
@@ -1931,6 +2031,19 @@ def status(base: Path, *, schedule=None) -> dict:
     elif not scheduled:
         warn("not-scheduled", "updates and daily backups are not scheduled on this machine yet: "
                               "`project-observatory full maintain ensure`")
+    stale = stale_definitions(base)
+    if stale:
+        named = "; ".join(f"{row['job']} ({', '.join(row['missing'][:3])})" for row in stale)
+        warn("job-path-missing", f"a background job's definition names a path that does not exist, so launchd or "
+                                 f"systemd cannot start it (a virtual environment rebuilt on another Python leaves "
+                                 f"this): {named}; `project-observatory full maintain ensure` rewrites them",
+             step="project-observatory full maintain ensure", jobs=[row["job"] for row in stale])
+    venv = _venv_problem()
+    if venv:
+        # No step: the engine cannot rebuild the environment it runs in; a person recreates it.
+        warn("venv-home-missing", f"{venv}: no job of this environment can start. Recreate the environment from an "
+                                  "installed Python and install the engine into it again, then run "
+                                  "`project-observatory full maintain ensure`")
     if not auto_enabled(base):
         warn("auto-off", f"{SWITCH_LABEL}: off — new releases wait for you: `project-observatory full auto-update on`")
     available = available_update(base)

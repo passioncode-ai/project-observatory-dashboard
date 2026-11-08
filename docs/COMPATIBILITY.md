@@ -350,6 +350,49 @@ platform, so neither a machine bundle nor a workspace snapshot carries them:
 | `machine-move/peers/` | 0.31.0 | the other machine's facts (`full machine-move facts --out FILE`, schema `observatory-machine-facts/1`: `machine`, `generated_at`, `engine_version`, `platform`, `ssh[]` of `file` and `fingerprint`, `device`, `jobs[]`, `elsewhere[]`, `restore`, `omitted`), placed by the person; written whole through a temporary file and a link, never over an existing name; `full machine-move status` reads every `*.json` here | never written by the engine; a file that does not read is named in `degraded`; deleting one forgets that machine |
 | `machine-id` | 0.30.1 | a random machine id, written only where the platform has no machine identifier of its own (macOS, most Linux and Windows have one) | deleting it gives the machine a new id: bundles and snapshots it took before then read as another machine's |
 
+## Background jobs name no Python release (OBS-393, the release after 0.35.5)
+
+No migration and no new workspace file. Until 0.35.5 every job definition named files inside the engine's
+`<venv>/lib/python3.X/site-packages/observatory/engine/`: the maintenance pass and the five-minute check
+(`tools/maintain.py`, with that folder as `WorkingDirectory`), the tick (`tools/tick.sh`), the server
+(`tools/serverd.py`), the per-install manifest `<home>/config/fabric-agent.json` (`mcp/server.py`) and the plugin
+hooks' `OBSERVATORY_ROOT` in Claude Code's settings. A venv rebuilt on another Python minor release (3.14 to 3.15)
+no longer has that folder, so launchd failed every run with exit 78, and the repair rewrote only the interpreter.
+
+- A definition written by this release names the venv's stable interpreter and a program name:
+  `<venv>/bin/python3 -P -m observatory.job maintain run --first-check-delay 90` (likewise `maintain check`, `tick`,
+  `serverd --run --port N`, and `mcp --stdio --home HOME` in the manifest). `observatory/job.py` is a new module of
+  the package; on macOS and Linux it replaces itself with the very program the old definition named
+  (`python <engine>/tools/maintain.py run ...`, `/bin/bash <engine>/tools/tick.sh`), so the process, its arguments,
+  its folder (the engine) and its signals are what they were; on Windows it runs the program in its own process.
+  `WorkingDirectory` (launchd), `WorkingDirectory=` (systemd, new in the pass's unit) and the Task Scheduler folder
+  are the workspace home. An engine run from a checkout, whose paths name no Python release, keeps naming its files
+  as before. A root-owned `space_daemons.py` accepts the new definitions unchanged: the program is still the venv's
+  interpreter, and the workspace home is inside the account's home.
+- The plugin settings: `OBSERVATORY_PYTHON` is the venv's stable interpreter (`<venv>/bin/python3`, the one the jobs
+  name) rather than the installer's `sys.executable`, and `OBSERVATORY_ROOT` is left out when its path names a Python
+  release; `full agent install` removes one an earlier release wrote, and `full agent status` names it. The hooks
+  (`session-start.sh`, `record-turn.sh`) treat a root that does not exist as unset and find the engine under the
+  interpreter's venv (`<venv>/lib/python3*/site-packages/observatory/engine`). With no `OBSERVATORY_ROOT`, an
+  earlier plugin version's session hook falls back to `project-observatory full-path` when that is on PATH, and its
+  turn hook records nothing until the plugin updates.
+- Repair compares the whole definition the installer would write now with the installed one, not the interpreter
+  alone. `install_launchd.repair_definitions` (the old name `repair_interpreters` still answers) rewrites a drifted
+  tick or server plist, keeping its interval, port, `PATH` and probe limit; each found row gains `changed` (the keys
+  that differ) and `missing` (the paths that do not exist). The maintenance pass reloads it as before (a running
+  tick waits for the next pass), and `full maintain ensure` now does the same for the tick and the server after
+  scheduling its own two jobs, answering `jobs`. For an account with no GUI session, or one whose job root runs as a
+  system daemon, a drifted background definition is rewritten and the answer is `waiting-for-root` with root's
+  `remove`, then `apply`, never a bootout of a running pass.
+- Doctor and `full maintain status` name `job-path-missing` (a definition of the pass, the check, the tick or the
+  server whose program, an argument or its folder does not exist; launchd and systemd definitions are read, Task
+  Scheduler's are not yet; step `project-observatory full maintain ensure`) and `venv-home-missing` (the engine's
+  `pyvenv.cfg` names a `home` that is gone, so no job of that venv can start; no step: a person recreates the venv).
+- On a machine that already failed: install this release into the venv (`project-observatory full update --apply`,
+  or a reinstall of the package), then `project-observatory full maintain ensure`; where it answers
+  `waiting-for-root`, an administrator runs the two `sudo` steps it prints, in order. Then
+  `project-observatory full doctor` shows no `job-path-missing`.
+
 ## Workspace restore: a carried secret store put back (OBS-350 part 2, the release after 0.35.4)
 
 Additive; the snapshot format stays 1 and nothing migrates. `full restore` writes each store a snapshot

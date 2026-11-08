@@ -1026,5 +1026,129 @@ class PlistsCarryAStablePath(Workspace):
         self.assertEqual(self.il.lint_plist(sd.build_plist()), [])
 
 
+# --- OBS-393: a venv rebuilt on another Python release ----------------------------
+
+class DefinitionsNameNoPythonRelease(PlistsCarryAStablePath):
+    """A second Mac's jobs failed every run (launchd exit 78) after its venv moved from Python
+    3.14 to 3.15: each definition named `<venv>/lib/python3.14/site-packages/observatory/engine/...`.
+    A definition built today names the venv's interpreter and a program name only."""
+
+    def engine(self):
+        import configuration
+        source, python = self._engine_in_a_venv()
+        patches = [patch.object(configuration, "SOURCE", source), patch.object(sys, "executable", str(python))]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        return source, python
+
+    @staticmethod
+    def words(value) -> list[str]:
+        if isinstance(value, dict):
+            return [w for v in value.values() for w in DefinitionsNameNoPythonRelease.words(v)]
+        if isinstance(value, (list, tuple)):
+            return [w for v in value for w in DefinitionsNameNoPythonRelease.words(v)]
+        return [str(value)]
+
+    def assertNoRelease(self, doc, what):
+        bound = [w for w in self.words(doc) if "lib/python3." in w or "site-packages" in w]
+        self.assertEqual(bound, [], f"{what} names a folder of one Python release")
+
+    def test_every_definition_built_today_names_no_python_release(self):
+        source, python = self.engine()
+        il = self.reload("install_launchd")
+        tick = il.build(1800)
+        self.assertNoRelease(tick, "the tick")
+        self.assertEqual(tick["ProgramArguments"], [str(python), "-P", "-m", "observatory.job", "tick"])
+        self.assertEqual(tick["WorkingDirectory"], str(self.home), "never inside site-packages")
+        server = self.reload("serverd").build_plist()
+        self.assertNoRelease(server, "the server")
+        self.assertEqual(server["ProgramArguments"][:5], [str(python), "-P", "-m", "observatory.job", "serverd"])
+        self.assertEqual(server["ProgramArguments"][5:7], ["--run", "--port"])
+        self.assertNoRelease(il.tick_job(1800).argv, "the tick's systemd or Task Scheduler job")
+        self.assertEqual(il.tick_job(1800).cwd, self.home)
+        maintenance = self.reload("maintenance")
+        for job in ("maintain", "check"):
+            doc = maintenance.LaunchdSchedule(self.home, job=job, headless=False).document()
+            self.assertNoRelease(doc, job)
+            self.assertEqual(doc["ProgramArguments"][:5], [str(python), "-P", "-m", "observatory.job", "maintain"])
+            self.assertEqual(doc["WorkingDirectory"], str(self.home))
+            self.assertEqual(il.lint_plist(doc), [])
+            systemd = maintenance.SystemdSchedule(self.home, job=job).service_text()
+            self.assertNotIn("lib/python3.", systemd)
+            self.assertIn(f'"-m" "observatory.job" "maintain" {maintenance.JOBS[job]["action"]}', systemd)
+        sys.path.insert(0, str(ROOT / "tools"))
+        from publish_contract import installed_manifest
+        conn = installed_manifest("ws-test")["capabilities"][0]["profile"]["connection"]
+        self.assertNoRelease(conn, "the installed manifest")
+        self.assertEqual(conn["args"][:4], ["-P", "-m", "observatory.job", "mcp"])
+        plugin = self.reload("agent_plugin")
+        env = plugin.workspace_env()
+        self.assertIsNone(env["OBSERVATORY_ROOT"], "the hooks find the engine through the interpreter")
+        self.assertEqual(env["OBSERVATORY_PYTHON"], str(python))
+
+    def test_a_checkout_keeps_naming_its_own_files(self):
+        # A checkout's paths name no Python release: its jobs run the file itself, as before.
+        il = self.reload("install_launchd")
+        self.assertFalse(il.version_bound(ROOT))
+        self.assertEqual(il.build(1800)["ProgramArguments"], ["/bin/bash", str(ROOT / "tools/tick.sh")])
+        self.assertTrue(il.version_bound("/v/lib/python3.15/site-packages/observatory/engine"))
+        self.assertTrue(il.version_bound("C:/Profiles/example/AppData/Roaming/Python/Python314/site-packages"))
+        self.assertFalse(il.version_bound("/v/bin/python3"))
+
+    def test_every_program_the_installer_names_is_shipped(self):
+        # The launcher's own table (observatory/job.py) is compared with this one by the
+        # repository's tests/test_job_launcher.py: this sandbox holds the engine only.
+        for name, (relative, _kind) in self.il.JOB_TOOLS.items():
+            self.assertTrue((ROOT / relative).is_file(), name)
+
+    def stale(self):
+        """Plists a 3.14 venv wrote, now that the venv runs 3.15: every engine path is gone."""
+        jobs = {j["name"]: j for j in self.il.managed_jobs()}
+        old = self.fake / "venv" / "lib" / "python3.14" / "site-packages/observatory/engine"
+        tick, server = Path(jobs["tick"]["plist"]), Path(jobs["server"]["plist"])
+        tick.parent.mkdir(parents=True, exist_ok=True)
+        tick.write_bytes(plistlib.dumps({"Label": jobs["tick"]["label"], "StartInterval": 1200,
+                                         "ProgramArguments": ["/bin/bash", str(old / "tools/tick.sh")],
+                                         "WorkingDirectory": str(old),
+                                         "EnvironmentVariables": {"PATH": "/usr/bin:/bin",
+                                                                  "OBSERVATORY_PYTHON": "/x/bin/python3"}}))
+        server.write_bytes(plistlib.dumps({"Label": jobs["server"]["label"],
+                                           "ProgramArguments": ["/x/bin/python3", str(old / "tools/serverd.py"),
+                                                                "--run", "--port", "48888"]}))
+        return jobs, tick, server
+
+    def test_a_stale_release_path_is_detected_and_rewritten(self):
+        _, python = self.engine()
+        il = self.il = self.reload("install_launchd")
+        jobs, tick, server = self.stale()
+        self.assertTrue(il.missing_paths(plistlib.loads(tick.read_bytes())))
+        found = {f["name"]: f for f in il.repair_definitions(str(python), write=False)}
+        self.assertEqual(set(found), {"tick", "server"})
+        self.assertIn("ProgramArguments", found["tick"]["changed"])
+        self.assertTrue(any("python3.14" in m for m in found["tick"]["missing"]))
+        il.repair_definitions(str(python))
+        doc = plistlib.loads(tick.read_bytes())
+        self.assertEqual(doc, il.wanted_definition("tick", doc, python=str(python)))
+        self.assertEqual(doc["StartInterval"], 1200, "the tick keeps its interval")
+        self.assertEqual(doc["EnvironmentVariables"]["PATH"], "/usr/bin:/bin", "and the PATH it was installed with")
+        self.assertEqual(il.missing_paths(doc), [])
+        served = plistlib.loads(server.read_bytes())
+        self.assertEqual(served["ProgramArguments"][-2:], ["--port", "48888"], "the server keeps its port")
+        self.assertNotIn("python3.14", plistlib.dumps(served).decode())
+        self.assertEqual(stat.S_IMODE(tick.stat().st_mode), 0o600)
+        self.assertEqual(il.repair_definitions(str(python)), [], "a second pass finds nothing")
+
+    def test_a_venv_whose_python_is_gone_is_named(self):
+        source, _ = self._engine_in_a_venv()
+        venv = self.fake / "venv"
+        (venv / "pyvenv.cfg").write_text(f"home = {self.fake / 'gone' / 'bin'}\nversion = 3.14.0\n")
+        problem = self.il.venv_home_problem(source)
+        self.assertIn("pyvenv.cfg home", problem)
+        (venv / "pyvenv.cfg").write_text(f"home = {self.fake / 'opt/homebrew/bin'}\n")
+        self.assertIsNone(self.il.venv_home_problem(source))
+        self.assertIsNone(self.il.venv_home_problem(ROOT), "a checkout has no venv to judge")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

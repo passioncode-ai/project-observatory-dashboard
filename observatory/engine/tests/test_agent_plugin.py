@@ -383,5 +383,64 @@ class OpenDashboardTests(unittest.TestCase):
         self.assertIn("already serves another workspace", p.stderr)
 
 
+class VersionFreeHookEnv(unittest.TestCase):
+    """OBS-393: the settings name no folder of one Python release, and the hooks find the engine
+    through the venv's interpreter when a rebuild on another release removed the old folder."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name).resolve()
+        sys.path.insert(0, str(ROOT / "tools"))
+        sys.path.insert(0, str(ROOT))
+        import agent_plugin
+        import configuration
+        self.plugin, self.configuration = agent_plugin, configuration
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_settings_drop_a_release_bound_root_and_name_the_stable_interpreter(self):
+        from unittest.mock import patch
+        engine = self.base / "venv/lib/python3.15/site-packages/observatory/engine"
+        stale = {"OBSERVATORY_ROOT": str(self.base / "venv/lib/python3.14/site-packages/observatory/engine"),
+                 "OBSERVATORY_PYTHON": str(self.base / "venv/bin/python3.14"), "KEEP": "1"}
+        with patch.object(self.configuration, "SOURCE", engine), \
+                patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.base / "workspace")}):
+            wanted = self.plugin.workspace_env()
+            self.assertIsNone(wanted["OBSERVATORY_ROOT"])
+            self.assertEqual(wanted["OBSERVATORY_PYTHON"],
+                             self.plugin._install_launchd().stable_interpreter(self.configuration.engine_python()),
+                             "the interpreter the background jobs name, never the installer's python3.14")
+            problems = self.plugin.hook_env_problems({"env": stale})
+            self.assertTrue(any("OBSERVATORY_ROOT" in p and "unset" in p for p in problems), problems)
+            settings = {"env": dict(stale)}
+            replaced = self.plugin.put_hook_env(settings)
+        self.assertNotIn("OBSERVATORY_ROOT", settings["env"], "a stale root is removed, not kept")
+        self.assertEqual(settings["env"]["KEEP"], "1")
+        self.assertLessEqual({"OBSERVATORY_ROOT", "OBSERVATORY_PYTHON"}, set(replaced))
+
+    @unittest.skipIf(os.name == "nt", "the hooks are bash")
+    def test_the_session_hook_finds_the_engine_through_the_interpreter(self):
+        venv = self.base / "venv"
+        engine = venv / "lib/python3.15/site-packages/observatory/engine"
+        (engine / "tools").mkdir(parents=True)
+        (venv / "bin").mkdir()
+        (venv / "pyvenv.cfg").write_text("home = /usr/bin\n")
+        os.symlink(sys.executable, venv / "bin/python3")
+        marker = self.base / "ran"
+        (engine / "observatory.py").write_text("")
+        (engine / "tools/session_start.py").write_text(
+            f"import pathlib, sys\npathlib.Path({str(marker)!r}).write_text(__file__)\n")
+        (engine / "tools/maintain.py").write_text("")
+        env = {"PATH": "/usr/bin:/bin", "HOME": str(self.base), "XDG_STATE_HOME": str(self.base / "state"),
+               "OBSERVATORY_ROOT": str(venv / "lib/python3.14/site-packages/observatory/engine"),
+               "OBSERVATORY_PYTHON": str(venv / "bin/python3")}
+        hook = ROOT / "skill/plugins/observatory-log/hooks/session-start.sh"
+        p = subprocess.run(["/bin/bash", str(hook)], env=env, input="", capture_output=True, text=True, timeout=60)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(marker.read_text(), str(engine / "tools/session_start.py"),
+                         "the 3.15 engine ran, though the settings still named the 3.14 folder")
+
+
 if __name__ == "__main__":
     unittest.main()
