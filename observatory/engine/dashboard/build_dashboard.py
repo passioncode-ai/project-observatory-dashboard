@@ -2422,6 +2422,9 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
     // The backups' own warnings no row above says (OBS-349), each with the step doctor names.
     "backups-vault-store-not-carried": w => [T("the secret store {path} is outside the workspace and the newest encrypted snapshot did not carry it; another machine restored from these backups would not get its keys", {path: w.path || ""}),
                                              fromStep(w.step, fullCommand("backups status"))],
+    "backups-secret-store-not-restored": w => [T("the last restore did not write the secret store {path} its backup carried ({reason}); its keys are not on this machine until it is written",
+                                                 {path: w.path || "", reason: w.reason || ""}),
+                                               fromStep(w.step, fullCommand("backups status"))],
     "backups-secret-store-missing": w => [T("the configured secret store {path} does not exist on this machine",
                                             {path: w.path || ""}), fromStep(w.step, fullCommand("backups status"))],
     "backups-secret-store-env-override": w => [T("the vault folder comes from the environment ({names}), which the daily job may not share; only the folder the settings name is carried",

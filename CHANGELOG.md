@@ -3,6 +3,30 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.35.5 (2026-11-08)
+
+The secret store kept outside the workspace now comes back with a workspace restored on another computer. Until now
+the encrypted snapshot carried it, but `full restore` only checked it and wrote it nowhere, so a machine lost meant
+keys lost unless a separate copy existed. Nothing needs you after installing.
+
+### Added
+
+- **`full restore` puts the carried secret store back** (OBS-350 part 2, `docs/COMPATIBILITY.md`,
+  `docs/CLI-COMPATIBILITY.md`). The store goes to the folder the restored settings name, under a policy for one
+  already there: `--secret-store auto` (the default: written where the folder is absent or empty, refused before any
+  write where it differs), `keep` (what `full init` uses), `merge` (missing files added, nothing overwritten),
+  `replace` (the old store moved aside, never deleted) or `skip`. The plan is made before anything is written; the
+  store is written through a staged copy under the vault's own lock, before the workspace is put in place.
+- **`full restore SNAPSHOT --secret-store-only`** writes only the stores, into the folders the current settings
+  name, for a workspace restored earlier or a store a restore skipped.
+- **Places a store is never written to.** A folder holding the home, the home's start-up files, `~/.ssh`,
+  `~/.gnupg`, `~/.aws`, `~/.config/gh`, `~/Library/LaunchAgents` and `~/Library/Keychains` are refused
+  (`secret-store-target-refused`), however spelled; a snapshot from another computer writes only where this
+  computer's settings name the same folder or `--secret-store-target PATH` confirms it
+  (`secret-store-target-unconfirmed`).
+- **Doctor says when a store was not put back** (`backups-secret-store-not-restored`, with the command that writes
+  it), until a store is in place.
+
 ## 0.35.4 (2026-11-08)
 
 A fix release for workspaces that move between machines, Python versions and accounts with nobody signed in. A

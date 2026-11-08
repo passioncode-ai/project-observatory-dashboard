@@ -993,11 +993,17 @@ def _init(base: Path, *, fresh: bool = False) -> dict:
         # Most often a reinstall on THIS machine: a snapshot that names no machine (taken before 0.30.1)
         # is restored whole and said to be `unknown`; only a known other machine id is restored
         # without that machine's identity (OBS-284).
-        restored = maintenance.restore_latest(base, unknown="keep")
+        # A store the snapshot carried is written only where none is: a reinstall over a surviving
+        # store never fails or overwrites it (OBS-350).
+        restored = maintenance.restore_latest(base, unknown="keep", secret_store="keep")
     result = initialize(base)
     if restored and restored.get("status") == "restored":
         result = {**result, "status": "restored", "restored_from": restored.get("from"),
                   "files": restored.get("files"), "machine": restored.get("machine")}
+        # What happened to a secret store the snapshot carried: under keep a folder not confirmed, busy or
+        # unwritable is skipped, and its `next` names the exact command that writes it (OBS-350).
+        if "secret_store" in restored:
+            result["secret_store"] = restored["secret_store"]
         if (restored.get("machine") or {}).get("mode") == "unknown":
             snap = restored.get("from")
             result["machine"]["next"] = [

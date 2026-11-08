@@ -36,6 +36,7 @@ import base64
 import collections
 import contextlib
 import datetime
+import fnmatch
 import oslocks
 import osprivacy
 import hashlib
@@ -1267,6 +1268,9 @@ CARRY_RECORD = ("store", "raw", "secret-store-carry.json")
 #: A carry older than this proves nothing about the store as it is now: two daily snapshots.
 CARRY_FRESH = datetime.timedelta(hours=48)
 CARRY_FIELDS = ("at", "kind", "file", "state", "reason", "files", "size", "not_carried", "sweep_failed")
+#: What the newest restore did with a carried store (OBS-350 part 2), written by `workspace_upgrade`.
+RESTORE_RECORD = ("store", "raw", "secret-store-restore.json")
+RESTORE_FIELDS = ("at", "snapshot", "state", "reason", "target", "files", "next")
 #: The environment can point the vault somewhere the settings do not; the maintenance job does
 #: not share a person's shell, so only the folder the settings name can be carried.
 VAULT_DIR_ENV, SECRETS_ENV = "OBSERVATORY_VAULT_DIR", "OBSERVATORY_SECRETS"
@@ -1304,7 +1308,11 @@ def _settings_stores(base: Path, doc: dict) -> tuple[Path, list[dict]]:
     for key in ("secret_store", "secrets"):
         value = sources.get(key)
         if isinstance(value, str) and value:
-            candidates.append((key, Path(value).expanduser().resolve()))
+            try:
+                candidates.append((key, Path(value).expanduser().resolve()))
+            except (OSError, RuntimeError):
+                # A link loop (RuntimeError on Python 3.11): named as written, never followed.
+                candidates.append((key, Path(os.path.abspath(Path(value).expanduser()))))
     effective = candidates[0][1] if candidates else home / "secrets"
     stores: list[dict] = []
     for key, path in candidates:
@@ -1360,6 +1368,52 @@ def _last_carry(base: Path) -> dict | None:
             else None for key in CARRY_FIELDS}
 
 
+def _last_restore(base: Path) -> dict | None:
+    """The newest restore record, or None; `{"state": "unknown"}` when it does not read."""
+    file = base.joinpath(*RESTORE_RECORD)
+    if not file.exists() and not file.is_symlink():
+        return None
+    try:
+        if file.is_symlink() or not file.is_file() or file.stat().st_size > 65536:
+            raise ValueError("not a plain record")
+        doc = json.loads(file.read_text(encoding="utf-8"))
+        if not isinstance(doc, dict) or not isinstance(doc.get("state"), str):
+            raise ValueError("no state")
+    except (OSError, ValueError):
+        return {"state": "unknown"}
+    def plain(row: dict) -> dict:
+        return {key: row.get(key) if isinstance(row.get(key), (str, int)) and not isinstance(row.get(key), bool)
+                else None for key in RESTORE_FIELDS}
+    out = plain(doc)
+    stores = doc.get("stores")
+    if isinstance(stores, list):
+        out["stores"] = [{"name": r.get("name") if isinstance(r.get("name"), str) else None, **plain(r)}
+                         for r in stores[:8] if isinstance(r, dict)]
+    return out
+
+
+def _holds_a_store(display: str | None) -> bool:
+    """Whether the folder a record names holds a vault store: a top-level `projects/` folder (the layout
+    `tools/vault.py` writes and the restore's own checks use) with something in it beyond lock files and
+    temporaries, put there by a later restore, by `vault.py` or by hand. A folder of unrelated files (a
+    refused target such as `~/.ssh`) is no store. Listed only; nothing is read."""
+    if not isinstance(display, str) or not display:
+        return False
+    try:
+        folder = Path(display).expanduser()
+        if folder.is_symlink() or not folder.is_dir():
+            return False
+        def ignorable(name: str) -> bool:
+            return (fnmatch.fnmatch(name, "*.lock") or fnmatch.fnmatch(name, "*.tmp")
+                    or name.startswith((".vault-write-", ".passphrase-")))
+        projects = folder / "projects"
+        if projects.is_symlink() or not projects.is_dir():
+            return False
+        return any(not ignorable(child.name) for child in projects.iterdir())
+    except (OSError, RuntimeError):
+        return False
+
+
 def _parse_at(text) -> datetime.datetime | None:
     if not isinstance(text, str):
         return None
@@ -1404,8 +1458,22 @@ def secret_store(base: Path) -> tuple[dict, list[dict]]:
     shown = _display(path)
     exists = path.is_dir()
     last = _last_carry(base)
+    restored = _last_restore(base)
     section = {"external": True, "path": shown, "settings_keys": keys, "exists": exists,
                "env_override": bool(moved), "last_carry": last}
+    if restored is not None:
+        section["last_restore"] = restored
+        # A skip with a reason (not confirmed, refused, busy, unwritable) warns, store by store, until its folder
+        # holds a store again, however it got there; a skip the caller chose (`skipped-by-choice`) never does.
+        for row in restored.get("stores") or [restored]:
+            if row.get("state") != "skipped" or not row.get("reason") or _holds_a_store(row.get("target")):
+                continue
+            where = row.get("target") or shown
+            warn("backups-secret-store-not-restored",
+                 f"the last restore did not write the secret store {where} its backup carried ({row['reason']}); "
+                 "its keys are not on this machine until it is written",
+                 row.get("next") or "project-observatory full restore SNAPSHOT --secret-store-only",
+                 path=where, reason=row["reason"])
     if not exists:
         source = keys[0]
         warn("backups-secret-store-missing", f"the configured secret store {shown} does not exist on this machine",
