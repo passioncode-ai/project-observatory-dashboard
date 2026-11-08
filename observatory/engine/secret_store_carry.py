@@ -1161,11 +1161,13 @@ def _link(target: str, at: Path) -> None:
     os.symlink(target, at)
 
 
-def _write_tree(src: Path, entry: dict, into: Path) -> list[dict]:
+def _write_tree(src: Path, entry: dict, into: Path, *, made: bool = False) -> list[dict]:
     """Write a carried store into the new folder `into`: folders 0700, files 0600 with their digests checked
-    as written and again after, links recreated (POSIX). Returns the entries not restored here."""
+    as written and again after, links recreated (POSIX). Returns the entries not restored here. `made`: the
+    caller has just made `into` itself (a verification, which must know the folder is its own)."""
     not_restored: list[dict] = []
-    _make_dir(into)
+    if not made:
+        _make_dir(into)
     for row in sorted(entry.get("directories") or [], key=lambda r: r["path"]):
         _make_dir(into / row["path"])
     for row in entry.get("files") or []:
@@ -1549,6 +1551,7 @@ VERIFY_NOT_EMPTY = "secret-store-verify-into-not-empty"
 VERIFY_REFUSED = "secret-store-verify-into-refused"
 VERIFY_CONFLICT = "secret-store-verify-into-conflict"
 VERIFY_FAILED = "secret-store-verify-failed"
+VERIFY_UNCHECKED = "secret-store-verify-into-unchecked"
 _VERIFY_STEP = ("Choose an empty or absent folder outside the workspace and outside every secret store, and run "
                 "project-observatory full restore SNAPSHOT --secret-store-verify-into DIR")
 
@@ -1592,6 +1595,10 @@ def _identities(path: Path) -> list[tuple]:
         info = os.stat(existing)
     except (OSError, RuntimeError, ValueError):
         return []
+    if not info.st_ino:
+        # A volume with no inode numbers (FAT, exFAT, some network shares on Windows) gives every folder the
+        # same identity: no identity is read there, and the resolved-name compare decides alone.
+        return []
     rest = path.parts[len(existing.parts):]
     base = (info.st_dev, info.st_ino)
     keys = [(base, _fold(Path(*rest[:i]))) for i in range(len(rest), 0, -1)]
@@ -1600,7 +1607,8 @@ def _identities(path: Path) -> list[tuple]:
             held = os.stat(folder)
         except OSError:
             continue
-        keys.append(((held.st_dev, held.st_ino), ()))
+        if held.st_ino:
+            keys.append(((held.st_dev, held.st_ino), ()))
     return keys
 
 
@@ -1779,10 +1787,17 @@ def verify_into(source: Path, manifest: dict, into: Path, avoid: list[tuple[Path
         try:
             if entry is carried[0]:
                 result["made"] = _open_into(into, list(avoid))
-            if os.path.lexists(root):
-                raise _Unreadable("the folder for it already exists")
+            try:
+                os.mkdir(root, 0o700)
+            except FileExistsError:
+                # Not this run's folder: refused, and never removed by the cleanup below.
+                raise CarryRefused(VERIFY_NOT_EMPTY, (
+                    f"--secret-store-verify-into: {shown} appeared while the store was being verified; it is not "
+                    f"this run's and was left as it is, and the copies this run made were removed. {_VERIFY_STEP}")
+                ) from None
             result["written"].append(root)
-            not_written = _write_tree(source / EXTERNAL / name, entry, root)
+            osprivacy.make_private(root)
+            not_written = _write_tree(source / EXTERNAL / name, entry, root, made=True)
             _verify_copy(root, entry)
         except (OSError, _Unreadable) as exc:
             # Every copy this run made goes: a half-verified set of secrets is not left behind.

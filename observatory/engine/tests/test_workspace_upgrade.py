@@ -2445,10 +2445,11 @@ class VerifySecretStoreInto(unittest.TestCase):
 
     def refused(self,snapshot,folder,code='secret-store-verify-into-refused',**kw):
         import secret_store_carry
+        new=kw.pop('new',self.base/'restored')
         with self.assertRaises(secret_store_carry.CarryRefused) as caught:
-            self.restore(snapshot,kw.pop('new',self.base/'restored'),secret_store_verify_into=str(folder),**kw)
+            self.restore(snapshot,new,secret_store_verify_into=str(folder),**kw)
         self.assertEqual(caught.exception.code,code,str(folder))
-        self.assertFalse(os.path.lexists(self.base/'restored'))
+        self.assertFalse(os.path.lexists(new))
         return caught.exception
 
     @unittest.skipUnless(sys.platform=='darwin','the Data volume firmlink is macOS\'s')
@@ -2628,6 +2629,57 @@ class VerifySecretStoreInto(unittest.TestCase):
         (root/'projects/empty').rmdir()
         with self.assertRaises(carry._Unreadable):
             carry._verify_copy(root,entry)
+
+
+    # --- review round 2 (OBS-394) -------------------------------------------------------------------------
+
+    def test_a_store_folder_that_appears_before_its_mkdir_is_refused_and_left_alone(self):
+        import secret_store_carry
+        snapshot,_=self.take()
+        into=self.base/'verify-here'
+        real=secret_store_carry._open_into
+
+        def then_someone_writes(folder,avoid):
+            made=real(folder,avoid)
+            (folder/'secret_store').mkdir()
+            (folder/'secret_store'/'theirs').write_text('fixture-value-040\n')
+            return made
+        with patch.object(secret_store_carry,'_open_into',then_someone_writes):
+            self.refused(snapshot,into,code='secret-store-verify-into-not-empty')
+        self.assertEqual((into/'secret_store'/'theirs').read_text(),'fixture-value-040\n',
+                         'a folder this run did not make is never removed')
+
+    def test_a_folder_beside_the_snapshot_file_is_accepted(self):
+        snapshot,_=self.take()
+        transfer=self.base/'obs-transfer'
+        transfer.mkdir()
+        carried=transfer/snapshot.name
+        shutil.copy2(snapshot,carried)
+        block=self.restore(carried,self.base/'restored',secret_store_verify_into=str(transfer/'verify'))['secret_store']
+        self.assertEqual(block['state'],'verified')
+        self.assert_store_is_the_snapshot(transfer/'verify'/'secret_store')
+        # The file itself is still never the folder.
+        self.refused(carried,carried,new=self.base/'restored-2')
+
+    def test_a_workspace_whose_settings_do_not_read_is_refused_not_skipped(self):
+        snapshot,_=self.take()
+        (self.home/'config/settings.json').write_text('{ not json')
+        error=self.refused(snapshot,self.base/'verify-here',code='secret-store-verify-into-unchecked')
+        self.assertIn(backup_display(self.home),str(error))
+        self.assertFalse(os.path.lexists(self.base/'verify-here'))
+
+    def test_a_volume_without_inode_numbers_falls_back_to_names(self):
+        import types
+        import secret_store_carry as carry
+        a,b=self.base/'one',self.base/'two'
+        a.mkdir()
+        b.mkdir()
+        flat=types.SimpleNamespace(st_dev=7,st_ino=0,st_mode=stat.S_IFDIR|0o700)
+        with patch.object(carry.os,'stat',lambda *args,**kw: flat):
+            self.assertFalse(carry._same_identity_overlap(a,b))
+            self.assertFalse(carry._same_identity_overlap(a/'x',b/'y'))
+        self.assertFalse(carry._overlaps(a,b))
+        self.assertTrue(carry._overlaps(a,a/'inside'),'the name compare still holds')
 
 
 if __name__=='__main__':

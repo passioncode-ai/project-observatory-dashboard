@@ -16,10 +16,12 @@ while the major version is 0, a minor release may change behaviour and says so h
   doctor reads is not written. It works with a whole restore and with `--secret-store-only`, which then needs no
   workspace, and answers `nothing-to-verify` when the snapshot carried no store. The copy stays in `DIR` for you to
   remove; one that fails to verify, or whose restore fails after it, is removed (`secret-store-verify-failed`,
-  exit 1). A DIR that is not empty, or lies in the new home, a workspace on this machine, the snapshot, a backups
-  folder or a secret store's folder (by name or by identity, `/System/Volumes/Data/...` included), is refused (`secret-store-verify-into-not-empty`, `secret-store-verify-into-refused`),
-  as is the flag beside `--secret-store-target` or another `--secret-store` policy
-  (`secret-store-verify-into-conflict`), all exit 2 with nothing written.
+  exit 1). A DIR that is not empty, or lies in the new home, a workspace on this machine, the snapshot file, a
+  backups folder or a secret store's folder (by name or by identity, `/System/Volumes/Data/...` included), is
+  refused (`secret-store-verify-into-not-empty`, `secret-store-verify-into-refused`), as is the flag beside
+  `--secret-store-target` or another `--secret-store` policy (`secret-store-verify-into-conflict`) and a run
+  where a workspace on this machine has settings that do not read (`secret-store-verify-into-unchecked`), all
+  exit 2 with nothing written. A DIR beside a carried `.obsnap` is fine.
 
 ## 0.35.5 (2026-11-08)
 

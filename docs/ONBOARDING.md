@@ -2435,10 +2435,14 @@ after the copy removes it and the folders it made for `DIR`. The temporary home'
 the live store, so run no other command against that home, and remove it with `DIR` once the check is done. Refused, exit 2, nothing
 written: `secret-store-verify-into-not-empty` (DIR holds something, or is a link or a file),
 `secret-store-verify-into-refused` (DIR is, holds or lies inside the new home, this workspace or the default
-one, the snapshot or the folder holding its file, a backups folder, a folder that the snapshot's settings or a
+one, the snapshot file (a DIR beside it, such as `~/obs-transfer/verify` next to a carried `.obsnap`, is fine),
+a backups folder, a folder that the snapshot's settings or a
 workspace's settings name in `sources.secret_store` or `sources.secrets`, `OBSERVATORY_SECRETS` or
 `OBSERVATORY_VAULT_DIR`, or one of the places a store is never written; compared by name and by identity, so a
-linked parent or macOS's `/System/Volumes/Data/...` spelling of the same folder is refused too), and
+linked parent or macOS's `/System/Volumes/Data/...` spelling of the same folder is refused too; on a volume
+without inode numbers, such as FAT or exFAT, the name alone decides), `secret-store-verify-into-unchecked` (a
+workspace on this machine whose settings do not read, so the store folders they name are unknown; repair them
+first), and
 `secret-store-verify-into-conflict` (beside `--secret-store-target` or a `--secret-store` policy other than
 `auto`, which only mean something when the store is written in place). A tampered carried file is refused
 before anything is written (`secret-store-manifest-mismatch`).

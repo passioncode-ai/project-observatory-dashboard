@@ -948,7 +948,7 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
         secret_store_carry.verify_conflict(secret_store, secret_store_target)
         early = [(destination, 'the new home')]
         if source.is_file():
-            early.append((Path(os.path.abspath(source)).parent, "the snapshot's folder"))
+            early.append((Path(os.path.abspath(source)), 'the snapshot file'))
         secret_store_carry.check_verify_into(secret_store_verify_into, early, require_empty=False)
     if source.is_file() and not source.is_symlink():
         # Refused before anyone is asked for a passphrase (the same refusal as below).
@@ -1072,20 +1072,27 @@ def _live_workspaces(destination: Path) -> list[Path]:
 def _verify_avoid(source: Path, manifest: dict, home: Path, snapshot_path: str | None,
                   settings: list[tuple[dict, str]]) -> list[tuple[Path | None, str]]:
     """Every folder `--secret-store-verify-into` must stay clear of (OBS-394): the new home or this workspace,
-    the snapshot and the folder holding its file, each live workspace and the folders its settings name for a
-    secret store, each workspace's backups folder, and the folders `settings` (the snapshot's) and the
-    environment name."""
+    the snapshot and its file (not the folder holding the file: a DIR beside a carried `.obsnap` is fine), each
+    live workspace and the folders its settings name for a secret store, each workspace's backups folder, and
+    the folders `settings` (the snapshot's) and the environment name. A workspace whose settings do not read
+    is refused (`secret-store-verify-into-unchecked`), never skipped: its store's folder is unknown."""
     avoid: list[tuple[Path | None, str]] = [(home, 'the new home or this workspace'), (source, 'the snapshot')]
     if snapshot_path:
-        avoid.append((Path(os.path.abspath(snapshot_path)).parent, "the snapshot's folder"))
+        avoid.append((Path(os.path.abspath(snapshot_path)), 'the snapshot file'))
     settings = list(settings)
     for base in [home, *_live_workspaces(home)]:
         if (base / 'workspace.json').is_file():
             avoid.append((base, 'a workspace on this machine'))
-            with contextlib.suppress(config.ConfigurationError, OSError, ValueError):
+            try:
                 sources = config.load(base).get('sources')
-                if isinstance(sources, dict):
-                    settings.append((sources, f"the workspace at {backup_vault._display(base)}'s settings"))
+            except (config.ConfigurationError, OSError, ValueError) as exc:
+                raise secret_store_carry.CarryRefused(secret_store_carry.VERIFY_UNCHECKED, (
+                    f"The settings of the workspace at {backup_vault._display(base)} do not read "
+                    f"({type(exc).__name__}), so the secret store folders they name cannot be kept clear of "
+                    "--secret-store-verify-into; nothing was written. Repair them, then run the restore again "
+                    "(what is wrong: project-observatory full doctor)")) from None
+            if isinstance(sources, dict):
+                settings.append((sources, f"the workspace at {backup_vault._display(base)}'s settings"))
         with contextlib.suppress(config.ConfigurationError, OSError, ValueError, RuntimeError):
             avoid.append((backup_vault.root_info(base)['path'].parent, 'the backups folder'))
     return avoid + secret_store_carry.setting_folders(manifest, settings, home)
@@ -1178,7 +1185,7 @@ def restore_store_only(source: Path, base: Path, *, secret_store: str = 'auto', 
         secret_store_carry.verify_conflict(secret_store, secret_store_target)
         early = [(base, 'the new home or this workspace')]
         if source.is_file():
-            early.append((Path(os.path.abspath(source)).parent, "the snapshot's folder"))
+            early.append((Path(os.path.abspath(source)), 'the snapshot file'))
         secret_store_carry.check_verify_into(secret_store_verify_into, early, require_empty=False)
     workspace.reject_symlinks(base)
     has_workspace = (base / 'workspace.json').is_file()
