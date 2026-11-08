@@ -3,6 +3,44 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.35.4 (2026-11-08)
+
+A fix release for workspaces that move between machines, Python versions and accounts with nobody signed in. A
+workspace now opens under any supported Python; the maintenance schedule works in an account with no GUI session;
+backups keep the newest copy and say where the passphrase is kept. One command changes: `workspace-backup --output`
+over a workspace that holds secrets now needs `--plaintext`. Nothing needs you after installing.
+
+### Fixed
+
+- **A workspace opens under any supported Python** (OBS-387, `docs/COMPATIBILITY.md` "Migration checksums: the
+  same under every Python"). The checksum recorded for each applied migration was the sha256 of `ast.dump`, whose
+  text differs between Python 3.11, 3.12, 3.13 and 3.14, and 3.15, so a workspace recorded under one interpreter was
+  refused under another as "corrupt or incompatible" (seen when Homebrew moved a venv from 3.14 to 3.15). A new
+  record is `v2:` and a digest of the migration's source text, the same under 3.11 to 3.15; the digests earlier
+  releases recorded are still read, each pinned to the code it attests, and never rewritten.
+- **The maintenance schedule in an account with no GUI session** (OBS-361 part 2). `full maintain ensure` failed
+  there with `Bootstrap failed: 125`; the maintenance and update-check jobs now go to the background folder that the
+  administrator's space daemons tool loads as system daemons, and the answer says `waiting-for-root` with the
+  administrator's command. Until the daemon runs, the plugin hook keeps running the pass at each session start; a
+  copy in `~/Library/LaunchAgents` stays until then (an ordinary account reached over SSH answers the same way).
+- **Backups keep the newest** (OBS-388). Rotation and "the newest" ordered backups made within one second by their
+  name's random suffix, so the newest could be rotated away; they now follow the order the backups were made in, and
+  the backup just written is never dropped, even after the clock was set back.
+- **Where the backup passphrase is kept** (OBS-391). Where no login Keychain takes it (a headless account), the
+  outside copy is the owner-only file, and the answer now says so instead of "the login Keychain refused"; once the
+  Keychain takes it, the copy moves there and the file goes.
+- **`machine-move cutover` refuses a stale staged definition** (OBS-390). A definition staged by a restore days ago
+  can name a release folder a newer release replaced; cutover now refuses it as `staged-plist-stale`, naming the
+  missing path, before anything moves.
+- A test of a restore killed by a signal no longer fails on a loaded CI runner (OBS-392).
+
+### Changed
+
+- **`full workspace-backup --output DIR` over a workspace that holds secrets needs `--plaintext`** (OBS-389,
+  `docs/CLI-COMPATIBILITY.md`). It wrote `secrets/`, the node's private keys and provider key files as a plaintext
+  directory without a word. It is now refused before anything is written, naming the encrypted route (no
+  `--output`) and the new `--plaintext` flag, which keeps the old copy and adds `"plaintext": true` and a warning.
+
 ## 0.35.3 (2026-11-07)
 
 A follow-up to 0.35.2's security check on macOS 27. The check now says more precisely why it could not confirm a

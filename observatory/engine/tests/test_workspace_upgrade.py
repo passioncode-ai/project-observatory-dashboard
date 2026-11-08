@@ -5,6 +5,7 @@ import contextlib
 import importlib
 import io
 import json
+from pathlib import PurePosixPath
 import os
 from pathlib import Path
 import shutil
@@ -149,6 +150,105 @@ class WorkspaceUpgrade(unittest.TestCase):
         self.assertTrue(first.exists())
         self.assertFalse(any('backups/' in row['path'] for row in files))
         self.assertFalse(any(row['path'].endswith('.lock') for row in files))
+
+    # OBS-389: an explicit --output is a plaintext folder; a workspace that holds secrets refuses it
+    # unless the caller asks for the plaintext copy by name.
+    def test_an_explicit_output_refuses_a_workspace_that_holds_secrets(self):
+        out=self.base/'plain copy'
+        with self.assertRaises(config.ConfigurationError) as caught:
+            upgrade.snapshot(self.home,out,writers_stopped=True)
+        message=str(caught.exception)
+        self.assertIn('secrets',message)
+        self.assertIn('without --output',message,'the encrypted way forward is named')
+        self.assertIn('--plaintext',message,'the explicit opt-in is named')
+        self.assertNotIn('synthetic opaque private value',message)
+        self.assertFalse(out.exists(),'nothing is written before the refusal')
+        self.assertEqual(list((self.home/'backups').iterdir()),[])
+
+    def test_an_update_snapshot_needs_the_opt_in_too(self):
+        out=self.home/'backups'/'before-update-refused'
+        with self.assertRaises(config.ConfigurationError):
+            upgrade.snapshot(self.home,out,writers_stopped=True,update=True)
+        self.assertFalse(out.exists())
+
+    def test_the_plaintext_opt_in_keeps_the_copy_and_says_so(self):
+        out=self.base/'plain copy'
+        result=upgrade.snapshot(self.home,out,writers_stopped=True,plaintext=True)
+        self.assertEqual((result['encrypted'],result['plaintext']),(False,True))
+        self.assertTrue(any('secrets' in line and 'plaintext' in line for line in result['warnings']),result)
+        self.assertEqual((out/'data/secrets/demo-slot').read_text(),'synthetic opaque private value')
+        self.assertEqual(stat.S_IMODE((out/'data/secrets/demo-slot').stat().st_mode),0o600)
+        self.assertNotIn('synthetic opaque private value',json.dumps(result))
+
+    def test_without_secrets_an_explicit_output_is_as_before(self):
+        (self.home/'secrets/demo-slot').unlink()
+        (self.home/'secrets/.vault.lock').write_text('')   # a lock or a temporary is not a secret
+        out=self.base/'plain copy'
+        result=upgrade.snapshot(self.home,out,writers_stopped=True)
+        self.assertEqual(result['encrypted'],False)
+        self.assertNotIn('warnings',result)
+        self.assertTrue((out/'manifest.json').is_file())
+
+    def test_the_nodes_private_keys_count_with_no_vault_inside(self):
+        # Review of OBS-389: with the vault outside the home, the device, organization and owner keys
+        # under node/ were still copied in plaintext with no refusal.
+        (self.home/'secrets/demo-slot').unlink()
+        for rel in ('node/device/sig.pem','node/orgs/demo-org/keys/kem.pem','node/shares/owner/sig.pem',
+                    'node/shares/sent/share-1/kem.pem','node/shares/received/share-2/sig.pem',
+                    'node/relay/spool.key'):
+            key=self.home/rel
+            key.parent.mkdir(parents=True,exist_ok=True)
+            key.write_text('synthetic key material')
+            self.assertIn('node',upgrade.secret_stores_inside(self.home),rel)
+            key.unlink()
+        for name in upgrade.STATE_SECRET_FILES:
+            key=self.home/'store'/name
+            existed=key.exists()
+            if not existed:
+                key.write_text('synthetic key material')
+            self.assertIn(f'store/{name}',upgrade.secret_stores_inside(self.home),name)
+            if not existed:
+                key.unlink()
+        (self.home/'node/shares/owner/sig.pem').write_text('synthetic key material')
+        out=self.base/'plain copy'
+        with self.assertRaisesRegex(config.ConfigurationError,'node'):
+            upgrade.snapshot(self.home,out,writers_stopped=True)
+        self.assertFalse(out.exists())
+
+    def test_unreadable_settings_fail_closed(self):
+        (self.home/'secrets/demo-slot').unlink()
+        (self.home/'config/settings.json').write_text('{not json')
+        self.assertTrue(any('unreadable' in s for s in upgrade.secret_stores_inside(self.home)))
+
+    def test_a_store_the_settings_put_inside_the_workspace_counts(self):
+        (self.home/'secrets/demo-slot').unlink()
+        inner=self.home/'vault-inside'/'projects'/'alpha'/'prod'
+        inner.mkdir(parents=True)
+        (inner/'API_KEY').write_text('synthetic opaque private value')
+        file=self.home/'config/settings.json'
+        doc=config.read_json(file)
+        doc.setdefault('sources',{})['secret_store']=str(self.home/'vault-inside')
+        workspace.write_json(file,doc)
+        with self.assertRaisesRegex(config.ConfigurationError,'vault-inside'):
+            upgrade.snapshot(self.home,self.base/'plain copy',writers_stopped=True)
+
+    def test_the_cli_refuses_and_takes_the_opt_in(self):
+        out=self.base/'cli copy'
+        err=io.StringIO()
+        with patch.object(sys,'stderr',err),contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(upgrade.main(['backup','--output',str(out),'--writers-stopped']),2)
+        self.assertIn('--plaintext',err.getvalue())
+        self.assertFalse(out.exists())
+        printed=io.StringIO()
+        with contextlib.redirect_stdout(printed):
+            self.assertEqual(upgrade.main(['backup','--output',str(out),'--writers-stopped','--plaintext']),0)
+        self.assertTrue(json.loads(printed.getvalue())['plaintext'])
+        err=io.StringIO()
+        with patch.object(sys,'stderr',err),contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(upgrade.main(['backup','--writers-stopped','--plaintext']),2)
+        self.assertIn('--output',err.getvalue())
+        backup=upgrade.parser()._subparsers._group_actions[0].choices['backup']
+        self.assertIn('--plaintext',backup.format_help())
 
     def test_restore_refuses_existing_data(self):
         source=self.snapshot()
@@ -633,7 +733,7 @@ class WorkspaceUpgrade(unittest.TestCase):
         import backup_vault
         backup_vault.set_passphrase(self.home,'a synthetic passphrase of the first machine')
         source=self.base/'explicit snapshot'
-        upgrade.snapshot(self.home,source,writers_stopped=True)
+        upgrade.snapshot(self.home,source,writers_stopped=True,plaintext=True)
         dest=self.base/'second machine'
         with patch.dict(os.environ,{'OBSERVATORY_MACHINE_ID':BETA}):
             result=upgrade.restore(source,dest)
@@ -1115,7 +1215,7 @@ class ExternalSecretStore(unittest.TestCase):
         # The pre-update snapshot (`update=True`, an explicit output) and `upgrade`'s own `_snapshot`
         # are named for what they are, not as a plaintext copy taken by hand.
         out=self.home/'backups'/'before-update-test'
-        receipt=upgrade.snapshot(self.home,out,writers_stopped=True,update=True)
+        receipt=upgrade.snapshot(self.home,out,writers_stopped=True,update=True,plaintext=True)
         manifest=config.read_json(out/'manifest.json')
         self.outputs+= [json.dumps(receipt),json.dumps(manifest)]
         self.assertEqual(manifest['externals'][0]['reason'],'update-snapshot')
@@ -1238,7 +1338,7 @@ class ExternalSecretStore(unittest.TestCase):
         self.assertEqual(result['secret_store_sweep'],{'failed':[{'path':'daily-stuck','error':'PermissionError'}]})
         self.assertEqual(self.record()['sweep_failed'],1)
         self.assertEqual(self.vault.status(self.home)['secret_store']['last_carry']['sweep_failed'],1)
-        by_hand=upgrade.snapshot(self.home,self.base/'by-hand-2',writers_stopped=True)
+        by_hand=upgrade.snapshot(self.home,self.base/'by-hand-2',writers_stopped=True,plaintext=True)
         self.assertEqual(by_hand['secret_store_sweep']['failed'][0]['path'],'daily-stuck')
 
     def test_a_failing_strip_never_hides_the_original_interrupt(self):
@@ -1250,7 +1350,7 @@ class ExternalSecretStore(unittest.TestCase):
                 upgrade.snapshot(self.home,writers_stopped=True,kind='daily')
         self.assertEqual(caught.exception.code,143)
         # The next snapshot's sweep cleans what this one could not.
-        upgrade.snapshot(self.home,self.base/'by-hand-3',writers_stopped=True)
+        upgrade.snapshot(self.home,self.base/'by-hand-3',writers_stopped=True,plaintext=True)
         for copy in (self.home/'backups').iterdir():
             self.assertFalse((copy/'external').exists(),copy)
 

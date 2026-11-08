@@ -718,6 +718,104 @@ class Doctor(Base):
         self.assertEqual(report['secret_store'], {'external': False})
 
 
+class RotationOrder(Base):
+    """OBS-388: backups taken within one second share their name's stamp, and only a random
+    suffix follows it. Rotation, the newest-first list a restore picks from and the newest
+    machine bundle must follow the order the backups were made in, never that suffix."""
+
+    STAMP = '20261107T211839Z'
+    # Made in this order: by name `aaaaaaaa` sorts first and `ffffffff` last, so a name sort
+    # would keep cccc, eeee and ffff and rotate away bbbb, the newest.
+    MADE = ('cccccccc', 'ffffffff', 'aaaaaaaa', 'eeeeeeee', 'bbbbbbbb')
+
+    def setUp(self):
+        super().setUp()
+        cheap = patch.dict(vault.SCRYPT, {'n': 2 ** 12})
+        cheap.start()
+        self.addCleanup(cheap.stop)
+
+    def make(self, kind='daily', suffix=vault.SNAPSHOT_SUFFIX, same_mtime=True):
+        files = []
+        for tail in self.MADE:
+            dest = self.target() / f'{kind}-{self.STAMP}-{tail}{suffix}'
+            vault.encrypt_stream(dest, lambda writer: writer.write(b'synthetic'), PASS, kind=kind, content='file')
+            files.append(dest)
+        if same_mtime:
+            # A file system that keeps whole seconds (HFS+, FAT, many network shares) gives
+            # them one mtime: the header's creation time still tells them apart.
+            for f in files:
+                os.utime(f, ns=(1_800_000_000_000_000_000, 1_800_000_000_000_000_000))
+        return files
+
+    def test_the_newest_of_several_in_one_second_survives_rotation(self):
+        files = self.make()
+        self.assertEqual(vault.artifacts(self.target(), 'daily', vault.SNAPSHOT_SUFFIX), files)
+        dropped = vault.rotate(self.target(), 'daily', vault.SNAPSHOT_SUFFIX)
+        self.assertEqual(dropped, [f.name for f in files[:-vault.KEEP]])
+        self.assertEqual(vault.artifacts(self.target(), 'daily', vault.SNAPSHOT_SUFFIX), files[-vault.KEEP:])
+        self.assertTrue(files[-1].exists(), 'the newest backup is kept')
+
+    def test_a_clock_set_back_never_drops_the_backup_just_written(self):
+        # OBS-388 review: three backups stamped in the future, then a new one stamped today. By
+        # their stamps the new one is the oldest, and its source folder is already gone.
+        future = []
+        for tail in ('aaaaaaaa', 'bbbbbbbb', 'cccccccc'):
+            dest = self.target() / f'daily-20991231T000000Z-{tail}{vault.SNAPSHOT_SUFFIX}'
+            vault.encrypt_stream(dest, lambda writer: writer.write(b'synthetic'), PASS, kind='daily', content='file')
+            future.append(dest)
+        new = self.target() / f'daily-{self.STAMP}-dddddddd{vault.SNAPSHOT_SUFFIX}'
+        vault.encrypt_stream(new, lambda writer: writer.write(b'synthetic'), PASS, kind='daily', content='file')
+        dropped = vault.rotate(self.target(), 'daily', vault.SNAPSHOT_SUFFIX, keep=3, protect=new)
+        self.assertTrue(new.exists(), 'the backup just written is kept')
+        self.assertEqual(dropped, [future[0].name])
+        self.assertEqual(len(vault.artifacts(self.target(), 'daily', vault.SNAPSHOT_SUFFIX)), 3)
+
+    def test_a_restore_offers_the_newest_first(self):
+        files = self.make()
+        self.assertEqual([c['snapshot'] for c in vault.candidates(self.home)], files[::-1])
+
+    def test_the_newest_machine_bundle_is_the_last_made(self):
+        import machine_backup as MB
+        # find_latest also scans the default roots: point them at empty folders, never the real ones.
+        empty = self.base / 'no-default-roots'
+        for name, value in (('documents_dir', empty / 'Documents'), ('data_dir', empty / 'share')):
+            patcher = patch.object(vault, name, lambda value=value: value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        files = self.make(kind=vault.MACHINE_KIND, suffix=vault.MACHINE_SUFFIX)
+        self.assertEqual(MB.newest(self.home), files[-1])
+        self.assertEqual(MB.find_latest(self.home), files[-1])
+
+    def test_without_a_readable_header_the_mtime_orders_them(self):
+        root = self.target()
+        root.mkdir(parents=True, exist_ok=True)
+        files = []
+        for n, tail in enumerate(self.MADE):
+            f = root / f'daily-{self.STAMP}-{tail}{vault.SNAPSHOT_SUFFIX}'
+            f.write_bytes(b'not an encrypted backup')
+            os.utime(f, ns=(1_800_000_000_000_000_000 + n, 1_800_000_000_000_000_000 + n))
+            files.append(f)
+        self.assertEqual(vault.artifacts(root, 'daily', vault.SNAPSHOT_SUFFIX), files)
+
+    def test_the_stamp_in_the_name_still_orders_across_seconds(self):
+        # The stamp is when the snapshot was taken (an export may encrypt it later): a later
+        # stamp is newer whatever the file times say. The database copies, whose name ends
+        # in the stamp itself, keep their stamp order too.
+        root = self.target()
+        root.mkdir(parents=True, exist_ok=True)
+        later = root / f'daily-20261107T211840Z-00000000{vault.SNAPSHOT_SUFFIX}'
+        earlier = root / f'daily-{self.STAMP}-ffffffff{vault.SNAPSHOT_SUFFIX}'
+        later.write_bytes(b'x')
+        earlier.write_bytes(b'x')
+        os.utime(later, ns=(1_000, 1_000))
+        self.assertEqual(vault.artifacts(root, 'daily', vault.SNAPSHOT_SUFFIX), [earlier, later])
+        dbs = [root / f'{vault.DB_KIND}-{s}{vault.DB_SUFFIX}' for s in ('20261107T211841Z', '20261105T000000Z')]
+        for n, f in enumerate(dbs):
+            f.write_bytes(b'x')
+            os.utime(f, ns=(1_000 + n, 1_000 + n))
+        self.assertEqual(vault.artifacts(root, vault.DB_KIND, vault.DB_SUFFIX), dbs[::-1])
+
+
 class FakeStore:
     """The OS credential store, in memory: what a restore reads, and proof it never writes."""
 
@@ -1034,8 +1132,9 @@ class ThisMachineOnly(Base):
                              ('not an object', lambda: meta.write_text('[]')),
                              ('a folder', lambda: (meta.unlink(), meta.mkdir()))):
             with self.subTest(name):
-                # Five snapshots in one second: rotation orders same-second names by their random
-                # suffix, so the newest could be rotated away. Each case starts with an empty root.
+                # Five snapshots in one second: before OBS-388 rotation ordered same-second names by
+                # their random suffix, so the newest could be rotated away (RotationOrder now proves
+                # it is kept). Each case still starts with an empty root.
                 for old in vault.artifacts(self.target(), 'daily', vault.SNAPSHOT_SUFFIX):
                     old.unlink()
                 if meta.is_dir():

@@ -15,6 +15,7 @@ import json
 import os
 from pathlib import Path
 import plistlib
+import re
 import shutil
 import stat
 import subprocess
@@ -31,6 +32,8 @@ import workspace
 import workspace_upgrade
 import backup_vault as vault
 import maintenance as M
+#: The real session-kind check; every test pins it (Base.setUp), this one tests it.
+REAL_HEADLESS = M.LaunchdSchedule.headless
 import app_update as A
 import release_signature
 import update_events
@@ -146,6 +149,10 @@ class Base(unittest.TestCase):
         conn.close()
         (self.home / "secrets" / "demo-slot").write_text(SECRET_MARK)
         self.store = FakeStore()
+        # A test names the session kind it means: detection would ask this machine's launchctl (OBS-361 part 2).
+        pin = patch.object(M.LaunchdSchedule, "headless", lambda sched: bool(sched._headless))
+        pin.start()
+        self.addCleanup(pin.stop)
 
     def tearDown(self):
         self.env.stop()
@@ -238,7 +245,8 @@ class Switch(Base):
         self.assertEqual((self.home / "auto-update").read_text(), "off\n", "and never to off either")
         # A snapshot and its restore carry the switch as it was (a rollback swaps the home).
         restored = self.base / "restored home"
-        snap = workspace_upgrade.snapshot(self.home, self.base / "snap", writers_stopped=True)
+        # The rollback stage is an explicit plaintext copy, as the update takes it (OBS-389).
+        snap = workspace_upgrade.snapshot(self.home, self.base / "snap", writers_stopped=True, plaintext=True)
         workspace_upgrade.restore(Path(snap["snapshot"]), restored)
         self.assertEqual((restored / "auto-update").read_text(), "off\n")
 
@@ -449,6 +457,101 @@ class Passphrase(Base):
         run, _ = self.runner([(44, "", "The specified item could not be found in the keychain.")])
         store = vault.SecretStore(runner=run, platform="darwin", which=lambda name: "/usr/bin/" + name)
         self.assertIsNone(store.get("ws-1"), "exit 44 is the one answer that means absent")
+
+    def keychain(self, *, refuses):
+        """`security` as a desktop account answers it, or as a headless one (OBS-391): no login
+        Keychain to write to, so every add fails while a lookup finds nothing (exit 44)."""
+        items, calls = {}, []
+
+        def run(argv, input=None, **kw):
+            calls.append(list(argv))
+            if argv[:2] == ["security", "find-generic-password"]:
+                label = argv[argv.index("-a") + 1]
+                if label in items:
+                    return subprocess.CompletedProcess(argv, 0, items[label] + "\n", "")
+                return subprocess.CompletedProcess(argv, 44, "", "The specified item could not be found in the keychain.")
+            if argv == ["security", "-i"]:
+                if refuses:
+                    return subprocess.CompletedProcess(argv, 50, "", "The specified keychain could not be found.")
+                label, value = re.search(r'-a "([^"]*)" .* -w (\S+)', input).groups()
+                if label in items and " -U" not in input:
+                    return subprocess.CompletedProcess(argv, 45, "", "The specified item already exists in the keychain.")
+                items[label] = value
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            raise AssertionError(argv)
+        store = vault.SecretStore(runner=run, platform="darwin", which=lambda name: "/usr/bin/" + name)
+        return store, items, calls
+
+    def fallback_file(self, label):
+        return self.base / "xdg-config" / "project-observatory" / "backup-passphrases" / label
+
+    def test_a_keychain_that_refuses_keeps_it_in_the_owner_only_file_and_says_so(self):
+        # OBS-391: a headless macOS account has no login Keychain to write to. The answer read
+        # "the login Keychain refused the backup passphrase" with kept_outside null; the copy
+        # outside the workspace goes to the owner-only file instead, and the answer names it.
+        store, items, _ = self.keychain(refuses=True)
+        out = vault.ensure_passphrase(self.home, store)
+        self.assertEqual((out["passphrase"], out["kept_outside"]), ("generated", "file"), out)
+        self.assertNotIn("warning", out)
+        self.assertNotIn("Keychain", json.dumps(out))
+        file = self.fallback_file(out["label"])
+        self.assertEqual(file.read_text().rstrip("\n"), vault.passphrase(self.home))
+        self.assertEqual(stat.S_IMODE(file.stat().st_mode), 0o600)
+        self.assertEqual(items, {})
+        again = vault.ensure_passphrase(self.home, store)
+        self.assertEqual((again["passphrase"], again["kept_outside"]), ("configured", "file"), again)
+        self.assertNotIn("warning", again)
+        # A workspace whose file was lost comes back from that copy.
+        vault.passphrase_file(self.home).unlink()
+        self.assertEqual(vault.ensure_passphrase(self.home, store)["passphrase"], "recovered")
+        self.assertEqual(vault.passphrase(self.home), file.read_text().rstrip("\n"))
+
+    def test_a_copy_the_file_kept_moves_into_the_keychain_once_it_answers(self):
+        # OBS-391 review: one unlock dialog that timed out must not leave the passphrase in a file
+        # for good. Once the Keychain takes it, the copy moves there and the file goes.
+        state = {"refuses": True}
+        items = {}
+
+        def run(argv, input=None, **kw):
+            if argv[:2] == ["security", "find-generic-password"]:
+                label = argv[argv.index("-a") + 1]
+                if label in items:
+                    return subprocess.CompletedProcess(argv, 0, items[label] + "\n", "")
+                return subprocess.CompletedProcess(argv, 44, "", "not found")
+            if argv == ["security", "-i"]:
+                if state["refuses"]:
+                    return subprocess.CompletedProcess(argv, 125, "", "TimeoutExpired")
+                label, value = re.search(r'-a "([^"]*)" .* -w (\S+)', input).groups()
+                items[label] = value
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            raise AssertionError(argv)
+        store = vault.SecretStore(runner=run, platform="darwin", which=lambda name: "/usr/bin/" + name)
+        first = vault.ensure_passphrase(self.home, store)
+        self.assertEqual(first["kept_outside"], "file")
+        self.assertTrue(self.fallback_file(first["label"]).is_file())
+        state["refuses"] = False
+        second = vault.ensure_passphrase(self.home, store)
+        self.assertEqual(second["kept_outside"], "keychain", second)
+        self.assertFalse(self.fallback_file(first["label"]).exists(), "the file copy goes once the Keychain holds it")
+        self.assertEqual(len(items), 1)
+
+    def test_a_keychain_that_takes_it_is_still_named_the_keychain(self):
+        store, items, _ = self.keychain(refuses=False)
+        out = vault.ensure_passphrase(self.home, store)
+        self.assertEqual((out["passphrase"], out["kept_outside"]), ("generated", "keychain"), out)
+        self.assertNotIn("warning", out)
+        self.assertIn(out["label"], items)
+        self.assertFalse(self.fallback_file(out["label"]).exists(), "no second copy beside the Keychain's")
+        again = vault.ensure_passphrase(self.home, store)
+        self.assertEqual((again["passphrase"], again["kept_outside"]), ("configured", "keychain"), again)
+
+    def test_an_item_already_in_the_keychain_is_not_moved_to_the_file(self):
+        # Exit 45 is "already exists": a first copy never replaces one, and never goes around it.
+        run, _ = self.runner([(45, "", "The specified item already exists in the keychain.")])
+        store = vault.SecretStore(runner=run, platform="darwin", which=lambda name: "/usr/bin/" + name)
+        with self.assertRaises(vault.BackupError):
+            store.put("ws-1", "a value")
+        self.assertFalse(self.fallback_file("ws-1").exists())
 
     def test_secret_service_values_travel_on_stdin(self):
         # lookup (absent) → store → lookup
@@ -1736,6 +1839,145 @@ class Schedule(Base):
         self.assertFalse(sched.install()["changed"], "an identical, loaded job is left as it is")
         sched.uninstall()
         self.assertFalse(sched.plist.exists())
+
+    def headless(self, loaded=False):
+        """A schedule in an account with no GUI session (OBS-361 part 2); `loaded` is root's daemon."""
+        if not hasattr(os, "getuid"):
+            self.skipTest("the headless path is macOS's; Windows has no os.getuid")
+        sched = M.LaunchdSchedule(self.home, headless=True)
+        self.bootstraps = []
+        self.daemon = {"loaded": loaded}
+        for name, fn in (("start_job", lambda plist: (self.bootstraps.append(plist), (False, "125"))[1]),
+                         ("job_loaded", lambda label: False)):
+            patcher = patch.object(sched.launch, name, fn)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        import machine_move
+        patcher = patch.object(machine_move, "_system_daemon_loaded",
+                               lambda runner, label, uid: self.daemon["loaded"])
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        Path.home().mkdir(parents=True, exist_ok=True)
+        return sched
+
+    def test_headless_the_job_goes_to_the_background_folder_and_waits_for_root(self):
+        import machine_identity
+        sched = self.headless()
+        out = sched.install()
+        target = machine_identity.background_dir(Path.home()) / f"{sched.label}.plist"
+        self.assertEqual(Path(out["definition"]), target)
+        self.assertEqual(plistlib.loads(target.read_bytes()), sched.document())
+        self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+        self.assertFalse(sched.plist.exists(), "nothing in ~/Library/LaunchAgents")
+        self.assertEqual(self.bootstraps, [], "no `bootstrap gui/<uid>`: it fails with 125 there")
+        self.assertEqual((out["domain"], out["load"]), ("system", "waiting-for-root"))
+        self.assertEqual(len(out["next"]), 1)
+        self.assertIn(f"apply --user ", out["next"][0])
+        self.assertIn(f"--label {sched.label}", out["next"][0])
+        self.assertTrue(sched.installed())
+
+    def test_headless_the_agent_copy_stays_until_roots_daemon_runs(self):
+        # launchctl answers 125 for an ordinary account reached over SSH too: its agent loads at sign-in.
+        sched = self.headless()
+        sched.plist.parent.mkdir(parents=True, exist_ok=True)
+        sched.plist.write_bytes(plistlib.dumps({"Label": sched.label, "old": True}))
+        out = sched.install()
+        self.assertEqual(out["agent_copy_kept"], str(sched.plist))
+        self.assertEqual(plistlib.loads(sched.plist.read_bytes()), sched.document(), "refreshed, not left stale")
+        self.daemon["loaded"] = True
+        out = sched.install()
+        self.assertFalse(sched.plist.exists(), "once root runs it, a sign-in would start it a second time")
+        self.assertEqual(out["removed_agent_copy"], str(sched.plist))
+
+    def test_headless_the_hook_runs_the_pass_while_root_has_not_loaded_it(self):
+        ran = []
+        with patch.object(M, "schedule_for", lambda base: M.Schedules(self.headless(), self.headless())), \
+                patch.object(M, "run_pass", lambda base: ran.append("pass") or {"result": "ran"}), \
+                patch.object(M, "check_pass", lambda base: ran.append("check") or {"result": "ran"}), \
+                patch.object(M.backup_vault, "ensure_passphrase", lambda base, store=None: {"result": "kept"}):
+            out = M.hook(self.home)
+        self.assertEqual(out["schedule"]["result"], "waiting-for-root")
+        self.assertIn("pass", ran, "updates and backups keep running until an administrator loads the daemon")
+
+    def test_headless_status_names_roots_apply(self):
+        sched = self.headless()
+        sched.install()
+        out = M.status(self.home, schedule=M.Schedules(self.headless(), self.headless()))
+        text = " ".join(out.get("warnings", []))
+        self.assertIn("wait for an administrator", text)
+        self.assertNotIn("not scheduled on this machine yet", text)
+        self.assertIn(" apply --user ", text)
+
+    def test_signed_in_later_roots_daemon_is_not_doubled_by_an_agent(self):
+        # A space whose daemon root runs, later signed in at the screen: the agent path must not load
+        # the job a second time, and status says it runs (confirming review of OBS-361 part 2).
+        sched = self.launchd()
+        self.loaded["value"] = True
+        import machine_move
+        with patch.object(machine_move, "_system_daemon_loaded", lambda runner, label, uid: True), \
+                patch.object(M.os, "getuid", lambda: 501, create=True):
+            out = sched.install()
+            self.assertEqual((out["domain"], out["load"]), ("system", "loaded"))
+            self.assertEqual(self.stops, [sched.label], "the agent loaded beside the daemon is booted out")
+            self.assertEqual(sched.status()["domain"], "system")
+            out = sched.uninstall()
+            self.assertIn(" remove ", out["next"][0], "only root stops the daemon")
+            self.assertEqual(sched.kick()["result"], "failed")
+
+    def test_headless_a_loaded_daemon_with_the_same_definition_is_left_alone(self):
+        sched = self.headless(loaded=True)
+        first = sched.install()
+        self.assertEqual(first["next"][0].split()[4], "remove", "a new definition replaces the loaded one")
+        self.assertIn(" apply ", first["next"][1])
+        again = sched.install()
+        self.assertEqual((again["changed"], again["load"]), (False, "loaded"))
+        self.assertNotIn("next", again)
+
+    def test_headless_ensure_is_scheduled_not_unscheduled(self):
+        sched = self.headless()
+        out = M.ensure(self.home, schedule=M.Schedules(sched, self.headless()), store=self.store)
+        self.assertNotEqual(out["schedule"].get("result"), "unscheduled")
+        self.assertEqual(out["schedule"]["load"], "waiting-for-root")
+
+    def test_headless_uninstall_names_roots_remove_for_a_loaded_daemon(self):
+        sched = self.headless(loaded=True)
+        sched.install()
+        out = sched.uninstall()
+        self.assertFalse(sched.installed())
+        self.assertIn(" remove ", out["next"][0])
+        self.assertEqual(sched.status()["domain"], "system")
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "space_daemons.py is a macOS tool")
+    def test_headless_definition_uses_only_keys_root_accepts(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        try:
+            import space_daemons
+        finally:
+            sys.path.remove(str(ROOT / "tools"))
+        for job in ("maintain", "check"):
+            doc = M.LaunchdSchedule(self.home, headless=True, job=job).document()
+            self.assertLessEqual(set(doc), set(space_daemons.ALLOWED_KEYS) - set(space_daemons.DROPPED_KEYS), job)
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "the session kind is asked on macOS only")
+    def test_the_session_kind_is_read_from_launchctl_once(self):
+        calls = []
+
+        def runner(argv, **kw):
+            calls.append(argv)
+            return subprocess.CompletedProcess(argv, self.code, "", "")
+        with patch.object(M.sys, "platform", "darwin"), patch.object(M.shutil, "which", lambda name: "/bin/launchctl"):
+            for code, headless in ((125, True), (112, True), (0, False), (113, False)):
+                self.code = calls.clear() or code
+                sched = M.LaunchdSchedule(self.home, runner=runner)
+                self.assertEqual(REAL_HEADLESS(sched), headless, code)
+                REAL_HEADLESS(sched)
+                self.assertEqual(len(calls), 1, "asked once per schedule")
+
+            def broken(argv, **kw):
+                raise OSError("no launchctl")
+            self.assertFalse(REAL_HEADLESS(M.LaunchdSchedule(self.home, runner=broken)))
+        with patch.object(M.sys, "platform", "linux"):
+            self.assertFalse(REAL_HEADLESS(M.LaunchdSchedule(self.home, runner=runner)))
 
     def test_a_changed_job_is_never_booted_out_from_inside_a_pass(self):
         # Review F1: the update a pass runs asks for the schedule; booting the job out

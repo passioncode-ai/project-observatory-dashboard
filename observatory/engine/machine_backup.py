@@ -1112,9 +1112,8 @@ def workspace_pointer(base: Path, home: Path) -> dict:
     newest = None
     try:
         root = backup_vault.root_info(base)["path"]
-        snaps = sorted((f for k in backup_vault.SNAPSHOT_KINDS
-                        for f in backup_vault.artifacts(root, k, backup_vault.SNAPSHOT_SUFFIX)),
-                       key=lambda f: backup_vault._artifact_stamp(f.name))
+        snaps = backup_vault.order_artifacts(f for k in backup_vault.SNAPSHOT_KINDS
+                                             for f in backup_vault.artifacts(root, k, backup_vault.SNAPSHOT_SUFFIX))
         newest = snaps[-1].name if snaps else None
     except (config.ConfigurationError, OSError):
         root = None
@@ -1277,7 +1276,7 @@ def _take(base: Path, trigger: str, home: Path, runner, path: str | None, at, st
         backup_vault._mark_owner(root, base)
         dest = root / f"{KIND}-{at.astimezone(datetime.timezone.utc).strftime('%Y%m%dT%H%M%SZ')}-{uuid.uuid4().hex[:8]}{SUFFIX}"
         backup_vault.encrypt_stream(dest, fill, secret, kind=KIND, content="tar+gzip")
-        dropped = backup_vault.rotate(root, KIND, SUFFIX, KEEP)
+        dropped = backup_vault.rotate(root, KIND, SUFFIX, KEEP, protect=dest)
     finally:
         shutil.rmtree(work, ignore_errors=True)
     settle_not_carried(col)
@@ -1457,7 +1456,7 @@ def find_latest(base: Path | None) -> Path | None:
         if root.is_dir():
             folders += [f for f in root.iterdir() if f.is_dir() and not f.is_symlink()]
     found = [f for folder in folders for f in backup_vault.artifacts(folder, KIND, SUFFIX)]
-    return max(found, key=lambda f: backup_vault._artifact_stamp(f.name)) if found else None
+    return backup_vault.order_artifacts(found)[-1] if found else None
 
 
 def secret_for(bundle: Path, base: Path | None, stdin_value: str | None = None) -> tuple[str, dict, str]:

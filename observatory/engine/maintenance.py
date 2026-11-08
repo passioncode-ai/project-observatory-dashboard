@@ -1428,21 +1428,47 @@ class LaunchdSchedule:
 
     kind = "launchd"
 
-    def __init__(self, base: Path, runner=None, job: str = "maintain"):
+    def __init__(self, base: Path, runner=None, job: str = "maintain", headless: bool | None = None):
         self.base, self.job = base, job
         self.launch = _install_launchd()
         self.label = f"org.project-observatory.{_instance_digest(base)}.{job}"
         self.plist = Path.home() / "Library" / "LaunchAgents" / f"{self.label}.plist"
         self.runner = runner
+        self._headless = headless
+
+    def headless(self) -> bool:
+        """This account has no GUI session (OBS-361 part 2): `bootstrap gui/<uid>` fails with 125 there, so
+        the job is a system daemon with UserName set to this account, which root's space_daemons.py loads
+        from the background folder. Asked once per schedule, as machine-move cutover asks it."""
+        if self._headless is None:
+            import machine_move
+            if sys.platform != "darwin" or shutil.which("launchctl") is None:
+                self._headless = False
+            else:
+                try:
+                    self._headless = not machine_move.gui_session(self.launch.uid(), self.runner or subprocess.run)
+                except (OSError, subprocess.SubprocessError):
+                    # launchctl did not answer: keep the agent path, which fails and says so, as before.
+                    self._headless = False
+        return self._headless
+
+    @property
+    def definition(self) -> Path:
+        """Where the definition lives: ~/Library/LaunchAgents, or the background folder when headless."""
+        if self.headless():
+            import machine_identity
+            return machine_identity.background_dir(Path.home()) / f"{self.label}.plist"
+        return self.plist
 
     def document(self) -> dict:
         env = self.launch.environment()
         # PATH comes from whoever runs the installer, and a terminal and an agent session
         # differ: an installed job keeps the PATH it has, so the definition does not flip
         # (and get reloaded) with each caller (review F1).
-        if self.installed():
+        source = self.definition if self.definition.is_file() else self.plist
+        if source.is_file():
             try:
-                kept = (plistlib.loads(self.plist.read_bytes()).get("EnvironmentVariables") or {}).get("PATH")
+                kept = (plistlib.loads(source.read_bytes()).get("EnvironmentVariables") or {}).get("PATH")
             except (OSError, ValueError, plistlib.InvalidFileException):
                 kept = None
             if kept:
@@ -1475,10 +1501,23 @@ class LaunchdSchedule:
         }
 
     def installed(self) -> bool:
-        return self.plist.is_file()
+        return self.definition.is_file()
+
+    def system_daemon(self) -> bool:
+        """Root's space_daemons.py runs this label as a system daemon of this account (OBS-361 part 2).
+        False where it cannot be asked (Windows, launchctl that did not answer)."""
+        if not hasattr(os, "getuid"):
+            return False
+        import machine_move
+        try:
+            return machine_move._system_daemon_loaded(self.runner or subprocess.run, self.label, self.launch.uid())
+        except (OSError, subprocess.SubprocessError):
+            return False
 
     def loaded(self) -> bool:
-        return self.launch.job_loaded(self.label)
+        if self.headless():
+            return self.system_daemon()
+        return self.launch.job_loaded(self.label) or self.system_daemon()
 
     def install(self) -> dict:
         doc = self.document()
@@ -1486,19 +1525,21 @@ class LaunchdSchedule:
         if problems:
             raise config.ConfigurationError("; ".join(problems))
         self.launch.prepare_logs((f"{self.job}.log", f"{self.job}.err"), self.base / "store" / "logs")
+        if self.headless():
+            return self._install_background(doc)
+        if self.system_daemon():
+            # Root's daemon of this account runs it already (a space signed in at the screen later):
+            # an agent loaded too would run every pass twice (OBS-361 part 2), so it is booted out.
+            if self.launch.job_loaded(self.label):
+                self.launch.stop_job(self.label)
+            return {"schedule": self.kind, "label": self.label, "changed": False, "domain": "system",
+                    "load": "loaded"}
         current = plistlib.loads(self.plist.read_bytes()) if self.installed() else None
         pending = self.base / "store" / "maintenance-reload-pending"
         if current == doc and self.loaded() and (self.job != "maintain" or not pending.exists()):
             return {"schedule": self.kind, "label": self.label, "changed": False}
         self.plist.parent.mkdir(parents=True, exist_ok=True)
-        if self.plist.is_symlink():
-            raise config.ConfigurationError("LaunchAgent plist cannot be a symbolic link")
-        tmp = self.plist.with_suffix(".plist.tmp")
-        tmp.unlink(missing_ok=True)
-        fd = osprivacy.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | osprivacy.NOFOLLOW, 0o600)
-        with os.fdopen(fd, "wb") as stream:
-            stream.write(plistlib.dumps(doc))
-        os.replace(tmp, self.plist)
+        self._write(self.plist, doc)
         if self.loaded():
             if self.job == "maintain" and pass_running(self.base):
                 # Booting the job out now would kill the pass that is running — perhaps the
@@ -1514,19 +1555,105 @@ class LaunchdSchedule:
             pending.unlink(missing_ok=True)
         return {"schedule": self.kind, "label": self.label, "changed": True}
 
+    @staticmethod
+    def _write(target: Path, doc: dict) -> None:
+        if target.is_symlink():
+            raise config.ConfigurationError("LaunchAgent plist cannot be a symbolic link")
+        tmp = target.with_suffix(".plist.tmp")
+        tmp.unlink(missing_ok=True)
+        fd = osprivacy.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | osprivacy.NOFOLLOW, 0o600)
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(plistlib.dumps(doc))
+        os.replace(tmp, target)
+
+    def _install_background(self, doc: dict) -> dict:
+        """`install` with no GUI session (OBS-361 part 2): the definition goes to the background folder, and the
+        administrator loads it with space_daemons.py. A copy left in ~/Library/LaunchAgents by an earlier
+        attempt is removed, so a later sign-in at the screen never starts the job a second time."""
+        import machine_identity
+        import machine_move
+        home, uid = Path.home(), self.launch.uid()
+        machine_identity.ensure_private_dir(machine_identity.background_dir(home), home)
+        target = self.definition
+        try:
+            current = plistlib.loads(target.read_bytes()) if target.is_file() else None
+        except (OSError, ValueError, plistlib.InvalidFileException):
+            current = None
+        changed = current != doc
+        if changed:
+            self._write(target, doc)
+        elif target.is_file() and not target.is_symlink():
+            # Root refuses a definition anyone but this account can change (space_daemons.py).
+            target.chmod(target.stat().st_mode & 0o7755 & ~0o022)
+        loaded = self.loaded()
+        # launchctl also answers 125 for an ordinary account signed out at the screen but reached over SSH:
+        # its LaunchAgents copy loads at the next sign-in, so it is kept, and refreshed, until root's daemon
+        # runs; only then is it removed, so a sign-in never starts the job a second time.
+        agent_copy = self.plist.is_file() and not self.plist.is_symlink()
+        if agent_copy and loaded:
+            self.plist.unlink()
+        elif agent_copy:
+            try:
+                if plistlib.loads(self.plist.read_bytes()) != doc:
+                    self._write(self.plist, doc)
+            except (OSError, ValueError, plistlib.InvalidFileException):
+                self._write(self.plist, doc)
+        out = {"schedule": self.kind, "label": self.label, "changed": changed, "domain": "system",
+               "definition": str(target), "load": "loaded" if loaded else "waiting-for-root",
+               **({"removed_agent_copy": str(self.plist)} if agent_copy and loaded else {}),
+               **({"agent_copy_kept": str(self.plist)} if agent_copy and not loaded else {})}
+        if loaded and not changed:
+            return out
+        # root's apply refuses a label that is already loaded: a new definition is removed, then applied.
+        steps = ([machine_move.root_step("remove", self.label, uid)] if loaded else []) + [
+            machine_move.root_step("apply", self.label, uid)]
+        out["load"] = "waiting-for-root"
+        out["result"] = "waiting-for-root"
+        out["next"] = steps
+        out["human_steps"] = ["if the administrator has not installed it on this computer yet: "
+                              + "; ".join(machine_move.install_steps())] + [
+            f"then: {step}  (this account has no GUI session, so the job runs as a system daemon with "
+            "UserName set to this account, never as root)" for step in steps]
+        return out
+
     def kick(self) -> dict:
         """Run the job now (`launchctl kickstart`, no `-k`: a running pass is left alone)."""
+        if self.headless() or self.system_daemon():
+            # A system daemon: only root can kickstart it, and the pass runs at its next interval anyway.
+            return {"result": "failed", "detail": f"{self.label} is a system daemon of this account; "
+                                                  f"it runs at its next interval (sudo launchctl kickstart system/{self.label} "
+                                                  "starts it now)"}
         ok, detail = self.launch.kick_job(self.label)
         return {"result": "started" if ok else "failed", **({} if ok else {"detail": detail[:200]})}
 
     def uninstall(self) -> dict:
+        if self.headless() or self.system_daemon():
+            import machine_move
+            if self.launch.job_loaded(self.label):
+                self.launch.stop_job(self.label)
+            loaded = self.system_daemon()
+            self.definition.unlink(missing_ok=True)
+            self.plist.unlink(missing_ok=True)
+            out = {"schedule": self.kind, "label": self.label, "removed": True, "domain": "system"}
+            if loaded:
+                out["next"] = [machine_move.root_step("remove", self.label, self.launch.uid())]
+            return out
         if self.loaded():
             self.launch.stop_job(self.label)
         self.plist.unlink(missing_ok=True)
         return {"schedule": self.kind, "label": self.label, "removed": True}
 
     def status(self) -> dict:
-        return {"kind": self.kind, "label": self.label, "installed": self.installed(), "loaded": self.loaded()}
+        out = {"kind": self.kind, "label": self.label, "installed": self.installed(), "loaded": self.loaded()}
+        if not self.headless():
+            if out["loaded"] and self.system_daemon():
+                out.update(installed=True, domain="system")
+            return out
+        out["domain"] = "system"
+        if out["installed"] and not out["loaded"]:
+            import machine_move
+            out["next"] = machine_move.root_step("apply", self.label, self.launch.uid())
+        return out
 
 
 class SystemdSchedule:
@@ -1706,6 +1833,8 @@ class Schedules:
     def status(self) -> dict:
         main, check = self.main.status(), self.check.status()
         out = {**main, "check": check}
+        if not out.get("next") and check.get("next"):
+            out["next"] = check["next"]
         for key in ("installed", "loaded", "active"):
             if key in main and main[key] is not None:
                 out[key] = bool(main[key]) and bool(check.get(key))
@@ -1795,6 +1924,10 @@ def status(base: Path, *, schedule=None) -> dict:
                              "themselves: `project-observatory full maintain ensure`")
     elif sched.get("probed") is False:
         pass
+    elif not scheduled and sched.get("domain") == "system" and sched.get("installed"):
+        warn("waiting-for-root", "updates and daily backups wait for an administrator: this account has no GUI "
+                                 f"session, so its job runs as a system daemon once root loads it: {sched.get('next')}",
+             step=sched.get("next"))
     elif not scheduled:
         warn("not-scheduled", "updates and daily backups are not scheduled on this machine yet: "
                               "`project-observatory full maintain ensure`")
@@ -2044,7 +2177,9 @@ def hook(base: Path) -> dict:
     announced (OBS-333), and the check never starts or installs anything while off."""
     result = ensure(base)
     sched = result.get("schedule") or {}
-    if sched.get("result") == "unscheduled":
+    # In an account with no GUI session the job waits for root's space_daemons.py (OBS-361 part 2);
+    # until root loads it, the hook keeps running the pass, as it does where nothing is scheduled.
+    if sched.get("result") in ("unscheduled", "waiting-for-root"):
         result["pass"] = run_pass(base)
         if not auto_enabled(base):
             result["check"] = check_pass(base)

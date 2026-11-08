@@ -2403,7 +2403,7 @@ a deleted workspace or a reinstall can still open its backups:
 
 | Platform | Where the copy is kept |
 |---|---|
-| macOS | the login Keychain, item "Project Observatory backups", account `<home-name>-<instance>` |
+| macOS | the login Keychain, item "Project Observatory backups", account `<home-name>-<instance>`; an account with no login Keychain to write to (a headless one) keeps it in `~/.config/project-observatory/backup-passphrases/<label>` (mode 600), and the answer names `file` |
 | Linux | the Secret Service through `secret-tool`; without it, `~/.config/project-observatory/backup-passphrases/<label>` (mode 600) |
 
 The value goes to the Keychain on `security -i`'s stdin and to `secret-tool` on stdin,
@@ -2491,8 +2491,13 @@ A rolled-back update keeps the changed workspace beside the restored one as
 `backups status` and `doctor` name it, and you delete it once the restored workspace is
 confirmed.
 
-`workspace-backup --output DIR` still writes a plaintext snapshot directory
-where you name it; that is an explicit choice and it is not encrypted.
+`workspace-backup --output DIR` writes a plaintext snapshot directory where you name it; it is
+not encrypted. Since OBS-389 it refuses when the workspace holds secrets (a secret store inside the
+workspace, such as `secrets/`, with a file in it) and names two ways forward: run `workspace-backup`
+without `--output`, which exports the snapshot encrypted once a backup passphrase is set, or add
+`--plaintext` to write the plaintext copy anyway. With `--plaintext` the answer carries
+`"plaintext": true` and a `warnings` line; keep that folder as private as the vault and delete it when
+done. A workspace without secrets writes `--output DIR` as before.
 
 ### This machine's agent setup, and moving to a new machine
 
@@ -2775,6 +2780,13 @@ the staged plist into `~/Library/LaunchAgents`, enables and loads it, and remove
 second machine's `elsewhere`; a load that fails puts the plist back in staging. A job that stays
 on the old machine needs nothing: on the second machine it stays staged and named as running
 elsewhere.
+
+A staged plist can be days old: the restore staged it, and a service released anew since then lives
+in a new release folder. Before it moves anything or asks you, `cutover` checks that the staged plist's
+`Program`, `ProgramArguments[0]` and `WorkingDirectory` exist on this machine; when one does not, it
+refuses that label with `staged-plist-stale`, naming the missing path (OBS-390). Write the job's current
+plist into `~/.local/share/project-observatory/machine-move/LaunchAgents/` (replacing the stale one),
+then run `cutover` again.
 
 **An account nobody logs in to** (macOS, OBS-361 part 1). An OS account with no graphical login, such
 as a second "space" on a shared computer, has no `gui/<uid>` launchd domain, and launchd refuses its

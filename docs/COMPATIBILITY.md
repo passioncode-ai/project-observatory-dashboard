@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The application release is **0.35.3**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
+The application release is **0.35.4**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
 
 ## SQLite runtime prerequisite
 
@@ -31,7 +31,7 @@ the release installation instructions, then run the full doctor command.
 | Workspace | format 1, minimum reader/writer application versions | Refuse unknown formats or newer required versions before writing |
 | Main configuration | schema 1 | Preserve unknown optional fields; refuse unsupported `must_understand` capabilities |
 | Registry | projects/repositories/relations 1–2; other documents 1 | Refuse future versions; preserve optional top-level extension fields on atomic writes |
-| SQLite | ten migration IDs (0001–0010), recorded AST checksums | Never rewrite a released migration; append a new ID; `full upgrade` proves the migration on a staged copy, then migrates the live store in place in one SQLite transaction (agents' sessions may keep writing), with a verified snapshot taken first; while it is staged only the SQLite databases with their `-wal`, `-journal` and `-shm` files, the append-only logs under `store/logs` and the session hooks' receipts (`store/raw/record-turn.json`, `store/raw/sessions-seen.jsonl`, `store/raw/companion-faults.jsonl`) may change, and settings, secrets, registries and every other file, the rest of `store/raw` included, must hold still (`workspace_upgrade.volatile`) |
+| SQLite | ten migration IDs (0001–0010), recorded checksums (`v2:` source digests since 0.35.4; the AST digests earlier releases recorded are read, OBS-387) | Never rewrite a released migration; append a new ID; `full upgrade` proves the migration on a staged copy, then migrates the live store in place in one SQLite transaction (agents' sessions may keep writing), with a verified snapshot taken first; while it is staged only the SQLite databases with their `-wal`, `-journal` and `-shm` files, the append-only logs under `store/logs` and the session hooks' receipts (`store/raw/record-turn.json`, `store/raw/sessions-seen.jsonl`, `store/raw/companion-faults.jsonl`) may change, and settings, secrets, registries and every other file, the rest of `store/raw` included, must hold still (`workspace_upgrade.volatile`) |
 | Plugin execution | API 1; absent version means legacy API 1 | Reject unknown versions and escaped script paths before execution; plugins remain trusted executable code |
 | MCP transport | existing declared 2026-07-28 interface, SDK 2.3.0 (`mcp==2.3.0` in the `full` extra; the HTTP transport re-measured on it 2026-10-08) | Preserve existing tool names, camelCase/snake_case aliases and proposal authority; transport negotiation is SDK-owned |
 | Tool data | existing published input/output schemas | A closed output schema can reject an added field: version the capability before changing its shape |
@@ -48,7 +48,7 @@ Semantic versioning applies to the declared public API even before 1.0 as a proj
 
 ## Tested migration boundary
 
-`observatory/engine/tests/test_schema_compatibility.py` covers every prefix of the ten migration IDs (0008 adds the agent-memory workflow tables, 0009 rebuilds the lexical index with search keys, 0010 adds the vector-namespace registry and quarantines the legacy OpenAI index), repeat opens, legacy checksum adoption, unknown IDs, changed migration checksum, future user_version, rollback after injected failure, WAL-only data and concurrent openers. Adopting a checksum for a legacy history records the current implementation; it cannot prove which old implementation originally ran.
+`observatory/engine/tests/test_schema_compatibility.py` covers every prefix of the ten migration IDs (0008 adds the agent-memory workflow tables, 0009 rebuilds the lexical index with search keys, 0010 adds the vector-namespace registry and quarantines the legacy OpenAI index), repeat opens, legacy checksum adoption, unknown IDs, changed migration checksum, future user_version, rollback after injected failure, WAL-only data and concurrent openers. Adopting a checksum for a legacy history records the current implementation; it cannot prove which old implementation originally ran. The same file pins the `v2:` digest of every shipped migration and checks that the AST digest of the running interpreter is listed (`MigrationChecksums`); hosted CI runs it under Python 3.11 and 3.14, and the release of 0.35.4 ran it under 3.11 to 3.15.
 
 `observatory/engine/tests/test_workspace_boundaries.py` covers concurrent initialization, symbolic-link escape attempts, source changes during migration, future writer refusal and preservation of an existing destination. `observatory/engine/tests/test_workspace.py` covers separate homes, optional settings preservation, configuration/registry version refusal and the complete local pipeline through fourteen generated pages (`test_complete_local_workflow_and_fourteen_pages`). Test execution receipts are recorded separately; listing a test here is not a claim that every release ran it.
 
@@ -349,6 +349,23 @@ platform, so neither a machine bundle nor a workspace snapshot carries them:
 | `machine-move/restore.json` | 0.31.0 | schema `observatory-machine-restore/1`: `machine`, `updatedAt` and one part per step that wrote (`apply`, `packages`, `clone`), each with its `at`, the bundle's name, counts and failures; `apply` adds `mode`, `taken_on`, `this_machine`, `only`, `skip`, `left_out` and `other_keys[]` of `key`, `fingerprint` and `in_ssh` (the public fingerprints of the keys a second-machine restore withheld; `in_ssh`, added after 0.31.0, is true when the key sat directly in `~/.ssh`, and only such an entry gets a `rekey` step in status, so an entry written by 0.31.0, without it, gets none); owner-only, written atomically; written by `full machine-restore`, read by `full machine-move status` (OBS-282, OBS-286) | an older engine neither reads nor writes it; one that is not this schema reads as `unknown` in status; deleting it makes the restore item `unknown` |
 | `machine-move/peers/` | 0.31.0 | the other machine's facts (`full machine-move facts --out FILE`, schema `observatory-machine-facts/1`: `machine`, `generated_at`, `engine_version`, `platform`, `ssh[]` of `file` and `fingerprint`, `device`, `jobs[]`, `elsewhere[]`, `restore`, `omitted`), placed by the person; written whole through a temporary file and a link, never over an existing name; `full machine-move status` reads every `*.json` here | never written by the engine; a file that does not read is named in `degraded`; deleting one forgets that machine |
 | `machine-id` | 0.30.1 | a random machine id, written only where the platform has no machine identifier of its own (macOS, most Linux and Windows have one) | deleting it gives the machine a new id: bundles and snapshots it took before then read as another machine's |
+
+## Migration checksums: the same under every Python (OBS-387, 0.35.4)
+
+No migration and no new file. Until 0.35.3 the checksum recorded for each applied migration (`migration_checksums`)
+was the sha256 of `ast.dump` of the migration's code, and `ast.dump` prints differently under Python 3.11, 3.12,
+3.13 and 3.14 (the same), and 3.15. A workspace recorded under one interpreter was refused under another: `full doctor`
+answered "Workspace database is corrupt or incompatible" and `full upgrade` "Applied migration code does not match its
+recorded checksum", although nothing was damaged (seen when Homebrew moved a venv from 3.14 to 3.15).
+
+- A new record is `v2:` and the sha256 of the migration's source text with comments, docstrings, trailing spaces and
+  blank lines left out, except inside string literals, where every character counts. It is the same under 3.11 to 3.15.
+- A record an earlier release wrote is still read: `store/migrate.py` lists, per migration, the AST digests it has under
+  each of those interpreters, pinned to the `v2:` digest of the code they were taken from. A recorded digest is never
+  rewritten, so an earlier release, on the interpreter that wrote them, still opens such a database.
+- A database first created by 0.35.4 or later records `v2:` digests, which 0.35.3 and earlier refuse. Going back to such
+  a release means restoring the snapshot taken before the update, as for any downgrade.
+- Before 0.35.4, keep each workspace's venv on the Python minor version its database was created under.
 
 ## macOS 27: a restricted connection table (peer_owner 1.3.0, 0.35.2)
 

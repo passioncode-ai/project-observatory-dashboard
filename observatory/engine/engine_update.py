@@ -1613,9 +1613,12 @@ class Transaction:
             try:
                 if self.has_ws:
                     wait_idle(self.base, self.deps.idle_timeout)
+                    # The rollback stage is a plaintext copy under the home's own backups that undo()
+                    # restores, then handed to backup_vault like the managed snapshots: it opts in to
+                    # holding the vault in plaintext while the update runs (OBS-389).
                     receipt = workspace_upgrade.snapshot(
                         self.base, self.base / "backups" / f"before-update-{uuid.uuid4().hex}", writers_stopped=True,
-                        update=True)
+                        update=True, plaintext=True)
                     snapshot = Path(receipt["snapshot"])
                     before = state(self.base)
                     self.step("snapshot", files=receipt["files"])

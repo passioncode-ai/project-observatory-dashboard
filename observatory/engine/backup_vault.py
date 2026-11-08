@@ -33,6 +33,7 @@ authentication rather than decrypting to something shorter.
 from __future__ import annotations
 
 import base64
+import collections
 import contextlib
 import datetime
 import oslocks
@@ -170,13 +171,13 @@ def candidates(base: Path) -> list[dict]:
                         continue  # the same name at another path is another workspace
                 except OSError:
                     continue
-            snaps = sorted([f for kind in SNAPSHOT_KINDS
-                            for f in artifacts(folder, kind, SNAPSHOT_SUFFIX)],
-                           key=lambda f: _artifact_stamp(f.name))
             # Every snapshot, so a damaged newest one still leaves an older one to restore.
             found += [{"label": folder.name, "folder": folder, "snapshot": snap,
-                       "stamp": _artifact_stamp(snap.name)} for snap in snaps]
-    return sorted(found, key=lambda c: c["stamp"], reverse=True)
+                       "stamp": _artifact_stamp(snap.name)}
+                      for kind in SNAPSHOT_KINDS for snap in artifacts(folder, kind, SNAPSHOT_SUFFIX)]
+    # Newest first, same-second snapshots included (OBS-388): one order over every folder.
+    order = {snap: n for n, snap in enumerate(order_artifacts(c["snapshot"] for c in found))}
+    return sorted(found, key=lambda c: order[c["snapshot"]], reverse=True)
 
 
 def _home_tail(base: Path) -> tuple[str, ...] | None:
@@ -226,20 +227,22 @@ def elsewhere(base: Path) -> list[dict]:
             parts = Path(named).parts
             if named == own or len(parts) <= len(tail) or tuple(parts[-len(tail):]) != tail:
                 continue
-            snaps = sorted([f for kind in SNAPSHOT_KINDS for f in artifacts(folder, kind, SNAPSHOT_SUFFIX)],
-                           key=lambda f: _artifact_stamp(f.name))
+            snaps = order_artifacts(f for kind in SNAPSHOT_KINDS for f in artifacts(folder, kind, SNAPSHOT_SUFFIX))
             if snaps:
                 out.append({"label": folder.name, "owner_home_relative": "~/" + "/".join(tail),
                             "newest": str(snaps[-1]), "snapshots": len(snaps)})
-    return sorted(out, key=lambda e: _artifact_stamp(Path(e["newest"]).name), reverse=True)
+    order = {n: i for i, n in enumerate(order_artifacts(Path(e["newest"]) for e in out))}
+    return sorted(out, key=lambda e: order[Path(e["newest"])], reverse=True)
+
+
+_STAMP = re.compile(r"(?:^|-)(\d{8}T\d{6}Z)(?=-|\.|$)")
 
 
 def _artifact_stamp(name: str) -> str:
-    """`<kind>-<YYYYmmddTHHMMSSZ>-…` → the stamp, so kinds sort together by time."""
-    for part in name.split("-"):
-        if len(part) == 16 and part[8] == "T" and part.endswith("Z"):
-            return part
-    return ""
+    """`<kind>-<YYYYmmddTHHMMSSZ>-…` or `<kind>-<YYYYmmddTHHMMSSZ>.<suffix>` → the stamp, so
+    kinds sort together by time ("" when the name carries none)."""
+    found = _STAMP.search(name)
+    return found.group(1) if found else ""
 
 
 # --- the passphrase ------------------------------------------------------
@@ -364,8 +367,10 @@ class SecretStore:
     docs/runs/2026-10-05-auto-update).
 
     macOS: the login Keychain, item service "Project Observatory backups", account = the
-    workspace label. Windows: the Credential Manager, a generic credential named
-    "Project Observatory backups/<label>", kept for this account on this machine (W5).
+    workspace label; an account with no login Keychain to write to (a headless one, OBS-391)
+    keeps it in the owner-only file below instead, and says so. Windows: the Credential
+    Manager, a generic credential named "Project Observatory backups/<label>", kept for this
+    account on this machine (W5).
     Elsewhere: the Secret Service through `secret-tool`, or, without it, an owner-only file
     under ~/.config/project-observatory/backup-passphrases/.
     A value travels on stdin and is never an argument: `security -i` reads its command
@@ -382,6 +387,10 @@ class SecretStore:
         # The Windows Credential Manager, or a stand-in with read/write (the tests).
         self.credentials = credentials if credentials is not None else (
             WindowsCredentials() if self.platform == "win32" else None)
+        #: Where `get` last found each label's item: `kind()` names the store this machine
+        #: tries first, and a Keychain or keyring that did not take the copy left it in the
+        #: owner-only file (OBS-391), so an answer naming where it is kept reads this.
+        self.held_in: dict[str, str] = {}
 
     def kind(self) -> str:
         if self.platform == "darwin" and self.which("security"):
@@ -406,6 +415,9 @@ class SecretStore:
     #: `security find-generic-password` exits 44 when no such item exists; every other
     #: failure (a locked Keychain, interaction not allowed, a timeout) is NOT absence.
     KEYCHAIN_NOT_FOUND = 44
+    #: `add-generic-password` without -U exits 45 when the item already exists: a first copy
+    #: that never replaces one, so it is a refusal and never a reason to write the file.
+    KEYCHAIN_DUPLICATE = 45
 
     def _run(self, argv: list[str], data: str | None = None) -> tuple[int, str]:
         code, out, _ = self._run_full(argv, data)
@@ -428,9 +440,14 @@ class SecretStore:
             code, _ = self._run(["security", "-i"],
                                 f'add-generic-password -a "{label}" -s "{self.SERVICE}" -w {encoded}'
                                 + (" -U" if replace else "") + "\n")
-            if code != 0:
-                raise BackupError("the login Keychain refused the backup passphrase")
-            return kind
+            if code == 0:
+                return kind
+            if code == self.KEYCHAIN_DUPLICATE:
+                raise BackupError(f"the login Keychain already holds a passphrase for {label}")
+            # No login Keychain takes it (a headless account, OBS-391): the owner-only file
+            # keeps the copy outside the workspace instead, as for a keyring that does not
+            # answer (review F7), and the answer names the file, not the Keychain.
+            kind = "file"
         if kind == "credential-manager":
             target = f"{self.SERVICE}/{label}"
             if not replace and self.credentials.read(target) is not None:
@@ -474,28 +491,36 @@ class SecretStore:
         caller then generated a new passphrase and wrote it over the only copy every
         existing backup opens with."""
         label, kind = self._safe(label), self.kind()
+        self.held_in.pop(label, None)
+        keyring_error = None
         if kind == "keychain":
             code, out, err = self._run_full(["security", "find-generic-password", "-a", label,
                                              "-s", self.SERVICE, "-w"])
-            if code == self.KEYCHAIN_NOT_FOUND:
-                return None
             text = out.strip()
-            if code != 0 or not text:
-                raise BackupError(f"the login Keychain did not answer (exit {code}"
-                                  + (f", {err.strip()[:120]}" if err.strip() else "") + ")")
-            if text.startswith("hex:"):
-                try:
-                    return bytes.fromhex(text[4:]).decode("utf-8")
-                except ValueError:
-                    raise BackupError(f"the Keychain item for {label} is not a passphrase this engine wrote") from None
-            return text
+            if code == 0 and text:
+                if text.startswith("hex:"):
+                    try:
+                        text = bytes.fromhex(text[4:]).decode("utf-8")
+                    except ValueError:
+                        raise BackupError(f"the Keychain item for {label} is not a passphrase this engine wrote") from None
+                self.held_in[label] = kind
+                return text
+            # Absent from the Keychain (exit 44), or a Keychain that did not answer: `put`
+            # keeps the copy in the owner-only file when no Keychain took it (OBS-391), so
+            # the file is read before either is called absence or an error.
+            if code != self.KEYCHAIN_NOT_FOUND:
+                keyring_error = (f"the login Keychain did not answer (exit {code}"
+                                 + (f", {err.strip()[:120]}" if err.strip() else "") + ")")
         if kind == "credential-manager":
-            return self.credentials.read(f"{self.SERVICE}/{label}")
-        keyring_error = None
+            value = self.credentials.read(f"{self.SERVICE}/{label}")
+            if value is not None:
+                self.held_in[label] = kind
+            return value
         if kind == "secret-service":
             code, out, err = self._run_full(["secret-tool", "lookup", "service", self.TOOL_SERVICE,
                                              "account", label])
             if code == 0 and out.rstrip("\n"):
+                self.held_in[label] = kind
                 return out.rstrip("\n")
             # `secret-tool lookup` exits 1 with nothing on stderr when the item is absent;
             # a message means no keyring answered. `put` then fell back to the owner-only
@@ -510,6 +535,7 @@ class SecretStore:
                 raise BackupError(f"{file} is readable by others; refusing to read it")
             value = file.read_text(encoding="utf-8").rstrip("\n")
             if value:
+                self.held_in[label] = "file"
                 return value
         if keyring_error:
             raise BackupError(keyring_error)
@@ -608,11 +634,28 @@ def ensure_passphrase(base: Path, store: SecretStore | None = None) -> dict:
             _keep_previous(store, label, stored)
             kind = store.put(label, current, replace=True)
         else:
-            kind = store.kind()
+            # Where the copy IS, not the store this machine tries first: a Keychain that
+            # took nothing left it in the owner-only file (OBS-391).
+            kind = (getattr(store, "held_in", None) or {}).get(label) or store.kind()
+            if kind == "file" and store.kind() != "file":
+                kind = _move_into_store(store, label, current)
     except (BackupError, OSError) as exc:
         return {"passphrase": state, "kept_outside": None,
                 "warning": f"the passphrase is only in {passphrase_file(base)}: {exc}"}
     return {"passphrase": state, "kept_outside": kind, "label": label}
+
+
+def _move_into_store(store: "SecretStore", label: str, value: str) -> str:
+    """A copy the owner-only file kept because the Keychain (or keyring) once took nothing, moved
+    into it once it does: one timed-out unlock dialog must not leave the passphrase in a file for
+    good (OBS-391 review). The file goes only after the store holds the item; any refusal keeps it."""
+    try:
+        kind = store.put(label, value)
+    except (BackupError, OSError):
+        return "file"
+    if kind != "file":
+        store._file(label).unlink(missing_ok=True)
+    return kind
 
 
 def stored_passphrases(store: "SecretStore", label: str) -> list[str]:
@@ -1034,17 +1077,67 @@ def extract_tree(path: Path, parent: Path, secret: str) -> Path:
 
 # --- rotation, export, migration ----------------------------------------
 
+def _header_created(path: Path) -> float | None:
+    """When an encrypted backup was made, from its plaintext header's `created_at` (written by
+    `_publish`, microseconds); None when the file does not read as one. Read only to order
+    backups whose names share one stamp (OBS-388), so a folder of backups is not opened file
+    by file on every listing."""
+    try:
+        with path.open("rb") as stream:
+            if stream.read(len(MAGIC)) != MAGIC:
+                return None
+            size = struct.unpack(">I", stream.read(4))[0]
+            if size > 64 * 1024:
+                return None
+            created = json.loads(stream.read(size)).get("created_at")
+        return datetime.datetime.fromisoformat(created).timestamp()
+    except (OSError, ValueError, TypeError, AttributeError, struct.error):
+        return None
+
+
+def order_artifacts(paths) -> list[Path]:
+    """Backups oldest first, in the order they were made (OBS-388).
+
+    The UTC stamp in the name orders backups taken in different seconds. Within one second
+    the name differs only by its random suffix, and ordering by that rotated the newest away
+    when several were taken at once; so ties go to the creation time in the encrypted
+    header, then to the file's mtime in nanoseconds (a file system that keeps whole seconds
+    gives same-second files one mtime, and a copy may reset it, which is why the header
+    comes first), and the name only last, so the order is at least stable."""
+    paths = list(paths)
+    stamps = {p: _artifact_stamp(p.name) for p in paths}
+    counts = collections.Counter(stamps.values())
+    tied = {s for s, n in counts.items() if n > 1}
+
+    def key(p: Path):
+        created = _header_created(p) if stamps[p] in tied else None
+        try:
+            mtime = p.stat().st_mtime_ns
+        except OSError:
+            mtime = 0
+        return (stamps[p], created is not None, created or 0.0, mtime, p.name)
+    return sorted(paths, key=key)
+
+
 def artifacts(root: Path, kind: str, suffix: str) -> list[Path]:
-    """Oldest first: names begin with a UTC stamp, so name order is age order."""
+    """Oldest first, in the order they were made (`order_artifacts`): never by the random
+    suffix that follows the stamp in the name."""
     if not root.is_dir():
         return []
-    return sorted(p for p in root.glob(f"{kind}-*{suffix}") if p.is_file() and not p.name.startswith("."))
+    return order_artifacts(p for p in root.glob(f"{kind}-*{suffix}") if p.is_file() and not p.name.startswith("."))
 
 
-def rotate(root: Path, kind: str, suffix: str, keep: int = KEEP) -> list[str]:
+def rotate(root: Path, kind: str, suffix: str, keep: int = KEEP, protect: Path | None = None) -> list[str]:
+    """Keep the `keep` newest. `protect`, the backup just written, is never dropped: a clock set back
+    names it older than the ones before it, and its source is already gone (OBS-388 review)."""
+    if keep < 1:
+        raise ValueError("rotate keeps at least one backup")
     found = artifacts(root, kind, suffix)
+    if protect is not None and protect in found:
+        found.remove(protect)
+        keep -= 1
     dropped = []
-    for old in found[:-keep] if len(found) > keep else []:
+    for old in (found[:-keep] if keep > 0 else found) if len(found) > keep else []:
         old.unlink()
         dropped.append(old.name)
     return dropped
@@ -1092,7 +1185,7 @@ def export_snapshot(base: Path, directory: Path, kind: str, secret: str) -> Path
     dest = root / f"{kind}-{_snapshot_stamp(directory)}-{uuid.uuid4().hex[:8]}{SNAPSHOT_SUFFIX}"
     encrypt_tree(directory, dest, secret, kind=kind)
     shutil.rmtree(directory)
-    rotate(root, kind, SNAPSHOT_SUFFIX)
+    rotate(root, kind, SNAPSHOT_SUFFIX, protect=dest)
     return dest
 
 
