@@ -7,21 +7,6 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
-- **`full restore --secret-store-verify-into DIR` checks a backup's secret store without touching the live one**
-  (OBS-394, `docs/COMPATIBILITY.md`, `docs/CLI-COMPATIBILITY.md`). Each store the snapshot carried is written into
-  `DIR/<name>/` (folders 0700, files 0600) and read back against the snapshot's manifest, every SHA-256, size,
-  folder and link, and the answer reads `secret_store: verified` with `files`, `bytes`, `links`, `directories`,
-  `skipped` and `verified`, the number of stores verified. The folder the snapshot's settings name is never written or locked, so a restore check into a
-  temporary home, from this machine's backup or another's, needs no `--secret-store-target`; the restore record
-  doctor reads is not written. It works with a whole restore and with `--secret-store-only`, which then needs no
-  workspace, and answers `nothing-to-verify` when the snapshot carried no store. The copy stays in `DIR` for you to
-  remove; one that fails to verify, or whose restore fails after it, is removed (`secret-store-verify-failed`,
-  exit 1). A DIR that is not empty, or lies in the new home, a workspace on this machine, the snapshot file, a
-  backups folder or a secret store's folder (by name or by identity, `/System/Volumes/Data/...` included), is
-  refused (`secret-store-verify-into-not-empty`, `secret-store-verify-into-refused`), as is the flag beside
-  `--secret-store-target` or another `--secret-store` policy (`secret-store-verify-into-conflict`) and a run
-  where a workspace on this machine has settings that do not read (`secret-store-verify-into-unchecked`), all
-  exit 2 with nothing written. A DIR beside a carried `.obsnap` is fine.
 - **`inventory/agents.md`, a readable page of the installed agents beside `inventory/agents.json`** (OBS-317,
   first half). The wiki projection writes it from `registry/agents.json`: one row per service key with its product,
   version (the manifest's provider revision), where it answers, its contract pin, who holds it (the supervisor, its
@@ -56,6 +41,42 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **`install_launchd.py install` reloads the tick through the waiting helpers** (OBS-424). It sent `bootout` and at
   once `bootstrap`, which launchd refuses while the bootout is still finishing (the race OBS-410 fixed elsewhere);
   it now uses `stop_job` and `start_job`.
+
+## 0.35.7 (2026-11-08)
+
+A backup's secret store can be checked without touching the live one. A weekly restore check into a temporary
+home used to verify the home only, because the store goes back only into the folder its settings name, the live
+one; `--secret-store-verify-into DIR` writes it into a disposable folder and reads every file back against the
+snapshot's manifest. It also brings the server back on a Mac that updated to 0.35.6, where the repaired
+definition left it unloaded.
+
+### Fixed
+
+- **The server comes back after an update to 0.35.6 on macOS** (OBS-410). `full maintain ensure` rewrote the
+  server's definition and reloaded it with a bootstrap that launchd refused while the old process was still exiting,
+  so the server stayed unloaded and the update reported nothing. Reloads now wait for the bootout and retry the
+  bootstrap; a reload that fails is `reload-failed`, naming the jobs left `unloaded` or `not_reloaded`; the update
+  loads a job it started again once ensure has run; and, once, a workspace updated to 0.35.6 whose server has its
+  definition and Fabric descriptor in place but is not loaded gets it loaded again by the first `maintain ensure` or
+  pass of 0.35.7 (the update to 0.35.7 runs one), answered under `jobs.recovered`.
+
+### Added
+
+- **`full restore --secret-store-verify-into DIR` checks a backup's secret store without touching the live one**
+  (OBS-394, `docs/COMPATIBILITY.md`, `docs/CLI-COMPATIBILITY.md`). Each store the snapshot carried is written into
+  `DIR/<name>/` (folders 0700, files 0600) and read back against the snapshot's manifest, every SHA-256, size,
+  folder and link, and the answer reads `secret_store: verified` with `files`, `bytes`, `links`, `directories`,
+  `skipped` and `verified`, the number of stores verified. The folder the snapshot's settings name is never written or locked, so a restore check into a
+  temporary home, from this machine's backup or another's, needs no `--secret-store-target`; the restore record
+  doctor reads is not written. It works with a whole restore and with `--secret-store-only`, which then needs no
+  workspace, and answers `nothing-to-verify` when the snapshot carried no store. The copy stays in `DIR` for you to
+  remove; one that fails to verify, or whose restore fails after it, is removed (`secret-store-verify-failed`,
+  exit 1). A DIR that is not empty, or lies in the new home, a workspace on this machine, the snapshot file, a
+  backups folder or a secret store's folder (by name or by identity, `/System/Volumes/Data/...` included), is
+  refused (`secret-store-verify-into-not-empty`, `secret-store-verify-into-refused`), as is the flag beside
+  `--secret-store-target` or another `--secret-store` policy (`secret-store-verify-into-conflict`) and a run
+  where a workspace on this machine has settings that do not read (`secret-store-verify-into-unchecked`), all
+  exit 2 with nothing written. A DIR beside a carried `.obsnap` is fine.
 
 ## 0.35.6 (2026-11-08)
 

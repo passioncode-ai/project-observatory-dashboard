@@ -1280,6 +1280,209 @@ class DefinitionsNameNoPythonRelease(PlistsCarryAStablePath):
             self.assertEqual(il.repair_systemd(str(python), write=False), [], "a second pass finds nothing")
 
 
+class ReloadWaitsForLaunchd(Workspace):
+    """`launchctl bootout` returns before the job's process has exited (the server is given 40 s), and a
+    `bootstrap` sent in that window fails, so a repaired server stayed unloaded after `full update`."""
+
+    def setUp(self):
+        super().setUp()
+        self.il = self.reload("install_launchd")
+        self.sleeps = []
+
+    def fake(self, script):
+        calls = []
+
+        def launchctl(*args, timeout=60):
+            calls.append(args[0])
+            return script(args[0], calls)
+        return calls, launchctl
+
+    def test_stop_waits_until_the_label_is_gone(self):
+        prints = iter([0, 0, 113])
+        calls, launchctl = self.fake(lambda verb, _: (next(prints), "") if verb == "print" else (0, ""))
+        with patch.object(self.il, "_launchctl", launchctl), patch.object(self.il.time, "sleep", self.sleeps.append):
+            ok, _ = self.il.stop_job("label.server")
+        self.assertTrue(ok)
+        self.assertEqual(calls, ["bootout", "print", "print", "print"])
+        self.assertEqual(len(self.sleeps), 2)
+
+    def test_stop_that_never_unloads_answers_false(self):
+        calls, launchctl = self.fake(lambda verb, _: (0, "loaded") if verb == "print" else (0, ""))
+        clock = iter(range(0, 1000, 5))
+        with patch.object(self.il, "_launchctl", launchctl), patch.object(self.il.time, "sleep", self.sleeps.append), \
+                patch.object(self.il.time, "monotonic", lambda: next(clock)):
+            ok, detail = self.il.stop_job("label.server")
+        self.assertFalse(ok)
+        self.assertIn("still loaded", detail)
+
+    def test_start_retries_a_bootstrap_launchd_refuses_for_now(self):
+        answers = iter([(5, "Bootstrap failed: 5: Input/output error"), (37, "Operation already in progress"), (0, "")])
+        calls, launchctl = self.fake(lambda verb, _: next(answers))
+        with patch.object(self.il, "_launchctl", launchctl), patch.object(self.il.time, "sleep", self.sleeps.append):
+            ok, _ = self.il.start_job("/x/label.server.plist")
+        self.assertTrue(ok)
+        self.assertEqual(calls, ["bootstrap"] * 3)
+
+    def test_start_gives_up_after_its_attempts_and_says_why(self):
+        calls, launchctl = self.fake(lambda verb, _: (5, "Bootstrap failed: 5: Input/output error"))
+        with patch.object(self.il, "_launchctl", launchctl), patch.object(self.il.time, "sleep", self.sleeps.append):
+            ok, detail = self.il.start_job("/x/label.server.plist")
+        self.assertFalse(ok)
+        self.assertIn("Input/output error", detail)
+        self.assertEqual(len(calls), self.il.BOOTSTRAP_ATTEMPTS)
+
+    def test_a_definition_launchd_rejects_is_not_retried(self):
+        calls, launchctl = self.fake(lambda verb, _: (1, "Load failed"))
+        with patch.object(self.il, "_launchctl", launchctl), patch.object(self.il.time, "sleep", self.sleeps.append):
+            ok, _ = self.il.start_job("/x/label.server.plist")
+        self.assertFalse(ok)
+        self.assertEqual(calls, ["bootstrap"])
+
+
+class ReloadFailureIsNamed(PlistsCarryAStablePath):
+    """A repaired job that was loaded and could not be loaded again is `reload-failed`, never `repaired`."""
+
+    def test_a_reload_launchd_refuses_is_reported(self):
+        bare = str(self.fake / "opt/homebrew/opt/python@3.99/bin/python3.99")
+        _, python = self._engine_in_a_venv()
+        jobs, tick, server = self._plists_with(bare)
+        il = self.il
+
+        class Launch:
+            def repair_interpreters(self, *, write, only=None):
+                return il.repair_interpreters(str(python), write=write, only=only)
+            def job_running(self, label): return False
+            def job_loaded(self, label): return True
+            def stop_job(self, label): return True, ""
+            def start_job(self, plist): return False, "Bootstrap failed: 5: Input/output error"
+
+        maintenance = self.reload("maintenance")
+        out = maintenance.step_jobs(Launch())
+        self.assertEqual(out["result"], "reload-failed")
+        self.assertEqual(sorted(out["unloaded"]), ["server", "tick"])
+        self.assertIn("Input/output error", out["jobs"][0]["detail"])
+
+    def test_a_stop_that_does_not_finish_is_not_followed_by_a_bootstrap(self):
+        bare = str(self.fake / "opt/homebrew/opt/python@3.99/bin/python3.99")
+        _, python = self._engine_in_a_venv()
+        self._plists_with(bare)
+        il, starts = self.il, []
+
+        class Launch:
+            def repair_interpreters(self, *, write, only=None):
+                return il.repair_interpreters(str(python), write=write, only=only)
+            def job_running(self, label): return False
+            def job_loaded(self, label): return True
+            def stop_job(self, label): return False, "still loaded 45 s after bootout"
+            def start_job(self, plist): starts.append(plist); return True, ""
+
+        out = self.reload("maintenance").step_jobs(Launch())
+        self.assertEqual(out["result"], "reload-failed")
+        self.assertEqual(starts, [])
+        self.assertEqual(sorted(out["not_reloaded"]), ["server", "tick"])
+        self.assertNotIn("unloaded", out)
+
+
+class LostServerIsLoadedOnce(Workspace):
+    """OBS-410: a server 0.35.6 left unloaded after its update is loaded again by the next pass, once."""
+
+    def setUp(self):
+        super().setUp()
+        self.maintenance = self.reload("maintenance")
+        self.root = self.base / "lost-server"
+        self.ws = self.root / "ws"
+        (self.ws / "store/logs").mkdir(parents=True)
+        self.plist = self.root / "label.server.plist"
+        self.plist.write_text("<plist/>")
+        self.descriptor = self.root / "project-observatory.default.json"
+        self.descriptor.write_text("{}")
+        self.marker = self.ws / "store/raw" / self.maintenance.LOST_SERVER_MARKER
+        test = self
+
+        class Launch:
+            loaded = False
+            starts = []
+            def managed_jobs(self, home=None):
+                return [{"name": "tick", "label": "label.tick", "plist": str(test.root / "label.tick.plist")},
+                        {"name": "server", "label": "label.server", "plist": str(test.plist)}]
+            def job_loaded(self, label): return self.loaded
+            def start_job(self, plist):
+                self.starts.append(plist)
+                self.loaded = True
+                return True, ""
+        self.launch = Launch()
+        self.launch.starts = []
+
+    def updated_to(self, version):
+        row = {"at": "2026-11-08T16:08:18Z", "event": "updated", "from": "0.35.5", "to": version}
+        (self.ws / "store/logs/update.jsonl").write_text(json.dumps(row) + "\n")
+
+    def recover(self, override="enabled"):
+        return self.maintenance.recover_lost_server(self.ws, self.launch, descriptor=self.descriptor,
+                                                    override=lambda label: override)
+
+    def test_a_server_lost_after_the_update_to_0_35_6_is_loaded_again_once(self):
+        self.updated_to("0.35.6")
+        self.assertEqual(self.recover(), {"job": "server", "result": "loaded-again"})
+        self.assertEqual(self.launch.starts, [str(self.plist)])
+        self.assertTrue(self.marker.exists())
+        self.launch.loaded = False  # a person boots it out later
+        self.assertIsNone(self.recover())
+        self.assertEqual(len(self.launch.starts), 1, "the recovery runs once")
+
+    def test_nothing_happens_without_an_update_to_0_35_6(self):
+        self.updated_to("0.35.5")
+        self.assertIsNone(self.recover())
+        self.assertEqual(self.launch.starts, [])
+
+    def test_a_server_turned_off_with_its_descriptor_removed_stays_off(self):
+        self.updated_to("0.35.6")
+        self.descriptor.unlink()
+        self.assertIsNone(self.recover())
+        self.assertEqual(self.launch.starts, [])
+        self.assertTrue(self.marker.exists(), "decided once: a server installed later is never touched")
+        self.descriptor.write_text("{}")
+        self.assertIsNone(self.recover())
+        self.assertEqual(self.launch.starts, [])
+
+    def test_a_server_the_operator_disabled_stays_off(self):
+        self.updated_to("0.35.6")
+        self.assertIsNone(self.recover(override="disabled"))
+        self.assertEqual(self.launch.starts, [])
+        self.assertIn('"disabled"', self.marker.read_text())
+
+    def test_a_loaded_server_is_left_alone_and_the_check_is_not_repeated(self):
+        self.updated_to("0.35.6")
+        self.launch.loaded = True
+        self.assertIsNone(self.recover())
+        self.assertEqual(self.launch.starts, [])
+        self.assertTrue(self.marker.exists())
+
+    def test_a_load_that_fails_is_named_and_tried_again_next_pass(self):
+        self.updated_to("0.35.6")
+        self.launch.start_job = lambda plist: (False, "Bootstrap failed: 5: Input/output error")
+        out = self.recover()
+        self.assertEqual(out["result"], "load-failed")
+        self.assertIn("Input/output error", out["detail"])
+        self.assertFalse(self.marker.exists())
+
+
+class StartAfterOwnTimeout(Workspace):
+    def setUp(self):
+        super().setUp()
+        self.il = self.reload("install_launchd")
+
+    def test_a_bootstrap_that_timed_out_but_loaded_is_a_success(self):
+        calls = []
+        def launchctl(*args, timeout=60):
+            calls.append(args[0])
+            return (125, "TimeoutExpired") if args[0] == "bootstrap" else (0, "")
+        with patch.object(self.il, "_launchctl", launchctl), patch.object(self.il.time, "sleep", lambda s: None):
+            ok, _ = self.il.start_job("/x/label.server.plist")
+        self.assertTrue(ok)
+        self.assertEqual(calls, ["bootstrap", "print"])
+
+
 @unittest.skipIf(os.name == "nt", "the launchd installer's own path; Windows installs through Task Scheduler")
 class InstallReloadsThroughTheWaitingHelpers(Workspace):
     """OBS-424: `install_launchd.py install` sent `bootout` and at once `bootstrap`, the race OBS-410 fixed

@@ -544,7 +544,7 @@
     {
       "path": "configuration.py",
       "source_sha256": "69575bf4b71bf590301f5dde7f87c26e19be4c96ed0f93647897a20c14574202",
-      "export_sha256": "c045f172542c7fb3920afd10717686b93a401c725d0cd6ac72ee9b12dde4f126",
+      "export_sha256": "1bd4089242cfc9a4b59294e5e35e09cb7bc8f2c0a6b62af7e056dae115e8a022",
       "bytes": 17513,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
@@ -954,8 +954,8 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "a92707254dcc779dede2bca3dcc2c1a57f70934c72a2a75f801510de32fd7457",
-      "bytes": 111349,
+      "export_sha256": "2efc6c32a8b619b3a4c1faefaf45c494999e7f3cac87f2315a4fafceba9ea0b9",
+      "bytes": 113346,
       "upstream_modified": true
     },
     {
@@ -990,8 +990,8 @@
       "path": "engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3eb1df2f0ea3c4c6c7bd19ec47700a52dd0abae46007e082d42e37884846dff3",
-      "bytes": 94722
+      "export_sha256": "11a30b667e08c3fd618a62c1fe952a4a71fcf15859c2a35240a65b38e5ed8439",
+      "bytes": 96208
     },
     {
       "path": "estate.py",
@@ -3174,8 +3174,8 @@
       "path": "maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "74b9374d387ec0f64e5a2b47a077a00614254dbfee97ffdac5b8478e5fe00660",
-      "bytes": 132335
+      "export_sha256": "a67c270fd5cae791cc5904070ff5e0be01c85b79dc94a408c877e9a531fbd564",
+      "bytes": 136450
     },
     {
       "path": "mcp/capability_tools.py",
@@ -4899,8 +4899,8 @@
       "path": "tests/test_engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e3c6c2d83f4a3b9887d8ec436b0c748aed3f5823765bcb2fe51b83d5ec361131",
-      "bytes": 76901
+      "export_sha256": "cb63b89a311d69eb1146057525904ec42ff1702b149bf683fbe6245e6c9c29af",
+      "bytes": 78659
     },
     {
       "path": "tests/test_env_inventory.py",
@@ -5352,8 +5352,8 @@
       "path": "tests/test_lifecycle.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a45a14f5e759c55436435765e302fdb60c5b1f0a9d7e56d07c49f1d34af9b93f",
-      "bytes": 70039
+      "export_sha256": "95d7d4cba647f0b7a6767fd155f5e757791d58896e54bfabe0058aaf9935996a",
+      "bytes": 79688
     },
     {
       "path": "tests/test_lifecycle_watch.py",
@@ -7075,8 +7075,8 @@
     {
       "path": "tools/install_launchd.py",
       "source_sha256": "c0e56088fc4d10b81a9af377b0f97de4dabe6107c2d05fe5f8f2f4f9ca9adc23",
-      "export_sha256": "a0e86db286d69ae181c46289ba77c55d0a4dc2841e009fb57db8fa3519158a82",
-      "bytes": 39891,
+      "export_sha256": "1e82d0b29b297eef1ea9b08b185e4ff3df8009bfd5f002550dbcb45ed43eee01",
+      "bytes": 41365,
       "python_comments_removed": 8,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
