@@ -301,4 +301,4 @@ def infra_html(page: str, payload: dict, t: Translator | None = None) -> str:
 #: Ids reached through a variable, so the catalog test can see them (tests/test_i18n.py).
 DYNAMIC = (tuple(KINDS.values()) + tuple(STATE_WORDS.values()) + REASONS
            + tuple(p[k] for p in PROVIDERS.values() for k in ("off", "switched_off", "unread"))
-           + ("Resource", "Month to date", "Reader expires", "Organization", "shared", "undecided"))
+           + ("Resource", "Reader", "Month to date", "Reader expires", "Organization", "shared", "undecided"))

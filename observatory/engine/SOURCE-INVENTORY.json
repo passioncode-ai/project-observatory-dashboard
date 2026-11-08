@@ -652,8 +652,8 @@
       "path": "dashboard/infra_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "13459eb2da4813f0d00c446d75c9ba6957e4434d1a46d0bd3384ce777af3fd37",
-      "bytes": 16458
+      "export_sha256": "6db18a459f805280eadc238b957a98ebc9497212a96615a4df9f633050f6abb9",
+      "bytes": 16468
     },
     {
       "path": "dashboard/locales/en.json",
