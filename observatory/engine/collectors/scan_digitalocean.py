@@ -24,7 +24,9 @@ to a log. A database object carries its users' passwords; only named fields are 
 
 DEGRADATION. Each failure is NAMED in `degraded` and the rest still lands: no team stashed, a
 token DigitalOcean refuses (401: the whole team), a scope the token lacks (403: that resource),
-a rate limit (429: that resource, with the wait the provider asked for).
+a rate limit (429: that resource, with the wait the provider asked for), and a `doctl` context
+whose team has no stashed token (`digitalocean:doctl:<context>`, with the `stash --from-doctl`
+step; OBS-421): its team is asked of DigitalOcean with that context's own token, kept in memory.
 """
 from __future__ import annotations
 

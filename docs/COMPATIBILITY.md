@@ -530,6 +530,26 @@ was. `workspace_upgrade.restore` and `restore_store_only` and
 `setting_folders`. Without the flag
 every command line answers as before.
 
+## Registry and doctor: readable agents page, account organizations, DigitalOcean signals (OBS-317, OBS-412 part 1, OBS-421, the release after 0.35.6)
+
+Additive; nothing migrates and no setting changes. With `features.wiki_projection` on, the projection writes
+`inventory/agents.md` beside `inventory/agents.json` in the wiki (generated, overwritten on each projection, built
+from `registry/agents.json` alone; no path or token), and its report `store/raw/projection.json` gains `pages`.
+`registry/digitalocean-account.json` and `registry/cloudflare-account.json`: every resource row gains `account_ref`
+(its account row's `id`), DigitalOcean account rows gain `team_uuid` and Cloudflare account rows `account_id`. When
+`config/organizations.json` names organizations, those account rows also carry `organization`,
+`organization_source` (`rule`, `conflict`, `none`) and `organization_why`, and `registry/heroku-apps.json` carries
+`team_organizations` (`team` and the same three fields); without the file nothing new is written. `match` accepts
+`digitalocean_teams`, `cloudflare_accounts` and `heroku_teams`; an older engine's validator names them as unknown list
+rules and ignores them, so a project they assigned falls back to the older answer there. A project assigned through
+a provider account reads `organization_source` `rule` with the account and the resource in `organization_why`, and
+projects.json is written once more in the same emit when such an answer changed. `full doctor` gains `digitalocean`
+(`integration`, `teams_stashed`, or `teams_stashed` null with `reason`) and the `attention` code `digitalocean-off`.
+The raw DigitalOcean scan's `degraded` may hold `digitalocean:doctl:<context>` rows. Organization certificates are
+rotated earlier (at two thirds of their validity or an hour before the three-day `expiring` notice, whichever comes
+first, never in the first half; OBS-423): nothing in the enrollment's files changes. Downgrade: an older engine reads
+every added field as an unknown key and leaves `inventory/agents.md` in the wiki as it was last written.
+
 ## Migration checksums: the same under every Python (OBS-387, 0.35.4)
 
 No migration and no new file. Until 0.35.3 the checksum recorded for each applied migration (`migration_checksums`)

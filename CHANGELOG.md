@@ -22,6 +22,40 @@ while the major version is 0, a minor release may change behaviour and says so h
   `--secret-store-target` or another `--secret-store` policy (`secret-store-verify-into-conflict`) and a run
   where a workspace on this machine has settings that do not read (`secret-store-verify-into-unchecked`), all
   exit 2 with nothing written. A DIR beside a carried `.obsnap` is fine.
+- **`inventory/agents.md`, a readable page of the installed agents beside `inventory/agents.json`** (OBS-317,
+  first half). The wiki projection writes it from `registry/agents.json`: one row per service key with its product,
+  version (the manifest's provider revision), where it answers, its contract pin, who holds it (the supervisor, its
+  label and state) and its MCP declarations, ordered by service key, with a header saying it is generated. It carries
+  no path, token or plist. The wiki links `[[inventory/agents]]`, and the tick's `links` step reported that note
+  missing on every tick.
+- **DigitalOcean onboarding signals** (OBS-421, `docs/ONBOARDING.md`). `full doctor` reports `digitalocean`
+  (`integration`, `teams_stashed`, counted from the door's records, never a value) and, when team tokens are stashed
+  while `integrations.digitalocean` is off, an `attention` row `digitalocean-off` with the step
+  `project-observatory full configure integrations digitalocean true`. `digitalocean.py teams` and the collector name
+  each `doctl` context whose team has no stashed token: "member of team X via doctl context Y: no token stashed;
+  `digitalocean.py stash --from-doctl Y`" (in the scan's `degraded` as `digitalocean:doctl:Y`). The team is asked of
+  DigitalOcean with that context's token; no value is printed or written.
+- **Organizations match provider accounts** (OBS-412 part 1, `docs/COMPATIBILITY.md`). `config/organizations.json`
+  `match` takes `digitalocean_teams` (a team's uuid or name), `cloudflare_accounts` (an account id) and
+  `heroku_teams` (a team name) beside `repository_owners` and `products`. A project matches one only through a
+  resource the registry already ties to it (a DigitalOcean app or a Cloudflare Pages project or zone with a measured
+  `project`, a Heroku app linked by its rule); an account two organizations claim is shared and assigns nothing.
+  The account rows of `registry/digitalocean-account.json` and `registry/cloudflare-account.json` carry
+  `organization`, `organization_source` (`rule`, `conflict`, `none`) and `organization_why`, and
+  `registry/heroku-apps.json` carries `team_organizations`, all only when organizations are configured; the
+  DigitalOcean and Cloudflare pages show an Organization column then. Every resource row names its account row
+  (`account_ref`); account rows carry `team_uuid` or `account_id`.
+
+### Fixed
+
+- **An organization certificate is rotated before doctor and `org status` call it expiring** (OBS-423). A 7-day
+  certificate read `expiring` three days before its end, while the maintenance pass rotated it only at two thirds of
+  its validity, 2.33 days before the end: for 16 hours a person was told to run `full org rotate` by hand (seen
+  2026-11-08: `daysLeft: 2.41`, `rotationDue: false`). A rotation is now due at two thirds or an hour before the
+  `expiring` notice, whichever comes first, never in the first half of the validity, judged on the server's clock.
+- **`install_launchd.py install` reloads the tick through the waiting helpers** (OBS-424). It sent `bootout` and at
+  once `bootstrap`, which launchd refuses while the bootout is still finishing (the race OBS-410 fixed elsewhere);
+  it now uses `stop_job` and `start_job`.
 
 ## 0.35.6 (2026-11-08)
 

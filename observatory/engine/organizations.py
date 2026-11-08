@@ -27,13 +27,14 @@ so a workspace that never configures this sees no change):
 THE ORDER, first answer wins:
   1. declared  — `projects` here, or `organization` in project_overrides.json
                  (where an accepted proposal lands);
-  2. rule      — a repository owner, a product membership or a provider account named under
-                 `match`; two organizations matching is a CONFLICT, reported, never guessed;
+  2. rule      — a repository owner or a product membership named under `match`;
+                 two organizations matching is a CONFLICT, reported, never guessed;
   3. external  — every repository owner is outside the estate (ownership.json):
                  a clone of somebody else's code has no accounts of ours;
   4. default   — the organization marked `default`.
 
-PROVIDER ACCOUNTS (OBS-412 part 1; ORG-R04 in docs/ux/organization-onboarding.md). `digitalocean_teams`,
+PROVIDER ACCOUNTS (OBS-412 part 1; rule ORG-R04 of the organization onboarding design). A provider
+account named under `match` is a rule of step 2 too, beside a repository owner and a product. `digitalocean_teams`,
 `cloudflare_accounts` and `heroku_teams` name accounts, never projects. A project matches one only
 through a resource the registry ALREADY attributes to it: a DigitalOcean app or a Cloudflare Pages
 project or zone whose `project` the infra documents measured (a repository or a site the registry
