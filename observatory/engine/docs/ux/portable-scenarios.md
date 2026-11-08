@@ -6,7 +6,7 @@ Each OSS id is defined once, as a table row or a `### OSS-n:` heading; a heading
 `### OSS-n, in detail:`. A new scenario takes the next free id and moves this line
 (the repository's `ScenarioIds` test checks both, and that every id below it is defined or vacant).
 
-**Next free OSS id:** `OSS-102`
+**Next free OSS id:** `OSS-110`
 
 **Vacant OSS ids:** `OSS-59` (claimed by an open pull request on 2026-10-18 when the SSH-key scenarios took OSS-62; never written)
 
@@ -1236,3 +1236,276 @@ Pure); `tests/test_machine_backup.py` HeadlessSpace
 `test_leave_is_refused_while_root_runs_it_then_works_from_the_background_folder`) and MachineMove. Status: built
 (OBS-361 part 1); the tick, server and maintenance of such an account, and a passphrase store with no login
 keychain, are later parts; product outcome unobserved.
+
+## Personal to organization: onboarding, projects and keys (2026-11-08)
+
+The operator asked on 2026-11-08 how a person who connects to an organization is set up, and how a personal install
+converts into an organizational one: the person chooses which projects and which keys go to the organization and
+keeps the rest personal, and the groupings of GitHub organizations, DigitalOcean teams and Observatory's own
+organizations must stop reading as one. The vocabulary (account, organization, context, space), the business rules
+ORG-R01 to ORG-R25, the screens ORG-W1 to ORG-W9 with their owners and the gap map are in
+[organization-onboarding.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/ux/organization-onboarding.md); the build rows are OBS-411 to OBS-420 with
+OBS-200, OBS-232 to OBS-236 and OBS-359 to OBS-372 on [the backlog](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/backlog.md). **The rules
+throughout:** anything undecided is personal; rules propose and the person decides; the organization receives only
+what was chosen for it, never a value; a key changes context only by rotation; every step has a CLI command and an
+MCP tool, and an agent does it on the person's word. They are OSS-102 to OSS-109. Each is planned (Status: draft);
+no product outcome is observed yet.
+
+Actor in every scenario: the person who runs Observatory on their own computer (an engineer or not), or their
+coding agent acting on their words; in OSS-104 and OSS-108 also the organization's administrator in the hub.
+
+### OSS-102: see whose everything is, before any organization
+
+Trigger: a new person installs Observatory (the launcher's `passioncode setup`, or `full init`) and opens it; or
+an existing person asks "what is a GitHub organization here, and what is an Observatory organization?".
+
+Steps:
+1. The first scan reads what the person connected: GitHub owners (`gh`), DigitalOcean teams (stashed tokens and
+   `doctl` contexts), Cloudflare accounts, Heroku teams and OpenRouter accounts the doors hold.
+2. Organizations (ORG-W1) shows Personal (default) with each account under it and its projects and keys counted,
+   grouped Organization, then Account, then Project. Help ("What these words mean") carries the four words.
+3. Accounts seen but not connected (a `doctl` context with no stashed token, a GitHub owner the `ownership.json`
+   does not declare) are listed under "Needs a decision" with [Connect] (the door's stash command) or [Ignore].
+4. Projects and Home group by organization, then account (OBS-418), never by a project's first GitHub owner.
+5. [Add a local organization] names one (a client, an employer without a server) and opens ORG-W2 for its accounts.
+
+States: empty (no provider connected: Personal with "No accounts connected yet" and the connect command of each door;
+never a row of zeros); loading (groups as skeletons; a provider still scanning reads "reading"); partial (a provider
+that failed keeps its rows with "not read since TIME" and its reason, e.g. a 401 for one DigitalOcean team); error
+(`organizations.json` does not read: the line and the fix, everything personal by ORG-R01); offline (last scan with
+its time; suggestions from the hub disabled); success (every account under one organization, "Nothing needs a
+decision").
+
+Edge cases: one GitHub user account holds both personal repositories and repositories of an organization's product
+(shown as a shared account, decided per project, ORG-R04); the same DigitalOcean team reached by two `doctl`
+contexts (one account, two ways in); an OpenRouter account whose keys serve both personal and organization projects
+(shared); an account two local organizations both match (conflict, assigned to neither); a workspace with no
+`organizations.json` at all (Personal only, as today).
+
+Acceptance: every account appears exactly once, under one organization or under "Needs a decision"; a GitHub
+organization is never shown as an Observatory organization; nothing is sent anywhere; the grouping is the same on
+ORG-W1, Projects and Home.
+Coverage: none yet (OBS-411, OBS-413, OBS-418). Status: draft; product outcome unobserved.
+
+### OSS-103: say which organization each provider account belongs to
+
+Trigger: "the acme-prod DigitalOcean team and the Acme Cloudflare account are Acme's", or a row of "Needs a decision"
+on ORG-W1.
+
+Steps:
+1. ORG-W2 opens on one account: what it holds here (projects, apps, zones, keys) and who suggests a mapping: the
+   organization's declared provider accounts read from the hub (names and owners only, never keys), a repository
+   owner rule, or nobody.
+2. The person picks: this organization, Personal, or decide per project (a shared account).
+3. The rule is saved in `organizations.json` under the account's kind (`github_owners`, `digitalocean_teams`,
+   `cloudflare_accounts`, `heroku_teams`, `openrouter_accounts`; `repository_owners` and `products` stay valid),
+   with `by` (the person, or an agent with the person's words).
+4. The screen says what the rule proposes ("12 projects and 3 keys will be proposed for Acme; nothing is sent") and
+   ORG-W1 regroups.
+
+States: loading (counts as skeletons); conflict (two organizations claim the account: both named with their rules,
+the person picks one or per project, ORG-R04); error (the file cannot be written: nothing changed, the reason);
+offline (hub suggestions unavailable, rules by hand still work); success ("Rule saved").
+
+Edge cases: an account the hub declares for Acme while a local rule says Personal (the person's rule wins and the
+difference is shown); a project whose repository is in one account and whose deploy is in another account of
+another organization (the project is proposed for neither and waits, ORG-R06); a rule removed later (its proposals
+are withdrawn; anything already handed over stays until returned, OSS-108).
+
+Acceptance: a rule never moves anything (ORG-R02); every proposal names its rule; a person's rule is never
+overwritten by an agent's or the hub's suggestion.
+Coverage: none yet (OBS-412). Status: draft; product outcome unobserved.
+
+### OSS-104: join an organization from an invitation
+
+Trigger: the organization's administrator invites the person in the hub (People: one link, single use, 72 hours, sent
+through the organization's own mail) and prepares this computer (Computers: "Prepare a computer", a token shown
+once); the person says "join Acme" or opens the link.
+
+Steps:
+1. The person redeems the invitation in the hub and registers their passkey (their gate, ORG-R23).
+2. Observatory's Join (ORG-W3, or `full org join` with the token or link on stdin) puts the token in the vault on
+   stdin, asks the server for the organization and shows its root key fingerprint for the person to compare with
+   what the administrator sent over another channel (ORG-R19).
+3. The screen says which device this is: this OS account (or VM) becomes one device of Acme (ORG-R21), and asks where
+   Acme's work will live (a separate space recommended, this space, or both here; OSS-107).
+4. Enrollment runs (`full org enroll`, OBS-161); the state reads enrolled.
+5. ORG-W4 shows the notice version Acme's policy names and what Acme sees and never sees, and opens the hub's page
+   where the person acknowledges it (DEC-0052). Until then nothing about the person is collected (ORG-R18).
+6. The local organization of the same name, if any, is linked to this enrollment (OBS-413); ORG-W1 shows Acme as
+   joined. Next: OSS-105.
+
+States: empty (nothing pasted: where the token comes from); checking (the server asked); mismatch (fingerprint
+differs: stop, nothing written, "Tell your administrator"); refused (token expired, used or for another organization:
+the server's words and "ask for a new token"); offline ("needs the network; nothing saved"); waiting for the notice
+(enrolled, not acknowledged); success (enrolled, acknowledged, layout chosen).
+
+Edge cases: a token pasted into a second OS account after it enrolled the first (refused, one token per device); a
+person already in another organization on this computer (joined beside it; the notice may say two organizations on
+one computer can be linked); a newer notice version later (collection of the kinds it changes waits until it is
+acknowledged); an invitation link whose organization id differs from the token's (refused before any key is made); a
+clipboard that carries the token across devices (the screen asks to turn off shared clipboard first, as the hub's
+runbook does).
+
+Acceptance: the token never appears in a chat, an argument, a log or the screen after it is read; no device key is
+made before the fingerprint is confirmed; the notice is never acknowledged by Observatory or by an agent; the person's
+other organizations are untouched.
+Coverage: none yet (OBS-414, OBS-200, OBS-413). The enrollment step itself: `tests/test_node_org.py` (OSS-74).
+Status: draft; product outcome unobserved.
+
+### OSS-105: choose which projects go to the organization
+
+Trigger: right after joining, or "move my Acme projects into Acme", or a finding "1 new project may belong to Acme".
+
+Steps:
+1. ORG-W5 lists every project on this computer in three groups: selected by a confirmed rule (all selected by
+   default, ORG-R15), needs you (shared accounts, ambiguous evidence, no rule), stays personal (collapsed, counted).
+   Project identities come from Fabric's project registry and Observatory's registry.
+2. The person clears or adds projects one by one, or uses [All] and [None] on a group; each row names its rule.
+3. When this space becomes the organization's (OSS-107), a fourth group lists the personal projects that must move
+   out to the person's personal space.
+4. Next: keys (OSS-106), then the review (ORG-W7): what Acme receives (an opaque reference per project; the
+   repository name only when it is in one of Acme's accounts, ORG-R03), what changes on this computer, and "N
+   projects and M keys stay personal and are never sent".
+5. Confirm signs the record `org-selection/1` with the enrollment's key and opens the hub where the person confirms it
+   with their passkey (a project enters by the person's own passkey). Apply runs (ORG-W8).
+
+States: empty (no project matches: [Add a rule] and [Choose by hand]); loading (rows as skeletons); partial (Fabric's
+registry or a provider not read: those projects read "account not known" and stay unselected); conflict (a project
+claimed by two organizations, ORG-R05); error (the record cannot be written: nothing applied); offline (the record is
+saved, sending waits, "waiting to send"); success (counts done per kind).
+
+Edge cases: a personal project on a computer that is otherwise the organization's (the person clears it; it is never
+named to Acme); a project with no repository (no rule can match; by hand only); a fork of an Acme repository in the
+person's own account (proposed for neither; the person decides); a project added after the selection (proposed,
+never selected, ORG-R16); the person changes the selection later (a new revision replacing the old one by its digest,
+ORG-R11); the same record applied twice (nothing changes, ORG-R12).
+
+Acceptance: an unselected project never reaches the server in any form; the preview and the applied record have the
+same digest (ORG-R14); undo before sending leaves no trace on the server (ORG-R13).
+Coverage: none yet (OBS-232, OBS-417). Status: draft; product outcome unobserved.
+
+### OSS-106: choose which keys go, without any personal key leaving
+
+Trigger: step 2 of the selection, or "give Acme the keys its projects need".
+
+Steps:
+1. ORG-W6 lists the vault slots of the selected projects, each with its environment, its issuing account (from the
+   door's record) and a proposal: organization, personal or ambiguous, with why (ORG-R06). Door admin keys are listed
+   as not movable (ORG-R07).
+2. Per key, or per group (one project's keys, one account's keys, listed before the choice): ask Acme for its own key
+   and revoke mine; ask Acme for its own key and keep mine personal; keep personal and send nothing.
+3. A slot whose value also sits in another context or space (equal keyed digests) is marked "must be split" (ORG-R09);
+   a slot whose name Acme already holds reads "nothing to do" when the values are equal and "Acme keeps its own" when
+   they differ (ORG-R10).
+4. On apply, each handed-over key becomes a credential request to Acme (provider, scopes, environment, slot name; no
+   value, ORG-R03); Acme's replacement arrives sealed to this enrollment with its provenance (OBS-360); the consumers
+   switch to it; then the personal value is revoked at the provider and the revocation is proved, or kept when the
+   person chose to keep it (ORG-R08).
+
+States: loading (names first, provenance after); partial (an issuer unknown, the key was put by hand: proposal from
+the project only, marked); ambiguous (the person must choose; default personal); waiting for Acme (a request sent, no
+replacement yet: the personal key keeps working and nothing is revoked); error (a provider refuses the revocation: the
+key is listed as "replacement in use, old value not revoked", with the door command; never shown as done, ORG-R25);
+offline (requests wait in the outbox); success (each key: replaced and revoked, replaced and kept, or personal).
+
+Edge cases: a key from the person's own OpenRouter account used by an Acme project (ambiguous; recommended: Acme issues
+its own from Acme's account, mine stays personal); a DigitalOcean team token of Acme's team kept in the personal
+space (it is Acme's: handed over by rotation, never copied); a slot in an environment Acme does not declare (needs a
+choice, ORG-R22); a provider with no API to mint (DigitalOcean): Acme's administrator mints in the control panel and
+installs it through the door, and this step waits; the person changes their mind after sending (OSS-108: return and
+rotate); a key shared with another person (a share is outside every context and is never selected).
+
+Acceptance: no value is ever sent, copied or placed in two contexts; a personal key is revoked only when the person
+chose it and only after its replacement works; a failed revocation is visible until settled.
+Coverage: none yet (OBS-415, OBS-416, OBS-417, OBS-360). Status: draft; product outcome unobserved.
+
+### OSS-107: decide where the organization's work lives on this computer
+
+Trigger: the layout question of OSS-104, or "keep Acme's work in its own account".
+
+Steps:
+1. Three layouts with their costs (organization-onboarding.md, "Where the organization's work lives"): a separate
+   space (recommended), this space is the organization's, both in one space.
+2. A separate space: the launcher's administrator step creates the OS account (the macOS administrator password,
+   ORG-R23), installs Observatory there, creates a space bound to `org:<id>` (OBS-362, OBS-359) and enrolls it with its
+   own token (ORG-R21). The selection's projects move by their curated entries (OBS-364); keys arrive by rotation
+   (OSS-106); after the import there is confirmed, the personal space forgets what moved (OBS-372).
+3. This space is the organization's: the personal items found here move out to the person's personal space (or are
+   forgotten on the person's word), then the space is bound to `org:<id>`.
+4. Both in one space: every project and slot carries its context; the organization sees only its own (mode C);
+   sessions start with the context's profile (OBS-236).
+
+States: loading (the plan built); waiting for the administrator password (the one human step, named); partial (the
+space exists, the import not confirmed: the personal space keeps everything until it is); error (binding refused
+because an item of another context remains: listed with its step, ORG-R20); offline (local steps run, enrollment
+waits); success (the space reads bound, `full context check` clean).
+
+Edge cases: a computer with one OS account and no administrator (only "both in one space" is possible, said so); a VM
+(one device, as an OS account); a space nobody logs in to (its jobs run through the keeper, OBS-361); two
+organizations on one computer (two spaces, or both beside personal in one space); moving the organization's space to
+another computer later (the move runbook, never a copy of personal data, since a personal snapshot into an
+organization's space is refused).
+
+Acceptance: a bound space holds nothing of another context; the personal space keeps an item until its import is
+confirmed elsewhere; every OS account or VM is its own device.
+Coverage: none yet (OBS-359, OBS-362, OBS-364, OBS-372, OBS-236). Status: draft; product outcome unobserved.
+
+### OSS-108: leave, be removed, or take a project back
+
+Trigger: "leave Acme"; "move landing-test back to personal"; or the administrator revokes this computer in the hub's
+Computers page, or the organization closes.
+
+Steps:
+1. Take a project back: ORG-W9, [Return a project to personal] (or `full org unassign PROJECT --org ID`). The
+   selection gets a new revision without it; keys Acme issued for it are deleted here and Acme is asked to revoke
+   them; keys whose origin was personal come back to personal and are listed for rotation, since Acme held them
+   (ORG-R13).
+2. Leave: `full org leave --org ID --plan` (or the screen) lists what happens (ORG-R17): the enrollment ends, Acme's
+   credentials here are deleted, projects return to personal with Acme still shown as a local organization, keys of
+   personal origin return and are listed for rotation, checkouts and repositories are untouched. `--apply` does it.
+3. Removed by the administrator, or the organization closed: the machine reads `removed` or `closed` (OSS-74) and the
+   same plan applies by itself, without a token.
+
+States: loading (the plan built); waiting (a revocation at a provider not confirmed yet: listed, never "done");
+error (a credential that cannot be deleted locally: named with its path class and command); offline (local steps run;
+the server learns at the next check-in, or never if removed); success (Acme absent from contexts; ORG-W1 shows Acme as
+local or gone).
+
+Edge cases: leaving while a hand-over waits for Acme's replacement (the personal key was never revoked, so nothing to
+restore); a project Acme still lists after it was returned (the server keeps its records until the administrator
+retires them; this computer sends nothing more about it); leaving a space bound to Acme (the space becomes empty of
+context and is offered for removal, never deleted by itself); rejoining later (a new token, a new device record, a new
+selection from scratch).
+
+Acceptance: leaving never deletes a checkout, a repository or a personal key; after leaving nothing more is sent to
+Acme; every key Acme saw is either rotated or listed for rotation.
+Coverage: removal and closing as built (`tests/test_node_org.py`, OSS-74); the rest none yet (OBS-419). Status:
+draft; product outcome unobserved.
+
+### OSS-109: my agent does all of it on my word
+
+Trigger: the person says to their agent "join Acme with this token, give Acme its projects and the keys they need,
+keep everything else personal", or any one step of OSS-102 to OSS-108.
+
+Steps:
+1. The agent reads the state (`observatory_org_accounts`, `full org accounts`) and says in one message what it will
+   do and what stays personal.
+2. It runs each step through the CLI or MCP tool of the screen's button (organization-onboarding.md, "Agent
+   parity"), recording the person's words verbatim, the time and where they were said as the decision (ORG-R23).
+3. It stops only at the person's gates, named once each with their link: the passkey registration from the
+   invitation, the notice acknowledgement in the hub, the passkey confirmation of the selection, the macOS
+   administrator password for a new OS account, and the fingerprint comparison.
+4. It reports what was done with evidence (the record's revision and digest, the journal's counts), what waits and
+   on what.
+
+States: as the screens'; an agent never reports "done" for a step whose journal is not `done`.
+
+Edge cases: the person's words cover projects but not keys (keys stay personal, and the agent asks once naming the
+keys); an ambiguous key (the agent chooses personal, the safest reversible option, and says so); the person's words
+came through another of their agents (a relay with the quote and its source counts, a paraphrase does not); a
+refusal from the server (reported with its words; never retried unchanged).
+
+Acceptance: every button of ORG-W1 to ORG-W9 has a door with the same effect and refusals (a test holds the map); no
+step needs the person to press anything except the named gates.
+Coverage: none yet (OBS-420, OBS-385). Status: draft; product outcome unobserved.
