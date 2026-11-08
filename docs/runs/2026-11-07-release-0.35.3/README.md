@@ -5,10 +5,9 @@ verdict, the method of the last read, and tests independent of their order; then
 
 ## State now
 
-- Open: the release PR, then the tag `v0.35.3`, its run, verification and the local install; then the sha256 of
-  `observatory/engine/peer_owner.py` to the projects that vendor it.
-- Waits: none beyond the release run (watched by the releasing session's background job).
-- Next task: merge the release PR, push the tag, verify, install, record the receipts here.
+- Open: none in this record.
+- Waits: none.
+- Next task: none here; the current work is in the newest run record.
 
 ## What it changes
 
@@ -36,3 +35,14 @@ verdict, the method of the last read, and tests independent of their order; then
 On the branch: `tests.test_peer_owner` 86 OK (1 skipped) on macOS twice in a row and in a Python 3.11 Linux container; the order
 case from the review (the failed-calibration test, then the live pair test, in one process) OK; the restricted-table
 class with `find_library` forced to None (as on Windows) OK; `tests.test_peer_check` and `tests.test_osprivacy` OK.
+
+## Receipts
+
+- Release PR #467 merged as `a69c6fee`; its hosted CI failed once on Linux, Python 3.11, in
+  `test_machine_backup` (a signalled-restore test's 30-second wait on a loaded runner); the job was rerun and passed,
+  and the flake became OBS-392 (fixed in 0.35.4).
+- Tag `v0.35.3` (tag object `db7b9f2d`) on `a69c6fee`; the release run published 19 files on 2026-11-07T23:47:26Z.
+- Verified: SHA256SUMS OK, gpg `VALIDSIG 63B30DC324BD697487AA31944FAFB8AEC803B6A7`, attestation exit 0.
+- sha256 of `observatory/engine/peer_owner.py` 1.3.1 in the wheel: `b3831e5f1026a1d93d27aa8b54926dcc62a78267b87ad51fec7461c92c9826b5`,
+  announced on the board (thread c1a45468).
+- Installed locally: `--version` answered 0.35.3.

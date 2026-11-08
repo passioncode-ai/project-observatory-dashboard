@@ -23,19 +23,19 @@ GUI session (OBS-361 part 2), backups that keep the newest and say where the pas
 `workspace-backup --output` refusing secrets without `--plaintext` (OBS-389), a stale staged definition refused at
 cutover (OBS-390).
 
-Next: tag `v0.35.4`, verify and install (receipts in the record); then OBS-350 part 2.
+Released 2026-11-08 (tag `v0.35.4` on `87bff14b`), verified and installed; receipts in the record. Next: OBS-350 part 2 (PR #470).
 
 [2026-11-07: release 0.35.3](runs/2026-11-07-release-0.35.3/README.md): engine 0.35.3 (`observatory-log` stays
 0.30.0): `peer_owner` 1.3.1 names why a restricted macOS table could not prove an owner (contract DEC-0155),
 remembers a restricted table for 30 seconds and keeps its tests independent of their order (OBS-386).
 
-Next: tag `v0.35.3`, verify and install (receipts in the record).
+Released 2026-11-07 (tag `v0.35.3` on `a69c6fee`), verified and installed; receipts in the record.
 
 [2026-11-07: release 0.35.2](runs/2026-11-07-release-0.35.2/README.md): engine 0.35.2 (`observatory-log` stays
 0.30.0): the loopback owner check works on macOS 27, where a process sees only its own sockets (`peer_owner` 1.3.0,
 OBS-384, #465); a full table answers as before.
 
-Next: tag `v0.35.2`, verify and install (receipts in the record).
+Released 2026-11-07 (tag `v0.35.2` on `4dfe1484`), verified and installed; receipts in the record.
 
 [2026-11-07: release 0.35.1](runs/2026-11-07-release-0.35.1/README.md): engine 0.35.1 (`observatory-log` stays
 0.30.0): `machine-move cutover` also reads `launchctl print gui/<uid>` exit 125 as an account with nobody signed in
