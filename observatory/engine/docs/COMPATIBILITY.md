@@ -487,6 +487,18 @@ clears it (doctor lists the folder's top level, never reads a file). An older en
 `tool` `workspace_upgrade.py`, `snapshot`, `taken_on`, `files`, `state`; never a value), which an older `vault.py`
 reads as any other movement. An older engine reading a snapshot this release writes still restores the home only.
 
+## Reloading a repaired job waits for launchd (OBS-410, 0.35.7)
+
+No migration and no new file. 0.35.6 rewrote a drifted job definition and reloaded the job with `launchctl bootout`
+then `bootstrap`; launchd refuses a bootstrap while the bootout of the same label is still finishing (the server
+is given 40 s to exit), so after `full update` to 0.35.6 the server could stay unloaded, and the next
+`full maintain ensure` leaves an unloaded job alone. From 0.35.7 a reload waits until the label is gone (up to
+45 s), retries a bootstrap launchd refuses for now (exits 5, 37) up to five times, and a reload that still fails
+answers `jobs.result: reload-failed` with the jobs it left `unloaded`; `full update` checks the jobs it started
+once `maintain ensure` has run and loads one that is gone, or names it under `services_not_restarted`. A machine
+that installed 0.35.6 and has no server job: install 0.35.7, or run
+`OBSERVATORY_SYSTEM_SETUP=1 python "$(project-observatory full-path)/tools/serverd.py" --install`.
+
 ## Workspace restore: verifying a carried secret store into a disposable folder (OBS-394, 0.35.7)
 
 Additive; the snapshot format stays 1 and nothing migrates. `full restore` takes `--secret-store-verify-into DIR`,

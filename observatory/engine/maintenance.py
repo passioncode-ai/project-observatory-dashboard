@@ -802,8 +802,8 @@ def step_jobs(launch=None) -> dict:
         for job in ready:
             row = {"job": job["name"], "was": job["was"], "now": job["now"]}
             if launch.job_loaded(job["label"]):
-                launch.stop_job(job["label"])
-                ok, detail = launch.start_job(job["plist"])
+                stopped, detail = launch.stop_job(job["label"])
+                ok, detail = launch.start_job(job["plist"]) if stopped else (False, detail)
                 row.update(reloaded=ok, **({} if ok else {"detail": str(detail)[:200]}))
             else:
                 # Not loaded before (a person stopped it, or it was never started): the definition is
@@ -812,7 +812,9 @@ def step_jobs(launch=None) -> dict:
                 row["loaded"] = False
             fixed.append(row)
         waiting = [j["name"] for j in drift if j not in ready]
-        return {"result": "repaired" if fixed else "waiting", "jobs": fixed,
+        lost = [r["job"] for r in fixed if r.get("reloaded") is False and r.get("loaded") is not False]
+        result = "reload-failed" if lost else ("repaired" if fixed else "waiting")
+        return {"result": result, "jobs": fixed, **({"unloaded": lost} if lost else {}),
                 **({"waiting": waiting} if waiting else {}), **({"skipped": skipped} if skipped else {})}
     except Exception as exc:  # noqa: BLE001 — a repair never fails a pass
         return {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}

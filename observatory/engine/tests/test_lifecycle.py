@@ -1280,5 +1280,106 @@ class DefinitionsNameNoPythonRelease(PlistsCarryAStablePath):
             self.assertEqual(il.repair_systemd(str(python), write=False), [], "a second pass finds nothing")
 
 
+class ReloadWaitsForLaunchd(Workspace):
+    """`launchctl bootout` returns before the job's process has exited (the server is given 40 s), and a
+    `bootstrap` sent in that window fails, so a repaired server stayed unloaded after `full update`."""
+
+    def setUp(self):
+        super().setUp()
+        self.il = self.reload("install_launchd")
+        self.sleeps = []
+
+    def fake(self, script):
+        calls = []
+
+        def launchctl(*args, timeout=60):
+            calls.append(args[0])
+            return script(args[0], calls)
+        return calls, launchctl
+
+    def test_stop_waits_until_the_label_is_gone(self):
+        prints = iter([0, 0, 113])
+        calls, launchctl = self.fake(lambda verb, _: (next(prints), "") if verb == "print" else (0, ""))
+        with patch.object(self.il, "_launchctl", launchctl), patch.object(self.il.time, "sleep", self.sleeps.append):
+            ok, _ = self.il.stop_job("label.server")
+        self.assertTrue(ok)
+        self.assertEqual(calls, ["bootout", "print", "print", "print"])
+        self.assertEqual(len(self.sleeps), 2)
+
+    def test_stop_that_never_unloads_answers_false(self):
+        calls, launchctl = self.fake(lambda verb, _: (0, "loaded") if verb == "print" else (0, ""))
+        clock = iter(range(0, 1000, 5))
+        with patch.object(self.il, "_launchctl", launchctl), patch.object(self.il.time, "sleep", self.sleeps.append), \
+                patch.object(self.il.time, "monotonic", lambda: next(clock)):
+            ok, detail = self.il.stop_job("label.server")
+        self.assertFalse(ok)
+        self.assertIn("still loaded", detail)
+
+    def test_start_retries_a_bootstrap_launchd_refuses_for_now(self):
+        answers = iter([(5, "Bootstrap failed: 5: Input/output error"), (37, "Operation already in progress"), (0, "")])
+        calls, launchctl = self.fake(lambda verb, _: next(answers))
+        with patch.object(self.il, "_launchctl", launchctl), patch.object(self.il.time, "sleep", self.sleeps.append):
+            ok, _ = self.il.start_job("/x/label.server.plist")
+        self.assertTrue(ok)
+        self.assertEqual(calls, ["bootstrap"] * 3)
+
+    def test_start_gives_up_after_its_attempts_and_says_why(self):
+        calls, launchctl = self.fake(lambda verb, _: (5, "Bootstrap failed: 5: Input/output error"))
+        with patch.object(self.il, "_launchctl", launchctl), patch.object(self.il.time, "sleep", self.sleeps.append):
+            ok, detail = self.il.start_job("/x/label.server.plist")
+        self.assertFalse(ok)
+        self.assertIn("Input/output error", detail)
+        self.assertEqual(len(calls), self.il.BOOTSTRAP_ATTEMPTS)
+
+    def test_a_definition_launchd_rejects_is_not_retried(self):
+        calls, launchctl = self.fake(lambda verb, _: (1, "Load failed"))
+        with patch.object(self.il, "_launchctl", launchctl), patch.object(self.il.time, "sleep", self.sleeps.append):
+            ok, _ = self.il.start_job("/x/label.server.plist")
+        self.assertFalse(ok)
+        self.assertEqual(calls, ["bootstrap"])
+
+
+class ReloadFailureIsNamed(PlistsCarryAStablePath):
+    """A repaired job that was loaded and could not be loaded again is `reload-failed`, never `repaired`."""
+
+    def test_a_reload_launchd_refuses_is_reported(self):
+        bare = str(self.fake / "opt/homebrew/opt/python@3.99/bin/python3.99")
+        _, python = self._engine_in_a_venv()
+        jobs, tick, server = self._plists_with(bare)
+        il = self.il
+
+        class Launch:
+            def repair_interpreters(self, *, write, only=None):
+                return il.repair_interpreters(str(python), write=write, only=only)
+            def job_running(self, label): return False
+            def job_loaded(self, label): return True
+            def stop_job(self, label): return True, ""
+            def start_job(self, plist): return False, "Bootstrap failed: 5: Input/output error"
+
+        maintenance = self.reload("maintenance")
+        out = maintenance.step_jobs(Launch())
+        self.assertEqual(out["result"], "reload-failed")
+        self.assertEqual(sorted(out["unloaded"]), ["server", "tick"])
+        self.assertIn("Input/output error", out["jobs"][0]["detail"])
+
+    def test_a_stop_that_does_not_finish_is_not_followed_by_a_bootstrap(self):
+        bare = str(self.fake / "opt/homebrew/opt/python@3.99/bin/python3.99")
+        _, python = self._engine_in_a_venv()
+        self._plists_with(bare)
+        il, starts = self.il, []
+
+        class Launch:
+            def repair_interpreters(self, *, write, only=None):
+                return il.repair_interpreters(str(python), write=write, only=only)
+            def job_running(self, label): return False
+            def job_loaded(self, label): return True
+            def stop_job(self, label): return False, "still loaded 45 s after bootout"
+            def start_job(self, plist): starts.append(plist); return True, ""
+
+        out = self.reload("maintenance").step_jobs(Launch())
+        self.assertEqual(out["result"], "reload-failed")
+        self.assertEqual(starts, [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

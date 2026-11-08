@@ -8,7 +8,17 @@ while the major version is 0, a minor release may change behaviour and says so h
 A backup's secret store can be checked without touching the live one. A weekly restore check into a temporary
 home used to verify the home only, because the store goes back only into the folder its settings name, the live
 one; `--secret-store-verify-into DIR` writes it into a disposable folder and reads every file back against the
-snapshot's manifest.
+snapshot's manifest. It also brings the server back on a Mac that updated to 0.35.6, where the repaired
+definition left it unloaded.
+
+### Fixed
+
+- **The server comes back after an update to 0.35.6 on macOS** (OBS-410). `full maintain ensure` rewrote the
+  server's definition and reloaded it with a bootstrap that launchd refused while the old process was still exiting,
+  so the server stayed unloaded and the update reported nothing. Reloads now wait for the bootout and retry the
+  bootstrap, a reload that fails is `reload-failed`, and the update loads a job it started again once ensure has
+  run. A machine that installed 0.35.6 and has no server: `OBSERVATORY_SYSTEM_SETUP=1 python "$(project-observatory
+  full-path)/tools/serverd.py" --install`, or install 0.35.7.
 
 ### Added
 

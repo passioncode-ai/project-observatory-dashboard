@@ -7,7 +7,7 @@ is 30 minutes because a tick over a quiet machine costs nothing and the
 interesting resolution here is "did work happen this half hour", not seconds.
 """
 from __future__ import annotations
-import argparse, plistlib, subprocess, sys, os, pathlib, hashlib, re, shutil, shlex, stat
+import argparse, plistlib, subprocess, sys, os, pathlib, hashlib, re, shutil, shlex, stat, time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -404,15 +404,42 @@ def job_loaded(label: str) -> bool:
     return _launchctl("print", f"gui/{uid()}/{label}")[0] == 0
 
 
+#: How long `stop_job` waits for launchd to finish a bootout: the server's ExitTimeOut (40 s) and a margin.
+BOOTOUT_WAIT_SECONDS = 45
+#: Bootstrap attempts, and the exits launchd gives while a bootout of the same label is still finishing
+#: (5, EIO "Input/output error"; 37, EALREADY "Operation already in progress"; 125, our own timeout).
+BOOTSTRAP_ATTEMPTS = 5
+BOOTSTRAP_TRANSIENT = frozenset({5, 37, 125})
+
+
 def stop_job(label: str) -> tuple[bool, str]:
-    """Boot the job out, leaving its plist on disk so start_job can bring it back."""
+    """Boot the job out, leaving its plist on disk so start_job can bring it back.
+
+    `launchctl bootout` returns before the job's process has exited, and a bootstrap sent in that window
+    fails; so this waits until the label is gone (up to BOOTOUT_WAIT_SECONDS) and answers False if it is not."""
     code, out = _launchctl("bootout", f"gui/{uid()}/{label}")
-    return code == 0 or not job_loaded(label), out
+    deadline = time.monotonic() + BOOTOUT_WAIT_SECONDS
+    delay = 0.25
+    while job_loaded(label):
+        if time.monotonic() >= deadline:
+            return False, f"still loaded {BOOTOUT_WAIT_SECONDS} s after bootout (exit {code}): {out}".strip()
+        time.sleep(delay)
+        delay = min(delay * 2, 2.0)
+    return True, out
 
 
 def start_job(plist: str) -> tuple[bool, str]:
-    code, out = _launchctl("bootstrap", f"gui/{uid()}", plist)
-    return code == 0, out
+    """Bootstrap the job, again while launchd answers that a bootout of the same label is still finishing."""
+    out = ""
+    for attempt in range(BOOTSTRAP_ATTEMPTS):
+        code, out = _launchctl("bootstrap", f"gui/{uid()}", plist)
+        if code == 0:
+            return True, out
+        if code not in BOOTSTRAP_TRANSIENT:
+            break
+        if attempt + 1 < BOOTSTRAP_ATTEMPTS:
+            time.sleep(1.0 + attempt)
+    return False, out
 
 
 def restart_job(label: str) -> tuple[bool, str]:
