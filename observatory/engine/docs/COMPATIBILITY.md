@@ -413,10 +413,13 @@ a reason, `next`: the exact command that writes it (`full restore SNAPSHOT --sec
 `--secret-store-target` for a folder not confirmed, after `configure sources` for a folder refused or unnamed).
 `full init` passes the restore's `secret_store` through in its answer. New workspace state:
 `store/raw/secret-store-restore.json`, owner-only, written by every restore and `--secret-store-only` of a snapshot
-that carried a store (`at`, `snapshot` file name, `state`, `reason`, `target` in display form, `files`, `next`;
-never a value); doctor's `backups.secret_store` gains `last_restore` from it and, while its state is `skipped`, the
-warning `backups-secret-store-not-restored` with that `next` as its step (also on Health), which a later write
-clears. An older engine ignores the file. The store's `projects/movements.jsonl` gains one `restore-store` row per write (`secret` `store/*`,
+that carried a store and removed by a restore of one that carried none (`at`, `snapshot` file name, the first store's
+`state`, `reason`, `target` in display form, `files`, `next`, and `stores`, the same per store; never a value). It
+never travels in a snapshot (`workspace_upgrade.EXCLUDED_FILES`). A skip chosen with `--secret-store skip` is
+recorded as `skipped-by-choice`. Doctor's `backups.secret_store` gains `last_restore` from it and, for each store
+`skipped` with a reason whose folder holds no store, the warning `backups-secret-store-not-restored` with that
+store's `next` as its step (also on Health); a store put in that folder by a later restore, by `vault.py` or by hand
+clears it (doctor lists the folder's top level, never reads a file). An older engine ignores the file. The store's `projects/movements.jsonl` gains one `restore-store` row per write (`secret` `store/*`,
 `tool` `workspace_upgrade.py`, `snapshot`, `taken_on`, `files`, `state`; never a value), which an older `vault.py`
 reads as any other movement. An older engine reading a snapshot this release writes still restores the home only.
 

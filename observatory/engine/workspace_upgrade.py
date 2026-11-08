@@ -69,9 +69,14 @@ def digest(file: Path) -> str:
     return h.hexdigest()
 
 
+#: Files that describe this machine's own last restore and never travel in a snapshot (OBS-350): restored
+#: elsewhere, another run's record would say another machine's store is missing.
+EXCLUDED_FILES = {'store/raw/secret-store-restore.json'}
+
+
 def excluded(path: Path) -> bool:
     return (any(p in EXCLUDED_DIRS for p in path.parts) or path.name in {'.workspace.lock', 'tick.lock', 'service.lock'}
-            or path.name.endswith(('.upgrade.lock', '-shm')))
+            or path.name.endswith(('.upgrade.lock', '-shm')) or PurePosixPath(*path.parts).as_posix() in EXCLUDED_FILES)
 
 
 def inventory(base: Path) -> dict[str, tuple[int, int, str]]:
@@ -1032,22 +1037,44 @@ def store_next_step(summary: dict, snapshot: str) -> str | None:
 
 
 def _said(summary: dict, snapshot: str) -> dict:
-    step = store_next_step(summary, snapshot)
-    return {**summary, 'next': step} if step else summary
+    """The summary with each skipped store's `next` (the first store's at the top, every store's in `stores`)."""
+    def one(row: dict) -> dict:
+        step = store_next_step(row, snapshot)
+        return {**row, 'next': step} if step else row
+    out = one(summary)
+    if isinstance(summary.get('stores'), list):
+        out['stores'] = [one(row) for row in summary['stores']]
+    return out
+
+
+def _recorded(row: dict) -> dict:
+    """One store as the restore record keeps it. A skip the caller chose (`--secret-store skip`, no reason)
+    is `skipped-by-choice`, which doctor never warns about; a skip with a reason stays `skipped`."""
+    state = row.get('state')
+    if state == 'skipped' and not row.get('reason'):
+        state = 'skipped-by-choice'
+    return {'name':row.get('name'), 'state':state, 'reason':row.get('reason'), 'target':row.get('target'),
+            'files':row.get('files', 0), 'next':row.get('next')}
 
 
 def _record_restore(base: Path, summary: dict, snapshot: str) -> None:
-    """`store/raw/secret-store-restore.json`: what the newest restore did with a carried store (codes, the
+    """`store/raw/secret-store-restore.json`: what the newest restore did with each carried store (codes, the
     folder in display form, the step; never a value), which doctor's `backups.secret_store.last_restore`
-    reads, so a store skipped under `keep` (what `full init` passes) is said until one is written. Only a
-    restore of a snapshot that carried a store writes it; one that cannot be written is said on stderr."""
-    if summary.get('state') in (None, 'not-in-snapshot', 'not-applicable'):
-        return
-    record = {'at':datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
-              'snapshot':snapshot, 'state':summary.get('state'), 'reason':summary.get('reason'),
-              'target':summary.get('target'), 'files':summary.get('files', 0), 'next':summary.get('next')}
+    reads, so a store skipped under `keep` (what `full init` passes) is said until one is in place. Every
+    restore rewrites it, and one whose snapshot carried no store removes it; the file never travels in a
+    snapshot (`EXCLUDED_FILES`). One that cannot be written is said on stderr."""
+    file = base.joinpath(*backup_vault.RESTORE_RECORD)
     try:
-        workspace.write_json(base.joinpath(*backup_vault.RESTORE_RECORD), record)
+        if summary.get('state') in (None, 'not-in-snapshot', 'not-applicable'):
+            if os.path.lexists(file):
+                file.unlink()
+            return
+        rows = summary['stores'] if isinstance(summary.get('stores'), list) else [summary]
+        first = _recorded(rows[0])
+        record = {'at':datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+                  'snapshot':snapshot, **{k: v for k, v in first.items() if k != 'name'},
+                  'stores':[_recorded(row) for row in rows]}
+        workspace.write_json(file, record)
     except (OSError, config.ConfigurationError) as exc:
         print(f'Observatory: the secret store restore record was not written: {type(exc).__name__}', file=sys.stderr)
 
