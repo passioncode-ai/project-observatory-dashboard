@@ -3,7 +3,12 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.35.7 (2026-11-08)
+
+A backup's secret store can be checked without touching the live one. A weekly restore check into a temporary
+home used to verify the home only, because the store goes back only into the folder its settings name, the live
+one; `--secret-store-verify-into DIR` writes it into a disposable folder and reads every file back against the
+snapshot's manifest.
 
 ### Added
 

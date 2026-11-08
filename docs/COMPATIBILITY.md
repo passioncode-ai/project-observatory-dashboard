@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The application release is **0.35.6**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
+The application release is **0.35.7**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
 
 ## SQLite runtime prerequisite
 
@@ -487,7 +487,7 @@ clears it (doctor lists the folder's top level, never reads a file). An older en
 `tool` `workspace_upgrade.py`, `snapshot`, `taken_on`, `files`, `state`; never a value), which an older `vault.py`
 reads as any other movement. An older engine reading a snapshot this release writes still restores the home only.
 
-## Workspace restore: verifying a carried secret store into a disposable folder (OBS-394, the release after 0.35.6)
+## Workspace restore: verifying a carried secret store into a disposable folder (OBS-394, 0.35.7)
 
 Additive; the snapshot format stays 1 and nothing migrates. `full restore` takes `--secret-store-verify-into DIR`,
 with a whole restore and with `--secret-store-only`: each store the snapshot carried is written into
