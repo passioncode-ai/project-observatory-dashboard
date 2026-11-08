@@ -1417,8 +1417,9 @@ class LostServerIsLoadedOnce(Workspace):
         row = {"at": "2026-11-08T16:08:18Z", "event": "updated", "from": "0.35.5", "to": version}
         (self.ws / "store/logs/update.jsonl").write_text(json.dumps(row) + "\n")
 
-    def recover(self):
-        return self.maintenance.recover_lost_server(self.ws, self.launch, descriptor=self.descriptor)
+    def recover(self, override="enabled"):
+        return self.maintenance.recover_lost_server(self.ws, self.launch, descriptor=self.descriptor,
+                                                    override=lambda label: override)
 
     def test_a_server_lost_after_the_update_to_0_35_6_is_loaded_again_once(self):
         self.updated_to("0.35.6")
@@ -1439,7 +1440,16 @@ class LostServerIsLoadedOnce(Workspace):
         self.descriptor.unlink()
         self.assertIsNone(self.recover())
         self.assertEqual(self.launch.starts, [])
-        self.assertFalse(self.marker.exists())
+        self.assertTrue(self.marker.exists(), "decided once: a server installed later is never touched")
+        self.descriptor.write_text("{}")
+        self.assertIsNone(self.recover())
+        self.assertEqual(self.launch.starts, [])
+
+    def test_a_server_the_operator_disabled_stays_off(self):
+        self.updated_to("0.35.6")
+        self.assertIsNone(self.recover(override="disabled"))
+        self.assertEqual(self.launch.starts, [])
+        self.assertIn('"disabled"', self.marker.read_text())
 
     def test_a_loaded_server_is_left_alone_and_the_check_is_not_repeated(self):
         self.updated_to("0.35.6")

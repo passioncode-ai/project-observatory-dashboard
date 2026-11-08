@@ -770,7 +770,7 @@ def _services():
     return services if services.available() else None
 
 
-def step_jobs(launch=None) -> dict:
+def step_jobs(launch=None, base: Path | None = None) -> dict:
     """The tick and server jobs run from the definition the installer would write now (0.19.3, OBS-393).
 
     Before 0.19.3 their plists could name the installer's interpreter instead, and a venv rebuilt
@@ -792,7 +792,7 @@ def step_jobs(launch=None) -> dict:
     out = _step_launchd_jobs(launch)
     if recover:
         try:
-            lost = recover_lost_server(config.home(), launch)
+            lost = recover_lost_server(base or config.home(), launch)
         except Exception as exc:  # noqa: BLE001 — a recovery never fails a pass
             lost = {"job": "server", "result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
         if lost:
@@ -806,14 +806,16 @@ LOST_SERVER_RELEASE = "0.35.6"
 LOST_SERVER_MARKER = "server-recovery-obs410.json"
 
 
-def recover_lost_server(base: Path, launch, *, descriptor: Path | None = None) -> dict | None:
+def recover_lost_server(base: Path, launch, *, descriptor: Path | None = None, override=None) -> dict | None:
     """Load the server 0.35.6 left unloaded after its update, once (OBS-410).
 
     0.35.6's `maintain ensure` rewrote the server's definition and sent `bootstrap` while launchd was
     still finishing the bootout, so the server stayed unloaded; an update from 0.35.6 runs 0.35.6's own
     code, which only restarts what is loaded, and a pass leaves an unloaded job alone. A server whose
     definition and Fabric descriptor are both in place but whose label is not loaded was lost, not
-    turned off (`serverd.py --uninstall` removes both), when this workspace was updated to 0.35.6."""
+    turned off (`serverd.py --uninstall` removes both), when this workspace was updated to 0.35.6. A label the operator
+    disabled (Fabric Dashboards' stop, LC-14) stays off. Every decided outcome writes the marker, so the check runs
+    until it decides once and never again; only a load launchd refused is tried at the next pass."""
     marker = base / "store" / "raw" / LOST_SERVER_MARKER  # paths-check: allow — the workspace `base` passed in, which need not be this process's paths.HOME; a test redirects it through `base`
     if marker.exists():
         return None
@@ -837,16 +839,22 @@ def recover_lost_server(base: Path, launch, *, descriptor: Path | None = None) -
     job = next(j for j in launch.managed_jobs(base) if j["name"] == "server")
     described = descriptor or fabric_service.descriptor_path(service_identity.SERVICE_ID,
                                                              service_identity.instance(base))
-    if not (Path(job["plist"]).exists() and described.exists()):
-        return None
 
     def done(result: str) -> None:
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text(json.dumps({"at": datetime.datetime.now(datetime.timezone.utc).strftime(
             "%Y-%m-%dT%H:%M:%SZ"), "result": result}) + "\n", encoding="utf-8")
 
+    if not (Path(job["plist"]).exists() and described.exists()):
+        done("no-server")
+        return None
     if launch.job_loaded(job["label"]):
         done("loaded")
+        return None
+    if override is None:
+        override = fabric_service.launchd_override
+    if override(job["label"]) == "disabled":
+        done("disabled")
         return None
     ok, detail = launch.start_job(job["plist"])
     if ok:
@@ -1220,7 +1228,7 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
             report["snapshot"] = step_snapshot(base, state, at, services, sleep=sleep)
             report["machine"] = step_machine(base, at, machine)
             if services is not None:
-                report["jobs"] = step_jobs()
+                report["jobs"] = step_jobs(base=base)
         if not report["update"]["result"].startswith("updated"):
             report["org"] = step_org(base, commands or Commands(base))
             try:
@@ -2048,7 +2056,7 @@ def ensure(base: Path, *, schedule=None, store=None, explicit: bool = False) -> 
         # The tick and the server too (OBS-393): a definition the installer would no longer write (a
         # path of a venv rebuilt on another Python) is rewritten and reloaded here, so a person's
         # `maintain ensure` mends every job, not only the two it schedules.
-        out["jobs"] = step_jobs()
+        out["jobs"] = step_jobs(base=base)
         out["hook_env"] = _refresh_hook_env()
     return out
 

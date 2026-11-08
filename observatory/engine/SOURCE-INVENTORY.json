@@ -954,8 +954,8 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "3409aa7f251fdf3277457771b6ffb79abdbfcc9008d6fd3732dca3b5186a3a98",
-      "bytes": 110805,
+      "export_sha256": "7b3f7c25b7fb0683ff5740579100bbdd73d0e1da70e316dfcda15dff1a13c50a",
+      "bytes": 111255,
       "upstream_modified": true
     },
     {
@@ -3174,8 +3174,8 @@
       "path": "maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "98ab4a5fd718e2bc485bac91bcb35c8f845bd2eea9e137cc7523e83ddf02249d",
-      "bytes": 135956
+      "export_sha256": "a67c270fd5cae791cc5904070ff5e0be01c85b79dc94a408c877e9a531fbd564",
+      "bytes": 136450
     },
     {
       "path": "mcp/capability_tools.py",
@@ -5352,8 +5352,8 @@
       "path": "tests/test_lifecycle.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f3a0552fd5c9dec240d260c9c3a33fb862bab4b14e96e7aa09d762e6fcabb964",
-      "bytes": 76594
+      "export_sha256": "6ca6384db64a8fa2254ba065c40ebaefc7a43bfb4e701144de2796af6f30f6e3",
+      "bytes": 77156
     },
     {
       "path": "tests/test_lifecycle_watch.py",

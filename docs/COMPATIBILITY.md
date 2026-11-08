@@ -499,9 +499,13 @@ checks the jobs it started once `maintain ensure` has run and loads one that is 
 `services_not_restarted`. A workspace that was updated to 0.35.6 (its `store/logs/update.jsonl` says so) and whose
 server has its launchd definition and Fabric descriptor in place but is not loaded gets the server loaded again,
 once, by the first `maintain ensure` or pass of 0.35.7 (the update to 0.35.7 runs `maintain ensure`), answered
-under `jobs.recovered`; the new file `store/raw/server-recovery-obs410.json` records that it ran, so a server a
-person boots out later stays out. `serverd.py --uninstall` removes both the definition and the descriptor, so a
-server turned off that way is never loaded. By hand:
+under `jobs.recovered`; the new file `store/raw/server-recovery-obs410.json` records the first decided outcome
+(`loaded`, `loaded-again`, `no-server`, `disabled`), after which the check never runs again, so a server a person
+boots out later stays out; only a load launchd refuses is tried again at the next pass. A server turned off with
+`serverd.py --uninstall` (which removes the definition and the descriptor) or stopped in Fabric Dashboards (a
+disabled label) is never loaded; one booted out by hand with a plain `launchctl bootout` before the update to 0.35.6
+cannot be told from a lost one and is loaded once. A workspace whose schedule was turned off with
+`maintain uninstall` has no pass and is not recovered. By hand:
 `OBSERVATORY_SYSTEM_SETUP=1 python "$(project-observatory full-path)/tools/serverd.py" --install`.
 
 ## Workspace restore: verifying a carried secret store into a disposable folder (OBS-394, 0.35.7)
