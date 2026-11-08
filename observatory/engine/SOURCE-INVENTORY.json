@@ -968,8 +968,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "9e71fa2af317a033237ade5ffbf45f92c5f917f1ca9e559219bf577c5452b674",
-      "bytes": 201186,
+      "export_sha256": "5f685094735b38ea5327155567aacba9d08115f6c4cb4c657d60e74bde58596a",
+      "bytes": 202931,
       "upstream_modified": true
     },
     {
@@ -6642,8 +6642,8 @@
     {
       "path": "tests/test_workspace_upgrade.py",
       "source_sha256": "baf6fb326428105e87a6acab67b3f89adc29038c5df488c822ab210c3e65fea3",
-      "export_sha256": "5c39d60276b2c4738338d5f6f7c1063910457b48aa4f217c8fa5b6119132d6dc",
-      "bytes": 102025,
+      "export_sha256": "a0030c36379e635bfe3ed3ae2c46358d2563066096b2e1814f2a6bcc25f30b20",
+      "bytes": 102115,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
