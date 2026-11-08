@@ -1796,13 +1796,15 @@ class RestoreSecretStore(unittest.TestCase):
     def test_the_target_is_read_after_the_home_rewrite(self):
         source=self.base/'fake-snapshot'
         (source/'data/config').mkdir(parents=True)
+        old_home,new_home=self.base/'homes'/'ann',self.base/'homes'/'bob'
+        elsewhere=str(self.base/'code')
         workspace.write_json(source/'data/config/settings.json',
-                             {'sources':{'secret_store':'/Users/olduser/.config/example/secrets','projects':'/srv/code'}})
-        with patch.object(upgrade,'this_home',lambda: Path('/home/newuser')):
-            sources=upgrade.restored_sources(source,{'home_path':'/Users/olduser'})
-            same=upgrade.restored_sources(source,{'home_path':'/home/newuser'})
-        self.assertEqual(sources,{'secret_store':'~/.config/example/secrets','projects':'/srv/code'})
-        self.assertEqual(same['secret_store'],'/Users/olduser/.config/example/secrets','a same-home restore keeps it')
+                             {'sources':{'secret_store':str(old_home/'.config/example/secrets'),'projects':elsewhere}})
+        with patch.object(upgrade,'this_home',lambda: new_home):
+            sources=upgrade.restored_sources(source,{'home_path':str(old_home)})
+            same=upgrade.restored_sources(source,{'home_path':str(new_home)})
+        self.assertEqual(sources,{'secret_store':'~/.config/example/secrets','projects':elsewhere})
+        self.assertEqual(same['secret_store'],str(old_home/'.config/example/secrets'),'a same-home restore keeps it')
 
 
 if __name__=='__main__':
