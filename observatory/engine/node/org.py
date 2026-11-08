@@ -148,6 +148,8 @@ def _ends(status: int, code: Optional[str]) -> bool:
     return code in ('epoch-superseded', 'certificate-expired') or (status == 401 and code in REMOVED_CODES)
 #: `org status`, Health and doctor warn this long before the certificate expires (OBS-199).
 EXPIRY_WARNING_SECONDS = 3 * 86400
+#: How long before the `expiring` notice a rotation is due (OBS-423): four maintenance passes.
+ROTATION_LEAD_SECONDS = 3600
 #: How long after its certificate ended a machine renews by its key on record, without a token (contract DEC-0100,
 #: `RENEWAL_GRACE_DAYS`): judged on the server's clock, the end included. Past it a new enrollment token is needed.
 RENEWAL_GRACE_SECONDS = 30 * 86400
@@ -1223,9 +1225,16 @@ class Enrollment:
             self.journal('rotated', serial=cert['serial'], notAfter=cert['notAfter'])
             return self.describe()
     def rotation_due(self, state: dict) -> bool:
+        """At 2/3 of the validity, or earlier: no later than an hour before `notice` calls the certificate
+        `expiring` (EXPIRY_WARNING_SECONDS), so the maintenance pass renews it before a person is told to
+        (OBS-423: a 7-day certificate read `expiring` 3 days before its end while 2/3 waited for 2.33 days).
+        Never in the first half of the validity, so a certificate shorter than twice the warning is not
+        rotated on every pass. Judged on the server's clock, as `notice` judges the expiry."""
         cert = state['certificate']
         start, end = strict_time(cert['notBefore']) / 1000, strict_time(cert['notAfter']) / 1000
-        return bool(state.get('rotate')) or self.clock() >= start + (end - start) * 2 / 3
+        at = max(start + (end - start) / 2,
+                 min(start + (end - start) * 2 / 3, end - EXPIRY_WARNING_SECONDS - ROTATION_LEAD_SECONDS))
+        return bool(state.get('rotate')) or self.clock() + (state.get('skewSeconds') or 0) >= at
 
     def expired(self, state: dict) -> bool:
         """On the server's clock, as the last check-in measured it: the clock every request is signed on."""

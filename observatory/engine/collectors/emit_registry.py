@@ -36,7 +36,7 @@ def _stamped(name, doc, stamps=("updated_on",)):
     """
     _, changed = atomic.write_json_carrying(
         INV / name, doc, stamps=stamps, now=OBS, indent=2)
-    if changed:
+    if changed and name not in _CHANGED:
         _CHANGED.append(name)
     return changed
 
@@ -456,6 +456,12 @@ if HEROKU_SRC.is_file():
     for e in _edges:
         add_rel(e["id"], e["type"], e["from"], e["to"], e["source_refs"], e.get("rule"))
     _doc = heroku_registry.document(_scan, heroku_apps, OBS)
+    # WHOSE EACH TEAM IS (OBS-412): only when organizations.json is configured, so a workspace that
+    # never set it up sees no new field.
+    if ORGS.active:
+        _doc["team_organizations"] = [
+            {"team": _tm, **ORGS.account("heroku", [_tm])}
+            for _tm in sorted({*(_doc.get("teams") or []), *(a["team"] for a in heroku_apps)} - {"personal"})]
     _stamped("heroku-apps.json", _doc)
     _t = _doc["totals"]
     print(f"heroku-apps.json: {_t['apps']} app(s), {_t['linked_to_a_project']} linked, "
@@ -576,6 +582,9 @@ _DO_SRC = paths.SCRATCH / "digitalocean.json"
 if _DO_SRC.is_file():
     _dodoc = _infra.digitalocean_document(json.loads(_DO_SRC.read_text(encoding="utf-8")),
                                           out_repos, relations, OBS)
+    if ORGS.active:
+        for _acc in _dodoc["accounts"]:
+            _acc.update(ORGS.account("digitalocean", [_acc.get("team_uuid"), _acc.get("name")]))
     _stamped("digitalocean-account.json", _dodoc)
     print(f"digitalocean-account.json: {_dodoc['totals']['resources']} resource(s) in "
           f"{len(_dodoc['accounts'])} team(s), {_dodoc['totals']['linked_to_a_project']} linked")
@@ -583,9 +592,23 @@ _CFA_SRC = paths.SCRATCH / "cloudflare_account.json"
 if _CFA_SRC.is_file():
     _cfadoc = _infra.cloudflare_document(json.loads(_CFA_SRC.read_text(encoding="utf-8")),
                                          zone_rows, out_repos, relations, OBS)
+    if ORGS.active:
+        for _acc in _cfadoc["accounts"]:
+            _acc.update(ORGS.account("cloudflare", [_acc.get("account_id")]))
     _stamped("cloudflare-account.json", _cfadoc)
     print(f"cloudflare-account.json: {_cfadoc['totals']['resources']} resource(s) in "
           f"{len(_cfadoc['accounts'])} account(s), {_cfadoc['totals']['linked_to_a_project']} linked")
+
+# ---- organizations through provider accounts (OBS-412 part 1) -------------
+# A project whose organization no repository owner or product decided is assigned again
+# with the accounts its MEASURED resources sit in (a DigitalOcean app, a Cloudflare Pages
+# project or zone, a Heroku app), and projects.json is written again when an answer changed.
+if ORGS.active:
+    _reorg = organizations.reassign(ORGS, out_projs, organizations.project_accounts(
+        _dodoc if _DO_SRC.is_file() else None, _cfadoc if _CFA_SRC.is_file() else None, heroku_apps))
+    if _reorg:
+        _stamped("projects.json", {"schema_version":2,"updated_on":OBS,"projects":out_projs,"degraded":M.get("degraded",[])})
+        print(f"organizations: {len(_reorg)} project(s) assigned through their provider accounts")
 
 # ---- accounts (docs/design/DEPLOYMENTS.md, PB-127) ------------------------
 import accounts as _accounts

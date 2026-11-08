@@ -48,6 +48,8 @@ WRITE_RESERVE = 15
 LISTINGS = (("droplets", "/v2/droplets", "droplets"), ("apps", "/v2/apps", "apps"),
             ("databases", "/v2/databases", "databases"), ("volumes", "/v2/volumes", "volumes"),
             ("domains", "/v2/domains", "domains"))
+#: The door as a person types it, in the step a degraded row names.
+DOOR = 'python "$(project-observatory full-path)/tools/digitalocean.py"'
 GITHUB = re.compile(r"github\.com[:/]+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+?)(?:\.git)?/?$")
 
 
@@ -194,6 +196,16 @@ def main(argv: list[str]) -> int:
                              "reason": f"the team could not be read ({type(e).__name__}); details withheld"})
         if row:
             teams.append(row)
+    # A TEAM THIS MACHINE CAN READ BUT DOES NOT (OBS-421): a doctl context whose team has no stash is
+    # named with the one command that stashes it, so a team never goes unread in silence.
+    if step_budget.remaining() >= WRITE_RESERVE:
+        try:
+            for row in door.unstashed_contexts():
+                degraded.append({"source": f"digitalocean:doctl:{door.private_files.credential_shape.shown(row['context'])}",
+                                 "reason": door.unstashed_line(row, DOOR)})
+        except Exception as e:  # noqa: BLE001  doctl's config is a hint; its failure never costs the scan
+            degraded.append({"source": "digitalocean:doctl", "reason":
+                             f"doctl's contexts were not read ({type(e).__name__}); details withheld"})
     if not tokens and not degraded:
         degraded.append({"source": "digitalocean", "reason":
                          "no team stashed: `python \"$(project-observatory full-path)/tools/digitalocean.py\" "

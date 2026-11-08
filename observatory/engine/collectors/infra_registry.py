@@ -18,6 +18,10 @@ Platform app, a managed database, a volume, a Worker, a bucket). Those rows say
 `monthly_cost: null` with `cost_note`, never a zero and never an estimate. A team's
 month-to-date usage, which DigitalOcean's balance endpoint does state, sits on the team.
 
+EVERY ROW NAMES ITS ACCOUNT ROW (`account_ref`, the account's `id` in `accounts`), and an account
+row its provider id (`team_uuid`, `account_id`), so `organizations.project_accounts` reaches the
+account a project's resources sit in, and `organization` on an account row says whose it is (OBS-412).
+
 A LINK IS MEASURED OR ABSENT (rule 2: never infer from a name). An App Platform app or a
 Pages project is tied to a project only through a repository it deploys from that the
 registry ALREADY ties to one; a zone carries the project `registry/cloudflare-zones.json`
@@ -110,8 +114,9 @@ def digitalocean_rows(scan: dict, index: dict[str, str]) -> tuple[list[dict], li
     rows, teams = [], []
     for t in scan.get("teams") or []:
         account = t.get("team_name") or t.get("label")
+        ref = f"digitalocean:team:{t.get('team_uuid') or t.get('label')}"
         bal = t.get("balance") or {}
-        teams.append({"id": f"digitalocean:team:{t.get('team_uuid') or t.get('label')}",
+        teams.append({"id": ref, "team_uuid": t.get("team_uuid"),
                       "label": t.get("label"), "name": account, "token_kind": t.get("token_kind"),
                       "month_to_date_usage": _number(bal.get("month_to_date_usage")),
                       "unread": [k for k in ("droplets", "apps", "databases", "volumes") if t.get(k) is None]})
@@ -121,10 +126,10 @@ def digitalocean_rows(scan: dict, index: dict[str, str]) -> tuple[list[dict], li
                 f"digitalocean:droplet:{d.get('id')}", "droplet", d.get("name"), account,
                 droplet_state(d.get("status")), d.get("status"),
                 cost=float(price) if isinstance(price, (int, float)) else None,
-                region=d.get("region"), size=d.get("size_slug"), created_on=(d.get("created_at") or "")[:10] or None)))
+                account_ref=ref, region=d.get("region"), size=d.get("size_slug"), created_on=(d.get("created_at") or "")[:10] or None)))
         for a in t.get("apps") or []:
             row = _row(f"digitalocean:app:{a.get('id')}", "app", a.get("name"), account, app_state(a),
-                       a.get("last_phase"), region=a.get("region"), host=a.get("live_host"),
+                       a.get("last_phase"), account_ref=ref, region=a.get("region"), host=a.get("live_host"),
                        repositories=a.get("repositories") or [],
                        updated_on=(a.get("updated_at") or "")[:10] or None)
             _link(row, a.get("repositories"), index, "digitalocean-app-repo")
@@ -133,13 +138,13 @@ def digitalocean_rows(scan: dict, index: dict[str, str]) -> tuple[list[dict], li
             rows.append(_unlinkable(_row(
                 f"digitalocean:database:{c.get('id')}", "database", c.get("name"), account,
                 "running" if c.get("status") == "online" else "pending" if c.get("status") in ("creating", "resizing", "migrating") else "down",
-                c.get("status"), region=c.get("region"), size=c.get("size"),
+                c.get("status"), account_ref=ref, region=c.get("region"), size=c.get("size"),
                 engine=" ".join(x for x in (c.get("engine"), c.get("version")) if x) or None)))
         for v in t.get("volumes") or []:
             rows.append(_unlinkable(_row(
                 f"digitalocean:volume:{v.get('id')}", "volume", v.get("name"), account,
                 "running" if v.get("droplet_ids") else "idle",
-                "attached" if v.get("droplet_ids") else "detached", region=v.get("region"),
+                "attached" if v.get("droplet_ids") else "detached", account_ref=ref, region=v.get("region"),
                 size_gb=v.get("size_gigabytes"))))
     return rows, teams
 
@@ -176,15 +181,16 @@ def cloudflare_rows(scan: dict, index: dict[str, str],
     rows, accounts = [], []
     for a in scan.get("accounts") or []:
         aid, account = a.get("account_id"), a.get("account_name") or a.get("label")
-        accounts.append({"id": f"cloudflare:account:{aid}", "label": a.get("label"), "name": account,
+        ref = f"cloudflare:account:{aid}"
+        accounts.append({"id": ref, "account_id": aid, "label": a.get("label"), "name": account,
                          "token_expires_at": a.get("token_expires_at"),
                          "unread": [k for k in ("workers", "pages", "r2", "d1", "zones") if a.get(k) is None]})
         for w in a.get("workers") or []:
             rows.append(_unlinkable(_row(f"cloudflare:worker:{aid}/{w.get('name')}", "worker", w.get("name"),
-                                         account, "listed", None, modified_on=w.get("modified_on"))))
+                                         account, "listed", None, account_ref=ref, modified_on=w.get("modified_on"))))
         for p in a.get("pages") or []:
             row = _row(f"cloudflare:pages:{aid}/{p.get('name')}", "pages", p.get("name"), account,
-                       pages_state(p), p.get("last_deploy_status"), host=p.get("subdomain"),
+                       pages_state(p), p.get("last_deploy_status"), account_ref=ref, host=p.get("subdomain"),
                        domains=p.get("domains") or [], last_deploy_on=p.get("last_deploy_on"))
             # Only a GitHub source names a GitHub repository; a GitLab `owner/name` is another one.
             github = p.get("repository") if p.get("source_type") == "github" else None
@@ -192,10 +198,10 @@ def cloudflare_rows(scan: dict, index: dict[str, str],
             rows.append(row)
         for b in a.get("r2") or []:
             rows.append(_unlinkable(_row(f"cloudflare:r2:{aid}/{b.get('name')}", "r2", b.get("name"), account,
-                                         "listed", None, location=b.get("location"), created_on=b.get("created_on"))))
+                                         "listed", None, account_ref=ref, location=b.get("location"), created_on=b.get("created_on"))))
         for d in a.get("d1") or []:
             rows.append(_unlinkable(_row(f"cloudflare:d1:{d.get('uuid')}", "d1", d.get("name"), account,
-                                         "listed", None, size_bytes=d.get("file_size"), tables=d.get("num_tables"))))
+                                         "listed", None, account_ref=ref, size_bytes=d.get("file_size"), tables=d.get("num_tables"))))
         for z in a.get("zones") or []:
             monthly = z.get("plan_price") if z.get("plan_frequency") == "monthly" and z.get("plan_currency") == "USD" else None
             free = z.get("plan_price") == 0
@@ -204,6 +210,7 @@ def cloudflare_rows(scan: dict, index: dict[str, str],
                        cost=float(monthly) if isinstance(monthly, (int, float)) else 0.0 if free else None,
                        cost_note="the plan states no monthly USD price",
                        subjects=[f"cloudflare:zone:{z.get('zone_id')}", f"domain:{z.get('name')}", f"zone:{z.get('name')}"],
+                       account_ref=ref,
                        plan=z.get("plan"), dns_records=z.get("dns_records"),
                        certificate_expires_on=z.get("certificate_expires_on"),
                        certificate_status=z.get("certificate_status"))
