@@ -1503,11 +1503,21 @@ class LaunchdSchedule:
     def installed(self) -> bool:
         return self.definition.is_file()
 
+    def system_daemon(self) -> bool:
+        """Root's space_daemons.py runs this label as a system daemon of this account (OBS-361 part 2).
+        False where it cannot be asked (Windows, launchctl that did not answer)."""
+        if not hasattr(os, "getuid"):
+            return False
+        import machine_move
+        try:
+            return machine_move._system_daemon_loaded(self.runner or subprocess.run, self.label, os.getuid())
+        except (OSError, subprocess.SubprocessError):
+            return False
+
     def loaded(self) -> bool:
         if self.headless():
-            import machine_move
-            return machine_move._system_daemon_loaded(self.runner or subprocess.run, self.label, os.getuid())
-        return self.launch.job_loaded(self.label)
+            return self.system_daemon()
+        return self.launch.job_loaded(self.label) or self.system_daemon()
 
     def install(self) -> dict:
         doc = self.document()
@@ -1517,11 +1527,11 @@ class LaunchdSchedule:
         self.launch.prepare_logs((f"{self.job}.log", f"{self.job}.err"), self.base / "store" / "logs")
         if self.headless():
             return self._install_background(doc)
-        import machine_move
-        if hasattr(os, "getuid") and machine_move._system_daemon_loaded(self.runner or subprocess.run, self.label,
-                                                                        os.getuid()):
+        if self.system_daemon():
             # Root's daemon of this account runs it already (a space signed in at the screen later):
-            # loading the agent too would run every pass twice (OBS-361 part 2).
+            # an agent loaded too would run every pass twice (OBS-361 part 2), so it is booted out.
+            if self.launch.job_loaded(self.label):
+                self.launch.stop_job(self.label)
             return {"schedule": self.kind, "label": self.label, "changed": False, "domain": "system",
                     "load": "loaded"}
         current = plistlib.loads(self.plist.read_bytes()) if self.installed() else None
@@ -1634,6 +1644,8 @@ class LaunchdSchedule:
     def status(self) -> dict:
         out = {"kind": self.kind, "label": self.label, "installed": self.installed(), "loaded": self.loaded()}
         if not self.headless():
+            if out["loaded"] and self.system_daemon():
+                out.update(installed=True, domain="system")
             return out
         out["domain"] = "system"
         if out["installed"] and not out["loaded"]:
@@ -1819,6 +1831,8 @@ class Schedules:
     def status(self) -> dict:
         main, check = self.main.status(), self.check.status()
         out = {**main, "check": check}
+        if not out.get("next") and check.get("next"):
+            out["next"] = check["next"]
         for key in ("installed", "loaded", "active"):
             if key in main and main[key] is not None:
                 out[key] = bool(main[key]) and bool(check.get(key))

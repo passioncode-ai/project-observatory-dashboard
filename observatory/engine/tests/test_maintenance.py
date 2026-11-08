@@ -1811,6 +1811,19 @@ class Schedule(Base):
         self.assertNotIn("not scheduled on this machine yet", text)
         self.assertIn(" apply --user ", text)
 
+    def test_signed_in_later_roots_daemon_is_not_doubled_by_an_agent(self):
+        # A space whose daemon root runs, later signed in at the screen: the agent path must not load
+        # the job a second time, and status says it runs (confirming review of OBS-361 part 2).
+        sched = self.launchd()
+        self.loaded["value"] = True
+        import machine_move
+        with patch.object(machine_move, "_system_daemon_loaded", lambda runner, label, uid: True), \
+                patch.object(M.os, "getuid", lambda: 501, create=True):
+            out = sched.install()
+            self.assertEqual((out["domain"], out["load"]), ("system", "loaded"))
+            self.assertEqual(self.stops, [sched.label], "the agent loaded beside the daemon is booted out")
+            self.assertEqual(sched.status()["domain"], "system")
+
     def test_headless_a_loaded_daemon_with_the_same_definition_is_left_alone(self):
         sched = self.headless(loaded=True)
         first = sched.install()
