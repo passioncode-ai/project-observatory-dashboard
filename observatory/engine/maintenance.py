@@ -1446,7 +1446,7 @@ class LaunchdSchedule:
                 self._headless = False
             else:
                 try:
-                    self._headless = not machine_move.gui_session(os.getuid(), self.runner or subprocess.run)
+                    self._headless = not machine_move.gui_session(self.launch.uid(), self.runner or subprocess.run)
                 except (OSError, subprocess.SubprocessError):
                     # launchctl did not answer: keep the agent path, which fails and says so, as before.
                     self._headless = False
@@ -1510,7 +1510,7 @@ class LaunchdSchedule:
             return False
         import machine_move
         try:
-            return machine_move._system_daemon_loaded(self.runner or subprocess.run, self.label, os.getuid())
+            return machine_move._system_daemon_loaded(self.runner or subprocess.run, self.label, self.launch.uid())
         except (OSError, subprocess.SubprocessError):
             return False
 
@@ -1572,7 +1572,7 @@ class LaunchdSchedule:
         attempt is removed, so a later sign-in at the screen never starts the job a second time."""
         import machine_identity
         import machine_move
-        home, uid = Path.home(), os.getuid()
+        home, uid = Path.home(), self.launch.uid()
         machine_identity.ensure_private_dir(machine_identity.background_dir(home), home)
         target = self.definition
         try:
@@ -1636,7 +1636,7 @@ class LaunchdSchedule:
             self.plist.unlink(missing_ok=True)
             out = {"schedule": self.kind, "label": self.label, "removed": True, "domain": "system"}
             if loaded:
-                out["next"] = [machine_move.root_step("remove", self.label, os.getuid())]
+                out["next"] = [machine_move.root_step("remove", self.label, self.launch.uid())]
             return out
         if self.loaded():
             self.launch.stop_job(self.label)
@@ -1652,7 +1652,7 @@ class LaunchdSchedule:
         out["domain"] = "system"
         if out["installed"] and not out["loaded"]:
             import machine_move
-            out["next"] = machine_move.root_step("apply", self.label, os.getuid())
+            out["next"] = machine_move.root_step("apply", self.label, self.launch.uid())
         return out
 
 
