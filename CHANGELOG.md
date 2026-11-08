@@ -3,7 +3,7 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.35.6 (2026-11-08)
 
 Background jobs keep running when their virtual environment is rebuilt on another Python. Until now every job
 definition named a folder of one Python release, and a venv moved from 3.14 to 3.15 left the maintenance job, the

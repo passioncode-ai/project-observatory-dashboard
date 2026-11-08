@@ -17,6 +17,13 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-11-08: release 0.35.6](runs/2026-11-08-release-0.35.6/README.md): engine 0.35.6 and `observatory-log` 0.35.6:
+background jobs, plugin hooks and the installed manifest name no Python release, so a venv rebuilt on another Python
+keeps them working; `full maintain ensure` repairs the pass, the check, the tick and the server (OBS-393).
+
+Next: tag `v0.35.6`, verify and install it on both Macs (receipts in the record); then the «machine lost» drill with
+the second Mac once OBS-394 lands.
+
 [2026-11-08: release 0.35.5](runs/2026-11-08-release-0.35.5/README.md): engine 0.35.5 (`observatory-log` stays
 0.30.0): `full restore` puts the secret store kept outside the workspace back on another computer, under a policy for
 one already there, with `--secret-store-only` and doctor's not-restored warning (OBS-350 part 2).
