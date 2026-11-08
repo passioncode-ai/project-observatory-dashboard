@@ -1624,8 +1624,11 @@ class RestoreSecretStore(unittest.TestCase):
         self.assertEqual((only['status'],only['secret_store']['state']),('store-restored','written'))
         self.assert_store_is_the_snapshot(target)
         self.assertFalse(os.path.lexists(self.store),'the snapshot\'s own setting is not used')
-        self.assertEqual({k:v for k,v in _tree(new).items() if not k.endswith('.lock')},
-                         {k:v for k,v in home_before.items() if not k.endswith('.lock')},'the home is not touched')
+        record='store/raw/secret-store-restore.json'   # the one file it writes in the home: what it did
+        self.assertEqual({k:v for k,v in _tree(new).items() if not k.endswith('.lock') and k!=record},
+                         {k:v for k,v in home_before.items() if not k.endswith('.lock') and k!=record},
+                         'the home is not touched')
+        self.assertEqual(config.read_json(new/record)['state'],'written')
         # A second run reads same; a folder that is no workspace is refused.
         with patch.dict(os.environ,{'OBSERVATORY_BACKUP_PASSPHRASE':PASSPHRASE}):
             self.assertEqual(upgrade.restore_store_only(snapshot,new)['secret_store']['state'],'same')
@@ -1912,7 +1915,7 @@ class RestoreSecretStore(unittest.TestCase):
         held=[]
         real=secret_store_carry._write_one
 
-        def probe(source,dest):
+        def probe(source,dest,expected):
             fd=os.open(self.store/'projects/.vault.lock',os.O_RDWR)
             try:
                 oslocks.flock(fd,oslocks.LOCK_EX|oslocks.LOCK_NB)
@@ -1921,7 +1924,7 @@ class RestoreSecretStore(unittest.TestCase):
                 held.append(True)
             finally:
                 os.close(fd)
-            return real(source,dest)
+            return real(source,dest,expected)
         with patch.object(secret_store_carry,'_write_one',probe):
             self.restore(snapshot,secret_store='merge')
         self.assertEqual(held,[True])
@@ -1934,9 +1937,16 @@ class RestoreSecretStore(unittest.TestCase):
                'directories':[],'links':[],'not_carried':[]}
         dest=self.base/'new-home'
         with patch.object(secret_store_carry,'_user_home',lambda: fake_home):
-            for target in (fake_home/'.ssh',fake_home/'.ssh'/'store',fake_home/'.gnupg',fake_home/'.aws',
-                           fake_home/'.config'/'gh',fake_home/'Library'/'LaunchAgents',
-                           fake_home/'Library'/'Keychains'/'x',fake_home,fake_home/'.zshrc'):
+            (fake_home/'.ssh').mkdir(parents=True)
+            (fake_home/'Library'/'LaunchAgents').mkdir(parents=True)
+            targets=[fake_home/'.ssh',fake_home/'.ssh'/'store',fake_home/'.gnupg',fake_home/'.aws',
+                     fake_home/'.config'/'gh',fake_home/'Library'/'LaunchAgents',
+                     fake_home/'Library'/'Keychains'/'x',fake_home,fake_home/'.zshrc']
+            if sys.platform=='darwin' or os.name=='nt':
+                # Case-insensitive by default there: another spelling names the same folder.
+                targets+=[fake_home/'.SSH',fake_home/'.SSH'/'new',fake_home/'library'/'launchagents'/'x',
+                          fake_home/'Library'/'launchagents',fake_home/'.ZSHRC']
+            for target in targets:
                 with self.subTest(str(target.relative_to(self.base))):
                     plan_args=(self.base,{'externals':[entry]},{'secret_store':str(target)},dest)
                     with self.assertRaises(secret_store_carry.CarryRefused) as caught:
@@ -2018,6 +2028,96 @@ class RestoreSecretStore(unittest.TestCase):
         with self.assertRaises(secret_store_carry.CarryRefused) as caught:
             upgrade.verify_snapshot(opened)
         self.assertEqual(caught.exception.code,'secret-store-manifest-mismatch')
+
+    def test_a_merged_file_whose_digest_differs_never_reaches_the_store(self):
+        import secret_store_carry
+        src=self.base/'carried'
+        src.mkdir()
+        (src/'K').write_text('fixture-value-014\n')
+        target=self.base/'target-store'
+        (target/'projects').mkdir(parents=True)
+        entry={'files':[{'path':'K','sha256':'0'*64,'size':18,'mode':384}],'directories':[],'links':[]}
+        with self.assertRaises(secret_store_carry.CarryFailed) as caught:
+            secret_store_carry._merge(src,entry,target,'the target')
+        self.assertIn('0 missing files were added',str(caught.exception))
+        self.assertFalse(os.path.lexists(target/'K'),'a file that does not match is never linked into the store')
+        self.assertEqual([p.name for p in target.iterdir()],['projects'],'no temporary is left either')
+
+    def test_a_file_system_without_hard_links_still_merges_and_a_failed_copy_leaves_nothing(self):
+        import errno
+        import secret_store_carry
+        src=self.base/'carried'
+        src.mkdir()
+        (src/'K').write_text('fixture-value-014\n')
+        sha=upgrade.digest(src/'K')
+        target=self.base/'target-store'
+        target.mkdir()
+        for code in (errno.EPERM,errno.ENOTSUP,errno.EMLINK):
+            with self.subTest(errno.errorcode[code]):
+                (target/'K').unlink(missing_ok=True)
+                with patch.object(secret_store_carry,'_link_new',side_effect=OSError(code,'no hard links here')):
+                    self.assertEqual(secret_store_carry._write_one(src/'K',target/'K',sha),sha)
+                self.assertEqual((target/'K').read_text(),'fixture-value-014\n')
+        (target/'K').unlink()
+        with patch.object(secret_store_carry,'_link_new',side_effect=OSError(errno.ENOTSUP,'no hard links here')), \
+                patch.object(secret_store_carry.shutil,'copyfileobj',side_effect=OSError(errno.ENOSPC,'full')):
+            with self.assertRaises(OSError):
+                secret_store_carry._write_one(src/'K',target/'K',sha)
+        self.assertEqual(list(target.iterdir()),[],'a partial copy and the temporary are removed')
+
+    def test_a_store_skipped_under_keep_is_said_with_its_step_and_doctor_shows_it_until_written(self):
+        import backup_vault
+        snapshot,_=self.snapshot_and_move_store_away()
+        shutil.rmtree(self.home)
+        new=self.base/'second'
+        with patch.dict(os.environ,{'OBSERVATORY_MACHINE_ID':BETA}):
+            result=self.restore(snapshot,new,secret_store='keep')
+        block=result['secret_store']
+        self.assertEqual((block['state'],block['reason']),('skipped','secret-store-target-unconfirmed'))
+        self.assertIn('--secret-store-only',block['next'])
+        self.assertIn('--secret-store-target',block['next'])
+        self.assertIn(str(snapshot),block['next'])
+        section,items=backup_vault.secret_store(new)
+        self.outputs.append(json.dumps([section,items]))
+        self.assertEqual(section['last_restore']['state'],'skipped')
+        [item]=[i for i in items if i['code']=='backups-secret-store-not-restored']
+        self.assertEqual(item['step'],block['next'])
+        # The step it names, run as given (the target confirmed), writes the store and clears the warning.
+        target=block['next'].split('--secret-store-target ')[1].strip("'")
+        with patch.dict(os.environ,{'OBSERVATORY_BACKUP_PASSPHRASE':PASSPHRASE}):
+            only=upgrade.restore_store_only(snapshot,new,secret_store_target=target)
+        self.outputs.append(json.dumps(only))
+        self.assertEqual(only['secret_store']['state'],'written')
+        self.assert_store_is_the_snapshot(self.store)
+        section,items=backup_vault.secret_store(new)
+        self.assertEqual(section['last_restore']['state'],'written')
+        self.assertFalse([i for i in items if i['code']=='backups-secret-store-not-restored'])
+
+    def test_secret_store_only_takes_the_target_as_a_confirmation_never_ignores_it(self):
+        import secret_store_carry
+        snapshot,_=self.snapshot_and_move_store_away()
+        new=self.base/'restored'
+        self.restore(snapshot,new,secret_store='skip')
+        with patch.dict(os.environ,{'OBSERVATORY_BACKUP_PASSPHRASE':PASSPHRASE}):
+            with self.assertRaises(secret_store_carry.CarryRefused) as caught:
+                upgrade.restore_store_only(snapshot,new,secret_store_target=str(self.base/'not-the-target'))
+            self.assertEqual(caught.exception.code,'secret-store-target-unconfirmed')
+            self.assertFalse(os.path.lexists(self.store))
+            only=upgrade.restore_store_only(snapshot,new,secret_store_target=str(self.store))
+        self.assertEqual(only['secret_store']['state'],'written')
+
+    def test_init_says_what_happened_to_the_store(self):
+        import maintenance
+        canned={'status':'restored','from':'/backups/daily-x.obsnap','files':3,'machine':{'mode':'second-machine'},
+                'secret_store':{'state':'skipped','reason':'secret-store-target-unconfirmed',
+                                'next':"project-observatory full restore '/backups/daily-x.obsnap' --secret-store-only"}}
+        empty=self.base/'empty-home'
+        with patch.object(maintenance,'system_setup_allowed',return_value=True), \
+                patch.object(maintenance,'restore_latest',return_value=canned), \
+                patch.object(maintenance,'ensure',return_value={'result':'patched'}), \
+                patch.object(workspace,'initialize',return_value={'status':'initialized'}):
+            result=workspace._init(empty)
+        self.assertEqual(result['secret_store'],canned['secret_store'])
 
 
 if __name__=='__main__':
