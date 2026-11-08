@@ -97,9 +97,10 @@ Since 0.4.1 `restore` also accepts an encrypted `.obsnap` file, and the default
 passphrase is configured; an explicit `--output DIR` keeps its plaintext meaning
 for a workspace without secrets. Since OBS-389 an explicit `--output DIR` over a
 workspace that holds secrets (a secret store inside the workspace, such as
-`secrets/`, with a file in it, or a private key of the node under `node/device`,
-`node/orgs/<org>/keys` or `node/shares/owner`; settings that cannot be read count
-too, since the stores they name are then unknown) is refused before anything is
+`secrets/`, with a file in it; the node folder, which holds the device, organization,
+share and relay keys; a provider key file in the state folder, `.openrouter-key` or
+`.openai-key`; settings that cannot be read count too, since the stores they name
+are then unknown) is refused before anything is
 written (exit 2),
 naming the encrypted route (no `--output`) and the new `--plaintext` flag; with
 `--plaintext` it writes the same plaintext directory as before and the answer adds

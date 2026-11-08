@@ -331,6 +331,13 @@ def _snapshot(base: Path, output: Path, *, carry_stores: bool = False,
         raise
 
 
+#: Provider keys the engine keeps as files in its state folder (review of OBS-389; tools/install_key.py,
+#: agent/providers.py). Not `.keyserver-token`: every workspace has one (runtime_identity), a restore must
+#: carry it unchanged, and it opens only this machine's loopback keyserver, behind the peer check, so a copy
+#: on this machine grants nothing its live file does not and a copy elsewhere opens nothing.
+STATE_SECRET_FILES = ('.openrouter-key', '.openai-key')
+
+
 def secret_stores_inside(base: Path) -> list[str]:
     """The secret stores inside the workspace that hold a file, as workspace-relative folders (OBS-389).
 
@@ -350,14 +357,17 @@ def secret_stores_inside(base: Path) -> list[str]:
     values = [sources.get('secret_store'), sources.get('secrets'),
               os.environ.get(backup_vault.SECRETS_ENV), os.environ.get(backup_vault.VAULT_DIR_ENV)]
     candidates = [home / 'secrets']
-    # The node's private keys sit outside every vault store (review of OBS-389): the device keys, each
-    # organization's keys and the owner's share key, under OBSERVATORY_NODE or <home>/node.
-    node = Path(os.environ.get('OBSERVATORY_NODE') or home / 'node').expanduser().resolve()
-    if node == home / 'node' or home in node.parents:
-        candidates += [node / 'device', node / 'shares' / 'owner']
-        orgs = node / 'orgs'
-        if orgs.is_dir() and not orgs.is_symlink():
-            candidates += sorted(org / 'keys' for org in orgs.iterdir() if org.is_dir() and not org.is_symlink())
+    # The node folder holds private keys outside every vault store (review of OBS-389): the device keys,
+    # each organization's keys, every share's keys (owner, sent, received) and the relay's sealing key.
+    # Counted whole, under OBSERVATORY_NODE when it is inside the home and at <home>/node in any case.
+    for node in {home / 'node', Path(os.environ.get('OBSERVATORY_NODE') or home / 'node').expanduser().resolve()}:
+        if node == home / 'node' or home in node.parents:
+            candidates.append(node)
+    # Provider keys and the keyserver's bearer token kept as files in the state folder (OBSERVATORY_STATE,
+    # <home>/store by default).
+    for state in {home / 'store', Path(os.environ.get('OBSERVATORY_STATE') or home / 'store').expanduser().resolve()}:
+        if state == home / 'store' or home in state.parents:
+            candidates += [state / name for name in STATE_SECRET_FILES]
     for value in values:
         if isinstance(value, str) and value:
             path = Path(value).expanduser().resolve()
@@ -365,7 +375,14 @@ def secret_stores_inside(base: Path) -> list[str]:
                 candidates.append(path)
     found: list[str] = list(unreadable)
     for store in candidates:
-        if not store.is_dir() or store.is_symlink():
+        if store.is_symlink():
+            continue
+        if store.is_file():
+            rel = store.relative_to(home).as_posix()
+            if rel not in found and store.stat().st_size and not excluded(PurePosixPath(rel)):
+                found.append(rel)
+            continue
+        if not store.is_dir():
             continue
         rel = store.relative_to(home).as_posix()
         if rel in found or any(rel.startswith(f + '/') for f in found) or excluded(PurePosixPath(rel)):

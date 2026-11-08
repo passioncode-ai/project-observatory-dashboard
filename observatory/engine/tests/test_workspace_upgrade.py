@@ -193,15 +193,25 @@ class WorkspaceUpgrade(unittest.TestCase):
         # Review of OBS-389: with the vault outside the home, the device, organization and owner keys
         # under node/ were still copied in plaintext with no refusal.
         (self.home/'secrets/demo-slot').unlink()
-        for rel in ('node/device/sig.pem','node/orgs/demo-org/keys/kem.pem','node/shares/owner/sig.pem'):
+        for rel in ('node/device/sig.pem','node/orgs/demo-org/keys/kem.pem','node/shares/owner/sig.pem',
+                    'node/shares/sent/share-1/kem.pem','node/shares/received/share-2/sig.pem',
+                    'node/relay/spool.key'):
             key=self.home/rel
             key.parent.mkdir(parents=True,exist_ok=True)
             key.write_text('synthetic key material')
-            self.assertEqual(upgrade.secret_stores_inside(self.home)[-1],str(PurePosixPath(rel).parent),rel)
+            self.assertIn('node',upgrade.secret_stores_inside(self.home),rel)
             key.unlink()
+        for name in upgrade.STATE_SECRET_FILES:
+            key=self.home/'store'/name
+            existed=key.exists()
+            if not existed:
+                key.write_text('synthetic key material')
+            self.assertIn(f'store/{name}',upgrade.secret_stores_inside(self.home),name)
+            if not existed:
+                key.unlink()
         (self.home/'node/shares/owner/sig.pem').write_text('synthetic key material')
         out=self.base/'plain copy'
-        with self.assertRaisesRegex(config.ConfigurationError,'node/shares/owner'):
+        with self.assertRaisesRegex(config.ConfigurationError,'node'):
             upgrade.snapshot(self.home,out,writers_stopped=True)
         self.assertFalse(out.exists())
 
