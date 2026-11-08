@@ -348,6 +348,37 @@ class ProviderAccounts(Base):
         self.assertEqual(declared["organization"], "person")
         self.assertEqual(self.orgs.reassign(a, [shop, declared], accounts), [], "a second pass changes nothing")
 
+    def test_the_emit_writes_account_organizations_and_assigns_through_them(self):
+        import subprocess
+        sys.path.insert(0, str(ROOT / "tests"))
+        from emitter_fixture import seed
+        root = Path(tempfile.mkdtemp(dir=self.tmp.name)).resolve()
+        env = seed(root)
+        self.write("products.json", {"products": {}, "roles": []})
+        self.write("organizations.json", {"organizations": {
+            "company": {"label": "Company", "match": {"digitalocean_teams": ["Company Team"]}},
+            "person": {"label": "Person", "default": True}}})
+        (root / "raw" / "digitalocean.json").write_text(json.dumps({"scanned_on": "2026-11-08", "degraded": [], "teams": [
+            {"label": "company-team", "team_uuid": TEAM, "team_name": "Company Team", "token_kind": "stash",
+             "apps": [{"id": "a1", "name": "service-api", "serving": True, "repositories": ["fixture/service"]}]},
+            {"label": "other-team", "team_uuid": SHARED_TEAM, "team_name": "Other Team", "token_kind": "stash",
+             "apps": []}]}), encoding="utf-8")
+        p = subprocess.run([sys.executable, "collectors/emit_registry.py", str(root / "raw")], cwd=ROOT, env=env,
+                           capture_output=True, text=True, timeout=300)
+        self.assertEqual(p.returncode, 0, (p.stdout + p.stderr)[-600:])
+        self.assertIn("1 project(s) assigned through their provider accounts", p.stdout)
+        projects = {x["id"]: x for x in json.loads((root / "registry" / "projects.json").read_text())["projects"]}
+        a = projects["project:fixture-a"]
+        self.assertEqual((a["organization"], a["organization_source"]), ("company", "rule"))
+        self.assertIn("DigitalOcean team Company Team (app service-api)", a["organization_why"])
+        self.assertEqual(projects["project:fixture-b"]["organization_source"], "external",
+                         "a project with no resource in a named account keeps the answer it had")
+        accounts = {x["team_uuid"]: x for x in
+                    json.loads((root / "registry" / "digitalocean-account.json").read_text())["accounts"]}
+        self.assertEqual(accounts[TEAM]["organization"], "company")
+        self.assertEqual((accounts[SHARED_TEAM]["organization"], accounts[SHARED_TEAM]["organization_source"]),
+                         (None, "none"))
+
     def test_rows_name_their_account_row(self):
         doc = do_doc(self.infra)
         ids = {a["id"] for a in doc["accounts"]}
