@@ -32,6 +32,7 @@ already does, and it lives inside the encrypted artifact.
 from __future__ import annotations
 
 import contextlib
+import errno
 import fnmatch
 import hashlib
 import json
@@ -41,6 +42,7 @@ import posixpath
 import re
 import shutil
 import stat
+import sys
 import time
 
 import backup_vault
@@ -899,20 +901,66 @@ def _user_home() -> Path | None:
         return None
 
 
+def _fold(path: Path) -> tuple[str, ...]:
+    """A path's parts as the file system compares them: case-folded where names are case-insensitive by
+    default (macOS, Windows), so `~/.SSH` is `~/.ssh` there."""
+    parts = Path(os.path.normcase(str(path))).parts
+    if sys.platform == "darwin" or osprivacy.WINDOWS:
+        parts = tuple(part.casefold() for part in parts)
+    return parts
+
+
+def _inside_folded(path: Path, folder: Path) -> bool:
+    a, b = _fold(path), _fold(folder)
+    return a[:len(b)] == b
+
+
+def _same_file(a: Path, b: Path) -> bool:
+    try:
+        return os.path.samefile(a, b)
+    except OSError:
+        return False
+
+
+def _nearest_existing(path: Path) -> Path | None:
+    current = path
+    while not os.path.lexists(current):
+        if current.parent == current:
+            return None
+        current = current.parent
+    return current
+
+
 def refused_location(target: Path) -> str | None:
     """Why a target is a place no store is written to (the home itself or a folder holding it, a sensitive
-    folder or a folder inside one, a start-up file of the home), or None."""
+    folder or a folder inside one, a start-up file of the home), or None.
+
+    Compared twice: by name, case-folded where the file system folds case by default, and by identity, the
+    nearest existing folder of the target and each of its parents against each sensitive folder that
+    exists (`os.path.samefile`), so another spelling or a link never reaches `~/.ssh`."""
     home = _user_home()
     if home is None:
         return None
     h, t = home.resolve(), target.resolve()
-    if backup_vault._within(h, t):
+    if _inside_folded(h, t):
         return "the home folder itself, or a folder holding it"
     for rel in SENSITIVE:
-        if backup_vault._within(t, h / rel):
+        if _inside_folded(t, h / rel):
             return f"~/{rel}, or a folder inside it"
-    if t.parent == h and t.name in STARTUP_FILES:
+    folded_startup = {_fold(Path(name))[-1] for name in STARTUP_FILES}
+    if _fold(t.parent) == _fold(h) and _fold(Path(t.name))[-1] in folded_startup:
         return f"~/{t.name}, a start-up file of the home"
+    existing = _nearest_existing(t)
+    if existing is not None:
+        chain = [existing, *existing.parents]
+        for rel in SENSITIVE:
+            folder = h / rel
+            if folder.is_dir() and any(_same_file(x, folder) for x in chain):
+                return f"~/{rel}, or a folder inside it"
+        if existing == t and any(_same_file(t, x) for x in (h, *h.parents)):
+            return "the home folder itself, or a folder holding it"
+        if t.parent.exists() and _same_file(t.parent, h) and _fold(Path(t.name))[-1] in folded_startup:
+            return f"~/{t.name}, a start-up file of the home"
     return None
 
 
@@ -1213,20 +1261,33 @@ def _link_new(temporary: str, dest: Path) -> None:
     os.link(temporary, dest)
 
 
+#: `os.link` errors that mean "this file system has no hard links" (exFAT, some SMB or FUSE mounts, Windows
+#: volumes without them): the file is then put in place by an exclusive create instead.
+NO_HARD_LINKS = {getattr(errno, name) for name in ("EPERM", "ENOTSUP", "EOPNOTSUPP", "EMLINK", "EXDEV", "ENOSYS",
+                                                   "EACCES") if hasattr(errno, name)}
+
+
 def _exclusive_copy(temporary: str, dest: Path) -> None:
-    """Where a hard link is not available (some Windows file systems): an O_EXCL create of `dest`."""
+    """Where a hard link is not available: an O_EXCL create of `dest` (an existing name fails), its bytes
+    copied from the finished temporary. A copy that fails removes the partial `dest` it created."""
     fd = osprivacy.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | osprivacy.NOFOLLOW | osprivacy.BINARY, 0o600)
-    with os.fdopen(fd, "wb") as out:
-        osprivacy.make_private(out.fileno())
-        with open(temporary, "rb") as inp:
-            shutil.copyfileobj(inp, out)
-        out.flush()
-        os.fsync(out.fileno())
+    try:
+        with os.fdopen(fd, "wb") as out:
+            osprivacy.make_private(out.fileno())
+            with open(temporary, "rb") as inp:
+                shutil.copyfileobj(inp, out)
+            out.flush()
+            os.fsync(out.fileno())
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(dest)
+        raise
 
 
-def _write_one(source: Path, dest: Path) -> str | None:
-    """One missing file, written in full beside itself and then put in place only if `dest` is still absent;
-    None when another writer created it meanwhile (a conflict, never overwritten)."""
+def _write_one(source: Path, dest: Path, expected: str) -> str | None:
+    """One missing file, written in full beside itself, its digest checked against `expected`, and only
+    then put in place, and only if `dest` is still absent. None when another writer created it meanwhile
+    (a conflict, never overwritten). A digest that differs raises before anything reaches `dest`."""
     import tempfile
     fd, temporary = tempfile.mkstemp(prefix=".restore-", suffix=".tmp", dir=dest.parent)
     try:
@@ -1240,18 +1301,20 @@ def _write_one(source: Path, dest: Path) -> str | None:
                     h.update(block)
             out.flush()
             os.fsync(out.fileno())
+        if h.hexdigest() != expected or _digest_file(Path(temporary))[1] != expected:
+            raise _Unreadable("a written file's digest differs")
         try:
             _link_new(temporary, dest)
         except FileExistsError:
             return None
-        except (OSError, AttributeError, NotImplementedError):
-            if not osprivacy.WINDOWS:
+        except (OSError, AttributeError, NotImplementedError) as exc:
+            if isinstance(exc, OSError) and exc.errno not in NO_HARD_LINKS and not osprivacy.WINDOWS:
                 raise
             try:
                 _exclusive_copy(temporary, dest)
             except FileExistsError:
                 return None
-        return h.hexdigest()
+        return expected
     finally:
         with contextlib.suppress(OSError):
             os.unlink(temporary)
@@ -1274,12 +1337,9 @@ def _merge(src: Path, entry: dict, target: Path, display: str) -> tuple[int, lis
             dest = target / row["path"]
             if not dest.parent.is_dir():
                 _make_parents(dest.parent)
-            got = _write_one(src / row["path"], dest)
-            if got is None:
+            if _write_one(src / row["path"], dest, row["sha256"]) is None:
                 raced.append(row["path"])
                 continue
-            if got != row["sha256"]:
-                raise _Unreadable("a written file's digest differs")
             _sync_dir(dest.parent)
             written += 1
         for row in entry.get("links") or []:
@@ -1300,15 +1360,20 @@ def _merge(src: Path, entry: dict, target: Path, display: str) -> tuple[int, lis
     except (OSError, _Unreadable) as exc:
         raise CarryFailed("secret-store-write-failed",
                           f"The secret store at {display} could not be merged ({type(exc).__name__}); "
-                          f"{written} missing files were added before it stopped, nothing was overwritten, and "
-                          "the home was not restored") from None
+                          f"{written} missing files were added before it stopped (each checked before it was "
+                          "put in place), nothing was overwritten, and the home was not restored") from None
     return written, not_restored, raced
 
 
 @contextlib.contextmanager
 def _target_lock(target: Path, display: str):
     """Hold the target vault's own mutation lock (`projects/.vault.lock`, as `tools/vault.py` takes it) while
-    the store is read and written, so a vault write running beside the restore is never lost."""
+    the store is read and written, so a vault write running beside the restore is never lost.
+
+    Under `replace`, or a write over an empty folder, the held descriptor's file moves with the old folder
+    into `<target>.before-restore-*`: a vault command waiting on it gets the lock when the restore ends and
+    then opens its files by path, in the store just written; a command starting after the rename takes
+    the new store's own lock."""
     if target.is_symlink() or not target.is_dir():
         yield
         return
@@ -1431,7 +1496,7 @@ def restore_summary(plan_: dict | None, results: list[dict], *, names: bool = Fa
         return {"state": "not-applicable"}
 
     def one(row: dict) -> dict:
-        out = {k: row[k] for k in ("name", "state", "reason", "target", "files", "same", "conflicts",
+        out = {k: row[k] for k in ("name", "state", "reason", "target", "setting", "files", "same", "conflicts",
                                    "only_here", "journal", "stages_removed")}
         out["not_restored"] = len(row["not_restored"])
         if row.get("aside"):

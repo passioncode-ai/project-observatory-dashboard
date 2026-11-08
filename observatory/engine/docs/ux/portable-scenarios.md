@@ -1141,7 +1141,9 @@ store that cannot be written is left as it was and the home is not restored (`se
 itself or a sensitive folder (`~/.ssh` and the like) is refused (`secret-store-target-refused`); a snapshot from
 another machine or home writes only where `--secret-store-target` or this machine's settings confirm it
 (`secret-store-target-unconfirmed`); `--json` gives each as `{"error": {"code", "message"}}`.
-`full init` on an empty home keeps a surviving store, and an update's rollback never touches it.
+`full init` on an empty home keeps a surviving store, and an update's rollback never touches it; a store init
+skipped (a folder not confirmed, refused, busy or unwritable) is in its answer with the exact `next` command, and
+doctor keeps `backups-secret-store-not-restored` with that command until a store is written.
 
 Acceptance: no value reaches a manifest, an answer, a record or a command's output; a store inside the workspace
 travels in `data/` exactly as before; an older engine restores the home and ignores `external/`.

@@ -380,7 +380,14 @@ folder, a folder named like a skipped file included, makes it not empty. A folde
 is moved aside, never deleted. A journal (`*.jsonl`) that only grew since the snapshot reads `same`: this departs
 from the spec's "journals that differ are conflicts", so that the restore's own `restore-store` line, or a vault
 write after the snapshot, does not make a rerun refuse. A file another writer creates while a merge writes it is a
-conflict and is never overwritten. A behaviour change for a snapshot taken by 0.34.0 or later that carried a
+conflict and is never overwritten; each merged file is checked against its digest before it is put in place (a
+hard link, or an exclusive create where the file system has no hard links). A protected place is recognised by
+name, case-folded on macOS and Windows (`~/.SSH` is `~/.ssh` there), and by identity: the target's nearest existing
+folder and its parents are compared with each protected folder that exists (`os.path.samefile`). A snapshot whose
+machine and home are this machine's, or one restored with `--same-machine` (a person's choice at a terminal) under
+the same home path, writes without confirmation. With `--secret-store-only`, `--secret-store-target` is the
+confirmation of the folder the current settings name: another folder is refused (`secret-store-target-unconfirmed`),
+never ignored. A behaviour change for a snapshot taken by 0.34.0 or later that carried a
 store: `auto` now writes it where none is, and refuses the whole restore when a different store is there, where
 0.34.0 to 0.35.4 restored the home and left the store in the snapshot; `--secret-store skip` restores as they did.
 `full init` on an empty home passes `keep` and an update's rollback passes `skip`, so neither can fail or write
@@ -401,7 +408,15 @@ merged or replaced. A second-machine restore moves `<state>/vault-digests/local.
 `<parent>/.<folder>.restore-<hex12>` (renamed into place, or removed; one a killed restore left is removed by the
 next restore after an hour) and, after `replace` or a write over an empty folder,
 `<folder>.before-restore-<UTC stamp>-<hex6>`, which the engine never deletes. The answer's `secret_store` may carry
-`notes` (for instance a folder fsync that failed after the store was put in place). The store's `projects/movements.jsonl` gains one `restore-store` row per write (`secret` `store/*`,
+`notes` (for instance a folder fsync that failed after the store was put in place) and, for a store `skipped` with
+a reason, `next`: the exact command that writes it (`full restore SNAPSHOT --secret-store-only`, with
+`--secret-store-target` for a folder not confirmed, after `configure sources` for a folder refused or unnamed).
+`full init` passes the restore's `secret_store` through in its answer. New workspace state:
+`store/raw/secret-store-restore.json`, owner-only, written by every restore and `--secret-store-only` of a snapshot
+that carried a store (`at`, `snapshot` file name, `state`, `reason`, `target` in display form, `files`, `next`;
+never a value); doctor's `backups.secret_store` gains `last_restore` from it and, while its state is `skipped`, the
+warning `backups-secret-store-not-restored` with that `next` as its step (also on Health), which a later write
+clears. An older engine ignores the file. The store's `projects/movements.jsonl` gains one `restore-store` row per write (`secret` `store/*`,
 `tool` `workspace_upgrade.py`, `snapshot`, `taken_on`, `files`, `state`; never a value), which an older `vault.py`
 reads as any other movement. An older engine reading a snapshot this release writes still restores the home only.
 

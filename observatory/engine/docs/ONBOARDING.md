@@ -2376,7 +2376,12 @@ while it writes. It never writes into the home itself, `~/.ssh`, `~/.gnupg`, `~/
 `~/Library/LaunchAgents` or `~/Library/Keychains` (`secret-store-target-refused`), and `merge` refuses a folder
 holding files but no `projects/`. A snapshot taken on another machine or under another home writes its store only
 where this machine's own workspace settings name the same folder, or where you confirm it with
-`--secret-store-target PATH` (the refusal `secret-store-target-unconfirmed` shows the exact command). A whole store is written
+`--secret-store-target PATH` (the refusal `secret-store-target-unconfirmed` shows the exact command).
+`--same-machine` (at a terminal) under the same home path counts as this machine's and needs no confirmation.
+Another spelling of a protected folder (`~/.SSH` on macOS) or a link to one is refused the same way. Under `keep`,
+which `full init` passes, none of these stops the restore: the store is answered `skipped` with its reason and a
+`next` command, `full init` shows it, and `full doctor` keeps the warning `backups-secret-store-not-restored` with
+that command until a store is written. A whole store is written
 into a sibling folder `.<name>.restore-<hex>` (folders 0700, files 0600, every SHA-256 checked again) and
 renamed into place in one step; a merge writes each missing file atomically and never over an existing one;
 missing parent folders are created 0700. A store that could not be written is left as it was and the home is
@@ -2422,13 +2427,14 @@ cannot be read may be a mark. `full vault-digests` shows it as `only here
 on purpose` here and `only on <machine> on purpose` on the other machine, neither of which counts as a
 difference.
 
-`backups.secret_store` in `full doctor` and `full backups status` names it (`path`, `settings_keys`, `exists`) and
-the newest record of a snapshot carrying it (`last_carry`, read from `store/raw/secret-store-carry.json`), and three
-warnings follow from it:
+`backups.secret_store` in `full doctor` and `full backups status` names it (`path`, `settings_keys`, `exists`),
+the newest record of a snapshot carrying it (`last_carry`, read from `store/raw/secret-store-carry.json`) and of the
+last restore of one (`last_restore`, from `store/raw/secret-store-restore.json`), and four warnings follow from it:
 
 | Code | When | Step |
 |---|---|---|
 | `backups-vault-store-not-carried` | the store exists and no snapshot carried it, the last one did not (its reason), or the last carry is more than 48 hours old | `full workspace-backup --writers-stopped`, or `full backup-passphrase set` when the reason is `no-passphrase`; a release whose snapshots do not carry the store names a copy by hand instead |
+| `backups-secret-store-not-restored` | the last restore skipped the store the backup carried (its reason: a folder not confirmed, refused, busy or unwritable) | the restore's `next`, for example `full restore SNAPSHOT --secret-store-only --secret-store-target PATH` |
 | `backups-secret-store-missing` | the folder the settings name does not exist on this machine | `full configure sources secret_store PATH` (or `secrets`, the setting that names it) |
 | `backups-secret-store-env-override` | the environment moves the vault away from the folder the settings choose: `OBSERVATORY_VAULT_DIR` names another slot folder than `<store>/projects`, or `OBSERVATORY_SECRETS` names another folder while `sources.secret_store` is unset (with it set, `OBSERVATORY_SECRETS` moves nothing) | `full configure sources secret_store PATH`: the daily job may not share the shell's environment, and only the folder the settings name is carried |
 

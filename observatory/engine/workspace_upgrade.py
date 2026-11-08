@@ -13,6 +13,7 @@ import os
 import posixpath
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 import re
+import shlex
 import shutil
 import sqlite3
 import stat
@@ -901,7 +902,8 @@ def digest_manifest_to_peers(stage: Path) -> dict | None:
 def restore(source: Path, destination: Path, *, secret: str | None = None, same_machine: bool | None = None,
             second_machine: bool | None = None, unknown: str = 'second', stdin_value: str | None = None,
             prompt: bool = True, secret_store: str = 'auto', secret_store_names: bool = False,
-            snapshot_name: str | None = None, secret_store_target: str | None = None) -> dict:
+            snapshot_name: str | None = None, secret_store_target: str | None = None,
+            snapshot_path: str | None = None) -> dict:
     """A snapshot directory, or an encrypted `.obsnap` file from the backups root.
 
     The encrypted file is authenticated in full and decrypted beside the new home. Its
@@ -944,7 +946,8 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
         try:
             result = restore(stage, destination, same_machine=same_machine, second_machine=second_machine,
                              unknown=unknown, secret_store=secret_store, secret_store_names=secret_store_names,
-                             snapshot_name=snapshot_name or source.name, secret_store_target=secret_store_target)
+                             snapshot_name=snapshot_name or source.name, secret_store_target=secret_store_target,
+                             snapshot_path=snapshot_path or str(source.resolve()))
         finally:
             shutil.rmtree(stage, ignore_errors=True)
         result['passphrase_source'] = opened_by
@@ -1002,18 +1005,62 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
               'external_sources_included':bool(stores) and all(r['state'] in ('written','same','merged','replaced')
                                                               for r in stores),
               'machine':{**placing, **(machine or {})}, 'paths':paths,
-              'secret_store':secret_store_carry.restore_summary(store_plan, stores, names=secret_store_names)}
+              'secret_store':_said(secret_store_carry.restore_summary(store_plan, stores, names=secret_store_names),
+                                   snapshot_path or str(source))}
+    _record_restore(destination, result['secret_store'], snapshot_name or source.name)
     if digests is not None:
         result['digest_manifest'] = digests
     return result
 
 
+def store_next_step(summary: dict, snapshot: str) -> str | None:
+    """The exact command that writes a store a restore skipped (`skipped` with a reason), or None.
+
+    `--secret-store-only` writes into the folders the restored workspace's settings name; a store skipped
+    because its folder was not confirmed is confirmed with `--secret-store-target`, and a folder the
+    settings must name first is named with `configure sources`."""
+    reason = summary.get('reason')
+    if summary.get('state') != 'skipped' or not reason:
+        return None
+    only = f'project-observatory full restore {shlex.quote(snapshot)} --secret-store-only'
+    if reason == 'secret-store-target-unconfirmed' and summary.get('target'):
+        return f"{only} --secret-store-target {shlex.quote(summary['target'])}"
+    if reason in ('secret-store-unresolved', 'secret-store-target-inside-home', 'secret-store-target-refused'):
+        setting = summary.get('setting') or 'secret_store'
+        return f'project-observatory full configure sources {setting} PATH, then {only}'
+    return only
+
+
+def _said(summary: dict, snapshot: str) -> dict:
+    step = store_next_step(summary, snapshot)
+    return {**summary, 'next': step} if step else summary
+
+
+def _record_restore(base: Path, summary: dict, snapshot: str) -> None:
+    """`store/raw/secret-store-restore.json`: what the newest restore did with a carried store (codes, the
+    folder in display form, the step; never a value), which doctor's `backups.secret_store.last_restore`
+    reads, so a store skipped under `keep` (what `full init` passes) is said until one is written. Only a
+    restore of a snapshot that carried a store writes it; one that cannot be written is said on stderr."""
+    if summary.get('state') in (None, 'not-in-snapshot', 'not-applicable'):
+        return
+    record = {'at':datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
+              'snapshot':snapshot, 'state':summary.get('state'), 'reason':summary.get('reason'),
+              'target':summary.get('target'), 'files':summary.get('files', 0), 'next':summary.get('next')}
+    try:
+        workspace.write_json(base.joinpath(*backup_vault.RESTORE_RECORD), record)
+    except (OSError, config.ConfigurationError) as exc:
+        print(f'Observatory: the secret store restore record was not written: {type(exc).__name__}', file=sys.stderr)
+
+
 def restore_store_only(source: Path, base: Path, *, secret_store: str = 'auto', secret_store_names: bool = False,
                        secret: str | None = None, stdin_value: str | None = None, prompt: bool = True,
-                       snapshot_name: str | None = None) -> dict:
+                       snapshot_name: str | None = None, secret_store_target: str | None = None,
+                       snapshot_path: str | None = None) -> dict:
     """Write only the secret stores a snapshot carried, into the folders the CURRENT workspace's settings
     name (`full restore SNAPSHOT --secret-store-only`, OBS-350). For a workspace an older engine restored,
-    or a restore interrupted between the store and the home. The home is never written."""
+    a restore interrupted between the store and the home, or a store a restore skipped. The home is never
+    written, except its restore record. `secret_store_target`, when given, must name that folder (the
+    confirmation a skipped restore's step carries); another folder is refused, never ignored."""
     if secret_store not in secret_store_carry.POLICIES:
         raise config.ConfigurationError(f"--secret-store takes one of {', '.join(secret_store_carry.POLICIES)}")
     workspace.reject_symlinks(base)
@@ -1027,7 +1074,9 @@ def restore_store_only(source: Path, base: Path, *, secret_store: str = 'auto', 
         stage = backup_vault.extract_tree(source.resolve(), base.resolve().parent, secret)
         try:
             result = restore_store_only(stage, base, secret_store=secret_store, secret_store_names=secret_store_names,
-                                        snapshot_name=snapshot_name or source.name)
+                                        snapshot_name=snapshot_name or source.name,
+                                        secret_store_target=secret_store_target,
+                                        snapshot_path=snapshot_path or str(source.resolve()))
         finally:
             shutil.rmtree(stage, ignore_errors=True)
         result['passphrase_source'] = opened_by
@@ -1037,11 +1086,15 @@ def restore_store_only(source: Path, base: Path, *, secret_store: str = 'auto', 
     manifest = verify_snapshot(source)
     sources = config.load(base).get('sources') or {}
     with operation_lock(base):
-        store_plan = secret_store_carry.restore_plan(source, manifest, sources, base, secret_store)
+        # A target given is a confirmation like a foreign snapshot's: it must be the folder the settings name.
+        store_plan = secret_store_carry.restore_plan(source, manifest, sources, base, secret_store,
+                                                     foreign=bool(secret_store_target), confirm=secret_store_target)
         stores = secret_store_carry.apply_plan(source, store_plan, secret_store, snapshot=snapshot_name or source.name,
                                                taken_on=manifest.get('machine_id'))
-    return {'status':'store-restored',
-            'secret_store':secret_store_carry.restore_summary(store_plan, stores, names=secret_store_names)}
+    summary = _said(secret_store_carry.restore_summary(store_plan, stores, names=secret_store_names),
+                    snapshot_path or str(source))
+    _record_restore(base, summary, snapshot_name or source.name)
+    return {'status':'store-restored', 'secret_store':summary}
 
 
 def add_missing(current: dict, defaults: dict) -> dict:
@@ -1273,7 +1326,8 @@ def main(argv: list[str]) -> int:
                 raise config.ConfigurationError('--secret-store-only writes the stores alone; it takes no '
                                                 '--same-machine or --second-machine')
             result = restore_store_only(args.snapshot, base, secret_store=args.secret_store,
-                                        secret_store_names=args.secret_store_names, stdin_value=stdin_value)
+                                        secret_store_names=args.secret_store_names, stdin_value=stdin_value,
+                                        secret_store_target=args.secret_store_target)
         elif getattr(args, 'same_machine', False) and getattr(args, 'second_machine', False):
             raise config.ConfigurationError('Give --same-machine or --second-machine, not both')
         # A terminal the person types in (a real console on Windows, where NUL also reads as a tty).
