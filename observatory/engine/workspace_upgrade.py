@@ -1057,19 +1057,23 @@ def _recorded(row: dict) -> dict:
             'files':row.get('files', 0), 'next':row.get('next')}
 
 
-def _record_restore(base: Path, summary: dict, snapshot: str) -> None:
+def _record_restore(base: Path, summary: dict, snapshot: str, *, full: bool = True) -> None:
     """`store/raw/secret-store-restore.json`: what the newest restore did with each carried store (codes, the
     folder in display form, the step; never a value), which doctor's `backups.secret_store.last_restore`
     reads, so a store skipped under `keep` (what `full init` passes) is said until one is in place. Every
     restore rewrites it, and one whose snapshot carried no store removes it; the file never travels in a
-    snapshot (`EXCLUDED_FILES`). One that cannot be written is said on stderr."""
+    snapshot (`EXCLUDED_FILES`). Every row decides, not the first. `--secret-store-only` (`full` false) with a
+    snapshot that carried no store leaves the record as it is: the store it names is still missing. One that
+    cannot be written is said on stderr."""
     file = base.joinpath(*backup_vault.RESTORE_RECORD)
+    nothing = (None, 'not-in-snapshot', 'not-applicable')
     try:
-        if summary.get('state') in (None, 'not-in-snapshot', 'not-applicable'):
-            if os.path.lexists(file):
+        rows = summary['stores'] if isinstance(summary.get('stores'), list) else [summary]
+        rows = [row for row in rows if row.get('state') not in nothing]
+        if not rows:
+            if full and os.path.lexists(file):
                 file.unlink()
             return
-        rows = summary['stores'] if isinstance(summary.get('stores'), list) else [summary]
         first = _recorded(rows[0])
         record = {'at':datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
                   'snapshot':snapshot, **{k: v for k, v in first.items() if k != 'name'},
@@ -1120,7 +1124,7 @@ def restore_store_only(source: Path, base: Path, *, secret_store: str = 'auto', 
                                                taken_on=manifest.get('machine_id'))
     summary = _said(secret_store_carry.restore_summary(store_plan, stores, names=secret_store_names),
                     snapshot_path or str(source))
-    _record_restore(base, summary, snapshot_name or source.name)
+    _record_restore(base, summary, snapshot_name or source.name, full=False)
     return {'status':'store-restored', 'secret_store':summary}
 
 

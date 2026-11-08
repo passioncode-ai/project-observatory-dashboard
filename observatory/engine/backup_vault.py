@@ -1389,8 +1389,10 @@ def _last_restore(base: Path) -> dict | None:
 
 
 def _holds_a_store(display: str | None) -> bool:
-    """Whether the folder a record names is there and holds anything beyond lock files and temporaries: a
-    store put there by a later restore, by `vault.py` or by hand. Its top level is listed; nothing is read."""
+    """Whether the folder a record names holds a vault store: a top-level `projects/` folder (the layout
+    `tools/vault.py` writes and the restore's own checks use) with something in it beyond lock files and
+    temporaries, put there by a later restore, by `vault.py` or by hand. A folder of unrelated files (a
+    refused target such as `~/.ssh`) is no store. Listed only; nothing is read."""
     if not isinstance(display, str) or not display:
         return False
     try:
@@ -1400,7 +1402,10 @@ def _holds_a_store(display: str | None) -> bool:
         def ignorable(name: str) -> bool:
             return (fnmatch.fnmatch(name, "*.lock") or fnmatch.fnmatch(name, "*.tmp")
                     or name.startswith((".vault-write-", ".passphrase-")))
-        return any(not ignorable(child.name) for child in folder.iterdir())
+        projects = folder / "projects"
+        if projects.is_symlink() or not projects.is_dir():
+            return False
+        return any(not ignorable(child.name) for child in projects.iterdir())
     except (OSError, RuntimeError):
         return False
 
