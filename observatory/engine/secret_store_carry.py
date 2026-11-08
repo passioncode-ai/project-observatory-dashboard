@@ -943,8 +943,9 @@ def refused_location(target: Path) -> str | None:
         return None
     try:
         return _refused_location(home, target)
-    except OSError as exc:
-        # Python 3.11 raises from `exists()` and `is_dir()` under a folder this account may not read: a place
+    except (OSError, RuntimeError) as exc:
+        # Python 3.11 raises from `exists()` and `is_dir()` under a folder this account may not read, and
+        # `resolve()` raises RuntimeError on a link loop there: a place
         # that cannot be checked is refused, never written, and under keep it is a skipped row.
         return f"a place that could not be checked ({type(exc).__name__})"
 
