@@ -177,14 +177,21 @@ def installed_manifest(instance: str | None = None) -> dict:
     recomputed; the copy holds machine paths and is never published."""
     doc = copy.deepcopy(json.loads(MANIFEST.read_text()))
     home = str(configuration.home().absolute())
+    try:
+        from tools import install_launchd
+    except ImportError:
+        sys.path.insert(0, str(ROOT / "tools"))
+        import install_launchd
+    # absolute(), NOT resolve(): a virtual environment's `python` is a symbolic link to the base
+    # interpreter, and resolving it names an interpreter without this environment's packages: a
+    # manifest whose server dies on its first import. The venv's stable interpreter, as the jobs
+    # name it, and the launcher's program name rather than `lib/python3.X/...` (OBS-393): a venv
+    # rebuilt on another Python release keeps the manifest runnable.
+    python = install_launchd.stable_interpreter(str(Path(configuration.engine_python()).absolute()))
+    argv = install_launchd.job_argv("mcp", "--stdio", "--home", home, python=python)
     for cap in doc["capabilities"]:
         cap["profile"]["connection"] = {
-            # absolute(), NOT resolve(): a virtual environment's `python` is a
-            # symbolic link to the base interpreter, and resolving it names an
-            # interpreter without this environment's packages — a manifest
-            # whose server dies on its first import.
-            "mode": "stdio", "executableRef": Path(sys.executable).absolute().as_uri(),
-            "args": [str(ROOT / "mcp/server.py"), "--stdio", "--home", home]}
+            "mode": "stdio", "executableRef": Path(argv[0]).absolute().as_uri(), "args": argv[1:]}
     if instance is not None:
         doc["provider"].setdefault("extensions", {})[SERVICE_KEY] = {
             "descriptor": f"project-observatory.{instance}"}

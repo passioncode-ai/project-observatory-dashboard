@@ -383,5 +383,119 @@ class OpenDashboardTests(unittest.TestCase):
         self.assertIn("already serves another workspace", p.stderr)
 
 
+class VersionFreeHookEnv(unittest.TestCase):
+    """OBS-393: the settings name no folder of one Python release, and the hooks find the engine
+    through the venv's interpreter when a rebuild on another release removed the old folder."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.base = Path(self.tmp.name).resolve()
+        sys.path.insert(0, str(ROOT / "tools"))
+        sys.path.insert(0, str(ROOT))
+        import agent_plugin
+        import configuration
+        self.plugin, self.configuration = agent_plugin, configuration
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_settings_keep_the_root_and_a_gone_one_is_refreshed(self):
+        # Hooks of every plugin version read OBSERVATORY_ROOT, so it stays written (review of OBS-393,
+        # finding 1); one that names a folder gone since is rewritten by `maintain ensure`.
+        from unittest.mock import patch
+        engine = self.base / "venv/lib/python3.15/site-packages/observatory/engine"
+        stale = {"OBSERVATORY_ROOT": str(self.base / "venv/lib/python3.14/site-packages/observatory/engine"),
+                 "OBSERVATORY_PYTHON": str(self.base / "venv/bin/python3.14"),
+                 "OBSERVATORY_HOME": str(self.base / "workspace"), "KEEP": "1"}
+        claude = self.base / "claude"
+        claude.mkdir()
+        with patch.object(self.configuration, "SOURCE", engine), \
+                patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.base / "workspace"),
+                                        "CLAUDE_CONFIG_DIR": str(claude)}):
+            wanted = self.plugin.workspace_env()
+            self.assertEqual(wanted["OBSERVATORY_ROOT"], str(self.plugin.ROOT))
+            self.assertEqual(wanted["OBSERVATORY_PYTHON"],
+                             self.plugin._install_launchd().stable_interpreter(self.configuration.engine_python()),
+                             "the interpreter the background jobs name, never the installer's python3.14")
+            (claude / "settings.json").write_text(json.dumps({"env": stale}))
+            out = self.plugin.refresh_hook_env()
+            self.assertEqual(out["result"], "refreshed", out)
+            env = json.loads((claude / "settings.json").read_text())["env"]
+            self.assertEqual((env["OBSERVATORY_ROOT"], env["KEEP"]), (str(self.plugin.ROOT), "1"))
+            self.assertEqual(self.plugin.refresh_hook_env()["result"], "ok", "nothing gone, nothing written")
+            (claude / "settings.json").write_text(json.dumps({"env": {**stale, "OBSERVATORY_HOME": "/elsewhere"}}))
+            self.assertEqual(self.plugin.refresh_hook_env()["result"], "not-ours", "another workspace's hooks")
+
+    @unittest.skipIf(os.name == "nt", "a stand-in `claude` that answers no is /usr/bin/false")
+    def test_uninstall_removes_a_root_an_earlier_install_wrote(self):
+        from unittest.mock import patch
+        claude = self.base / "claude"
+        claude.mkdir()
+        gone = str(self.base / "venv/lib/python3.14/site-packages/observatory/engine")
+        (claude / "settings.json").write_text(json.dumps({"env": {"OBSERVATORY_ROOT": gone, "KEEP": "1"}}))
+        with patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.base / "workspace"), "CLAUDE_CONFIG_DIR": str(claude),
+                                     "CLAUDE_BIN": "/usr/bin/false"}):
+            self.plugin.uninstall()
+        self.assertEqual(json.loads((claude / "settings.json").read_text())["env"], {"KEEP": "1"})
+
+    @unittest.skipIf(os.name == "nt", "the hooks are bash")
+    def test_the_session_hook_finds_the_engine_through_the_interpreter(self):
+        venv = self.base / "venv"
+        engine = venv / "lib/python3.15/site-packages/observatory/engine"
+        (engine / "tools").mkdir(parents=True)
+        (venv / "bin").mkdir()
+        # A later-sorting leftover must not win: the release pyvenv.cfg names is the one (finding 9).
+        decoy = venv / "lib/python3.9/site-packages/observatory/engine"
+        (decoy / "tools").mkdir(parents=True)
+        (decoy / "observatory.py").write_text("")
+        (decoy / "tools/session_start.py").write_text("raise SystemExit(3)\n")
+        (venv / "pyvenv.cfg").write_text("home = /usr/bin\nversion_info = 3.15.0.final.0\n")
+        os.symlink(sys.executable, venv / "bin/python3")
+        marker = self.base / "ran"
+        (engine / "observatory.py").write_text("")
+        (engine / "tools/session_start.py").write_text(
+            f"import pathlib, sys\npathlib.Path({str(marker)!r}).write_text(__file__)\n")
+        (engine / "tools/maintain.py").write_text("")
+        env = {"PATH": "/usr/bin:/bin", "HOME": str(self.base), "XDG_STATE_HOME": str(self.base / "state"),
+               "OBSERVATORY_ROOT": str(venv / "lib/python3.14/site-packages/observatory/engine"),
+               "OBSERVATORY_PYTHON": str(venv / "bin/python3")}
+        hook = ROOT / "skill/plugins/observatory-log/hooks/session-start.sh"
+        p = subprocess.run(["/bin/bash", str(hook)], env=env, input="", capture_output=True, text=True, timeout=60)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertEqual(marker.read_text(), str(engine / "tools/session_start.py"),
+                         "the 3.15 engine ran, though the settings still named the 3.14 folder")
+        marker.unlink()
+        relative = {**env, "OBSERVATORY_PYTHON": "venv/bin/python3"}
+        p = subprocess.run(["/bin/bash", str(hook)], env=relative, cwd=self.base, input="", capture_output=True,
+                           text=True, timeout=60)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertFalse(marker.exists(), "a relative interpreter is never followed")
+
+    @unittest.skipIf(os.name == "nt", "the hooks are bash")
+    def test_the_session_hook_falls_back_when_the_named_release_folder_is_absent(self):
+        # pyvenv.cfg names 3.15 but the folder is lib/python3.15t (free-threaded), or names a
+        # release with no folder at all: the hook looks for the one there is (round 2, finding 3).
+        hook = ROOT / "skill/plugins/observatory-log/hooks/session-start.sh"
+        for folder, version in (("python3.15t", "3.15.0"), ("python3.15", "3.16.1")):
+            venv = self.base / f"venv-{folder}-{version}"
+            engine = venv / "lib" / folder / "site-packages/observatory/engine"
+            (engine / "tools").mkdir(parents=True)
+            (venv / "bin").mkdir()
+            (venv / "pyvenv.cfg").write_text(f"home = /usr/bin\nversion_info = {version}.final.0\n")
+            os.symlink(sys.executable, venv / "bin/python3")
+            marker = venv / "ran"
+            (engine / "observatory.py").write_text("")
+            (engine / "tools/session_start.py").write_text(
+                f"import pathlib\npathlib.Path({str(marker)!r}).write_text(__file__)\n")
+            (engine / "tools/maintain.py").write_text("")
+            env = {"PATH": "/usr/bin:/bin", "HOME": str(self.base), "XDG_STATE_HOME": str(self.base / "state"),
+                   "OBSERVATORY_PYTHON": str(venv / "bin/python3")}
+            p = subprocess.run(["/bin/bash", str(hook)], env=env, input="", capture_output=True, text=True,
+                               timeout=60)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(marker.read_text() if marker.exists() else None,
+                             str(engine / "tools/session_start.py"), folder)
+
+
 if __name__ == "__main__":
     unittest.main()

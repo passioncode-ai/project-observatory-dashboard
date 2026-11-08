@@ -1069,7 +1069,9 @@ GitHub marketplace `passioncode-ai/project-observatory-dashboard`, installs
 installed and shipped versions and anything the hooks would miss; `full agent
 uninstall` reverses it. The hook environment it writes is `OBSERVATORY_ROOT`
 (the engine), `OBSERVATORY_HOME` (the workspace) and `OBSERVATORY_PYTHON` (the
-interpreter that runs the hooks). `install` says "installed" only after Claude Code's
+interpreter that runs the hooks: the engine's venv `bin/python3`). When a venv rebuilt on
+another Python leaves `OBSERVATORY_ROOT` naming a folder that is gone, the hooks find the
+engine under the interpreter's venv and `full maintain ensure` rewrites the value (OBS-393). `install` says "installed" only after Claude Code's
 own `installed_plugins.json` lists the plugin, and reports the version it lists
 (`installed_version`) beside the one this engine ships; a `claude` that exits 0 without
 installing is refused and nothing is written to settings. `uninstall` removes the keys
@@ -3291,6 +3293,16 @@ How the job gets scheduled:
 - The `observatory-log` plugin's session hook schedules it where it is missing. On Linux
   without a systemd user manager, the hook runs the pass itself, and the check too while
   updates are off.
+
+Every job definition (the pass, the check, the tick, the server) names the engine's virtual
+environment interpreter and a program name, `<venv>/bin/python3 -P -m observatory.job maintain run`,
+never a folder of one Python release such as `lib/python3.14/site-packages`, so a venv rebuilt on
+another Python keeps its jobs running (OBS-393). A definition that differs from the one the
+installer would write now is rewritten by `project-observatory full maintain ensure` (all four jobs
+under launchd and systemd; on Windows the pass and the check) and by the next pass (the tick and the
+server), keeping what the installer does not write; `full doctor` names one whose program, argument
+or folder is gone (`job-path-missing`). An account with no GUI session answers `waiting-for-root`
+with the administrator's two steps, `remove` then `apply`.
 
 `OBSERVATORY_SYSTEM_SETUP=0` in the environment keeps every one of these away from launchd,
 systemd, Task Scheduler and the credential store: `full init` answers `not-scheduled-here`,
