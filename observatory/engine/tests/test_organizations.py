@@ -352,7 +352,8 @@ class ProviderAccounts(Base):
         import subprocess
         sys.path.insert(0, str(ROOT / "tests"))
         from emitter_fixture import seed
-        root = Path(tempfile.mkdtemp(dir=self.tmp.name)).resolve()
+        root = Path(self.tmp.name).resolve() / "estate"
+        root.mkdir()
         env = seed(root)
         self.write("products.json", {"products": {}, "roles": []})
         self.write("organizations.json", {"organizations": {
@@ -378,6 +379,61 @@ class ProviderAccounts(Base):
         self.assertEqual(accounts[TEAM]["organization"], "company")
         self.assertEqual((accounts[SHARED_TEAM]["organization"], accounts[SHARED_TEAM]["organization_source"]),
                          (None, "none"))
+
+    def test_a_second_emit_with_nothing_new_carries_the_projects_date(self):
+        """Review of #479, finding 1: projects.json was written twice per emit, first without the
+        account-derived organizations, so its `updated_on` moved every day with the same content."""
+        import subprocess
+        sys.path.insert(0, str(ROOT / "tests"))
+        from emitter_fixture import seed
+        root = Path(self.tmp.name).resolve() / "estate"
+        root.mkdir()
+        env = seed(root)
+        self.write("products.json", {"products": {}, "roles": []})
+        self.write("organizations.json", {"organizations": {
+            "company": {"label": "Company", "match": {"digitalocean_teams": [TEAM]}},
+            "person": {"label": "Person", "default": True}}})
+        (root / "raw" / "digitalocean.json").write_text(json.dumps({"scanned_on": "2026-11-08", "degraded": [], "teams": [
+            {"label": "company-team", "team_uuid": TEAM, "team_name": "Company Team", "token_kind": "stash",
+             "apps": [{"id": "a1", "name": "service-api", "serving": True, "repositories": ["fixture/service"]}]}]}),
+            encoding="utf-8")
+        reg = root / "registry" / "projects.json"
+
+        def emit():
+            p = subprocess.run([sys.executable, "collectors/emit_registry.py", str(root / "raw")], cwd=ROOT, env=env,
+                               capture_output=True, text=True, timeout=300)
+            self.assertEqual(p.returncode, 0, (p.stdout + p.stderr)[-600:])
+            return json.loads(reg.read_text(encoding="utf-8"))
+
+        first = emit()
+        self.assertEqual({x["id"]: x["organization"] for x in first["projects"]}["project:fixture-a"], "company")
+        first["updated_on"] = "2026-01-01"                    # as an earlier day's emit wrote it
+        reg.write_text(json.dumps(first), encoding="utf-8")
+        second = emit()
+        self.assertEqual(second["updated_on"], "2026-01-01", "nothing changed, so the date is carried")
+        self.assertEqual(second["projects"], first["projects"])
+
+    def test_a_string_where_a_list_belongs_matches_nothing_and_is_named(self):
+        orgs = json.loads(json.dumps(self.config))
+        orgs["organizations"]["company"]["match"] = {"heroku_teams": "c", "repository_owners": "company-org"}
+        a = self.orgs.Assigner(doc=orgs, estate_owners={"company-org"}, products={})
+        self.assertEqual(a.account("heroku", ["c"])["organization"], None, "a string is not read letter by letter")
+        self.assertEqual(a.assign({"id": "project:x", "owners": ["company-org"]})["source"], "default")
+        self.assertEqual(sorted(a.problems), ["company: match.heroku_teams is not a known list rule; ignored",
+                                              "company: match.repository_owners is not a known list rule; ignored"])
+
+    def test_a_team_name_two_teams_bear_decides_nothing_and_is_warned_about(self):
+        orgs = json.loads(json.dumps(self.config))
+        orgs["organizations"]["company"]["match"] = {"digitalocean_teams": ["Twin"]}
+        orgs["organizations"]["person"]["match"] = {"digitalocean_teams": [SHARED_TEAM]}
+        a = self.orgs.Assigner(doc=orgs)
+        accounts = [{"id": "digitalocean:team:" + TEAM, "team_uuid": TEAM, "name": "Twin"},
+                    {"id": "digitalocean:team:" + SHARED_TEAM, "team_uuid": SHARED_TEAM, "name": "twin"}]
+        warnings = self.orgs.annotate_accounts(a, "digitalocean", accounts)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("'Twin', the name of 2 teams here", warnings[0])
+        self.assertEqual([x["organization"] for x in accounts], [None, "person"], "the uuid still decides")
+        self.assertEqual(self.orgs.account_keys("digitalocean", accounts)["digitalocean:team:" + TEAM], [TEAM])
 
     def test_rows_name_their_account_row(self):
         doc = do_doc(self.infra)

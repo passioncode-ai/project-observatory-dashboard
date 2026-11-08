@@ -580,10 +580,12 @@ never connected names the switch and the door's commands; a scan that read nothi
 Two signals keep a team from going unread in silence (OBS-421): `full doctor` reports how many team
 tokens are stashed (`digitalocean.teams_stashed`, counted from the records, never a value) and, while
 `integrations.digitalocean` is off, an `attention` row `digitalocean-off` whose step is
-`project-observatory full configure integrations digitalocean true`; and `teams` and the collector name
-each `doctl` context whose team has no stashed token ("member of team X via doctl context Y: no token
-stashed; `digitalocean.py stash --from-doctl Y`", in the scan's `degraded` as `digitalocean:doctl:Y`),
-asking DigitalOcean which team the context's token answers for and printing no value.
+`project-observatory full configure integrations digitalocean true`; and `teams` names each `doctl`
+context whose token is not a stashed one, offline (team unknown), while `teams --probe` and the collector
+ask DigitalOcean which team the context's token answers for (10 s each) and name a team with no stash
+("member of team X via doctl context Y: no token stashed; `digitalocean.py stash --from-doctl Y`", in the
+scan's `degraded` as `digitalocean:doctl:Y`). No value is printed, and a context name shaped like a
+credential is not printed either.
 
 **A DigitalOcean managed database's password, without printing it.**
 `tools/digitalocean.py` uses the operator's `doctl` context. `db list` and
@@ -2251,8 +2253,9 @@ one project is reported as a `conflict` and assigns neither. An empty file turns
 the feature off.
 
 The provider account rules (OBS-412 part 1) are `digitalocean_teams` (a team's
-uuid or name), `cloudflare_accounts` (an account id) and `heroku_teams` (a team
-name). A project matches one only through a resource the registry already ties
+uuid, or its name while no other team here bears it; the emit warns about a name
+two teams bear), `cloudflare_accounts` (an account id) and `heroku_teams` (a team
+name). A rule that is not a list of strings is ignored and named. A project matches one only through a resource the registry already ties
 to it: a DigitalOcean app or a Cloudflare Pages project or zone whose `project`
 was measured through a repository or a site, a Heroku app linked by its rule. A
 team's name alone never assigns a project. Each account says whose it is in its

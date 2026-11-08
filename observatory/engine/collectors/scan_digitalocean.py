@@ -200,14 +200,17 @@ def main(argv: list[str]) -> int:
             teams.append(row)
     # A TEAM THIS MACHINE CAN READ BUT DOES NOT (OBS-421): a doctl context whose team has no stash is
     # named with the one command that stashes it, so a team never goes unread in silence.
-    if step_budget.remaining() >= WRITE_RESERVE:
-        try:
-            for row in door.unstashed_contexts():
-                degraded.append({"source": f"digitalocean:doctl:{door.private_files.credential_shape.shown(row['context'])}",
-                                 "reason": door.unstashed_line(row, DOOR)})
-        except Exception as e:  # noqa: BLE001  doctl's config is a hint; its failure never costs the scan
-            degraded.append({"source": "digitalocean:doctl", "reason":
-                             f"doctl's contexts were not read ({type(e).__name__}); details withheld"})
+    # Each context's team is asked with a short timeout, and only while the step's deadline leaves room
+    # for that call and the write; the rest are named unasked.
+    try:
+        rows = door.unstashed_contexts(
+            probe=True, may_ask=lambda: step_budget.remaining() >= WRITE_RESERVE + door.PROBE_TIMEOUT)
+        for row in rows:
+            degraded.append({"source": f"digitalocean:doctl:{door.private_files.credential_shape.shown(row['context'])}",
+                             "reason": door.unstashed_line(row, DOOR)})
+    except Exception as e:  # noqa: BLE001  doctl's config is a hint; its failure never costs the scan
+        degraded.append({"source": "digitalocean:doctl", "reason":
+                         f"doctl's contexts were not read ({type(e).__name__}); details withheld"})
     if not tokens and not degraded:
         degraded.append({"source": "digitalocean", "reason":
                          "no team stashed: `python \"$(project-observatory full-path)/tools/digitalocean.py\" "

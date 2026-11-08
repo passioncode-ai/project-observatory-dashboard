@@ -115,13 +115,35 @@ def product_index() -> dict[str, set[str]]:
     return out
 
 
+def _usable_orgs(orgs) -> tuple[dict, list[str]]:
+    """The organizations with only the `match` rules that can be read: a rule whose value is not a list
+    of strings (a string iterates as its letters) or that no engine knows is dropped and named, so it
+    matches nothing instead of matching by accident (review of #479)."""
+    if not isinstance(orgs, dict):
+        return {}, ["organizations must be an object keyed by name"]
+    out, problems = {}, []
+    for name, org in orgs.items():
+        if not isinstance(org, dict):
+            problems.append(f"{name}: must be an object")
+            continue
+        match = org.get("match") if isinstance(org.get("match"), dict) else {}
+        kept = {}
+        for key, value in match.items():
+            if key in MATCH_RULES and isinstance(value, list) and all(isinstance(v, str) for v in value):
+                kept[key] = value
+            else:
+                problems.append(f"{name}: match.{key} is not a known list rule; ignored")
+        out[name] = {**org, "match": kept}
+    return out, problems
+
+
 class Assigner:
     """Loaded once per emit; `assign` is then a pure function of one project."""
 
     def __init__(self, doc: dict | None = None, estate_owners: set[str] | None = None,
                  products: dict[str, set[str]] | None = None):
         self.doc = load() if doc is None else doc
-        self.orgs = self.doc.get("organizations") or {}
+        self.orgs, self.problems = _usable_orgs(self.doc.get("organizations") or {})
         self.declared = self.doc.get("projects") or {}
         self.estate = _estate_owners() if estate_owners is None else {o.lower() for o in estate_owners}
         self.products = product_index() if products is None else products
@@ -218,6 +240,43 @@ def _rule_of(provider: str) -> str:
     return next(rule for rule, (prov, _w) in ACCOUNT_RULES.items() if prov == provider)
 
 
+def account_keys(provider: str, accounts: list[dict]) -> dict[str, list[str]]:
+    """account row id -> what a `match` rule may name it by: a DigitalOcean team by its uuid, and by its
+    name only when no other team here bears that name; a Cloudflare account by its id."""
+    rows = [a for a in accounts or [] if isinstance(a, dict)]
+    if provider == "digitalocean":
+        names: dict[str, int] = {}
+        for a in rows:
+            if a.get("name"):
+                names[str(a["name"]).lower()] = names.get(str(a["name"]).lower(), 0) + 1
+        return {a.get("id"): [str(k) for k in (a.get("team_uuid"),
+                                              a.get("name") if names.get(str(a.get("name") or "").lower()) == 1
+                                              else None) if k]
+                for a in rows}
+    return {a.get("id"): [str(a["account_id"])] if a.get("account_id") else [] for a in rows}
+
+
+def annotate_accounts(assigner: "Assigner", provider: str, accounts: list[dict]) -> list[str]:
+    """Write each account row's organization (`Assigner.account`) and return warnings: a DigitalOcean
+    team name a rule uses that two teams here bear decides nothing; the rule needs the team's uuid."""
+    keys = account_keys(provider, accounts)
+    for a in accounts or []:
+        if isinstance(a, dict):
+            a.update(assigner.account(provider, keys.get(a.get("id")) or []))
+    warnings = []
+    if provider == "digitalocean":
+        names: dict[str, int] = {}
+        for a in accounts or []:
+            if isinstance(a, dict) and a.get("name"):
+                names[str(a["name"]).lower()] = names.get(str(a["name"]).lower(), 0) + 1
+        for org, body in sorted(assigner.orgs.items()):
+            for value in (body.get("match") or {}).get("digitalocean_teams") or []:
+                if names.get(value.lower(), 0) > 1:
+                    warnings.append(f"{org}: match.digitalocean_teams names {value!r}, the name of "
+                                    f"{names[value.lower()]} teams here; it decides nothing, name the team's uuid")
+    return warnings
+
+
 def project_accounts(digitalocean: dict | None = None, cloudflare: dict | None = None,
                      heroku_apps: list[dict] | None = None) -> dict[str, list[dict]]:
     """project id -> the provider accounts the registry attributes to it, through the resources the
@@ -232,13 +291,13 @@ def project_accounts(digitalocean: dict | None = None, cloudflare: dict | None =
 
     for provider, doc, key_field in (("digitalocean", digitalocean, "team_uuid"),
                                      ("cloudflare", cloudflare, "account_id")):
-        accounts = {a.get("id"): a for a in (doc or {}).get("accounts") or [] if isinstance(a, dict)}
+        rows = [a for a in (doc or {}).get("accounts") or [] if isinstance(a, dict)]
+        accounts, keys = {a.get("id"): a for a in rows}, account_keys(provider, rows)
         for r in sorted((doc or {}).get("resources") or [], key=lambda r: str(r.get("id"))):
             acct = accounts.get(r.get("account_ref"))
             if not (r.get("project") and r.get("link_rule") and acct):
                 continue
-            keys = [acct.get(key_field)] + ([acct.get("name")] if provider == "digitalocean" else [])
-            add(r["project"], {"provider": provider, "keys": [str(k) for k in keys if k],
+            add(r["project"], {"provider": provider, "keys": keys.get(acct.get("id")) or [],
                                "label": acct.get("name") or acct.get(key_field),
                                "via": f"{r.get('kind')} {r.get('name')}"})
     for a in sorted(heroku_apps or [], key=lambda a: str(a.get("id"))):

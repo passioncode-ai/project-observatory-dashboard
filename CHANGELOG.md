@@ -8,7 +8,8 @@ while the major version is 0, a minor release may change behaviour and says so h
 ### Added
 
 - **`inventory/agents.md`, a readable page of the installed agents beside `inventory/agents.json`** (OBS-317,
-  first half). The wiki projection writes it from `registry/agents.json`: one row per service key with its product,
+  first half). The wiki projection writes it from `registry/agents.json`, with the frontmatter of the other inventory
+  notes: one row per service key with its product,
   version (the manifest's provider revision), where it answers, its contract pin, who holds it (the supervisor, its
   label and state) and its MCP declarations, ordered by service key, with a header saying it is generated. It carries
   no path, token or plist. The wiki links `[[inventory/agents]]`, and the tick's `links` step reported that note
@@ -16,10 +17,12 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **DigitalOcean onboarding signals** (OBS-421, `docs/ONBOARDING.md`). `full doctor` reports `digitalocean`
   (`integration`, `teams_stashed`, counted from the door's records, never a value) and, when team tokens are stashed
   while `integrations.digitalocean` is off, an `attention` row `digitalocean-off` with the step
-  `project-observatory full configure integrations digitalocean true`. `digitalocean.py teams` and the collector name
-  each `doctl` context whose team has no stashed token: "member of team X via doctl context Y: no token stashed;
-  `digitalocean.py stash --from-doctl Y`" (in the scan's `degraded` as `digitalocean:doctl:Y`). The team is asked of
-  DigitalOcean with that context's token; no value is printed or written.
+  `project-observatory full configure integrations digitalocean true`. `digitalocean.py teams` names each `doctl`
+  context whose token is not a stashed one, offline (team unknown); `teams --probe` and the collector ask DigitalOcean
+  which team it is with that context's own token (10 s each, the collector only while its deadline allows) and name a
+  team with no stash: "member of team X via doctl context Y: no token stashed; `digitalocean.py stash --from-doctl Y`"
+  (in the scan's `degraded` as `digitalocean:doctl:Y`). A context name shaped like a credential is never printed and
+  gets no command; no value is printed or written.
 - **Organizations match provider accounts** (OBS-412 part 1, `docs/COMPATIBILITY.md`). `config/organizations.json`
   `match` takes `digitalocean_teams` (a team's uuid or name), `cloudflare_accounts` (an account id) and
   `heroku_teams` (a team name) beside `repository_owners` and `products`. A project matches one only through a
@@ -29,7 +32,10 @@ while the major version is 0, a minor release may change behaviour and says so h
   `organization`, `organization_source` (`rule`, `conflict`, `none`) and `organization_why`, and
   `registry/heroku-apps.json` carries `team_organizations`, all only when organizations are configured; the
   DigitalOcean and Cloudflare pages show an Organization column then. Every resource row names its account row
-  (`account_ref`); account rows carry `team_uuid` or `account_id`.
+  (`account_ref`); account rows carry `team_uuid` or `account_id`. A team name two teams bear decides nothing (the
+  emit warns; name the uuid), and a `match` rule that is not a list of strings is ignored and named instead of being
+  read letter by letter. With organizations configured, `registry/projects.json` is written once per emit, after the
+  provider documents.
 
 ### Fixed
 
@@ -37,10 +43,11 @@ while the major version is 0, a minor release may change behaviour and says so h
   certificate read `expiring` three days before its end, while the maintenance pass rotated it only at two thirds of
   its validity, 2.33 days before the end: for 16 hours a person was told to run `full org rotate` by hand (seen
   2026-11-08: `daysLeft: 2.41`, `rotationDue: false`). A rotation is now due at two thirds or an hour before the
-  `expiring` notice, whichever comes first, never in the first half of the validity, judged on the server's clock.
+  `expiring` notice, whichever comes first, never in the first half of the validity (so before the notice for
+  certificates of about 6 days or more), judged on the server's clock.
 - **`install_launchd.py install` reloads the tick through the waiting helpers** (OBS-424). It sent `bootout` and at
   once `bootstrap`, which launchd refuses while the bootout is still finishing (the race OBS-410 fixed elsewhere);
-  it now uses `stop_job` and `start_job`.
+  it now uses `stop_job` and `start_job`, and names a stop that did not finish.
 
 ## 0.35.7 (2026-11-08)
 

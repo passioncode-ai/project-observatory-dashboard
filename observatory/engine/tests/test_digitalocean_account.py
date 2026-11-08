@@ -580,29 +580,50 @@ def case_collector(tmp: pathlib.Path, env: dict, provider: Provider) -> None:
     provider.tokens[ADMIN_B]["alive"] = True
 
 
-def case_doctl_contexts_without_a_stash(tmp: pathlib.Path, env: dict) -> None:
+def case_doctl_contexts_without_a_stash(tmp: pathlib.Path, env: dict, provider: Provider) -> None:
     """OBS-421: a doctl context whose team has no stash is named, with the command that stashes it,
-    by `teams` and by the collector; contexts of stashed teams are not; no value is printed."""
+    by `teams` and by the collector; contexts of stashed teams are not; no value is printed. `teams`
+    stays offline unless `--probe`; a context name is quoted, and one shaped like a credential is never
+    printed and gets no command."""
+    shaped = "dop_v1_" + "7f" * 32                     # a context NAME shaped like a token
     (tmp / "doctl-config.yaml").write_text(
         f"access-token: {FOREIGN}\nauth-contexts:\n  default: \"\"\n  work: '{ADMIN_B}'\n  side: {THIRD}\n"
-        "context: work\noutput: text\n")
+        f"  {shaped}: {THIRD}\ncontext: work\noutput: text\n")
+    before = len(provider.calls)
     r = door(env, "teams")
     out = r.stdout + r.stderr
-    check("teams names a doctl context whose team has no stash, with the step",
+    asked = [c for c in provider.calls[before:] if c[1] == "/v2/account" and c[2] == TEAM_C["uuid"]]
+    check("teams without --probe sends no doctl context's token", r.returncode == 0 and not asked,
+          str(provider.calls[before:])[:300])
+    check("teams without --probe names each unstashed context offline, with the quoted step",
+          "doctl context side: its token is not a stashed one, team unknown" in r.stdout
+          and "stash --from-doctl side`" in r.stdout, out[-800:])
+    check("a context name shaped like a credential is never printed and gets no command",
+          shaped not in out and "shaped like a credential, so no command is printed" in r.stdout, out[-800:])
+    r = door(env, "teams", "--probe")
+    out = r.stdout + r.stderr
+    check("teams --probe names the team of a doctl context with no stash, with the step",
           r.returncode == 0 and "member of team Unstashed Team via doctl context side: no token stashed" in r.stdout
-          and "stash --from-doctl side" in r.stdout, out[-600:])
+          and "stash --from-doctl side`" in r.stdout and "shaped like a credential" not in r.stdout, out[-800:])
     check("teams names no context of a stashed team",
           "doctl context work" not in r.stdout and "doctl context default" not in r.stdout, out[-600:])
-    check("and prints no value", clean(out), out[-300:])
+    check("and prints no value", clean(out) and shaped not in out, out[-300:])
     out_file = tmp / "digitalocean-doctl.json"
     r = subprocess.run([sys.executable, str(SCAN), str(out_file)], env=env, capture_output=True, text=True, timeout=120)
     doc = json.loads(out_file.read_text()) if out_file.is_file() else {}
     rows = [d for d in doc.get("degraded", []) if d["source"].startswith("digitalocean:doctl")]
     check("the collector names the unstashed team's context in degraded, with the step",
-          r.returncode == 0 and len(rows) == 1 and rows[0]["source"] == "digitalocean:doctl:side"
-          and "Unstashed Team" in rows[0]["reason"] and "stash --from-doctl side" in rows[0]["reason"],
-          str(doc.get("degraded"))[:400])
-    check("the scan carries no value", clean(json.dumps(doc)))
+          r.returncode == 0 and any(d["source"] == "digitalocean:doctl:side" and "Unstashed Team" in d["reason"]
+                                    and "stash --from-doctl side" in d["reason"] for d in rows),
+          str(doc.get("degraded"))[:600])
+    check("the scan carries no value", clean(json.dumps(doc)) and shaped not in json.dumps(doc))
+    import time as _time
+    r = subprocess.run([sys.executable, str(SCAN), str(out_file)], capture_output=True, text=True, timeout=120,
+                       env=dict(env, OBSERVATORY_STEP_DEADLINE=str(_time.time() + 5)))
+    doc = json.loads(out_file.read_text()) if out_file.is_file() else {}
+    check("past the deadline a context is named unasked, never dropped",
+          any(d["source"] == "digitalocean:doctl:side" and "deadline" in d["reason"] for d in doc.get("degraded", [])),
+          str(doc.get("degraded"))[:600])
     (tmp / "doctl-config.yaml").unlink()
     r = door(env, "teams")
     check("no doctl config, no doctl section", r.returncode == 0 and "doctl context" not in r.stdout,
@@ -663,7 +684,7 @@ def main() -> int:
             r = door(env, "rotate", "observatory-read--example-team", stdin=READ2 + "\n")
             check("the collector's read token is replaced by rotate", r.returncode == 0, (r.stdout + r.stderr)[-300:])
             case_collector(tmp, env, provider)
-            case_doctl_contexts_without_a_stash(tmp, env)
+            case_doctl_contexts_without_a_stash(tmp, env, provider)
         case_findings(provider)
     finally:
         server.shutdown()

@@ -1488,7 +1488,7 @@ class InstallReloadsThroughTheWaitingHelpers(Workspace):
     """OBS-424: `install_launchd.py install` sent `bootout` and at once `bootstrap`, the race OBS-410 fixed
     in `stop_job` and `start_job` (launchd refuses a bootstrap while the bootout is still finishing)."""
 
-    def run_install(self, start_ok: bool = True):
+    def run_install(self, start_ok: bool = True, stop_ok: bool = True):
         il = self.reload("install_launchd")
         calls, raw = [], []
         maintenance = importlib.import_module("maintenance")
@@ -1496,7 +1496,7 @@ class InstallReloadsThroughTheWaitingHelpers(Workspace):
         with patch.object(il.sys, "platform", "darwin"), patch.object(il, "scheduler_allowed", lambda: True), \
                 patch.object(il, "build", lambda interval, python=None: doc), \
                 patch.object(il, "lint_plist", lambda d: []), patch.object(il, "prepare_logs", lambda names: None), \
-                patch.object(il, "stop_job", lambda label: calls.append(("stop", label)) or (True, "")), \
+                patch.object(il, "stop_job", lambda label: calls.append(("stop", label)) or (stop_ok, "still loaded")), \
                 patch.object(il, "start_job", lambda plist: calls.append(("start", plist)) or (start_ok, "refused")), \
                 patch.object(il, "run", lambda *a: raw.append(a) or (0, "")), \
                 patch.object(maintenance, "ensure", lambda home: {"schedule": {"label": "m"}, "auto_update": True}), \
@@ -1516,6 +1516,12 @@ class InstallReloadsThroughTheWaitingHelpers(Workspace):
         _il, code, _calls, _raw, err = self.run_install(start_ok=False)
         self.assertEqual(code, 1)
         self.assertIn("bootstrap failed: refused", err)
+
+    def test_a_stop_that_did_not_finish_is_named(self):
+        _il, code, calls, _raw, err = self.run_install(stop_ok=False, start_ok=False)
+        self.assertEqual(code, 1)
+        self.assertIn("the loaded tick did not stop: still loaded", err)
+        self.assertEqual([c[0] for c in calls], ["stop", "start"], "the load is still tried, and its refusal named")
 
     def test_the_installer_source_has_no_trailing_whitespace(self):
         src = (ROOT / "tools" / "install_launchd.py").read_text(encoding="utf-8").splitlines()
