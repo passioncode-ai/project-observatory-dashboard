@@ -3,7 +3,23 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.35.7 (2026-11-08)
+
+A backup's secret store can be checked without touching the live one. A weekly restore check into a temporary
+home used to verify the home only, because the store goes back only into the folder its settings name, the live
+one; `--secret-store-verify-into DIR` writes it into a disposable folder and reads every file back against the
+snapshot's manifest. It also brings the server back on a Mac that updated to 0.35.6, where the repaired
+definition left it unloaded.
+
+### Fixed
+
+- **The server comes back after an update to 0.35.6 on macOS** (OBS-410). `full maintain ensure` rewrote the
+  server's definition and reloaded it with a bootstrap that launchd refused while the old process was still exiting,
+  so the server stayed unloaded and the update reported nothing. Reloads now wait for the bootout and retry the
+  bootstrap; a reload that fails is `reload-failed`, naming the jobs left `unloaded` or `not_reloaded`; the update
+  loads a job it started again once ensure has run; and, once, a workspace updated to 0.35.6 whose server has its
+  definition and Fabric descriptor in place but is not loaded gets it loaded again by the first `maintain ensure` or
+  pass of 0.35.7 (the update to 0.35.7 runs one), answered under `jobs.recovered`.
 
 ### Added
 
