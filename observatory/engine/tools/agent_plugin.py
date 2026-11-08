@@ -4,8 +4,8 @@
 install  adds the GitHub marketplace, installs the plugin, turns plugin
          auto-update ON (pass --no-auto-update to keep it off) and sets
          OBSERVATORY_ROOT / OBSERVATORY_HOME / OBSERVATORY_PYTHON for the
-         plugin's hooks (OBSERVATORY_ROOT only where its path names no Python
-         release, OBS-393). It reports "installed" only when Claude Code's own
+         plugin's hooks; `maintain ensure` refreshes them when they name a
+         folder that is gone (OBS-393). It reports "installed" only when Claude Code's own
          installed_plugins.json lists the plugin afterwards.
 status   reports the marketplace source, auto-update, installed version and
          whether the hooks can find this engine and workspace.
@@ -80,7 +80,7 @@ def manual_env_advice() -> str:
     which is silent until someone wonders why nothing was recorded."""
     names = ", ".join(ENV_KEYS)
     try:
-        values = json.dumps({k: v for k, v in workspace_env().items() if v is not None}, ensure_ascii=False)
+        values = json.dumps(workspace_env(), ensure_ascii=False)
         where = settings_path()
     except (configuration.ConfigurationError, OSError) as exc:
         return (f"That route leaves the hook environment ({names}) unset, and this workspace could not be "
@@ -228,33 +228,55 @@ def _install_launchd():
 
 
 def workspace_env() -> dict:
-    """What the hooks read, version-free (OBS-393). `OBSERVATORY_PYTHON` is the engine's venv
-    interpreter as the background jobs name it (`<venv>/bin/python3`, never `python3.14`), and
-    `OBSERVATORY_ROOT` is None, meaning left unset, when the engine sits in a folder naming one
-    Python release (`lib/python3.14/site-packages`): a venv rebuilt on another release would leave
-    the hooks pointed at a folder that no longer exists, so they find the engine through the
-    interpreter's environment instead. A checkout's path names no release and is written."""
+    """What the hooks read. `OBSERVATORY_PYTHON` is the engine's venv interpreter as the background
+    jobs name it (`<venv>/bin/python3`, never the installer's `python3.14`, OBS-393).
+    `OBSERVATORY_ROOT` is this engine's folder: hooks of every plugin version read it, and a venv
+    rebuilt on another Python release leaves it naming a folder that is gone, which the hooks of
+    0.35.6 and later treat as unset (they find the engine under OBSERVATORY_PYTHON's venv) and
+    `refresh_hook_env` rewrites at the next `maintain ensure`."""
     launch = _install_launchd()
     try:
         python = launch.stable_interpreter(configuration.engine_python())
     except configuration.ConfigurationError:
         python = configuration.engine_python()
-    return {"OBSERVATORY_ROOT": None if launch.version_bound(launch.engine_root()) else str(ROOT),
-            "OBSERVATORY_HOME": str(configuration.home()), "OBSERVATORY_PYTHON": python}
+    return {"OBSERVATORY_ROOT": str(ROOT), "OBSERVATORY_HOME": str(configuration.home()),
+            "OBSERVATORY_PYTHON": python}
 
 
 def put_hook_env(settings: dict) -> dict:
-    """Write workspace_env() into SETTINGS: set each value, remove a key whose value is None (an
-    OBSERVATORY_ROOT an earlier release wrote). Returns the values it replaced or removed."""
+    """Write workspace_env() into SETTINGS; returns the values it replaced."""
     wanted = workspace_env()
     env = settings.setdefault("env", {})
     previous = {k: env.get(k) for k in ENV_KEYS}
-    for key, value in wanted.items():
-        if value is None:
-            env.pop(key, None)
-        else:
-            env[key] = value
+    env.update(wanted)
     return {k: v for k, v in previous.items() if v and v != wanted[k]}
+
+
+def _gone(value) -> bool:
+    return isinstance(value, str) and os.path.isabs(value) and not os.path.lexists(value)
+
+
+def refresh_hook_env() -> dict:
+    """Rewrite the hook environment `agent install` wrote when it names an engine folder or an
+    interpreter that no longer exists (a venv rebuilt on another Python, OBS-393), for this same
+    workspace only. Nothing is written when the settings name no OBSERVATORY_HOME, another
+    workspace, or paths that exist. Answers {"result": ok | refreshed | not-ours | error}."""
+    try:
+        path = settings_path()
+        if not path.is_file():
+            return {"result": "ok"}
+        settings = read_json(path)
+        env = settings.get("env") or {}
+        if env.get("OBSERVATORY_HOME") != str(configuration.home()):
+            return {"result": "not-ours"}
+        stale = [k for k in ("OBSERVATORY_ROOT", "OBSERVATORY_PYTHON") if _gone(env.get(k))]
+        if not stale:
+            return {"result": "ok"}
+        replaced = put_hook_env(settings)
+        write_json(path, settings)
+        return {"result": "refreshed", "keys": stale, "replaced": replaced}
+    except (PluginError, configuration.ConfigurationError, OSError, ValueError) as exc:
+        return {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
 
 
 def write_hook_env() -> dict:
@@ -369,9 +391,7 @@ def hook_env_problems(settings: dict) -> list[str]:
     env, wanted = settings.get("env") or {}, workspace_env()
     # "not set" for an absent variable: `None` is Python's word, not the user's.
     return [(f"{k} is {env[k]!r}" if env.get(k) is not None else f"{k} is not set")
-            + (f" in Claude Code settings; hooks need {wanted[k]!r}" if wanted[k] is not None else
-               " in Claude Code settings; hooks need it unset (it names a folder of one Python release; they "
-               "find the engine through OBSERVATORY_PYTHON): `project-observatory full agent install` removes it")
+            + f" in Claude Code settings; hooks need {wanted[k]!r}"
             for k in ENV_KEYS if env.get(k) != wanted[k]]
 
 
@@ -420,7 +440,11 @@ def uninstall() -> dict:
                      "and its hooks still read it")
     else:
         for k, v in workspace_env().items():
-            if v is not None and (settings.get("env") or {}).get(k) == v:
+            have = (settings.get("env") or {}).get(k)
+            # Also a value an earlier install wrote that names a folder gone since (a venv rebuilt on
+            # another Python, OBS-393): it is this engine's own key, and nothing else reads it.
+            if have == v or (k != "OBSERVATORY_HOME" and _gone(have)
+                             and ("observatory" in str(have) or k == "OBSERVATORY_PYTHON")):
                 changed = _drop(settings, "env", k) or changed
     if changed:
         write_json(settings_path(), settings)

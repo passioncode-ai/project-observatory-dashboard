@@ -399,25 +399,44 @@ class VersionFreeHookEnv(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_settings_drop_a_release_bound_root_and_name_the_stable_interpreter(self):
+    def test_settings_keep_the_root_and_a_gone_one_is_refreshed(self):
+        # Hooks of every plugin version read OBSERVATORY_ROOT, so it stays written (review of OBS-393,
+        # finding 1); one that names a folder gone since is rewritten by `maintain ensure`.
         from unittest.mock import patch
         engine = self.base / "venv/lib/python3.15/site-packages/observatory/engine"
         stale = {"OBSERVATORY_ROOT": str(self.base / "venv/lib/python3.14/site-packages/observatory/engine"),
-                 "OBSERVATORY_PYTHON": str(self.base / "venv/bin/python3.14"), "KEEP": "1"}
+                 "OBSERVATORY_PYTHON": str(self.base / "venv/bin/python3.14"),
+                 "OBSERVATORY_HOME": str(self.base / "workspace"), "KEEP": "1"}
+        claude = self.base / "claude"
+        claude.mkdir()
         with patch.object(self.configuration, "SOURCE", engine), \
-                patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.base / "workspace")}):
+                patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.base / "workspace"),
+                                        "CLAUDE_CONFIG_DIR": str(claude)}):
             wanted = self.plugin.workspace_env()
-            self.assertIsNone(wanted["OBSERVATORY_ROOT"])
+            self.assertEqual(wanted["OBSERVATORY_ROOT"], str(self.plugin.ROOT))
             self.assertEqual(wanted["OBSERVATORY_PYTHON"],
                              self.plugin._install_launchd().stable_interpreter(self.configuration.engine_python()),
                              "the interpreter the background jobs name, never the installer's python3.14")
-            problems = self.plugin.hook_env_problems({"env": stale})
-            self.assertTrue(any("OBSERVATORY_ROOT" in p and "unset" in p for p in problems), problems)
-            settings = {"env": dict(stale)}
-            replaced = self.plugin.put_hook_env(settings)
-        self.assertNotIn("OBSERVATORY_ROOT", settings["env"], "a stale root is removed, not kept")
-        self.assertEqual(settings["env"]["KEEP"], "1")
-        self.assertLessEqual({"OBSERVATORY_ROOT", "OBSERVATORY_PYTHON"}, set(replaced))
+            (claude / "settings.json").write_text(json.dumps({"env": stale}))
+            out = self.plugin.refresh_hook_env()
+            self.assertEqual(out["result"], "refreshed", out)
+            env = json.loads((claude / "settings.json").read_text())["env"]
+            self.assertEqual((env["OBSERVATORY_ROOT"], env["KEEP"]), (str(self.plugin.ROOT), "1"))
+            self.assertEqual(self.plugin.refresh_hook_env()["result"], "ok", "nothing gone, nothing written")
+            (claude / "settings.json").write_text(json.dumps({"env": {**stale, "OBSERVATORY_HOME": "/elsewhere"}}))
+            self.assertEqual(self.plugin.refresh_hook_env()["result"], "not-ours", "another workspace's hooks")
+
+    @unittest.skipIf(os.name == "nt", "a stand-in `claude` that answers no is /usr/bin/false")
+    def test_uninstall_removes_a_root_an_earlier_install_wrote(self):
+        from unittest.mock import patch
+        claude = self.base / "claude"
+        claude.mkdir()
+        gone = str(self.base / "venv/lib/python3.14/site-packages/observatory/engine")
+        (claude / "settings.json").write_text(json.dumps({"env": {"OBSERVATORY_ROOT": gone, "KEEP": "1"}}))
+        with patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.base / "workspace"), "CLAUDE_CONFIG_DIR": str(claude),
+                                     "CLAUDE_BIN": "/usr/bin/false"}):
+            self.plugin.uninstall()
+        self.assertEqual(json.loads((claude / "settings.json").read_text())["env"], {"KEEP": "1"})
 
     @unittest.skipIf(os.name == "nt", "the hooks are bash")
     def test_the_session_hook_finds_the_engine_through_the_interpreter(self):
@@ -425,7 +444,12 @@ class VersionFreeHookEnv(unittest.TestCase):
         engine = venv / "lib/python3.15/site-packages/observatory/engine"
         (engine / "tools").mkdir(parents=True)
         (venv / "bin").mkdir()
-        (venv / "pyvenv.cfg").write_text("home = /usr/bin\n")
+        # A later-sorting leftover must not win: the release pyvenv.cfg names is the one (finding 9).
+        decoy = venv / "lib/python3.9/site-packages/observatory/engine"
+        (decoy / "tools").mkdir(parents=True)
+        (decoy / "observatory.py").write_text("")
+        (decoy / "tools/session_start.py").write_text("raise SystemExit(3)\n")
+        (venv / "pyvenv.cfg").write_text("home = /usr/bin\nversion_info = 3.15.0.final.0\n")
         os.symlink(sys.executable, venv / "bin/python3")
         marker = self.base / "ran"
         (engine / "observatory.py").write_text("")
@@ -440,6 +464,12 @@ class VersionFreeHookEnv(unittest.TestCase):
         self.assertEqual(p.returncode, 0, p.stderr)
         self.assertEqual(marker.read_text(), str(engine / "tools/session_start.py"),
                          "the 3.15 engine ran, though the settings still named the 3.14 folder")
+        marker.unlink()
+        relative = {**env, "OBSERVATORY_PYTHON": "venv/bin/python3"}
+        p = subprocess.run(["/bin/bash", str(hook)], env=relative, cwd=self.base, input="", capture_output=True,
+                           text=True, timeout=60)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertFalse(marker.exists(), "a relative interpreter is never followed")
 
 
 if __name__ == "__main__":

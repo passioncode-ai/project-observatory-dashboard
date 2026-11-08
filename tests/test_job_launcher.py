@@ -74,5 +74,22 @@ class LauncherTests(unittest.TestCase):
             self.assertEqual(Path(cwd).resolve(), root)
 
 
+    @unittest.skipIf(os.name == "nt", "exec and signal dispositions are POSIX's")
+    def test_the_program_starts_with_default_signals(self):
+        # Python ignores SIGPIPE, and an ignored signal survives exec: bash's tick would have
+        # inherited it (review of OBS-393, finding 11).
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / "tools").mkdir()
+            # A writer into a closed pipe dies of SIGPIPE (141) with the default, and fails (1) when ignored.
+            (root / "tools" / "tick.sh").write_text('yes | head -n 1 >/dev/null; echo "${PIPESTATUS[0]}"\n')
+            code = (f"import observatory.job as j; from pathlib import Path; "
+                    f"j.engine_root = lambda: Path({str(root)!r}); raise SystemExit(j.main(['tick']))")
+            p = subprocess.run([sys.executable, "-c", code], cwd=REPO, env=ENV, capture_output=True, text=True,
+                               timeout=60)
+            self.assertEqual(p.returncode, 0, p.stderr)
+            self.assertEqual(p.stdout.strip(), "141", "SIGPIPE arrives with its default, not ignored")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -21,6 +21,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import runpy
+import signal
 import sys
 
 #: name -> (path inside the engine, how it runs, whether it starts in the engine folder).
@@ -72,6 +73,11 @@ def main(argv: list[str] | None = None) -> int:
     if start_in is not None:
         os.chdir(start_in)
     if os.name != "nt":
+        # Python starts with SIGPIPE (and SIGXFSZ) ignored, and an ignored signal survives exec:
+        # the program, bash's tick above all, gets the defaults it would have had from launchd.
+        for name in ("SIGPIPE", "SIGXFSZ"):
+            if hasattr(signal, name):
+                signal.signal(getattr(signal, name), signal.SIG_DFL)
         os.execv(program[0], program)
     # Windows: the script runs here, as `python <file>` would run it.
     sys.argv = program[1:]

@@ -1100,15 +1100,9 @@ def install() -> int:
 
 
 def server_job():
-    """The server for Task Scheduler or systemd (`osschedule`), as `build_plist` describes it for
-    launchd: started at logon, restarted on failure, no time limit, standard priority."""
-    import osschedule
-    return osschedule.Job(name="server", workspace=paths.HOME,
-                          argv=tuple(install_launchd.job_argv("serverd", "--run", "--port", str(PORT))),
-                          env=tuple(sorted(install_launchd.environment().items())),
-                          cwd=install_launchd.job_cwd(paths.HOME),
-                          stdout=paths.STATE / "logs/serverd.out", stderr=paths.STATE / "logs/serverd.err",
-                          time_limit_seconds=EXIT_TIMEOUT + 10, background=False)
+    """The server for Task Scheduler or systemd (`osschedule`): `install_launchd.server_job`, so the
+    maintenance pass rebuilds the very same unit when it repairs a drifted one (OBS-393)."""
+    return install_launchd.server_job(PORT)
 
 
 def _supervisor_record(job) -> dict:

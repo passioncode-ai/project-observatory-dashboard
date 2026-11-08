@@ -776,32 +776,72 @@ def step_jobs(launch=None) -> dict:
     Before 0.19.3 their plists could name the installer's interpreter instead, and a venv rebuilt
     on another Python release left them naming `lib/python3.X/site-packages` files that no longer
     exist (OBS-393). An update restarts them from the files as they are, so an install that had
-    it wrong stayed wrong. A plist that differs from the installer's (`install_launchd.
-    repair_definitions`, the whole definition) is rewritten and reloaded: the tick only while it
-    is not running (otherwise the next pass), the server at once, which costs its clients a
-    reconnect."""
+    it wrong stayed wrong. A definition that differs from the installer's in a key it writes
+    (`install_launchd.repair_definitions`, `repair_systemd` on Linux) is rewritten: the tick only
+    while it is not running (otherwise the next pass). A launchd job that was loaded is reloaded and
+    one that was not stays unloaded; a running systemd server is restarted, which costs its clients
+    a reconnect. A drift that cannot be mended here is answered under `skipped`, with its reason."""
     if launch is None:
-        if sys.platform != "darwin" or shutil.which("launchctl") is None:
+        if sys.platform == "darwin" and shutil.which("launchctl") is not None:
+            launch = _install_launchd()
+        elif sys.platform.startswith("linux") and shutil.which("systemctl") is not None:
+            return _step_systemd_jobs(_install_launchd())
+        else:
             return {"result": "not-applicable"}
-        launch = _install_launchd()
     try:
         drift = launch.repair_interpreters(write=False)
+        skipped = [{"job": j["name"], "missing": j.get("missing", []), "reason": j["skipped"]}
+                   for j in drift if j.get("skipped")]
+        drift = [j for j in drift if not j.get("skipped")]
         if not drift:
-            return {"result": "ok"}
+            return {"result": "skipped" if skipped else "ok", **({"skipped": skipped} if skipped else {})}
         ready = [j for j in drift if not (j["name"] == "tick" and launch.job_running(j["label"]))]
         if ready:
             launch.repair_interpreters(write=True, only={j["name"] for j in ready})
         fixed = []
         for job in ready:
+            row = {"job": job["name"], "was": job["was"], "now": job["now"]}
             if launch.job_loaded(job["label"]):
                 launch.stop_job(job["label"])
-            ok, detail = launch.start_job(job["plist"])
-            fixed.append({"job": job["name"], "was": job["was"], "now": job["now"],
-                          "reloaded": ok, **({} if ok else {"detail": str(detail)[:200]})})
+                ok, detail = launch.start_job(job["plist"])
+                row.update(reloaded=ok, **({} if ok else {"detail": str(detail)[:200]}))
+            else:
+                # Not loaded before (a person stopped it, or it was never started): the definition is
+                # mended and stays unloaded.
+                row["reloaded"] = False
+                row["loaded"] = False
+            fixed.append(row)
         waiting = [j["name"] for j in drift if j not in ready]
         return {"result": "repaired" if fixed else "waiting", "jobs": fixed,
-                **({"waiting": waiting} if waiting else {})}
+                **({"waiting": waiting} if waiting else {}), **({"skipped": skipped} if skipped else {})}
     except Exception as exc:  # noqa: BLE001 — a repair never fails a pass
+        return {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
+
+
+def _step_systemd_jobs(launch) -> dict:
+    """`step_jobs` on Linux: the tick's and the server's systemd user units (OBS-393)."""
+    try:
+        rows = {row["name"]: row["handle"] for row in launch.systemd_unit_files()}
+        drift = launch.repair_systemd(write=False)
+        skipped = [{"job": j["name"], "missing": j.get("missing", []), "reason": j["skipped"]}
+                   for j in drift if j.get("skipped")]
+        drift = [j for j in drift if not j.get("skipped")]
+        if not drift:
+            return {"result": "skipped" if skipped else "ok", **({"skipped": skipped} if skipped else {})}
+        ready = [j for j in drift if not (j["name"] == "tick" and rows["tick"].running())]
+        fixed = []
+        if ready:
+            launch.repair_systemd(write=True, only={j["name"] for j in ready})
+            for job in ready:
+                row = {"job": job["name"], "changed": job["changed"]}
+                if job["name"] == "server" and rows["server"].running():
+                    ok, detail = rows["server"].restart()
+                    row.update(restarted=ok, **({} if ok else {"detail": str(detail)[:200]}))
+                fixed.append(row)
+        waiting = [j["name"] for j in drift if j not in ready]
+        return {"result": "repaired" if fixed else "waiting", "jobs": fixed,
+                **({"waiting": waiting} if waiting else {}), **({"skipped": skipped} if skipped else {})}
+    except Exception as exc:  # noqa: BLE001: a repair never fails a pass
         return {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
 
 
@@ -1454,6 +1494,22 @@ class LaunchdSchedule:
                     self._headless = False
         return self._headless
 
+    #: Where root's space_daemons.py writes the daemon it loads (root:wheel 0644, readable by all).
+    DAEMONS = Path("/Library/LaunchDaemons")
+
+    def root_copy_stale(self, doc: dict) -> bool:
+        """Root's loaded daemon was made from another definition than DOC: its program or working
+        folder differs (space_daemons.py copies both unchanged). False when it cannot be read, so
+        the answer is never invented (OBS-393)."""
+        path = self.DAEMONS / f"{self.label}.plist"
+        try:
+            daemon = plistlib.loads(path.read_bytes()) if path.is_file() else None
+        except (OSError, ValueError, plistlib.InvalidFileException):
+            daemon = None
+        if not isinstance(daemon, dict):
+            return False
+        return any(daemon.get(key) != doc.get(key) for key in ("ProgramArguments", "WorkingDirectory"))
+
     def background_definition(self) -> Path:
         """The definition root's space_daemons.py loads: the account's background folder."""
         import machine_identity
@@ -1466,17 +1522,20 @@ class LaunchdSchedule:
             return self.background_definition()
         return self.plist
 
-    def document(self) -> dict:
+    def document(self, kept_from: Path | None = None) -> dict:
         env = self.launch.environment()
         # PATH comes from whoever runs the installer, and a terminal and an agent session
         # differ: an installed job keeps the PATH it has, so the definition does not flip
-        # (and get reloaded) with each caller (review F1).
-        source = self.definition if self.definition.is_file() else self.plist
+        # (and get reloaded) with each caller (review F1). KEPT_FROM names the definition the
+        # document is compared with (root's background copy), so the PATH is read from that one.
+        source = kept_from or (self.definition if self.definition.is_file() else self.plist)
         if source.is_file():
             try:
                 kept = (plistlib.loads(source.read_bytes()).get("EnvironmentVariables") or {}).get("PATH")
             except (OSError, ValueError, plistlib.InvalidFileException):
                 kept = None
+            # Never a Cellar or another account's folder, even when an older release kept one (OBS-393).
+            kept = self.launch.kept_path(kept)
             if kept:
                 env["PATH"] = kept
         env["OBSERVATORY_HOME"] = str(self.base)
@@ -1551,7 +1610,10 @@ class LaunchdSchedule:
                 current = plistlib.loads(background.read_bytes()) if background.is_file() else None
             except (OSError, ValueError, plistlib.InvalidFileException):
                 current = None
-            if current is not None and current != doc:
+            # Compared with the document whose PATH is the background copy's own, so a caller with
+            # another PATH does not read as a change (and a waiting-for-root) on every ensure.
+            doc = self.document(kept_from=background) if background.is_file() else doc
+            if (current is not None and current != doc) or self.root_copy_stale(doc):
                 # Root's daemon was made from a definition the builder no longer writes (a path of a
                 # venv rebuilt on another Python, OBS-393): only root can replace it, remove then apply.
                 return self._install_background(doc, target=background)
@@ -1625,7 +1687,9 @@ class LaunchdSchedule:
                "definition": str(target), "load": "loaded" if loaded else "waiting-for-root",
                **({"removed_agent_copy": str(self.plist)} if agent_copy and loaded else {}),
                **({"agent_copy_kept": str(self.plist)} if agent_copy and not loaded else {})}
-        if loaded and not changed:
+        if loaded and not changed and not self.root_copy_stale(doc):
+            # Root's daemon runs this very definition. One it loaded from an earlier definition still
+            # waits for root's remove, then apply, though the background copy is already the new one.
             return out
         # root's apply refuses a label that is already loaded: a new definition is removed, then applied.
         steps = ([machine_move.root_step("remove", self.label, uid)] if loaded else []) + [
@@ -1911,7 +1975,19 @@ def ensure(base: Path, *, schedule=None, store=None, explicit: bool = False) -> 
         # path of a venv rebuilt on another Python) is rewritten and reloaded here, so a person's
         # `maintain ensure` mends every job, not only the two it schedules.
         out["jobs"] = step_jobs()
+        out["hook_env"] = _refresh_hook_env()
     return out
+
+
+def _refresh_hook_env() -> dict:
+    """The plugin hooks' environment in Claude Code's settings, rewritten when it names an engine
+    folder or interpreter that is gone (OBS-393, `agent_plugin.refresh_hook_env`)."""
+    try:
+        _install_launchd()
+        import agent_plugin
+        return agent_plugin.refresh_hook_env()
+    except Exception as exc:  # noqa: BLE001 - scheduling never fails on the hooks' settings
+        return {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
 
 
 def unschedule(base: Path, *, schedule=None) -> dict:
@@ -1928,9 +2004,9 @@ def unschedule(base: Path, *, schedule=None) -> dict:
 # --- what doctor and the Health page read -------------------------------------------
 
 def _definition_files(base: Path) -> list[tuple[str, Path]]:
-    """(job, file) for every job definition of this workspace on this machine that exists: the pass and
-    the check (launchd's agent folder and the background folder root loads from, or systemd user units)
-    and, on macOS, the tick and the server."""
+    """(job, file) for every job definition of this workspace on this machine that exists: the pass, the
+    check, the tick and the server (launchd's agent folder and the background folder root loads from,
+    or systemd user units). Labels and unit names come from BASE, the workspace asked about."""
     found: list[tuple[str, Path]] = []
     if sys.platform == "darwin":
         import machine_identity
@@ -1941,13 +2017,17 @@ def _definition_files(base: Path) -> list[tuple[str, Path]]:
                 found.append((job, folder / f"{label}.plist"))
         try:
             launch = _install_launchd()
-            found += [(row["name"], Path(row["plist"])) for row in launch.managed_jobs()]
+            found += [(row["name"], Path(row["plist"])) for row in launch.managed_jobs(base)]
         except Exception:  # noqa: BLE001 - a status never fails doctor
             pass
     elif sys.platform != "win32":
         for job in JOBS:
             units = SystemdSchedule(base, job=job)
             found.append((job, units.units / f"{units.name}.service"))
+        try:
+            found += [(row["name"], row["service"]) for row in _install_launchd().systemd_unit_files(base)]
+        except Exception:  # noqa: BLE001 - a status never fails doctor
+            pass
     return [(job, path) for job, path in found if path.is_file() and not path.is_symlink()]
 
 

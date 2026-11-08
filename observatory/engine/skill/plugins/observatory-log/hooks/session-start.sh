@@ -20,14 +20,24 @@ if [ -z "$root" ] && [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
     c="$n"
   done
 fi
-if [ -z "$root" ] && [ -n "${OBSERVATORY_PYTHON:-}" ]; then
-  # The engine in the interpreter's own venv (OBS-393): `full agent install` names the venv's
-  # `bin/python3` and no folder of one Python release, which a rebuild on another one removes.
-  v="$(dirname "$(dirname "$OBSERVATORY_PYTHON")")"
-  for c in "$v"/lib/python3*/site-packages/observatory/engine; do
-    [ -f "$c/observatory.py" ] && root="$c"
-  done
-fi
+case "${OBSERVATORY_PYTHON:-}" in
+  /*)
+    if [ -z "$root" ]; then
+      # The engine in the interpreter's own venv (OBS-393): `full agent install` names the venv's
+      # `bin/python3`, and a venv rebuilt on another Python release has a new lib/python3.X. The
+      # release pyvenv.cfg names is the one; only without it is the folder found by its name.
+      v="$(dirname "$(dirname "$OBSERVATORY_PYTHON")")"
+      mm="$(sed -n 's/^version[_a-z]* *= *\([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' "$v/pyvenv.cfg" 2>/dev/null | head -n 1)"
+      if [ -n "$mm" ]; then
+        c="$v/lib/python$mm/site-packages/observatory/engine"
+        [ -f "$c/observatory.py" ] && root="$c"
+      else
+        for c in "$v"/lib/python3*/site-packages/observatory/engine; do
+          [ -f "$c/observatory.py" ] && root="$c"
+        done
+      fi
+    fi ;;
+esac
 if [ -z "$root" ] && command -v project-observatory >/dev/null 2>&1; then
   # Installed by the PassionCode launcher with no `full agent install`: ask the engine.
   root="$(project-observatory full-path 2>/dev/null || true)"

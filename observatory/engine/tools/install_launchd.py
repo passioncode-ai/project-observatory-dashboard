@@ -7,7 +7,7 @@ is 30 minutes because a tick over a quiet machine costs nothing and the
 interesting resolution here is "did work happen this half hour", not seconds.
 """
 from __future__ import annotations
-import argparse, plistlib, subprocess, sys, os, pathlib, hashlib, re, shutil, stat
+import argparse, plistlib, subprocess, sys, os, pathlib, hashlib, re, shutil, shlex, stat
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -16,8 +16,10 @@ import paths
 import configuration
 
 
-def instance_label(kind: str) -> str:
-    digest = hashlib.sha256(str(paths.HOME.resolve()).encode()).hexdigest()[:16]
+def instance_label(kind: str, home: pathlib.Path | str | None = None) -> str:
+    """The launchd label of this workspace's job KIND; HOME names another workspace (doctor reads the
+    workspace it was asked about, not the one this process was started for)."""
+    digest = hashlib.sha256(str(pathlib.Path(home or paths.HOME).resolve()).encode()).hexdigest()[:16]
     return f"org.project-observatory.{digest}.{kind}"
 
 
@@ -143,9 +145,41 @@ def job_argv(tool: str, *args: str, python: str | None = None) -> list[str]:
     python = python or stable_interpreter(configuration.engine_python())
     root = engine_root()
     if version_bound(root):
+        problem = interpreter_problem(python, root)
+        if problem:
+            raise configuration.ConfigurationError(f"no job definition is written: {problem}")
         return [python, "-P", "-m", LAUNCHER, tool, *args]
     relative, kind = JOB_TOOLS[tool]
     return (["/bin/bash", str(root / relative)] if kind == "bash" else [python, str(root / relative)]) + list(args)
+
+
+def engine_venv(root: pathlib.Path | None = None) -> pathlib.Path | None:
+    """The virtual environment holding the engine: the nearest ancestor with `pyvenv.cfg`."""
+    root = root or engine_root()
+    return next((parent for parent in root.parents if (parent / "pyvenv.cfg").is_file()), None)
+
+
+def interpreter_problem(python: str, root: pathlib.Path | None = None) -> str | None:
+    """Why PYTHON must not be written into a job definition for the engine at ROOT, or None.
+
+    A venv whose base Python is gone (`pyvenv.cfg` home missing) has a `bin/python3` that is a
+    broken link; `configuration.engine_python` then falls back to whatever interpreter runs this
+    process, and a definition naming it would start the launcher where the package is not
+    installed. Only the engine venv's own interpreter, existing, is written (OBS-393)."""
+    root = root or engine_root()
+    problem = venv_home_problem(root)
+    if problem:
+        return problem
+    venv = engine_venv(root)
+    if venv is None:
+        return None
+    where = pathlib.Path(python).parent
+    if where not in (venv / "bin", venv / "Scripts"):
+        return f"the interpreter {python} is not the engine's virtual environment's ({venv})"
+    if not os.path.exists(python):
+        return (f"the interpreter {python} does not start ("
+                + ("a link to a Python that is gone" if os.path.lexists(python) else "missing") + ")")
+    return None
 
 
 def job_cwd(workspace: pathlib.Path | str) -> pathlib.Path:
@@ -348,13 +382,15 @@ def run(*args: str) -> tuple[int, str]:
     return p.returncode, (p.stdout + p.stderr).strip()
 
 
-def managed_jobs() -> list[dict]:
+def managed_jobs(home: pathlib.Path | str | None = None) -> list[dict]:
     """This workspace's two launchd jobs: the tick (here) and the server (tools/serverd.py).
 
     `full update` stops and restarts exactly these. Their labels come from the
-    workspace path, so another workspace's jobs on the same account are never named."""
-    server = instance_label("server")
-    return [{"name": "tick", "label": LABEL, "plist": str(PLIST)},
+    workspace path, so another workspace's jobs on the same account are never named.
+    HOME names the workspace when it is not this process's."""
+    tick = LABEL if home is None else instance_label("tick", home)
+    server = instance_label("server", home)
+    return [{"name": "tick", "label": tick, "plist": str(PLIST if home is None else plist_path(tick))},
             {"name": "server", "label": server, "plist": str(plist_path(server))}]
 
 
@@ -409,35 +445,72 @@ def _is_python(argument: str) -> bool:
 CALLER_ENV = ("PATH", *TICK_LIMITS)
 
 
-def _port_of(doc: dict) -> int | None:
-    args = doc.get("ProgramArguments") or []
+def kept_path(value) -> str | None:
+    """An installed job's PATH, kept by a rewrite, without the entries no definition may carry: a
+    Homebrew Cellar folder (LC-05) or one another account can write. None when nothing is left."""
+    if not isinstance(value, str):
+        return None
+    entries = [e for e in value.split(os.pathsep) if e and "/Cellar/" not in e and _safe_dir(e)]
+    return os.pathsep.join(dict.fromkeys(entries)) or None
+
+
+def fitted_env(env: dict, have: dict) -> dict:
+    """The builder's ENV fitted to an installed job's environment HAVE: its caller entries (CALLER_ENV)
+    are kept, and a variable the builder does not write (HTTPS_PROXY, SSL_CERT_FILE, ...) stays."""
+    out = dict(env)
+    for key, value in (have or {}).items():
+        if key not in out and key not in CALLER_ENV and isinstance(value, str):
+            out[key] = value
+    path = kept_path((have or {}).get("PATH"))
+    if path and "PATH" in out:
+        out["PATH"] = path
+    for key in TICK_LIMITS:
+        value = (have or {}).get(key)
+        if isinstance(value, str) and _seconds(value):
+            out[key] = value
+        else:
+            out.pop(key, None)
+    return out
+
+
+def _port_of(args) -> int | None:
+    args = list(args or [])
     for i, arg in enumerate(args[:-1]):
         if arg == "--port" and str(args[i + 1]).isdigit():
             return int(args[i + 1])
     return None
 
 
-def wanted_definition(name: str, installed: dict, python: str | None = None) -> dict | None:
-    """The definition the installer would write now for managed job NAME, fitted to what is
-    installed: the tick keeps its interval, the server its port, both their caller's environment
-    entries (CALLER_ENV). None when it cannot be built here (a refused interpreter path)."""
+def _wanted(name: str, installed: dict, python: str | None) -> tuple[dict | None, str | None]:
+    """(definition, None), or (None, why) when the installer would refuse to write one here."""
     try:
         if name == "tick":
             interval = installed.get("StartInterval")
             doc = build(interval if isinstance(interval, int) and interval >= 60 else 1800, python=python)
         elif name == "server":
-            doc = server_document(_port_of(installed) or default_server_port(), python=python)
+            doc = server_document(_port_of(installed.get("ProgramArguments")) or default_server_port(), python=python)
         else:
-            return None
-    except (configuration.ConfigurationError, ValueError):
-        return None
-    env, have = doc["EnvironmentVariables"], installed.get("EnvironmentVariables") or {}
-    for key in CALLER_ENV:
-        if isinstance(have.get(key), str):
-            env[key] = have[key]
-        elif key != "PATH":
-            env.pop(key, None)
-    return doc
+            return None, f"no builder for {name}"
+    except (configuration.ConfigurationError, ValueError) as exc:
+        return None, str(exc)[:300]
+    doc["EnvironmentVariables"] = fitted_env(doc["EnvironmentVariables"], installed.get("EnvironmentVariables") or {})
+    return doc, None
+
+
+def merged_definition(installed: dict, wanted: dict) -> dict:
+    """WANTED's keys over INSTALLED: a key the builder does not write (Disabled, a person's
+    KeepAlive tweak, a SoftResourceLimits) stays as installed."""
+    out = dict(installed)
+    out.update(wanted)
+    return out
+
+
+def wanted_definition(name: str, installed: dict, python: str | None = None) -> dict | None:
+    """The definition the installer would write now for managed job NAME, fitted to what is installed:
+    the tick keeps its interval, the server its port, both their caller's environment entries and any
+    key or variable the builder does not write. None when it cannot be built here."""
+    doc, _ = _wanted(name, installed, python)
+    return None if doc is None else merged_definition(installed, doc)
 
 
 def _drift(installed: dict, wanted: dict) -> tuple[str, str]:
@@ -458,15 +531,21 @@ def repair_definitions(expected: str | None = None, *, write: bool = True,
     """The managed jobs (tick, server) whose installed plist differs from the one the installer
     would write now, each rewritten in place with `write` (mode 0600; loading it is the caller's step).
 
-    The whole definition is compared, not one field. Before 0.19.3 the plists could name the
+    Every key the installer writes is compared, not one field. Before 0.19.3 the plists could name the
     INSTALLER's interpreter (a tick on Homebrew's bare python failed its backup on `No module
     named 'cryptography'`), and only the interpreter was repaired; a venv rebuilt on another
     Python release (3.14 to 3.15) left every plist naming `lib/python3.14/site-packages/...`
     files that no longer existed, and launchd failed each run with exit 78 (OBS-393). `full
-    update` restarts the jobs from the files as they are, so only this rewrite mends them.
-    `expected` is the interpreter the definitions name (the engine's by default); `only` names
-    the jobs to look at. A job without a plist, or with one that does not parse, is skipped."""
-    expected = expected or stable_interpreter(configuration.engine_python())
+    update` restarts the jobs from the files as they are, so only this rewrite mends them. A key or
+    a variable the installer does not write stays. A drift that cannot be mended here (no
+    definition may be written: a venv whose Python is gone, a refused path) is answered with
+    `skipped` and its reason, never hidden. `expected` is the interpreter the definitions name (the
+    engine's by default); `only` names the jobs to look at. A job without a plist, or with one that
+    does not parse, is skipped."""
+    try:
+        expected = expected or stable_interpreter(configuration.engine_python())
+    except configuration.ConfigurationError:
+        expected = configuration.engine_python()
     found = []
     for job in managed_jobs():
         path = pathlib.Path(job["plist"])
@@ -478,13 +557,22 @@ def repair_definitions(expected: str | None = None, *, write: bool = True,
             continue
         if not isinstance(doc, dict):
             continue
-        wanted = wanted_definition(job["name"], doc, python=expected)
-        if wanted is None or wanted == doc or lint_plist(wanted):
+        built, why = _wanted(job["name"], doc, expected)
+        wanted = None if built is None else merged_definition(doc, built)
+        if wanted is not None and wanted == doc:
+            continue
+        problems = lint_plist(wanted) if wanted is not None else [why or "no definition"]
+        missing = missing_paths(doc)
+        if problems:
+            if missing:
+                # Only a definition that cannot start is worth a row: one that runs is left alone.
+                found.append({"name": job["name"], "label": job["label"], "plist": str(path),
+                              "missing": missing, "skipped": "; ".join(problems)[:400]})
             continue
         was, now = _drift(doc, wanted)
         found.append({"name": job["name"], "label": job["label"], "plist": str(path), "was": was, "now": now,
                       "changed": sorted(k for k in set(doc) | set(wanted) if doc.get(k) != wanted.get(k)),
-                      **({"missing": missing_paths(doc)} if missing_paths(doc) else {})})
+                      **({"missing": missing} if missing else {})})
         if write:
             fd = osprivacy.open(path, os.O_WRONLY | os.O_TRUNC | osprivacy.NOFOLLOW, 0o600)
             with os.fdopen(fd, "wb") as stream:
@@ -497,17 +585,137 @@ def repair_definitions(expected: str | None = None, *, write: bool = True,
 repair_interpreters = repair_definitions
 
 
-def tick_job(interval: int):
-    """The tick for Task Scheduler or systemd (`osschedule`), as `build` describes it for launchd."""
+def tick_job(interval: int, python: str | None = None, have_env: dict | None = None):
+    """The tick for Task Scheduler or systemd (`osschedule`), as `build` describes it for launchd.
+    HAVE_ENV, an installed unit's environment, is kept as `fitted_env` keeps it (a repair)."""
     import osschedule
     if interval < 60:
         raise ValueError("Tick interval must be at least 60 seconds")
-    env = environment()
+    python = python or stable_interpreter(configuration.engine_python())
+    env = environment(python)
     env["OBSERVATORY_TICK_CEILING_SECONDS"] = str(tick_ceiling(interval))
-    return osschedule.Job(name="tick", workspace=paths.HOME, argv=tuple(job_argv("tick-py")),
+    if have_env is not None:
+        env = fitted_env(env, have_env)
+    return osschedule.Job(name="tick", workspace=paths.HOME, argv=tuple(job_argv("tick-py", python=python)),
                           env=tuple(sorted(env.items())), cwd=job_cwd(paths.HOME),
                           stdout=LOG_DIR / "tick.log", stderr=LOG_DIR / "tick.err",
                           interval_seconds=interval, time_limit_seconds=tick_ceiling(interval) + exit_timeout())
+
+
+def server_job(port: int | None = None, python: str | None = None, have_env: dict | None = None):
+    """The server for Task Scheduler or systemd (`osschedule`), as `server_document` describes it for
+    launchd: started at logon, restarted on failure, standard priority (tools/serverd.py `server_job`)."""
+    import osschedule
+    python = python or stable_interpreter(configuration.engine_python())
+    env = environment(python)
+    if have_env is not None:
+        env = fitted_env(env, have_env)
+    return osschedule.Job(name="server", workspace=paths.HOME,
+                          argv=tuple(job_argv("serverd", "--run", "--port", str(port or default_server_port()),
+                                              python=python)),
+                          env=tuple(sorted(env.items())), cwd=job_cwd(paths.HOME),
+                          stdout=paths.STATE / "logs/serverd.out", stderr=paths.STATE / "logs/serverd.err",
+                          time_limit_seconds=SERVER_EXIT_TIMEOUT + 10, background=False)
+
+
+def _unit_fields(text: str) -> tuple[list[str], dict, str | None]:
+    """(ExecStart's words, its Environment= entries, WorkingDirectory) of a systemd unit."""
+    argv, env, cwd = [], {}, None
+    for line in text.splitlines():
+        key, _, value = line.partition("=")
+        if key == "ExecStart":
+            try:
+                argv = shlex.split(value)
+            except ValueError:
+                argv = []
+        elif key == "Environment":
+            try:
+                words = shlex.split(value)
+            except ValueError:
+                continue
+            for word in words:
+                name, sep, val = word.partition("=")
+                if sep:
+                    env[name] = val
+        elif key == "WorkingDirectory":
+            cwd = value.strip().strip('"')
+    return argv, env, cwd
+
+
+def systemd_unit_files(home: pathlib.Path | str | None = None) -> list[dict]:
+    """This workspace's tick and server systemd user units: name, unit, the service file and the timer."""
+    import osschedule
+    out = []
+    workspace = pathlib.Path(home or paths.HOME)
+    for name in ("tick", "server"):
+        # SystemdJob directly, not `osschedule.handle`: doctor reads these files on any system.
+        handle = osschedule.SystemdJob(osschedule.Job(
+            name=name, workspace=workspace, argv=(sys.executable,), env=(), cwd=workspace,
+            stdout=workspace / "x", stderr=workspace / "x", interval_seconds=None if name == "server" else 3600))
+        out.append({"name": name, "unit": handle.unit, "service": handle.units / handle.unit,
+                    "timer": handle.units / f"{handle.name}.timer", "handle": handle})
+    return out
+
+
+def repair_systemd(expected: str | None = None, *, write: bool = True, only: set[str] | None = None,
+                   systemctl=None) -> list[dict]:
+    """`repair_definitions` for Linux: the tick's and the server's systemd user units, compared as
+    text with what the installer would write now (keeping the tick's interval, the server's port, the
+    caller's PATH and any variable the installer does not write). With `write`, the drifted files
+    are rewritten and the user manager reloaded (`daemon-reload`); whether a unit is enabled is left
+    as it is, and restarting a running server is the caller's step."""
+    import osschedule
+    try:
+        expected = expected or stable_interpreter(configuration.engine_python())
+    except configuration.ConfigurationError:
+        expected = configuration.engine_python()
+    found = []
+    for row in systemd_unit_files():
+        service, timer = row["service"], row["timer"]
+        if (only is not None and row["name"] not in only) or service.is_symlink() or not service.is_file():
+            continue
+        try:
+            text = service.read_text(encoding="utf-8")
+            timer_text = timer.read_text(encoding="utf-8") if timer.is_file() else ""
+        except OSError:
+            continue
+        argv, env, cwd = _unit_fields(text)
+        missing = missing_paths({"ProgramArguments": argv, "WorkingDirectory": cwd})
+        try:
+            if row["name"] == "tick":
+                every = re.search(r"^OnUnitActiveSec=(\d+)s?$", timer_text, re.M)
+                job = tick_job(int(every.group(1)) if every and int(every.group(1)) >= 60 else 1800,
+                               python=expected, have_env=env)
+            else:
+                job = server_job(_port_of(argv), python=expected, have_env=env)
+            unit = osschedule.SystemdJob(job)
+            files = [(service, unit.service_text())]
+            if unit.timer_text() is not None:
+                files.append((timer, unit.timer_text()))
+        except (configuration.ConfigurationError, osschedule.ScheduleError, ValueError) as exc:
+            if missing:
+                found.append({"name": row["name"], "unit": row["unit"], "missing": missing,
+                              "skipped": str(exc)[:400]})
+            continue
+        drift = [(path, want) for path, want in files
+                 if not path.is_file() or path.read_text(encoding="utf-8") != want]
+        if not drift:
+            continue
+        found.append({"name": row["name"], "unit": row["unit"], "changed": [p.name for p, _ in drift],
+                      **({"missing": missing} if missing else {})})
+        if write:
+            for path, want in drift:
+                tmp = path.with_suffix(path.suffix + ".tmp")
+                tmp.write_text(want, encoding="utf-8")
+                os.replace(tmp, path)
+    if write and found and any("changed" in f for f in found):
+        (systemctl or systemctl_user)("daemon-reload")
+    return found
+
+
+def systemctl_user(*args: str) -> tuple[int, str]:
+    """`systemctl --user ARGS` as the units' own supervisor (`osschedule.SystemdJob`) runs it."""
+    return systemd_unit_files()[0]["handle"]._systemctl(*args)
 
 
 def main_other(action: str, interval: int) -> int:
