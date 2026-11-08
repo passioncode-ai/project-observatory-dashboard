@@ -1243,7 +1243,7 @@ The operator asked on 2026-11-08 how a person who connects to an organization is
 converts into an organizational one: the person chooses which projects and which keys go to the organization and
 keeps the rest personal, and the groupings of GitHub organizations, DigitalOcean teams and Observatory's own
 organizations must stop reading as one. The vocabulary (account, organization, context, space), the business rules
-ORG-R01 to ORG-R29, the screens ORG-W1 to ORG-W9 with their owners and the gap map are in
+ORG-R01 to ORG-R30, the screens ORG-W1 to ORG-W9 with their owners and the gap map are in
 [organization-onboarding.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/ux/organization-onboarding.md); the build rows are OBS-411 to OBS-420, OBS-425 and OBS-426 with
 OBS-200, OBS-232 to OBS-236 and OBS-359 to OBS-372 on [the backlog](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/backlog.md). **The rules
 throughout:** nothing enters a joined organization without a decision; rules propose and the person decides; the
@@ -1332,9 +1332,11 @@ Steps:
 1. The person redeems the invitation in the hub (People: one link, single use, 72 hours, sent through the
    organization's own mail); it registers their passkey in the hub. It enrolls no computer.
 2. In Fabric, the person admits Acme into their estate: Fabric shows Acme's root fingerprint, the person compares it
-   with the one the administrator sends over another channel, and their passkey signs the pin (OM-2). A mismatch pins
-   nothing. Today the hub shows no root fingerprint for the administrator to send (its invitation is a link only), so
-   the comparison waits for the hub row in the gap map; until then Fabric says the fingerprint was not compared.
+   with the one in the administrator's invitation (the administrator's own Fabric shows it, the invitation message
+   carries it), and only a match lets their passkey sign the pin (OM-2, Fabric ADR-0178 point 6). A mismatch, or an
+   invitation without a fingerprint, pins nothing and says why. Today the hub's invitation is a link only and the
+   administrator's Fabric does not show the fingerprint yet (gap map rows for Fabric and the hub), so the join waits
+   here until both exist.
 3. The person acknowledges Acme's notice in the hub's signed-in page (DEC-0052). Observatory never does (ORG-R18).
 4. The person chooses where Acme's work lives (OSS-107) before anything enrolls (ORG-R29). In the recommended
    separate-space layout the steps below run in the new space; the current personal space never enrolls.
@@ -1345,8 +1347,10 @@ Steps:
 6. The local organization of the same name, if any, is linked to this enrollment (OBS-413); ORG-W1 shows Acme as
    joined and names the device. Next: OSS-105.
 
-States: empty (no token: where it comes from and who makes it); not admitted (no applied estate revision pins Acme:
-"admit Acme in Fabric first"); checking (the server asked); refused (a computer token expired, used, for another
+States: empty (no token: where it comes from and who makes it); no fingerprint (the invitation carries none, so
+nothing is pinned and the join cannot complete: "ask your administrator for the fingerprint their Fabric shows");
+not admitted (no applied estate revision pins Acme: "admit Acme in Fabric first"; Observatory enrolls nothing until it
+does, ORG-R19); checking (the server asked); refused (a computer token expired, used, for another
 organization, or a fleet token: the server's words and "ask your administrator for a new computer token"); offline
 ("needs the network; nothing saved"); waiting for the notice (enrolled; "Acme keeps nothing about your work until you
 acknowledge its notice. It already knows this computer is enrolled." Draft string, for copywriting); success
@@ -1401,8 +1405,8 @@ adaptation revision in Fabric, ORG-R11); the same record applied twice (nothing 
 installed or not signed in (the projects wait, named, and keys and layout steps go on).
 
 Acceptance: an unselected project never reaches the server in any form; a repository name reaches it only as a label
-the person typed; the preview and the applied record have the same digest (ORG-R14); undo before anything left this
-computer leaves no trace on the server (ORG-R13).
+the person typed; the preview and the applied record have the same digest (ORG-R14); undo before Fabric's entry
+revision is signed leaves no trace on the server, and after it a take-back waits for the person's passkey (ORG-R13).
 Coverage: none yet (OBS-232, OBS-417, OBS-425; Fabric TP-04, contract CT-169). Status: draft; product outcome
 unobserved.
 
@@ -1463,9 +1467,13 @@ Steps:
    keys the person chose to revoke, each once the person confirms Acme's replacement works (ORG-R08). The personal space never enrolls in Acme.
 3. This space is the organization's: every personal kind found here is carried into the person's personal space and
    verified there, or removed with its reason, before binding (ORG-R27, OBS-426): vault slots (carried, verified,
-   never forgotten), the vault-digests key and manifests, SSH keys, the person's estate record, pairing and device
-   keys, shares received, memory and ledger records of personal projects, and the snapshot settings; personal
-   projects' curated entries are exported there; then the space is bound to `org:ID` and enrolls.
+   never forgotten), the vault-digests key and manifests, the personal context's device keys, shares received,
+   memory and ledger records of personal projects, and the snapshot settings. SSH private keys never move: the
+   personal space makes and registers its own key wherever the old one is registered (`full ssh-keys rekey OLD
+   --apply`, OSS-96), then the old key's registrations are removed as a rotation removes them (OSS-67) and its file is
+   removed here. The person's estate record stays, applied read-only, because Acme's pin and unpin live there
+   (ORG-R30). Personal projects' curated entries are exported there; then the space is bound to `org:ID` and enrolls
+   with its computer token.
 4. Both in one space: the space enrolls; every project and slot carries its context; the organization sees only its
    own (mode C); sessions start with the context's profile (OBS-236).
 
@@ -1494,21 +1502,31 @@ or the organization closes.
 
 Steps:
 1. Take a project back: ORG-W9, [Take a project back] (or `full org unassign PROJECT --org ID`). Observatory writes a
-   selection revision without it and hands Fabric the withdrawal (an adaptation revision without that item, ORG-R13);
-   the keys Acme issued for it are deleted from Acme's space here. Observatory sends nothing else: each credential
+   selection revision without it and hands Fabric the take-back; Fabric drafts the estate revision that removes the
+   project's entry and asks the person's passkey for it (leaving needs either the person or an administrator, Fabric
+   ADR-0180 decision 2, amending ADR-0178 point 7), and withdraws the item from the adaptation plan. Until the
+   passkey signs, the project stays in Acme's context and the screen says "stays in Acme until your passkey signs".
+   Once signed, the keys Acme issued for it are deleted from Acme's space here. Observatory sends nothing else: each credential
    envelope ends within 30 days (`credentialExpiresAt`, DEC-0111), when the node deletes its value, and the provider
    key itself lives as minted until Acme's administrator revokes it (DEC-0111 item 4). Personal keys are
    untouched (they never left; any the person chose to revoke stay revoked).
-2. Leave: Fabric withdraws the adaptation plan, then unpins Acme from the estate (AD-6, OM-5). In each space enrolled
+2. An administrator releases a project: Acme's administrator signs a release statement in their own Fabric; the
+   person's Fabric verifies it, stops that project's outflow to Acme on receipt, and drafts the revision removing its
+   entry for the person's passkey (Fabric ADR-0180 decision 2); the local steps of step 1 follow.
+3. Leave: Fabric withdraws the adaptation plan, then drafts the one estate revision that revokes Acme's grants,
+   placements and pin and asks the person's passkey for it (AD-6, OM-5, Fabric ADR-0178 point 7); until it is signed
+   the membership stands. In each space enrolled
    in Acme, `full org leave --org ID --plan` (or the screen) lists what happens (ORG-R17): the enrollment ends, Acme's
    credentials here are deleted, the local entry stays with its rules paused so the projects read Personal, checkouts,
    repositories and personal keys untouched; `--apply` does it. A space bound to Acme is left empty of context and
    offered for removal, never deleted by itself.
-3. Removed by the administrator, or the organization closed: the space reads `removed` or `closed` (OSS-74) and the
-   same local plan applies by itself, without a token; Fabric's plan is ended by the server (AD-6).
+4. Removed by the administrator, or the organization closed: the space reads `removed` or `closed` (OSS-74) and the
+   same local plan applies by itself, without a token; Fabric's plan is ended by the server (AD-6), and Fabric asks the
+   person's passkey for the unpin.
 
 States: empty (nothing was ever selected: leaving only ends the enrollment and the pin); loading (the plan built);
-waiting (Fabric's withdrawal not answered yet: shown, the local steps go on, never "done" for that part); error (a
+waiting (a take-back "stays in Acme until your passkey signs"; the unpin "waiting for your passkey"; Fabric's
+withdrawal not answered yet: each shown, the local steps go on, never "done" for that part); error (a
 credential that cannot be deleted locally: named with its kind and command); offline (local steps run; Fabric's
 withdrawal waits); success (Acme absent from contexts; ORG-W1 shows Acme as local with paused rules).
 
@@ -1536,8 +1554,10 @@ Steps:
    at, source) for each `relayed` step (ORG-R23).
 3. It stops only at the `human` steps, named once each with their link: the passkey registration from the
    invitation, the fingerprint comparison and the passkey signing the pin in Fabric, the passkey signing the estate
-   revision that places the chosen projects in Acme's context (Fabric, R1-D12), the notice acknowledgement in the hub,
-   the administrator preparing the computer token, and the macOS administrator password for a new OS account. The
+   revision that places the chosen projects in Acme's context (Fabric, R1-D12), the passkey signing a revision that
+   removes a project's entry or ends the membership (Fabric, ADR-0180 decision 2), the notice acknowledgement in the
+   hub, and the macOS administrator password for a new OS account. Two more are another person's: the administrator
+   preparing the computer token (and sending the root fingerprint), and an administrator's release statement. The
    person's confirmation that a replacement key works is `relayed`: their words to the agent are enough.
 4. It reports what was done with evidence (the record's revision and digest, the journal's counts), what waits and
    on what.
@@ -1550,6 +1570,7 @@ words came through another of their agents (a relay with the quote and its sourc
 refusal from the server (reported with its words; never retried unchanged).
 
 Acceptance: every button of ORG-W1 to ORG-W9 has a door with the same effect, refusals and gate class (a test holds
-the map); no step needs the person to press anything except the six named human steps, each of which is in Fabric,
-the hub or the operating system, never in Observatory.
+the map); no step needs the person to press anything except the six named human steps of their own, each of which is
+in Fabric, the hub or the operating system, never in Observatory; the administrator's steps are named as another
+person's.
 Coverage: none yet (OBS-420, OBS-385). Status: draft; product outcome unobserved.
