@@ -489,14 +489,19 @@ reads as any other movement. An older engine reading a snapshot this release wri
 
 ## Reloading a repaired job waits for launchd (OBS-410, 0.35.7)
 
-No migration and no new file. 0.35.6 rewrote a drifted job definition and reloaded the job with `launchctl bootout`
-then `bootstrap`; launchd refuses a bootstrap while the bootout of the same label is still finishing (the server
-is given 40 s to exit), so after `full update` to 0.35.6 the server could stay unloaded, and the next
-`full maintain ensure` leaves an unloaded job alone. From 0.35.7 a reload waits until the label is gone (up to
-45 s), retries a bootstrap launchd refuses for now (exits 5, 37) up to five times, and a reload that still fails
-answers `jobs.result: reload-failed` with the jobs it left `unloaded`; `full update` checks the jobs it started
-once `maintain ensure` has run and loads one that is gone, or names it under `services_not_restarted`. A machine
-that installed 0.35.6 and has no server job: install 0.35.7, or run
+No migration. 0.35.6 rewrote a drifted job definition and reloaded the job with `launchctl bootout` then
+`bootstrap`; launchd refuses a bootstrap while the bootout of the same label is still finishing (the server is
+given 40 s to exit), so after `full update` to 0.35.6 the server could stay unloaded, and a pass leaves an unloaded
+job alone. From 0.35.7 a reload waits until the label is gone (up to 45 s) and retries a bootstrap launchd refuses
+for now (exits 5, 37 and 125) up to five times; a reload that still fails answers `jobs.result: reload-failed`,
+naming the jobs it left `unloaded` and those still running their old definition (`not_reloaded`); `full update`
+checks the jobs it started once `maintain ensure` has run and loads one that is gone, or names it under
+`services_not_restarted`. A workspace that was updated to 0.35.6 (its `store/logs/update.jsonl` says so) and whose
+server has its launchd definition and Fabric descriptor in place but is not loaded gets the server loaded again,
+once, by the first `maintain ensure` or pass of 0.35.7 (the update to 0.35.7 runs `maintain ensure`), answered
+under `jobs.recovered`; the new file `store/raw/server-recovery-obs410.json` records that it ran, so a server a
+person boots out later stays out. `serverd.py --uninstall` removes both the definition and the descriptor, so a
+server turned off that way is never loaded. By hand:
 `OBSERVATORY_SYSTEM_SETUP=1 python "$(project-observatory full-path)/tools/serverd.py" --install`.
 
 ## Workspace restore: verifying a carried secret store into a disposable folder (OBS-394, 0.35.7)

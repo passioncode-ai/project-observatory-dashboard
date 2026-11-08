@@ -36,14 +36,18 @@ full; fix OBS-410, the server 0.35.6 left unloaded on a Mac after its update; th
   `tools/serverd.py --install`). `full maintain ensure` rewrote the server's definition and reloaded it with
   `bootout` then `bootstrap`, which launchd refuses while the bootout is still finishing; the next pass leaves an
   unloaded job alone. A reload now waits until the label is gone (up to 45 s) and retries a bootstrap launchd
-  refuses for now (exits 5, 37, up to five times); a reload that still fails is `reload-failed`; `full update`
-  loads a job it started that ensure left unloaded, or names it under `services_not_restarted`.
+  refuses for now (exits 5, 37 and 125, up to five times); a reload that still fails is `reload-failed`; `full update`
+  loads a job it started that ensure left unloaded, or names it under `services_not_restarted`; and a server 0.35.6
+  left unloaded is loaded again once (`recover_lost_server`). Found by an independent review of the first fix:
+  without it, installing 0.35.7 would not have brought such a server back.
 
 ## Decisions
 
 - **0.35.7, a patch release**: one additive flag and a fix; no setting, schema or migration change.
-- **0.35.7 goes out the same day as 0.35.6**: every Mac that auto-updates to 0.35.6 can lose its server, and the
-  next update (to 0.35.7) runs the fixed reload and the recheck.
+- **0.35.7 goes out the same day as 0.35.6**: every Mac that auto-updates to 0.35.6 can lose its server. The
+  update from 0.35.6 runs 0.35.6's code, which restarts only what is loaded, so 0.35.7 brings a lost server back
+  itself: once, on a workspace updated to 0.35.6, its first `maintain ensure` (which the update runs) loads a server
+  whose definition and Fabric descriptor are in place but whose label is not loaded (`jobs.recovered`).
 - **The verified copy stays in DIR** for the caller to remove; the docs say it holds every key in plaintext.
 - **No doctor record** for a verification: it must neither raise nor clear `backups-secret-store-not-restored`.
 - **Only the snapshot file is avoided, not its folder**, so the transfer layout `~/obs-transfer/verify` works.
@@ -60,7 +64,7 @@ full; fix OBS-410, the server 0.35.6 left unloaded on a Mac after its update; th
   hosted CI on PR #476 green before it merged as `47f3ca1c`.
 
 - OBS-410: tests first (`test_lifecycle` classes `ReloadWaitsForLaunchd` and `ReloadFailureIsNamed`,
-  `test_engine_update` two cases for the recheck; they failed before the fix), then the portable suites lifecycle,
+  `LostServerIsLoadedOnce`, `StartAfterOwnTimeout`, `test_engine_update` two cases for the recheck; they failed before the fix), then the portable suites lifecycle,
   maintenance, engine_update, serverd, osschedule, space_daemons, handed_commands and osprivacy on
   Python 3.14.
 

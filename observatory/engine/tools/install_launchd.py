@@ -435,6 +435,9 @@ def start_job(plist: str) -> tuple[bool, str]:
         code, out = _launchctl("bootstrap", f"gui/{uid()}", plist)
         if code == 0:
             return True, out
+        if code == 125 and job_loaded(pathlib.Path(plist).stem):
+            # Our own timeout, but launchd did load it: a retry would only meet "already loaded".
+            return True, out
         if code not in BOOTSTRAP_TRANSIENT:
             break
         if attempt + 1 < BOOTSTRAP_ATTEMPTS:

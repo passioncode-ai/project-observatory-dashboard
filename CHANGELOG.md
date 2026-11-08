@@ -16,9 +16,10 @@ definition left it unloaded.
 - **The server comes back after an update to 0.35.6 on macOS** (OBS-410). `full maintain ensure` rewrote the
   server's definition and reloaded it with a bootstrap that launchd refused while the old process was still exiting,
   so the server stayed unloaded and the update reported nothing. Reloads now wait for the bootout and retry the
-  bootstrap, a reload that fails is `reload-failed`, and the update loads a job it started again once ensure has
-  run. A machine that installed 0.35.6 and has no server: `OBSERVATORY_SYSTEM_SETUP=1 python "$(project-observatory
-  full-path)/tools/serverd.py" --install`, or install 0.35.7.
+  bootstrap; a reload that fails is `reload-failed`, naming the jobs left `unloaded` or `not_reloaded`; the update
+  loads a job it started again once ensure has run; and, once, a workspace updated to 0.35.6 whose server has its
+  definition and Fabric descriptor in place but is not loaded gets it loaded again by the first `maintain ensure` or
+  pass of 0.35.7 (the update to 0.35.7 runs one), answered under `jobs.recovered`.
 
 ### Added
 

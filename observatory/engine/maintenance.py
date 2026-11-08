@@ -781,13 +781,81 @@ def step_jobs(launch=None) -> dict:
     while it is not running (otherwise the next pass). A launchd job that was loaded is reloaded and
     one that was not stays unloaded; a running systemd server is restarted, which costs its clients
     a reconnect. A drift that cannot be mended here is answered under `skipped`, with its reason."""
+    recover = False
     if launch is None:
         if sys.platform == "darwin" and shutil.which("launchctl") is not None:
-            launch = _install_launchd()
+            launch, recover = _install_launchd(), True
         elif sys.platform.startswith("linux") and shutil.which("systemctl") is not None:
             return _step_systemd_jobs(_install_launchd())
         else:
             return {"result": "not-applicable"}
+    out = _step_launchd_jobs(launch)
+    if recover:
+        try:
+            lost = recover_lost_server(config.home(), launch)
+        except Exception as exc:  # noqa: BLE001 — a recovery never fails a pass
+            lost = {"job": "server", "result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
+        if lost:
+            out["recovered"] = lost
+    return out
+
+
+#: The release whose job repair could leave the server unloaded after its update (OBS-410).
+LOST_SERVER_RELEASE = "0.35.6"
+#: Written once the recovery below has run, so a server a person boots out later stays out.
+LOST_SERVER_MARKER = "server-recovery-obs410.json"
+
+
+def recover_lost_server(base: Path, launch, *, descriptor: Path | None = None) -> dict | None:
+    """Load the server 0.35.6 left unloaded after its update, once (OBS-410).
+
+    0.35.6's `maintain ensure` rewrote the server's definition and sent `bootstrap` while launchd was
+    still finishing the bootout, so the server stayed unloaded; an update from 0.35.6 runs 0.35.6's own
+    code, which only restarts what is loaded, and a pass leaves an unloaded job alone. A server whose
+    definition and Fabric descriptor are both in place but whose label is not loaded was lost, not
+    turned off (`serverd.py --uninstall` removes both), when this workspace was updated to 0.35.6."""
+    marker = base / "store" / "raw" / LOST_SERVER_MARKER  # paths-check: allow — the workspace `base` passed in, which need not be this process's paths.HOME; a test redirects it through `base`
+    if marker.exists():
+        return None
+    try:
+        lines = (base / "store" / "logs" / "update.jsonl").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    updated = False
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if row.get("event") == "updated" and row.get("to") == LOST_SERVER_RELEASE:
+            updated = True
+            break
+    if not updated:
+        return None
+    import fabric_service
+    import service_identity
+    job = next(j for j in launch.managed_jobs(base) if j["name"] == "server")
+    described = descriptor or fabric_service.descriptor_path(service_identity.SERVICE_ID,
+                                                             service_identity.instance(base))
+    if not (Path(job["plist"]).exists() and described.exists()):
+        return None
+
+    def done(result: str) -> None:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(json.dumps({"at": datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"), "result": result}) + "\n", encoding="utf-8")
+
+    if launch.job_loaded(job["label"]):
+        done("loaded")
+        return None
+    ok, detail = launch.start_job(job["plist"])
+    if ok:
+        done("loaded-again")
+        return {"job": "server", "result": "loaded-again"}
+    return {"job": "server", "result": "load-failed", "detail": str(detail)[:200]}
+
+
+def _step_launchd_jobs(launch) -> dict:
     try:
         drift = launch.repair_interpreters(write=False)
         skipped = [{"job": j["name"], "missing": j.get("missing", []), "reason": j["skipped"]}
@@ -804,7 +872,8 @@ def step_jobs(launch=None) -> dict:
             if launch.job_loaded(job["label"]):
                 stopped, detail = launch.stop_job(job["label"])
                 ok, detail = launch.start_job(job["plist"]) if stopped else (False, detail)
-                row.update(reloaded=ok, **({} if ok else {"detail": str(detail)[:200]}))
+                row.update(reloaded=ok, **({} if ok else {"detail": str(detail)[:200]}),
+                           **({} if stopped else {"still_loaded": True}))
             else:
                 # Not loaded before (a person stopped it, or it was never started): the definition is
                 # mended and stays unloaded.
@@ -812,9 +881,12 @@ def step_jobs(launch=None) -> dict:
                 row["loaded"] = False
             fixed.append(row)
         waiting = [j["name"] for j in drift if j not in ready]
-        lost = [r["job"] for r in fixed if r.get("reloaded") is False and r.get("loaded") is not False]
-        result = "reload-failed" if lost else ("repaired" if fixed else "waiting")
+        failed = [r for r in fixed if r.get("reloaded") is False and r.get("loaded") is not False]
+        lost = [r["job"] for r in failed if not r.get("still_loaded")]
+        stale = [r["job"] for r in failed if r.get("still_loaded")]
+        result = "reload-failed" if failed else ("repaired" if fixed else "waiting")
         return {"result": result, "jobs": fixed, **({"unloaded": lost} if lost else {}),
+                **({"not_reloaded": stale} if stale else {}),
                 **({"waiting": waiting} if waiting else {}), **({"skipped": skipped} if skipped else {})}
     except Exception as exc:  # noqa: BLE001 — a repair never fails a pass
         return {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}

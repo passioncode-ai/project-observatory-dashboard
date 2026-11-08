@@ -1379,6 +1379,98 @@ class ReloadFailureIsNamed(PlistsCarryAStablePath):
         out = self.reload("maintenance").step_jobs(Launch())
         self.assertEqual(out["result"], "reload-failed")
         self.assertEqual(starts, [])
+        self.assertEqual(sorted(out["not_reloaded"]), ["server", "tick"])
+        self.assertNotIn("unloaded", out)
+
+
+class LostServerIsLoadedOnce(Workspace):
+    """OBS-410: a server 0.35.6 left unloaded after its update is loaded again by the next pass, once."""
+
+    def setUp(self):
+        super().setUp()
+        self.maintenance = self.reload("maintenance")
+        self.root = self.base / "lost-server"
+        self.ws = self.root / "ws"
+        (self.ws / "store/logs").mkdir(parents=True)
+        self.plist = self.root / "label.server.plist"
+        self.plist.write_text("<plist/>")
+        self.descriptor = self.root / "project-observatory.default.json"
+        self.descriptor.write_text("{}")
+        self.marker = self.ws / "store/raw" / self.maintenance.LOST_SERVER_MARKER
+        test = self
+
+        class Launch:
+            loaded = False
+            starts = []
+            def managed_jobs(self, home=None):
+                return [{"name": "tick", "label": "label.tick", "plist": str(test.root / "label.tick.plist")},
+                        {"name": "server", "label": "label.server", "plist": str(test.plist)}]
+            def job_loaded(self, label): return self.loaded
+            def start_job(self, plist):
+                self.starts.append(plist)
+                self.loaded = True
+                return True, ""
+        self.launch = Launch()
+        self.launch.starts = []
+
+    def updated_to(self, version):
+        row = {"at": "2026-11-08T16:08:18Z", "event": "updated", "from": "0.35.5", "to": version}
+        (self.ws / "store/logs/update.jsonl").write_text(json.dumps(row) + "\n")
+
+    def recover(self):
+        return self.maintenance.recover_lost_server(self.ws, self.launch, descriptor=self.descriptor)
+
+    def test_a_server_lost_after_the_update_to_0_35_6_is_loaded_again_once(self):
+        self.updated_to("0.35.6")
+        self.assertEqual(self.recover(), {"job": "server", "result": "loaded-again"})
+        self.assertEqual(self.launch.starts, [str(self.plist)])
+        self.assertTrue(self.marker.exists())
+        self.launch.loaded = False  # a person boots it out later
+        self.assertIsNone(self.recover())
+        self.assertEqual(len(self.launch.starts), 1, "the recovery runs once")
+
+    def test_nothing_happens_without_an_update_to_0_35_6(self):
+        self.updated_to("0.35.5")
+        self.assertIsNone(self.recover())
+        self.assertEqual(self.launch.starts, [])
+
+    def test_a_server_turned_off_with_its_descriptor_removed_stays_off(self):
+        self.updated_to("0.35.6")
+        self.descriptor.unlink()
+        self.assertIsNone(self.recover())
+        self.assertEqual(self.launch.starts, [])
+        self.assertFalse(self.marker.exists())
+
+    def test_a_loaded_server_is_left_alone_and_the_check_is_not_repeated(self):
+        self.updated_to("0.35.6")
+        self.launch.loaded = True
+        self.assertIsNone(self.recover())
+        self.assertEqual(self.launch.starts, [])
+        self.assertTrue(self.marker.exists())
+
+    def test_a_load_that_fails_is_named_and_tried_again_next_pass(self):
+        self.updated_to("0.35.6")
+        self.launch.start_job = lambda plist: (False, "Bootstrap failed: 5: Input/output error")
+        out = self.recover()
+        self.assertEqual(out["result"], "load-failed")
+        self.assertIn("Input/output error", out["detail"])
+        self.assertFalse(self.marker.exists())
+
+
+class StartAfterOwnTimeout(Workspace):
+    def setUp(self):
+        super().setUp()
+        self.il = self.reload("install_launchd")
+
+    def test_a_bootstrap_that_timed_out_but_loaded_is_a_success(self):
+        calls = []
+        def launchctl(*args, timeout=60):
+            calls.append(args[0])
+            return (125, "TimeoutExpired") if args[0] == "bootstrap" else (0, "")
+        with patch.object(self.il, "_launchctl", launchctl), patch.object(self.il.time, "sleep", lambda s: None):
+            ok, _ = self.il.start_job("/x/label.server.plist")
+        self.assertTrue(ok)
+        self.assertEqual(calls, ["bootstrap", "print"])
 
 
 if __name__ == "__main__":
