@@ -2364,12 +2364,19 @@ is put in place. What it does when that folder already holds a store is the `--s
 
 | The folder | `auto` (default) | `keep` | `merge` | `replace` | `skip` |
 |---|---|---|---|---|---|
-| absent, or empty (lock files and temporaries only) | written whole | written whole | written whole | written whole | nothing |
+| absent, or empty (lock files and temporaries only, kept aside) | written whole | written whole | written whole | written whole | nothing |
 | holds every carried file, the same | `same` | `same` | `same` | `same` | nothing |
 | differs | refused, nothing written (`secret-store-not-empty`) | left as it is (`kept-existing`) | the missing files written, the rest kept (`merged`) | moved aside to `<folder>.before-restore-<time>-<hex>`, never deleted, then written whole (`replaced`) | nothing |
 
 Files only in the folder are never removed (only `replace` moves the whole folder aside) and are counted as
-`only_here`; a journal (`*.jsonl`) that has grown since the snapshot reads the same. A whole store is written
+`only_here`; a journal (`*.jsonl`) that has grown since the snapshot reads the same. No folder is ever deleted: an
+empty one is moved aside to `<folder>.before-restore-<time>-<hex>` like a replaced store, and a folder holding any
+subfolder (even one named `x.lock` or `keys.tmp`) is not empty. The restore holds the vault's own lock in that folder
+while it writes. It never writes into the home itself, `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config/gh`,
+`~/Library/LaunchAgents` or `~/Library/Keychains` (`secret-store-target-refused`), and `merge` refuses a folder
+holding files but no `projects/`. A snapshot taken on another machine or under another home writes its store only
+where this machine's own workspace settings name the same folder, or where you confirm it with
+`--secret-store-target PATH` (the refusal `secret-store-target-unconfirmed` shows the exact command). A whole store is written
 into a sibling folder `.<name>.restore-<hex>` (folders 0700, files 0600, every SHA-256 checked again) and
 renamed into place in one step; a merge writes each missing file atomically and never over an existing one;
 missing parent folders are created 0700. A store that could not be written is left as it was and the home is
