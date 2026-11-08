@@ -11,7 +11,10 @@ WHAT IT DOES. `external_stores(base)` names the stores outside the workspace, by
 uses (`backup_vault._settings_stores`), so the store doctor says is not carried is the store a
 snapshot carries. `carry(store, dest)` copies one byte for byte under the vault's own mutation lock,
 with digests, sizes and modes, and says why when it does not. `verify(source, manifest)` checks a
-snapshot's `external/` folder against its manifest.
+snapshot's `external/` folder against its manifest. On the way back (part 2), `restore_plan` decides
+per store what the restore's `--secret-store` policy does with the folder the restored settings name,
+before anything is written, and `apply_plan` writes it through a sibling stage before the home is
+renamed into place (the section "the restore's part" below).
 
 WHERE IT GOES. Only into a snapshot that is about to be encrypted (`workspace_upgrade.snapshot` without
 an explicit output and with a passphrase): a plaintext copy of an external store is never written.
@@ -668,3 +671,559 @@ def summary(rows: list[dict]) -> dict:
     return {"state": first["state"], "reason": first["reason"], "files": len(first["files"]),
             "size": first["size"], "kept_here": first.get("kept_here", 0),
             "not_carried": len(first.get("not_carried") or [])}
+
+
+# --- the restore's part (OBS-350 part 2) ----------------------------------------------------------
+#
+# WHERE IT GOES. The target of a carried store is the folder the restored settings name for it (the
+# first of its `settings_keys` present, after the home rewrite), or, with `--secret-store-only`, the
+# folder the CURRENT workspace's settings name. A target inside the restored home is refused: the home
+# would then hold the store twice.
+#
+# WHAT IS DECIDED FIRST. `restore_plan` reads the target and decides what the policy does with it before
+# anything is written; a refusal there changes nothing. `apply_plan` writes, and is called before the
+# restored home is renamed into place, so a store that could not be written leaves no home behind.
+#
+# HOW IT IS WRITTEN. A whole store goes through a sibling stage `.<name>.restore-<hex12>` (folders 0700,
+# files 0600 through osprivacy, every digest checked again, fsync) and one rename; a merge writes each
+# missing file atomically beside itself and never overwrites one; a replace moves the old store aside
+# (`<target>.before-restore-<stamp>-<hex6>`, never deleted) and puts it back when the write fails.
+
+#: The restore policies for a target that already exists (`full restore --secret-store`).
+POLICIES = ("auto", "keep", "merge", "replace", "skip")
+#: A leftover restore stage older than this is a dead run's and the next restore removes it.
+RESTORE_STAGE_AGE_SECONDS = 3600
+RESTORE_STAGE = re.compile(r"\.(?P<name>.+)\.restore-(?:empty-)?[0-9a-f]{12}")
+
+
+class CarryFailed(RuntimeError):
+    """A failure while writing a store (exit 1); the target is left as it was."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def _write_failed(target_display: str, why: str) -> CarryFailed:
+    return CarryFailed("secret-store-write-failed",
+                       f"The secret store at {target_display} could not be written ({why}); it was left as it was "
+                       "and the home was not restored")
+
+
+def _within_either(a: Path, b: Path) -> bool:
+    return backup_vault._within(a, b) or backup_vault._within(b, a)
+
+
+def resolve_target(entry: dict, sources: dict, home: Path) -> tuple[Path | None, str, str | None]:
+    """(target, the setting that named it, a problem code or None) for one carried store.
+
+    `sources` are the settings' `sources` after the home rewrite; the value is expanded under this
+    home. A value absent, relative or unexpandable is `secret-store-unresolved`; one inside the home
+    (or holding it) is `secret-store-target-inside-home`."""
+    keys = [k for k in (entry.get("settings_keys") or [entry.get("name")]) if isinstance(k, str)]
+    for key in keys:
+        value = sources.get(key)
+        if not isinstance(value, str) or not value.strip():
+            continue
+        try:
+            path = Path(value).expanduser()
+        except (RuntimeError, KeyError):
+            return None, key, "secret-store-unresolved"
+        if not path.is_absolute():
+            return None, key, "secret-store-unresolved"
+        path = Path(os.path.abspath(path))
+        if _within_either(path.resolve(), home.resolve()):
+            return path, key, "secret-store-target-inside-home"
+        return path, key, None
+    return None, (keys[0] if keys else "secret_store"), "secret-store-unresolved"
+
+
+def _digest_prefix(path: Path, limit: int) -> str:
+    h = hashlib.sha256()
+    left = limit
+    fd = osprivacy.open(path, os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK)
+    with os.fdopen(fd, "rb") as stream:
+        while left > 0:
+            block = stream.read(min(left, 1024 * 1024))
+            if not block:
+                break
+            h.update(block)
+            left -= len(block)
+    return h.hexdigest()
+
+
+def _through_link(target: Path, rel: str) -> bool:
+    """Whether an ancestor of `rel` under `target` is a link or not a folder: nothing is written through it."""
+    current = target
+    for part in rel.split("/")[:-1]:
+        current = current / part
+        if not os.path.lexists(current):
+            return False
+        if current.is_symlink() or not current.is_dir():
+            return True
+    return False
+
+
+def _file_state(target: Path, row: dict) -> str:
+    """`same`, `missing` or `conflict` for one carried file against the target. A journal (`*.jsonl`) that
+    grew since the snapshot reads the same: the copy holds what was read, and a journal only appends
+    (the restore's own movement line among them, so a rerun reads `same`)."""
+    rel = row["path"]
+    if _through_link(target, rel):
+        return "conflict"
+    path = target / rel
+    if not os.path.lexists(path):
+        return "missing"
+    if path.is_symlink() or not path.is_file():
+        return "conflict"
+    try:
+        size = path.lstat().st_size
+        if rel.endswith(".jsonl"):
+            same = size >= row["size"] and _digest_prefix(path, row["size"]) == row["sha256"]
+        else:
+            same = size == row["size"] and _digest_file(path)[1] == row["sha256"]
+    except (OSError, _Unreadable):
+        return "conflict"
+    return "same" if same else "conflict"
+
+
+def _link_state(target: Path, row: dict) -> str:
+    if _through_link(target, row["path"]):
+        return "conflict"
+    path = target / row["path"]
+    if not os.path.lexists(path):
+        return "missing"
+    try:
+        return "same" if path.is_symlink() and os.readlink(path) == row["target"] else "conflict"
+    except OSError:
+        return "conflict"
+
+
+def _present(target: Path) -> tuple[set[str], bool]:
+    """(the relative paths of every file and link under the target the copy would carry, whether anything
+    else is there: a special file). Lock files and temporaries do not count."""
+    found: set[str] = set()
+    other = False
+    for current, children, names in os.walk(target, followlinks=False):
+        here = Path(current)
+        children[:] = [c for c in children if not _skipped(c)]
+        for name in names + [c for c in children if (here / c).is_symlink()]:
+            if _skipped(name):
+                continue
+            path = here / name
+            rel = path.relative_to(target).as_posix()
+            if path.is_symlink() or path.is_file():
+                found.add(rel)
+            else:
+                other = True
+        children[:] = [c for c in children if not (here / c).is_symlink()]
+    return found, other
+
+
+def classify(target: Path, entry: dict) -> dict:
+    """The target's state against a carried store: `absent`, `empty`, `same`, `differs` or `not-a-folder`,
+    with counts of `missing`, `same`, `conflict` and `only_here`, and the conflicting paths."""
+    counts = {"missing": 0, "same": 0, "conflict": 0, "only_here": 0}
+    if not os.path.lexists(target):
+        return {"state": "absent", "counts": counts, "conflict_paths": []}
+    if target.is_symlink() or not target.is_dir():
+        return {"state": "not-a-folder", "counts": counts, "conflict_paths": []}
+    present, other = _present(target)
+    if not present and not other:
+        return {"state": "empty", "counts": counts, "conflict_paths": []}
+    conflicts = []
+    carried = set()
+    rows = [(row, _file_state) for row in entry.get("files") or []]
+    if not osprivacy.WINDOWS:
+        rows += [(row, _link_state) for row in entry.get("links") or []]
+    for row, state_of in rows:
+        carried.add(row["path"])
+        state = state_of(target, row)
+        counts[state] += 1
+        if state == "conflict":
+            conflicts.append(row["path"])
+    counts["only_here"] = len(present - carried)
+    state = "same" if not counts["missing"] and not counts["conflict"] else "differs"
+    return {"state": state, "counts": counts, "conflict_paths": sorted(conflicts)}
+
+
+def _refusal(code: str, name: str, setting: str, display: str | None, counts: dict | None = None) -> CarryRefused:
+    if code == "secret-store-not-empty":
+        c = counts or {}
+        return CarryRefused(code, (
+            f"The secret store at {display} already holds a store that differs from the snapshot's "
+            f"({c.get('missing', 0)} missing, {c.get('conflict', 0)} different, {c.get('only_here', 0)} only there); "
+            "nothing was written. Choose with --secret-store keep (leave it), merge (add the missing files, "
+            "keep the rest) or replace (move it aside, write the snapshot's), or skip"))
+    if code == "secret-store-target-inside-home":
+        return CarryRefused(code, (
+            f"The secret store setting sources.{setting} names {display}, which lies inside the restored home "
+            "(or holds it); nothing was written. Restore with --secret-store skip, then point the setting "
+            f"outside the home (project-observatory full configure sources {setting} PATH) and run "
+            "project-observatory full restore SNAPSHOT --secret-store-only"))
+    if code == "secret-store-not-a-folder":
+        return CarryRefused("secret-store-unresolved", (
+            f"The secret store setting sources.{setting} names {display}, which is a link or not a folder; "
+            "nothing was written. Restore with --secret-store skip, then point the setting at a folder "
+            f"(project-observatory full configure sources {setting} PATH) and run "
+            "project-observatory full restore SNAPSHOT --secret-store-only"))
+    return CarryRefused("secret-store-unresolved", (
+        f"The restored settings do not name a folder for the carried secret store {name} (sources.{setting}); "
+        "nothing was written. Restore with --secret-store skip, then name one "
+        f"(project-observatory full configure sources {setting} PATH) and run "
+        "project-observatory full restore SNAPSHOT --secret-store-only"))
+
+
+def _decide(state: str, policy: str) -> str:
+    if state in ("absent", "empty"):
+        return "write"
+    if state == "same":
+        return "none"
+    return {"auto": "refuse", "keep": "keep", "merge": "merge", "replace": "replace"}[policy]
+
+
+def restore_plan(source: Path, manifest: dict, sources: dict, home: Path, policy: str) -> dict:
+    """What a restore does with every store the snapshot carried, decided before anything is written.
+
+    Raises `CarryRefused` (nothing written) for a refusal the policy gives. `{"present": bool, "rows": [...]}`;
+    `present` is false for a snapshot whose manifest has no `externals` (an older engine's)."""
+    if policy not in POLICIES:
+        raise config.ConfigurationError(f"--secret-store takes one of {', '.join(POLICIES)}")
+    entries = manifest.get("externals")
+    if not isinstance(entries, list):
+        return {"present": False, "rows": []}
+    rows = []
+    for entry in entries:
+        row = {"entry": entry, "name": entry.get("name"), "target": None, "display": None, "setting": None,
+               "state": None, "action": None, "reason": None,
+               "counts": {"missing": 0, "same": 0, "conflict": 0, "only_here": 0}, "conflict_paths": []}
+        rows.append(row)
+        if entry.get("state") != "carried":
+            row.update(action="none", state="not-in-snapshot", reason=entry.get("reason"))
+            continue
+        if policy == "skip":
+            row.update(action="skip", state="skipped")
+            continue
+        target, setting, problem = resolve_target(entry, sources, home)
+        row.update(target=target, setting=setting,
+                   display=backup_vault._display(target) if target is not None else None)
+        if problem is None:
+            found = classify(target, entry)
+            row.update(state=found["state"], counts=found["counts"], conflict_paths=found["conflict_paths"])
+            if found["state"] == "not-a-folder":
+                problem = "secret-store-not-a-folder"
+        if problem is not None:
+            if policy == "keep":
+                code = "secret-store-unresolved" if problem == "secret-store-not-a-folder" else problem
+                row.update(action="skip", state="skipped", reason=code)
+                continue
+            raise _refusal(problem, row["name"], setting, row["display"])
+        action = _decide(row["state"], policy)
+        if action == "refuse":
+            raise _refusal("secret-store-not-empty", row["name"], setting, row["display"], row["counts"])
+        row["action"] = action
+    return {"present": True, "rows": rows}
+
+
+# --- writing --------------------------------------------------------------------------------------
+
+def _sync_dir(path: Path) -> None:
+    if osprivacy.WINDOWS:
+        return  # a folder cannot be opened for fsync there; the files are synced one by one
+    fd = osprivacy.open(path, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _make_parents(folder: Path) -> None:
+    """Create the missing parents of a target 0700; an existing parent is never changed."""
+    missing = []
+    current = folder
+    while not os.path.lexists(current):
+        missing.append(current)
+        if current.parent == current:
+            break
+        current = current.parent
+    for path in reversed(missing):
+        _make_dir(path)
+
+
+def _link(target: str, at: Path) -> None:
+    os.symlink(target, at)
+
+
+def _write_tree(src: Path, entry: dict, into: Path) -> list[dict]:
+    """Write a carried store into the new folder `into`: folders 0700, files 0600 with their digests checked
+    as written and again after, links recreated (POSIX). Returns the entries not restored here."""
+    not_restored: list[dict] = []
+    _make_dir(into)
+    for row in sorted(entry.get("directories") or [], key=lambda r: r["path"]):
+        _make_dir(into / row["path"])
+    for row in entry.get("files") or []:
+        dest = into / row["path"]
+        if not dest.parent.is_dir():
+            _make_parents(dest.parent)
+        _, sha = _copy_file(src / row["path"], dest)
+        if sha != row["sha256"]:
+            raise _Unreadable("a written file's digest differs")
+    for row in entry.get("links") or []:
+        if osprivacy.WINDOWS:
+            not_restored.append({"path": row["path"], "reason": "link-not-supported"})
+            continue
+        at = into / row["path"]
+        if not at.parent.is_dir():
+            _make_parents(at.parent)
+        _link(row["target"], at)
+    for row in entry.get("files") or []:
+        if _digest_file(into / row["path"])[1] != row["sha256"]:
+            raise _Unreadable("a written file's digest differs")
+    folders = [into]
+    for current, children, _ in os.walk(into, followlinks=False):
+        folders += [Path(current) / c for c in children if not (Path(current) / c).is_symlink()]
+    for folder in reversed(folders):
+        _sync_dir(folder)
+    return not_restored
+
+
+def _stage_for(target: Path) -> Path:
+    import secrets
+    return target.parent / f".{target.name}.restore-{secrets.token_hex(6)}"
+
+
+def sweep_stages(target: Path, *, age_seconds: float = RESTORE_STAGE_AGE_SECONDS) -> int:
+    """Remove this target's leftover restore stages older than `age_seconds` (a run killed mid-write);
+    a recent one may be a live restore's and is left. Never raises."""
+    removed = 0
+    parent = target.parent
+    try:
+        children = list(parent.iterdir())
+    except OSError:
+        return 0
+    now = time.time()
+    for child in children:
+        match = RESTORE_STAGE.fullmatch(child.name)
+        if not match or match.group("name") != target.name:
+            continue
+        try:
+            if child.is_symlink() or not child.is_dir() or now - child.lstat().st_mtime <= age_seconds:
+                continue
+            shutil.rmtree(child)
+            removed += 1
+        except OSError:
+            continue
+    return removed
+
+
+def _whole(src: Path, entry: dict, target: Path, display: str) -> list[dict]:
+    """Write the store whole onto an absent target, or over an empty folder, through a sibling stage."""
+    stage = _stage_for(target)
+    aside = None
+    try:
+        _make_parents(target.parent)
+        not_restored = _write_tree(src, entry, stage)
+        if os.path.lexists(target):
+            # An empty folder (locks and temporaries only): moved aside, replaced, then removed.
+            aside = target.parent / f".{target.name}.restore-empty-{os.urandom(6).hex()}"
+            os.rename(target, aside)
+        try:
+            os.rename(stage, target)
+        except BaseException:
+            if aside is not None:
+                os.rename(aside, target)
+                aside = None
+            raise
+        _sync_dir(target.parent)
+    except (OSError, _Unreadable) as exc:
+        raise _write_failed(display, type(exc).__name__) from None
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+        if aside is not None:
+            shutil.rmtree(aside, ignore_errors=True)
+    return not_restored
+
+
+def _write_one(source: Path, dest: Path) -> str:
+    """One missing file, written atomically beside itself and never over an existing one."""
+    import tempfile
+    fd, temporary = tempfile.mkstemp(prefix=".restore-", suffix=".tmp", dir=dest.parent)
+    try:
+        osprivacy.make_private(fd)
+        h = hashlib.sha256()
+        with os.fdopen(fd, "wb") as out:
+            inp_fd = osprivacy.open(source, os.O_RDONLY | osprivacy.NOFOLLOW | osprivacy.NONBLOCK)
+            with os.fdopen(inp_fd, "rb") as inp:
+                for block in iter(lambda: inp.read(1024 * 1024), b""):
+                    out.write(block)
+                    h.update(block)
+            out.flush()
+            os.fsync(out.fileno())
+        if os.path.lexists(dest):
+            raise FileExistsError(dest.name)
+        os.replace(temporary, dest)
+        return h.hexdigest()
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(temporary)
+        raise
+
+
+def _merge(src: Path, entry: dict, target: Path, display: str) -> tuple[int, list[dict]]:
+    """Write every carried file the target lacks; conflicts and files only there are left alone."""
+    written = 0
+    not_restored: list[dict] = []
+    try:
+        for row in sorted(entry.get("directories") or [], key=lambda r: r["path"]):
+            folder = target / row["path"]
+            if not os.path.lexists(folder) and not _through_link(target, row["path"] + "/x"):
+                _make_dir(folder)
+        for row in entry.get("files") or []:
+            if _file_state(target, row) != "missing":
+                continue
+            dest = target / row["path"]
+            if not dest.parent.is_dir():
+                _make_parents(dest.parent)
+            if _write_one(src / row["path"], dest) != row["sha256"]:
+                dest.unlink(missing_ok=True)
+                raise _Unreadable("a written file's digest differs")
+            _sync_dir(dest.parent)
+            written += 1
+        for row in entry.get("links") or []:
+            if osprivacy.WINDOWS:
+                not_restored.append({"path": row["path"], "reason": "link-not-supported"})
+                continue
+            if _link_state(target, row) != "missing":
+                continue
+            at = target / row["path"]
+            if not at.parent.is_dir():
+                _make_parents(at.parent)
+            _link(row["target"], at)
+            written += 1
+    except (OSError, _Unreadable) as exc:
+        raise _write_failed(display, type(exc).__name__) from None
+    return written, not_restored
+
+
+def _replace(src: Path, entry: dict, target: Path, display: str) -> tuple[Path, list[dict]]:
+    """Move the existing store aside (0700, never deleted) and write the snapshot's whole; on failure the
+    old store is put back."""
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    aside = target.parent / f"{target.name}.before-restore-{stamp}-{os.urandom(3).hex()}"
+    try:
+        os.rename(target, aside)
+        osprivacy.private_folder(aside)
+    except OSError as exc:
+        if os.path.lexists(aside) and not os.path.lexists(target):
+            os.rename(aside, target)
+        raise _write_failed(display, type(exc).__name__) from None
+    try:
+        not_restored = _whole(src, entry, target, display)
+    except BaseException:
+        if not os.path.lexists(target):
+            os.rename(aside, target)
+        raise
+    return aside, not_restored
+
+
+def _journal(target: Path, **detail) -> str:
+    """One line in the restored vault's movement journal, through `vault.journal` (never a value)."""
+    tools = str(Path(__file__).resolve().parent / "tools")
+    folder = target / "projects"
+    saved_env = os.environ.get("OBSERVATORY_VAULT_DIR")
+    os.environ["OBSERVATORY_VAULT_DIR"] = str(folder)
+    try:
+        import sys
+        if tools not in sys.path:
+            sys.path.insert(0, tools)
+        import vault
+        saved = vault.STORE, vault.MOVES, vault.LEAKS
+        vault.STORE, vault.MOVES, vault.LEAKS = folder, folder / "movements.jsonl", folder / "leaks.jsonl"
+        try:
+            vault.journal("restore-store", "store/*", tool="workspace_upgrade.py", **detail)
+        finally:
+            vault.STORE, vault.MOVES, vault.LEAKS = saved
+        return "written"
+    except Exception as exc:  # noqa: BLE001: the store is written; the answer says the line is not
+        return f"failed: {type(exc).__name__}"
+    finally:
+        if saved_env is None:
+            os.environ.pop("OBSERVATORY_VAULT_DIR", None)
+        else:
+            os.environ["OBSERVATORY_VAULT_DIR"] = saved_env
+
+
+def apply_plan(source: Path, plan_: dict, policy: str, *, snapshot: str, taken_on: str | None) -> list[dict]:
+    """Carry out a plan; one result row per store. The target's state is read again first, so a store that
+    changed since the plan is decided again (a refusal still writes nothing). Raises `CarryFailed`."""
+    results = []
+    for row in plan_["rows"]:
+        out = {"name": row["name"], "state": row["state"], "reason": row["reason"], "target": row["display"],
+               "setting": row["setting"], "files": 0, "same": row["counts"]["same"],
+               "conflicts": row["counts"]["conflict"], "only_here": row["counts"]["only_here"],
+               "not_restored": [], "conflict_paths": row["conflict_paths"], "aside": None, "journal": None,
+               "stages_removed": 0}
+        results.append(out)
+        entry = row["entry"]
+        if row["action"] in ("none", "skip") and row["state"] in ("not-in-snapshot", "skipped"):
+            continue
+        target, display = row["target"], row["display"]
+        out["stages_removed"] = sweep_stages(target)
+        out["not_restored"] = [dict(r, reason=r.get("reason")) for r in entry.get("not_carried") or []
+                               if r.get("reason") != "this-machine-only"]
+        found = classify(target, entry)
+        if found["state"] == "not-a-folder":
+            raise _refusal("secret-store-not-a-folder", row["name"], row["setting"], display)
+        action = _decide(found["state"], policy)
+        if action == "refuse":
+            raise _refusal("secret-store-not-empty", row["name"], row["setting"], display, found["counts"])
+        out.update(same=found["counts"]["same"], conflicts=found["counts"]["conflict"],
+                   only_here=found["counts"]["only_here"], conflict_paths=found["conflict_paths"])
+        src = source / EXTERNAL / row["name"]
+        if action == "none":
+            out["state"] = "same"
+            continue
+        if action == "keep":
+            out["state"] = "kept-existing"
+            continue
+        if action == "write":
+            out["not_restored"] += _whole(src, entry, target, display)
+            out.update(state="written", files=len(entry.get("files") or []) + (
+                0 if osprivacy.WINDOWS else len(entry.get("links") or [])))
+        elif action == "merge":
+            written, skipped = _merge(src, entry, target, display)
+            out["not_restored"] += skipped
+            out.update(state="merged", files=written)
+        elif action == "replace":
+            aside, skipped = _replace(src, entry, target, display)
+            out["not_restored"] += skipped
+            out.update(state="replaced", files=len(entry.get("files") or []), aside=backup_vault._display(aside),
+                       conflicts=0, only_here=0, conflict_paths=[])
+        if out["files"]:
+            out["journal"] = _journal(target, snapshot=snapshot, taken_on=taken_on, files=out["files"],
+                                      state=out["state"])
+    return results
+
+
+def restore_summary(plan_: dict | None, results: list[dict], *, names: bool = False) -> dict:
+    """The answer's `secret_store`: counts by default; relative paths only when asked (`names`)."""
+    if plan_ is None or not plan_["present"]:
+        return {"state": "not-in-snapshot"}
+    if not results:
+        return {"state": "not-applicable"}
+
+    def one(row: dict) -> dict:
+        out = {k: row[k] for k in ("name", "state", "reason", "target", "files", "same", "conflicts",
+                                   "only_here", "journal", "stages_removed")}
+        out["not_restored"] = len(row["not_restored"])
+        if row.get("aside"):
+            out["aside"] = row["aside"]
+        if names:
+            out["conflict_paths"] = list(row["conflict_paths"])
+            out["not_restored_paths"] = [{"path": r["path"], "reason": r["reason"]} for r in row["not_restored"]]
+        return out
+
+    first = one(results[0])
+    if len(results) > 1:
+        first["stores"] = [one(r) for r in results]
+    return first

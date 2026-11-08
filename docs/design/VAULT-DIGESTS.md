@@ -143,6 +143,14 @@ differs, and the one-line summary counts them (`1 kept on one machine on purpose
 deletes a slot of that name another machine already holds: the mark is the source machine's statement,
 not an order to delete elsewhere.
 
+A second-machine restore (OBS-350 part 2) moves the first machine's own manifest, which the workspace
+snapshot holds as `<state>/vault-digests/local.json`, to `<state>/vault-digests/peers/<its machine>.json`
+(`peer-<hex8>.json` when its machine name is this machine's, or a peer of that name is already there), after
+`read_manifest` accepts it; a file it does not accept stays where it is and the restore's
+`digest_manifest` names it. The carried store brings the estate key, so this machine's first `write` makes a
+`local.json` of its own instead of refusing the first machine's as a key lost, and the view compares against
+the first machine at once. A same-machine restore keeps `local.json` as it is.
+
 A rotation marks the other copies stale without a separate step: the manifest carries each slot's
 `rotated_at`, and a `differs` cell names the side that rotated later, comparing the times (not
 their text, so `10:00+02:00` is earlier than `09:00Z`); a side that never rotated is the older one.

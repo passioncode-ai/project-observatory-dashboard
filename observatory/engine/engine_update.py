@@ -1251,7 +1251,8 @@ def restore_in_place(base: Path, snapshot: Path) -> Path:
     stage = base.parent / f".{base.name}.update-restore-{uuid.uuid4().hex[:12]}"
     # The snapshot this update took a moment ago on this machine: restored whole, whatever machine
     # id it names (a snapshot from before 0.30.1 names none, OBS-284).
-    workspace_upgrade.restore(snapshot, stage, same_machine=True)
+    # The pre-update snapshot carries no external secret store, and a rollback never touches one (OBS-350).
+    workspace_upgrade.restore(snapshot, stage, same_machine=True, secret_store="skip")
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     failed = base.parent / f"{base.name}.failed-update-{stamp}-{uuid.uuid4().hex[:6]}"
     if (base / "backups").is_dir():

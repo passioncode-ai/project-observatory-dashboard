@@ -2356,10 +2356,46 @@ why, how many files and bytes, how many entries stayed behind), the record docto
 cannot be written is said on stderr and in the answer's `carry_record_error`. The daily run also keeps the
 state in its maintenance record. The machine bundle skips a store the snapshot carries, naming it in its
 `skipped` list, so no second copy can drift; a store the snapshot never carries (`contains-workspace`) is
-walked like any other path. Putting it back on another machine (`full restore --secret-store POLICY`,
-`--secret-store-only`) is the next part of this work; until then this release restores the home and
-leaves the carried store in the snapshot: `full backups decrypt FILE DIR` opens it, and
-`DIR/external/secret_store/` is the store to copy into place. A copy by hand must recreate each link the
+walked like any other path.
+
+**Putting the store back.** `full restore` writes a carried store into the folder the restored settings
+name for it (after the home rewrite, so `~/...` lands under this machine's home), before the home itself
+is put in place. What it does when that folder already holds a store is the `--secret-store` policy:
+
+| The folder | `auto` (default) | `keep` | `merge` | `replace` | `skip` |
+|---|---|---|---|---|---|
+| absent, or empty (lock files and temporaries only) | written whole | written whole | written whole | written whole | nothing |
+| holds every carried file, the same | `same` | `same` | `same` | `same` | nothing |
+| differs | refused, nothing written (`secret-store-not-empty`) | left as it is (`kept-existing`) | the missing files written, the rest kept (`merged`) | moved aside to `<folder>.before-restore-<time>-<hex>`, never deleted, then written whole (`replaced`) | nothing |
+
+Files only in the folder are never removed (only `replace` moves the whole folder aside) and are counted as
+`only_here`; a journal (`*.jsonl`) that has grown since the snapshot reads the same. A whole store is written
+into a sibling folder `.<name>.restore-<hex>` (folders 0700, files 0600, every SHA-256 checked again) and
+renamed into place in one step; a merge writes each missing file atomically and never over an existing one;
+missing parent folders are created 0700. A store that could not be written is left as it was and the home is
+not restored (`secret-store-write-failed`, exit 1); a refusal (`secret-store-not-empty`,
+`secret-store-unresolved` when the restored settings name no folder for it, `secret-store-target-inside-home`
+when that folder lies inside the new home, `secret-store-manifest-mismatch`) is exit 2 and writes nothing.
+`--json` turns either into `{"error": {"code": "...", "message": "..."}}` on stdout. A link inside the store is
+recreated as a link (on Windows it is named `link-not-supported` instead); a link leaving the store and a
+special file were never carried and are named. A write appends one `restore-store` line to the store's own
+movement journal (`vault.py`; names and counts, never a value). The answer's `secret_store` says what
+happened (`written`, `same`, `merged`, `replaced`, `kept-existing`, `skipped`, `not-in-snapshot` for a
+snapshot that did not carry it, `not-applicable` for a workspace with no external store), with counts;
+`--secret-store-names` adds the conflicting and not restored files by relative path. A `.<name>.restore-<hex>`
+folder a killed restore left is removed by the next restore once it is an hour old. `full init` on an empty
+home restores with `keep`, so a reinstall over a surviving store never fails or overwrites it; an update's
+rollback never touches the store (`skip`).
+
+For a workspace an older release restored, or a restore stopped between the store and the home, write the
+stores alone into the folders THIS workspace's settings name; the home is not touched:
+
+```sh
+project-observatory full restore SNAPSHOT --secret-store-only [--secret-store POLICY] [--json]
+```
+
+Without a release that does this, `full backups decrypt FILE DIR` opens the snapshot and
+`DIR/external/secret_store/` is the store to copy into place by hand; such a copy must recreate each link the
 manifest lists under `externals[].links` (`ln -s TARGET PATH` inside the store: links are recorded, never
 stored as links), and then delete `DIR`, which holds every key in plaintext.
 
@@ -2667,8 +2703,12 @@ of that:
   the backups root and never rotate the first machine's. The vault and everything else, the CLI
   logins the machine bundle carries included, are restored: they are your own credentials and
   work on both machines. A vault kept outside the workspace is carried in the encrypted snapshot
-  but not yet written into place by `full restore` (see "A secret store outside the workspace"
-  above), and a slot marked `keep-here` never leaves the first machine.
+  and written where the restored settings name it (see "Putting the store back" above), and a slot
+  marked `keep-here` never leaves the first machine. The first machine's own vault digest manifest
+  (`<state>/vault-digests/local.json`) becomes a peer here, `peers/<its machine>.json` (or
+  `peers/peer-<hex>.json` when its name is this machine's), so this machine's first
+  `vault-digests write` makes its own under the carried estate key and the view compares against the
+  first machine at once; the answer's `digest_manifest` says where it went.
 - **Which machine is which.** Each machine has an id derived from its platform identifier (never
   written). A snapshot or bundle that names another machine, or names none, is restored the
   second-machine way; `--same-machine` at a terminal restores one whole. `full init` on an empty
@@ -3053,7 +3093,10 @@ runs beside this one" above. To start the second machine empty, on the new machi
 Each machine has its own vault. `project-observatory full vault-digests` shows every vault slot per
 machine as `same`, `differs`, `only here`, `missing` or `unreachable` (with the time of that
 machine's last answer), and one line when all match. Machines compare keyed HMAC-SHA-256 digests
-under one estate key, never values, so both need the same key once:
+under one estate key, never values, so both need the same key once. The key lives at the top of the
+secret store, so a second machine restored from an encrypted snapshot that carried the store has it
+already (and the first machine's manifest as a peer); `key export` and `key import` are needed only when the
+store did not come from a snapshot:
 
 ```sh
 project-observatory full vault-digests key export /path/to/new-file    # on the first machine

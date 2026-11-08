@@ -1117,7 +1117,12 @@ digest; doctor's `backups.secret_store.last_carry` reads `carried` and the not-c
 vault-digests keep-here PROJECT ENV NAME --why "..."` keeps one slot here: the snapshot names it
 `this-machine-only` and still reads as carried, and `full vault-digests` shows `only here on purpose` here and
 `only on <machine> on purpose` on the other machine, neither of which is a difference. `unkeep-here` lets the next
-snapshot carry it. The machine bundle skips the store and says it travels in the workspace snapshot.
+snapshot carry it. The machine bundle skips the store and says it travels in the workspace snapshot. On the other
+machine `full restore SNAPSHOT` writes the store where the restored settings name it (under this machine's home after
+the home rewrite), before the home, and answers `secret_store.state` `written`; a folder already holding the same
+files reads `same`. `--secret-store keep|merge|replace|skip` chooses what happens to a different store already there;
+`--secret-store-only` writes the stores alone into the folders this workspace's settings name. The first machine's
+digest manifest becomes a peer, so `full vault-digests` compares against it at once.
 
 Failure paths: a plaintext `--output` snapshot, no passphrase, a failed export, the pre-update snapshot, a store over
 256 MB, one that changed during two copies, or one that cannot be read is never carried, and the snapshot, the carry
@@ -1127,8 +1132,13 @@ by the next snapshot. A kept slot's rotation archives stay with it, and a slot w
 stays here (`unreadable`). A link leaving the store,
 a socket and lock files stay behind; a link inside it is recorded, never followed or written. A damaged or unlisted
 carried file is refused at verification (`secret-store-manifest-mismatch`). Marking a slot this machine does not
-hold, or clearing a mark that is not there, exits 2. Writing the store into place on the other machine is part 2:
-until then `full backups decrypt` opens it and the person copies `external/secret_store/`.
+hold, or clearing a mark that is not there, exits 2. On restore, a different store already in the folder is refused
+under the default `auto` with counts and the policy flags (`secret-store-not-empty`, exit 2, nothing written); a
+folder the settings do not name, or one inside the new home, is refused the same way (`secret-store-unresolved`,
+`secret-store-target-inside-home`) and the message names the `configure sources` and `--secret-store-only` steps; a
+store that cannot be written is left as it was and the home is not restored (`secret-store-write-failed`, exit 1);
+`replace` moves the old store aside and never deletes it; `--json` gives each as `{"error": {"code", "message"}}`.
+`full init` on an empty home keeps a surviving store, and an update's rollback never touches it.
 
 Acceptance: no value reaches a manifest, an answer, a record or a command's output; a store inside the workspace
 travels in `data/` exactly as before; an older engine restores the home and ignores `external/`.
@@ -1151,8 +1161,15 @@ Coverage: `tests/test_workspace_upgrade.py` ExternalSecretStore (`test_an_extern
 `tests/test_backup_vault.py`
 ThisMachineOnly (`test_a_rotated_kept_slot_leaves_its_archives_behind_too`,
 `test_a_mark_that_does_not_read_keeps_the_slot_here` among them);
-`tests/test_vault_digests.py` ThisMachineOnly; `tests/test_machine_backup.py` ExternalSecretStore. Status: built
-(OBS-350 part 1); the restore side waits for part 2; product outcome unobserved.
+`tests/test_vault_digests.py` ThisMachineOnly; `tests/test_machine_backup.py` ExternalSecretStore;
+`tests/test_workspace_upgrade.py` RestoreSecretStore (`test_restore_writes_the_store_where_the_restored_settings_point`,
+`test_auto_refuses_a_different_existing_store_before_writing_anything`, `test_keep_merge_replace_and_skip_follow_the_table`,
+`test_the_store_is_written_before_the_home_and_a_failed_store_write_leaves_both_unchanged`,
+`test_secret_store_only_writes_the_store_into_the_current_settings_target`,
+`test_the_first_machines_digest_manifest_becomes_a_peer_on_a_second_machine`,
+`test_init_on_an_empty_home_keeps_a_surviving_store`,
+`test_the_command_line_takes_the_policy_and_answers_a_refusal_as_json` among them). Status: built (OBS-350 parts 1
+and 2); product outcome unobserved.
 
 ### OSS-101: a job moved into an account nobody logs in to runs there, and comes back after a reboot
 

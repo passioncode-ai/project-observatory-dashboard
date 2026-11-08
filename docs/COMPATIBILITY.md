@@ -350,6 +350,46 @@ platform, so neither a machine bundle nor a workspace snapshot carries them:
 | `machine-move/peers/` | 0.31.0 | the other machine's facts (`full machine-move facts --out FILE`, schema `observatory-machine-facts/1`: `machine`, `generated_at`, `engine_version`, `platform`, `ssh[]` of `file` and `fingerprint`, `device`, `jobs[]`, `elsewhere[]`, `restore`, `omitted`), placed by the person; written whole through a temporary file and a link, never over an existing name; `full machine-move status` reads every `*.json` here | never written by the engine; a file that does not read is named in `degraded`; deleting one forgets that machine |
 | `machine-id` | 0.30.1 | a random machine id, written only where the platform has no machine identifier of its own (macOS, most Linux and Windows have one) | deleting it gives the machine a new id: bundles and snapshots it took before then read as another machine's |
 
+## Workspace restore: a carried secret store put back (OBS-350 part 2, the release after 0.35.4)
+
+Additive; the snapshot format stays 1 and nothing migrates. `full restore` writes each store a snapshot
+carried (`externals[].state` `carried`) into the folder the restored settings name for it: the first of its
+`settings_keys` present in `sources` after the home rewrite (OBS-347), expanded under this home. New flags,
+each optional, so every existing command line answers as before for a snapshot that carried nothing:
+`--secret-store {auto,keep,merge,replace,skip}` (default `auto`), `--secret-store-only` (write the stores of
+SNAPSHOT into the folders the current workspace's settings name; the home is not touched; refused without a
+workspace), `--secret-store-names` (relative paths of conflicting and not restored files in the answer) and
+`--json` (a refusal or failure as `{"error": {"code", "message"}}` on stdout, exit 2 or 1; without it the
+message stays `Observatory: ...` on stderr). The policy decides what happens to a folder that already holds a
+store; it is computed after verification and before the home is staged, and the store is written before the
+home is renamed into place. Refusals, exit 2, nothing written: `secret-store-not-empty` (`auto` and a store that
+differs), `secret-store-unresolved` (no folder named, a relative one, or a link or file at that path),
+`secret-store-target-inside-home`, `secret-store-manifest-mismatch`; under `keep` an unresolved folder or one
+inside the home is not refused but answered as state `skipped` with that code as its `reason`. Failure, exit 1, the folder left as it was and the home not
+restored: `secret-store-write-failed`. A behaviour change for a snapshot taken by 0.34.0 or later that carried a
+store: `auto` now writes it where none is, and refuses the whole restore when a different store is there, where
+0.34.0 to 0.35.4 restored the home and left the store in the snapshot; `--secret-store skip` restores as they did.
+`full init` on an empty home passes `keep` and an update's rollback passes `skip`, so neither can fail or write
+because of a store. `maintenance.restore_latest` takes `secret_store` and `secret_store_names`; a store refusal
+other than a manifest mismatch is raised, never turned into "try an older backup". `workspace_upgrade.restore`
+gains the keywords `secret_store`, `secret_store_names` and `snapshot_name`; `workspace_upgrade.restore_store_only`
+is new; the refusals are `secret_store_carry.CarryRefused` (a `ConfigurationError` with `code`) and the failure
+`secret_store_carry.CarryFailed` (a `RuntimeError` with `code`).
+
+The restore answer gains `secret_store` (`state` `written`, `same`, `merged`, `replaced`, `kept-existing`,
+`skipped`, `not-in-snapshot` with the snapshot's `reason`, or `not-applicable`; `reason`, `target` in display
+form, counts `files`, `same`, `conflicts`, `only_here`, `not_restored`, `stages_removed`, `journal`, `aside` after
+a replace, and `stores` when there are several; `conflict_paths` and `not_restored_paths` only with
+`--secret-store-names`), and `external_sources_included` is true when every carried store reads written, same,
+merged or replaced. A second-machine restore moves `<state>/vault-digests/local.json` to
+`<state>/vault-digests/peers/<machine>.json` (or `peer-<hex8>.json`) and answers `digest_manifest` (`state`
+`moved-to-peers` with `file`, or `left` with `reason`). New files outside the workspace, both owner-only: the stage
+`<parent>/.<folder>.restore-<hex12>` (renamed into place, or removed; one a killed restore left is removed by the
+next restore after an hour) and, after `replace`, `<folder>.before-restore-<UTC stamp>-<hex6>`, which the engine
+never deletes. The store's `projects/movements.jsonl` gains one `restore-store` row per write (`secret` `store/*`,
+`tool` `workspace_upgrade.py`, `snapshot`, `taken_on`, `files`, `state`; never a value), which an older `vault.py`
+reads as any other movement. An older engine reading a snapshot this release writes still restores the home only.
+
 ## Migration checksums: the same under every Python (OBS-387, 0.35.4)
 
 No migration and no new file. Until 0.35.3 the checksum recorded for each applied migration (`migration_checksums`)
@@ -688,8 +728,8 @@ in the answer's `secret_store_sweep.failed` (folder name, error class) and count
 `workspace_upgrade.snapshot` gains the keyword `update` (the pre-update snapshot passes it). `verify_snapshot`
 refuses a link, a special file, an unlisted file or folder, a changed file or a folder of a store not carried, with
 the code `secret-store-manifest-mismatch` (a `ConfigurationError`, so exit codes are unchanged). An older engine
-verifies and restores `data/` alone and ignores `external/`; so does this release's `full restore`, which does not
-write the store into place yet (the restore side is part 2). New workspace state: `store/raw/secret-store-carry.json`,
+verifies and restores `data/` alone and ignores `external/`; so does the `full restore` of 0.34.0 to 0.35.4, which
+does not write the store into place (the restore side is part 2, below). New workspace state: `store/raw/secret-store-carry.json`,
 owner-only, written atomically after each snapshot the backups keep or export when a store is external (`at`,
 `kind`, `file`, `state`, `reason`, `files`, `size`, `not_carried`, `sweep_failed`; never a value), read by doctor
 since OBS-349 (doctor's `last_carry` gains `not_carried` and `sweep_failed`); a write that fails is said on stderr and as `carry_record_error`. The
