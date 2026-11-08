@@ -153,6 +153,10 @@ class Base(unittest.TestCase):
         pin = patch.object(M.LaunchdSchedule, "headless", lambda sched: bool(sched._headless))
         pin.start()
         self.addCleanup(pin.stop)
+        # Root's daemon copies are read from a folder of this test, never the machine's (OBS-393).
+        daemons = patch.object(M.LaunchdSchedule, "DAEMONS", self.base / "LaunchDaemons")
+        daemons.start()
+        self.addCleanup(daemons.stop)
 
     def tearDown(self):
         self.env.stop()
@@ -1946,6 +1950,171 @@ class Schedule(Base):
         self.assertFalse(sched.installed())
         self.assertIn(" remove ", out["next"][0])
         self.assertEqual(sched.status()["domain"], "system")
+
+    # --- OBS-393: a venv rebuilt on another Python release ---------------------------------
+
+    def stale_doc(self, sched) -> dict:
+        """The definition a 3.14 venv wrote: its engine paths are gone once the venv runs 3.15."""
+        old = self.base / "venv" / "lib" / "python3.14" / "site-packages" / "observatory" / "engine"
+        doc = sched.document()
+        doc["ProgramArguments"] = [doc["ProgramArguments"][0], str(old / "tools" / "maintain.py"), "run"]
+        doc["WorkingDirectory"] = str(old)
+        return doc
+
+    def test_headless_a_stale_release_path_waits_for_root_to_remove_then_apply(self):
+        # The second Mac's account has no GUI session: root's daemon runs the stale definition, and
+        # only root can replace it, so the answer is remove, then apply, never a bootout of our own.
+        sched = self.headless(loaded=True)
+        target = sched.definition
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(plistlib.dumps(self.stale_doc(sched)))
+        out = M.ensure(self.home, schedule=M.Schedules(sched, self.headless(loaded=True)), store=self.store)
+        sched_out = out["schedule"]
+        self.assertEqual((sched_out["changed"], sched_out["load"]), (True, "waiting-for-root"))
+        self.assertEqual([step.split()[4] for step in sched_out["next"]], ["remove", "apply"])
+        self.assertEqual(plistlib.loads(target.read_bytes()), sched.document(), "the new definition is in place")
+        self.assertNotIn("python3.14", target.read_bytes().decode())
+        self.assertEqual(self.bootstraps, [])
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "root's daemons are macOS's")
+    def test_signed_in_later_a_stale_daemon_definition_waits_for_root(self):
+        # Root's daemon of this account was made from a stale definition and the account is now signed
+        # in at the screen: install used to answer "loaded, unchanged" and the daemon kept failing.
+        sched = self.launchd()
+        background = sched.background_definition()
+        background.parent.mkdir(parents=True, exist_ok=True)
+        background.write_bytes(plistlib.dumps(self.stale_doc(sched)))
+        import machine_move
+        with patch.object(machine_move, "_system_daemon_loaded", lambda runner, label, uid: True):
+            out = sched.install()
+        self.assertEqual(out["load"], "waiting-for-root")
+        self.assertEqual([step.split()[4] for step in out["next"]], ["remove", "apply"])
+        self.assertEqual(plistlib.loads(background.read_bytes()), sched.document())
+
+    def test_doctor_names_a_definition_whose_paths_are_gone(self):
+        sched = M.LaunchdSchedule(self.home, headless=False)
+        if sys.platform == "darwin":
+            sched.plist.parent.mkdir(parents=True, exist_ok=True)
+            sched.plist.write_bytes(plistlib.dumps(self.stale_doc(sched)))
+        elif sys.platform != "win32":
+            units = M.SystemdSchedule(self.home)
+            units.units.mkdir(parents=True, exist_ok=True)
+            old = self.base / "venv" / "lib" / "python3.14" / "site-packages" / "observatory" / "engine"
+            (units.units / f"{units.name}.service").write_text(
+                f'[Service]\nExecStart="/usr/bin/python3" "{old}/tools/maintain.py" run\nWorkingDirectory="{old}"\n')
+        else:
+            self.skipTest("Task Scheduler definitions are not read yet")
+        out = M.status(self.home, schedule=FakeSchedule())
+        items = [i for i in out["warning_items"] if i["code"] == "job-path-missing"]
+        self.assertEqual(len(items), 1, out["warnings"])
+        self.assertEqual(items[0]["jobs"], ["maintain"])
+        self.assertIn("python3.14", items[0]["text"])
+        self.assertEqual(items[0]["step"], "project-observatory full maintain ensure")
+        report = workspace.verdict({"maintenance": out})
+        self.assertIn("job-path-missing", [row["code"] for row in report["attention"]])
+        self.assertFalse(report["clean"])
+
+    def test_doctor_names_a_venv_whose_python_is_gone(self):
+        with patch.object(M, "_venv_problem", lambda: "the engine's virtual environment /v was made from a "
+                                                        "Python that is gone (pyvenv.cfg home /gone does not exist)"):
+            out = M.status(self.home, schedule=FakeSchedule())
+        item = next(i for i in out["warning_items"] if i["code"] == "venv-home-missing")
+        self.assertIn("pyvenv.cfg home", item["text"])
+        self.assertNotIn("step", item, "the engine cannot rebuild its own environment: the text says how")
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "root's daemons are macOS's")
+    def test_signed_in_later_callers_with_other_paths_do_not_flap(self):
+        # The system-daemon branch compared the background copy with a document whose PATH came from
+        # the caller: every ensure from another shell rewrote it and asked root again (finding 3).
+        sched = self.launchd()
+        background = sched.background_definition()
+        background.parent.mkdir(parents=True, exist_ok=True)
+        import machine_move
+        with patch.object(machine_move, "_system_daemon_loaded", lambda runner, label, uid: True):
+            with patch.dict(os.environ, {"PATH": "/usr/bin:/bin"}):
+                background.write_bytes(plistlib.dumps(self.stale_doc(sched)))
+                first = sched.install()
+                self.assertEqual(first["load"], "waiting-for-root")
+            tools = self.base / "tools-bin"            # a folder holding a tool joins a caller's PATH
+            tools.mkdir()
+            (tools / "gh").write_text("#!/bin/sh\n")
+            (tools / "gh").chmod(0o700)
+            with patch.dict(os.environ, {"PATH": os.pathsep.join([str(tools), "/usr/bin", "/bin"])}):
+                self.assertIn(str(tools), sched.launch.launch_path())
+                again = M.LaunchdSchedule(self.home).install()
+        self.assertEqual((again["changed"], again["load"]), (False, "loaded"), again)
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "root's daemons are macOS's")
+    def test_headless_root_still_running_the_old_definition_is_still_waited_for(self):
+        # The background copy is new, root's daemon still runs the old one: the second ensure used
+        # to answer "loaded" and the failing daemon was forgotten (finding 8).
+        sched = self.headless(loaded=True)
+        target = sched.definition
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(plistlib.dumps(sched.document()))
+        M.LaunchdSchedule.DAEMONS.mkdir(parents=True, exist_ok=True)
+        (M.LaunchdSchedule.DAEMONS / f"{sched.label}.plist").write_bytes(plistlib.dumps(self.stale_doc(sched)))
+        out = sched.install()
+        self.assertEqual((out["changed"], out["load"]), (False, "waiting-for-root"))
+        self.assertEqual([step.split()[4] for step in out["next"]], ["remove", "apply"])
+        (M.LaunchdSchedule.DAEMONS / f"{sched.label}.plist").write_bytes(plistlib.dumps(sched.document()))
+        self.assertEqual(sched.install()["load"], "loaded", "once root applied it, nothing waits")
+
+    def test_a_repaired_job_that_was_not_loaded_stays_unloaded(self):
+        # step_jobs bootstrapped every drifted job, one a person had stopped included (finding 6).
+        calls = []
+
+        class Launch:
+            def repair_interpreters(self, *, write, only=None):
+                return [{"name": "server", "label": "x.server", "plist": "/p/x.server.plist", "was": "a", "now": "b"},
+                        {"name": "tick", "label": "x.tick", "plist": "/p/x.tick.plist", "was": "a", "now": "b",
+                         "missing": ["/gone"], "skipped": "no job definition is written"}]
+            def job_running(self, label): return False
+            def job_loaded(self, label): return False
+            def stop_job(self, label): calls.append(("stop", label)); return True, ""
+            def start_job(self, plist): calls.append(("start", plist)); return True, ""
+        out = M.step_jobs(Launch())
+        self.assertEqual(calls, [])
+        self.assertEqual(out["jobs"], [{"job": "server", "was": "a", "now": "b", "reloaded": False, "loaded": False}])
+        self.assertEqual(out["skipped"][0]["job"], "tick", "a drift that cannot be mended is named")
+
+    def test_the_systemd_server_is_restarted_and_a_running_tick_waits(self):
+        class Handle:
+            def __init__(self, running): self.is_running, self.restarts = running, 0
+            def running(self): return self.is_running
+            def restart(self): self.restarts += 1; return True, ""
+        handles = {"tick": Handle(True), "server": Handle(True)}
+        written = []
+
+        class Launch:
+            def systemd_unit_files(self):
+                return [{"name": n, "handle": h} for n, h in handles.items()]
+            def repair_systemd(self, *, write, only=None):
+                if write:
+                    written.append(only)
+                return [{"name": "tick", "unit": "t", "changed": ["t.service"]},
+                        {"name": "server", "unit": "s", "changed": ["s.service"]}]
+        out = M._step_systemd_jobs(Launch())
+        self.assertEqual(written, [{"server"}])
+        self.assertEqual(out["waiting"], ["tick"])
+        self.assertEqual(handles["server"].restarts, 1)
+
+    def test_doctor_reads_the_systemd_tick_and_server_units(self):
+        if os.name == "nt":
+            self.skipTest("systemd units are Linux's")
+        launch = M._install_launchd()
+        rows = {r["name"]: r for r in launch.systemd_unit_files(self.home)}
+        rows["server"]["service"].parent.mkdir(parents=True, exist_ok=True)
+        old = self.base / "venv" / "lib" / "python3.14" / "site-packages" / "observatory" / "engine"
+        rows["server"]["service"].write_text(f'[Service]\nExecStart="/usr/bin/python3" "{old}/tools/serverd.py" "--run"\n')
+        with patch.object(M.sys, "platform", "linux"):
+            stale = M.stale_definitions(self.home)
+        self.assertEqual([row["job"] for row in stale], ["server"])
+
+    def test_a_definition_built_today_names_the_workspace_as_its_folder_or_the_checkout(self):
+        doc = M.LaunchdSchedule(self.home).document()
+        self.assertNotIn("lib/python3.", plistlib.dumps(doc).decode())
+        self.assertIn(doc["WorkingDirectory"], (str(self.home), str(M.config.SOURCE)))
 
     @unittest.skipUnless(hasattr(os, "getuid"), "space_daemons.py is a macOS tool")
     def test_headless_definition_uses_only_keys_root_accepts(self):

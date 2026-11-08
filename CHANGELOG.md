@@ -3,6 +3,27 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.35.6 (2026-11-08)
+
+Background jobs keep running when their virtual environment is rebuilt on another Python. Until now every job
+definition named a folder of one Python release, and a venv moved from 3.14 to 3.15 left the maintenance job, the
+tick and the server failing on every run. After installing: `project-observatory full maintain ensure` (an
+account with no GUI session also needs the administrator's two steps it prints).
+
+### Fixed
+
+- **Job definitions name no Python release** (OBS-393, `docs/COMPATIBILITY.md`). The pass, the check, the tick,
+  the server and the per-install manifest run `<venv>/bin/python3 -P -m observatory.job PROGRAM`, a new module that
+  starts the same program in the same process; the working folder is the workspace home. A checkout and a Windows
+  venv keep naming their files. No definition is written for an interpreter that cannot start it.
+- **Repair compares the whole definition**, not only the interpreter, on macOS and, new, for the systemd tick and
+  server on Linux, keeping the tick's interval, the server's port, its `PATH` and anything the installer does not
+  write (in a systemd unit, its `Environment=` variables), and dropping the server's old `LowPriorityIO` and `Nice`; a job that was not loaded stays unloaded; `full maintain ensure` repairs the tick and the server too. A
+  daemon root runs from an older definition keeps answering `waiting-for-root` until root applies the new one.
+- **Doctor names `job-path-missing` and `venv-home-missing`.**
+- **The plugin hooks find the engine after a venv rebuild**, and `full maintain ensure` refreshes their settings
+  when they name a folder that is gone. The observatory-log plugin moves to 0.35.6.
+
 ## 0.35.5 (2026-11-08)
 
 The secret store kept outside the workspace now comes back with a workspace restored on another computer. Until now
