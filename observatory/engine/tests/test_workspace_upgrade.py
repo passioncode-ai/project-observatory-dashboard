@@ -2187,6 +2187,49 @@ class RestoreSecretStore(unittest.TestCase):
         [item]=[i for i in items if i['code']=='backups-secret-store-not-restored']
         self.assertEqual(item['step'],said['stores'][1]['next'])
 
+    def test_a_refused_target_full_of_other_files_still_warns(self):
+        # Fourth review: a refused target (such as ~/.ssh) holds unrelated files; only a vault store
+        # (a projects/ folder with content) clears the warning.
+        import backup_vault
+        new=self.base/'restored-ws'
+        workspace.initialize(new)
+        doc=config.read_json(new/'config/settings.json')
+        doc.setdefault('sources',{})['secret_store']=str(self.store)
+        workspace.write_json(new/'config/settings.json',doc)
+        refused=self.base/'looks-like-ssh'
+        refused.mkdir()
+        (refused/'id_example').write_text('not a store')
+        rows=[{'name':'secret_store','state':'skipped','reason':'secret-store-target-refused','target':str(refused),
+               'files':0}]
+        upgrade._record_restore(new,upgrade._said({**rows[0],'stores':rows},'snap.obsnap'),'snap.obsnap')
+        self.assertTrue([i for i in backup_vault.secret_store(new)[1] if i['code']=='backups-secret-store-not-restored'])
+        (refused/'projects'/'alpha').mkdir(parents=True)
+        self.assertFalse([i for i in backup_vault.secret_store(new)[1] if i['code']=='backups-secret-store-not-restored'],
+                         'a vault store in place clears it')
+
+    def test_every_row_decides_and_secret_store_only_keeps_a_needed_record(self):
+        new=self.base/'restored-ws'
+        workspace.initialize(new)
+        record=new/'store/raw/secret-store-restore.json'
+        rows=[{'name':'secret_store','state':'not-in-snapshot','reason':None,'target':None,'files':0},
+              {'name':'secrets','state':'skipped','reason':'secret-store-write-failed','target':str(self.base/'two'),
+               'files':0}]
+        upgrade._record_restore(new,{**rows[0],'stores':rows},'snap.obsnap')
+        self.assertEqual([r['state'] for r in config.read_json(record)['stores']],['skipped'],
+                         'a later skipped store is recorded though the first carried nothing')
+        upgrade._record_restore(new,{'state':'not-applicable'},'other.obsnap',full=False)
+        self.assertTrue(record.is_file(),'a store-only run of a snapshot without a store keeps the record')
+        upgrade._record_restore(new,{'state':'not-applicable'},'other.obsnap')
+        self.assertFalse(record.exists(),'a full restore without a carried store removes it')
+
+    def test_a_link_loop_is_refused_never_raised(self):
+        import secret_store_carry as carry
+        loop=self.base/'loop'
+        os.symlink(loop,loop)
+        with patch.object(Path,'resolve',side_effect=RuntimeError('Symlink loop')):
+            reason=carry.refused_location(loop/'store')
+        self.assertIn('could not be checked',reason)
+
     def test_a_target_whose_place_cannot_be_checked_is_refused_and_skipped_under_keep(self):
         import secret_store_carry
         entry={'name':'secret_store','settings_keys':['secret_store'],'state':'carried','files':[],
