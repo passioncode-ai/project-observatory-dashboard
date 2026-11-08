@@ -2381,7 +2381,8 @@ where this machine's own workspace settings name the same folder, or where you c
 Another spelling of a protected folder (`~/.SSH` on macOS) or a link to one is refused the same way. Under `keep`,
 which `full init` passes, none of these stops the restore: the store is answered `skipped` with its reason and a
 `next` command, `full init` shows it, and `full doctor` keeps the warning `backups-secret-store-not-restored` with
-that command until a store is written. A whole store is written
+that command until a store is in that folder again, however it got there. A skip you chose with
+`--secret-store skip` raises no warning. A whole store is written
 into a sibling folder `.<name>.restore-<hex>` (folders 0700, files 0600, every SHA-256 checked again) and
 renamed into place in one step; a merge writes each missing file atomically and never over an existing one;
 missing parent folders are created 0700. A store that could not be written is left as it was and the home is
