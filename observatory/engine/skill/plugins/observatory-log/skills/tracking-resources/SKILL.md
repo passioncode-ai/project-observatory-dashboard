@@ -15,7 +15,7 @@ description: >-
   the repository.
 license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 metadata:
-  version: "0.35.6"
+  version: "0.35.9"
 compatibility: >-
   Requires a full Project Observatory installation with organizations.json
   configured; the observatory MCP server or its local CLI. Creating the resource

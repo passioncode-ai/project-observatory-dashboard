@@ -3,7 +3,15 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.35.9 (2026-11-09)
+
+Organization onboarding, part one: `full org accounts` lists every provider account this space reaches under one
+organization, `full org keys` classifies each vault slot of an organization's projects, and the account rules gain
+`github_owners` and `openrouter_accounts`. `full org select` keeps the local record of what goes to an organization,
+with `show`, `apply`, `undo` and `confirm-replacement`. Credentials can be requested instead of minted by hand: the
+administrator issues one through the OpenRouter or Cloudflare door straight into the requested slot, with its
+provenance beside it, and can revoke it with proof. The observatory-log plugin moves to 0.35.9: its handling-secrets
+skill names the request tool.
 
 ### Added
 
