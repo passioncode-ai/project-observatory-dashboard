@@ -650,7 +650,7 @@ information. Until then the 1.1.0 copy keeps working as before, without `replace
   `write`, `bootout`, `wait` (the same bound), `bootstrap` (again while launchd answers 5, 37 or 125, up to five
   attempts, as the engine's own jobs since OBS-410; 125 counts as loaded when launchd names this tool's plist as the label's path). When the new daemon
   does not load, the previous file and registry entry go back and the previous daemon is loaded again, and
-  `put_back` says which of these held (a label with no previous daemon is left with no file, no entry and, if the
+  `put_back` says which of these held (a label with no previous daemon file is left with no file, its registry entry as it was and, if the
   refused bootstrap loaded it after all, booted out); when the old daemon does not stop in time, nothing new is
   loaded and the previous file goes back. Interrupted while it waits (Ctrl-C), it puts the previous file and registry entry back before it exits. It
   reloads even when nothing changed, and applies a label never applied. Its answer is

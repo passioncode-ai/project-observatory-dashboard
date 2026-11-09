@@ -59,7 +59,7 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Fixed
 
-- **A space's daemon is replaced in one step and never left unloaded by a race** (OBS-475, OBS-395 part 2; space daemons 1.2.0,
+- **A space's daemon is replaced in one step, and no longer left unloaded by `apply` right after `remove`** (OBS-475, OBS-395 part 2; space daemons 1.2.0,
   `docs/COMPATIBILITY.md` "Space daemons: replacing a loaded daemon"). `launchctl bootout` returns before the
   daemon's process has exited, so an `apply` right after `remove` was refused `label_taken` and the space's service
   stayed unloaded until someone ran it again. `remove` now answers once launchd has let the label go (45 s, or the
