@@ -1182,7 +1182,8 @@ class Skills(Base):
         # One window: the finding, the plugin, then 98 skills.
         self.assertEqual((len(first["findings"]), len(first["spaces"][0]["plugins"]), len(first["spaces"][0]["skills"])),
                          (1, 1, 98))
-        self.assertEqual((first["page"]["total"], first["page"]["nextCursor"]), (452, "100"))
+        self.assertEqual(first["page"]["total"], 452)
+        self.assertRegex(first["page"]["nextCursor"], r"^100@[0-9]{14}$")
         self.assertEqual(first["counts"], {"skills": 450, "plugins": 1, "findings": 1})
         last = self.server.observatory_machine(section="skills", cursor="402")["skills"]
         self.assertEqual([r["name"] for r in last["spaces"][0]["skills"]][:1], ["s400"])
@@ -1191,6 +1192,11 @@ class Skills(Base):
         for cursor in ("nope", "\u00b2", "9" * 5000):
             bad = self.server.observatory_machine(section="skills", cursor=cursor)
             self.assertIn("invalid-cursor", {d["code"] for d in bad["degraded"]})
+        stale = self.server.observatory_machine(section="skills", cursor="100@20000101000000")
+        self.assertIn("scanned again", " ".join(d["reason"] for d in stale["degraded"]))
+        self.assertEqual(stale["skills"]["page"]["cursor"].split("@")[0], "0")
+        follow = self.server.observatory_machine(section="skills", cursor=first["page"]["nextCursor"])
+        self.assertEqual(follow["skills"]["page"]["cursor"], first["page"]["nextCursor"])
         past = self.server.observatory_machine(section="skills", cursor="9999")
         self.assertEqual((past["skills"]["spaces"][0]["skills"], past["skills"]["page"]["nextCursor"]), ([], None),
                          "a cursor past the end is the end, never the first page again")

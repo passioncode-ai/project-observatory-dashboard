@@ -2084,7 +2084,8 @@ or has another shape, or is ambiguous (`installed_plugins.json`, a settings file
 scan yet, one older than the inventory, or one older than 24 hours (`stale`) is named there with the command
 that fills it. Agents read the same answer with `observatory_machine(section="skills")`, 100 rows a page, the
 findings first, then each space's plugins, then its skills (`limit` up to 100, and `cursor` from
-`skills.page.nextCursor`; `counts` always whole;
+`skills.page.nextCursor`, which names the scan it belongs to, so a walk across a rescan starts again rather
+than skipping rows; `counts` always whole;
 rows there leave out their null fields, and `degraded` comes once, at the top).
 
 ### The disk guard

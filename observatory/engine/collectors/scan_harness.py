@@ -723,11 +723,18 @@ NAME_SHAPE = re.compile(r"[A-Za-z0-9][A-Za-z0-9:._-]{0,63}")
 PLUGIN_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:@[A-Za-z0-9][A-Za-z0-9._-]{0,63})?")
 
 
+def _text(name: str, limit: int = 64) -> str:
+    """A folder's name as a row may carry it: cut to `limit` characters, and anything that is not UTF-8 (a lone
+    surrogate a JSON record held, the bytes of a Linux file name) replaced, so the scan's JSON can always be
+    written."""
+    return name[:limit].encode("utf-8", "replace").decode("utf-8")
+
+
 def _skill_name(declared, folder: str) -> str:
     """The front matter's `name` when it has a name's shape, else the folder's name, cut to 64 characters."""
     if isinstance(declared, str) and NAME_SHAPE.fullmatch(declared):
         return declared
-    return folder[:64]
+    return _text(folder)
 
 
 def _skill_rows(folder: Path, agent: str, scope: str, extra: dict, seen: set[str],
@@ -793,8 +800,10 @@ def _marketplace_latest(name: str, market: dict, degraded: list[dict], cache: di
     except (OSError, ValueError, RuntimeError):   # RuntimeError: a link loop, on Python 3.11 and 3.12
         return None, None
     try:
-        present = folder.is_dir()
-    except OSError:   # a folder that cannot be searched raises here on Python 3.11 and 3.12
+        present = stat.S_ISDIR(os.stat(folder).st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        present = False
+    except (OSError, ValueError):   # a folder that cannot be searched (Path.is_dir() answers False there from 3.13)
         degraded.append({"source": f"claude:marketplace:{label}:{name}", "code": "unreadable",
                          "reason": "the plugin's folder in the marketplace's local copy could not be searched"})
         return None, None
@@ -836,6 +845,7 @@ def _claude_plugins(claude: Path, degraded: list[dict]) -> tuple[list[dict], lis
     user_settings = _settings_doc(claude / "settings.json", "claude:settings.json", degraded)
     settings_cache: dict[tuple[str, str], dict | None] = {}
     catalogue_cache: dict = {}
+    latest_cache: dict[tuple[str, str], tuple[str | None, str | None]] = {}
 
     shapes_named: set[str] = set()
 
@@ -880,10 +890,11 @@ def _claude_plugins(claude: Path, degraded: list[dict]) -> tuple[list[dict], lis
                 where = record.get("projectPath")
                 folder = (Path(where) if isinstance(where, str) and where and "\0" not in where
                           and Path(where).is_absolute() else None)
-                project = folder.name[:64] if folder and folder.name else None
+                project = _text(folder.name) if folder and folder.name else None
                 # Two projects may share a folder name in two places; a short digest of the path tells their
                 # installs apart (a board subject, an ack) without the path itself.
-                project_key = hashlib.sha256(str(folder).encode("utf-8")).hexdigest()[:8] if project else None
+                project_key = (hashlib.sha256(str(folder).encode("utf-8", "surrogatepass")).hexdigest()[:8]
+                               if project else None)
                 if project is None:
                     settings = None
                 else:
@@ -899,8 +910,11 @@ def _claude_plugins(claude: Path, degraded: list[dict]) -> tuple[list[dict], lis
                 degraded.append({"source": f"claude:known_marketplaces.json:{market}", "code": "unrecognised-shape",
                                  "reason": "the marketplace's record is not an object; its newest versions are not "
                                            "known"})
-            latest, latest_from = _marketplace_latest(key.split("@", 1)[0], {**info, "_name": market},
-                                                      degraded, catalogue_cache) if info else (None, None)
+            if info and (market, key) not in latest_cache:
+                # Once per plugin: a plugin installed in several projects is one manifest, read and named once.
+                latest_cache[(market, key)] = _marketplace_latest(key.split("@", 1)[0], {**info, "_name": market},
+                                                                  degraded, catalogue_cache)
+            latest, latest_from = latest_cache.get((market, key), (None, None)) if info else (None, None)
             version = _plain_version(record.get("version"))
             have, newest = version_key(version), version_key(latest)
             row = {"name": key, "agent": CLAUDE_CODE, "scope": scope, "project": project, "projectKey": project_key,
@@ -925,7 +939,12 @@ def _codex_plugins(home: Path, degraded: list[dict], skills: list[dict], seen: s
     inventory can read, so its newest published version is not known (`latest` null). The skills of an enabled
     plugin's version folder are added to `skills`, scope `plugin`."""
     cache = home / ".codex" / "plugins" / "cache"
-    markets = [m for m in _folders(cache, "codex:plugins-cache", degraded) if not m.name.startswith(".")]
+    listed = [m for m in _folders(cache, "codex:plugins-cache", degraded) if not m.name.startswith(".")]
+    markets = [m for m in listed if NAME_SHAPE.fullmatch(m.name)]
+    if len(markets) < len(listed):
+        degraded.append({"source": "codex:plugins-cache", "code": "unrecognised-shape",
+                         "reason": "a folder of Codex's plugin cache has a name of another shape; it is not in the "
+                                   "inventory"})
     if not markets:
         return []
     config = _inventory_doc(home / ".codex" / "config.toml", "codex:config.toml", degraded, kind="toml")
@@ -938,6 +957,11 @@ def _codex_plugins(home: Path, degraded: list[dict], skills: list[dict], seen: s
     for market in markets:
         plugins = [p for p in _folders(market, f"codex:plugins-cache:{market.name}", degraded)
                    if not p.name.startswith(".")]
+        if any(not NAME_SHAPE.fullmatch(p.name) for p in plugins):
+            degraded.append({"source": f"codex:plugins-cache:{market.name}", "code": "unrecognised-shape",
+                             "reason": "a plugin folder of Codex's cache has a name of another shape; it is not in the "
+                                       "inventory"})
+            plugins = [p for p in plugins if NAME_SHAPE.fullmatch(p.name)]
         for plugin in plugins:
             entries = [f.name for f in _folders(plugin, f"codex:plugins-cache:{market.name}:{plugin.name}", degraded)
                        if not f.name.startswith(".")]
@@ -1000,7 +1024,7 @@ def inventory(home: Path, roots: list[Path]) -> dict:
             # Listed whatever it holds: a project without `.claude/skills` lists nothing, one whose folder cannot
             # be searched is named in `degraded`.
             skills += _skill_rows(project / ".claude" / "skills", CLAUDE_CODE, "project",
-                                  {"project": project.name}, seen, degraded)
+                                  {"project": _text(project.name)}, seen, degraded)
     plugins, plugin_skills = _claude_plugins(claude, degraded)
     skills += plugin_skills
     codex_seen: set[str] = set()

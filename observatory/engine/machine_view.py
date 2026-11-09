@@ -155,6 +155,17 @@ def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
         rows += [("plugin", index, r) for r in space["plugins"]] + [("skill", index, r) for r in space["skills"]]
     total = len(rows)
     start = 0
+    # A cursor carries the scan it was given for (`offset@stamp`): the tick rewrites the scan every half hour, and a
+    # walk that spans a rescan would skip or repeat rows without saying so. A bare offset is taken as it is.
+    stamp = re.sub(r"[^0-9]", "", str(doc.get("generated_at") or ""))[:14]
+    given = re.fullmatch(r"([0-9]{1,9})(?:@([0-9]{1,14}))?", str(cursor)) if cursor is not None else None
+    if given and given.group(2) is not None and given.group(2) != stamp:
+        degraded.append({"source": "cursor", "code": "invalid-cursor",
+                         "reason": "the inventory was scanned again since this cursor was given; the first page of "
+                                   "the new scan is shown"})
+        cursor = None
+    elif given:
+        cursor = given.group(1)
     if cursor is not None:
         if re.fullmatch(r"[0-9]{1,9}", str(cursor)) and int(cursor) <= total:
             start = int(cursor)
@@ -173,7 +184,8 @@ def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
     spaces = [{**space, "plugins": [r for kind, i, r in window if kind == "plugin" and i == index],
                "skills": [r for kind, i, r in window if kind == "skill" and i == index]}
               for index, space in enumerate(spaces)]
-    page = {"limit": limit, "cursor": str(start), "nextCursor": str(end) if end < total else None, "total": total,
+    page = {"limit": limit, "cursor": f"{start}@{stamp}", "nextCursor": f"{end}@{stamp}" if end < total else None,
+            "total": total,
             "order": "findings, then each space's plugins, then its skills"}
     return {"measuredAt": doc.get("generated_at"), "spaces": spaces, "page": page, "counts": counts,
             "findings": findings, "open": inventory.get("open") or SKILLS_OPEN, "degraded": degraded}

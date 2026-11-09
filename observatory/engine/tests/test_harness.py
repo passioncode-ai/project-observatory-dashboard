@@ -839,12 +839,18 @@ class Inventory(unittest.TestCase):
         known["family"]["lastUpdated"] = "2026-01-02T00:00:00Z" + "x" * 100_000
         write_json(self.home / ".claude" / "plugins" / "known_marketplaces.json", known)
         installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
-        installed["plugins"]["kit@family"][0]["projectPath"] = str(self.base / ("p" * 200))
         installed["plugins"]["tool@family"][0]["version"] = "1." + "0" * 5000
+        (self.home / ".codex" / "plugins" / "cache" / "family" / "helper" / ("1." + "1" * 60)).mkdir()
+        (self.projects / ("q" * 120) / ".claude" / "skills").mkdir(parents=True)
+        versioned_skill(self.projects / ("q" * 120) / ".claude" / "skills", "deep", "")
+        (self.home / ".codex" / "plugins" / "cache" / ("m" * 120) / "tool" / "1.0.0").mkdir(parents=True)
+        installed["plugins"]["kit@family"][0]["projectPath"] = str(self.base / ("p" * 120))
+        installed["plugins"]["stray@family"] = [{"scope": "local", "projectPath": "/x/\ud800", "version": "1.0.0"}]
         write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
-        (self.home / ".codex" / "plugins" / "cache" / "family" / "helper" / ("1." + "1" * 200)).mkdir()
         inv = self.inventory()
         self.assertNotEqual([d["source"] for d in inv["degraded"]][:1], ["inventory"], "the inventory did not fail")
+        json.dumps(inv, ensure_ascii=False).encode("utf-8")   # the scan's JSON can be written
+        self.assertIn(("codex:plugins-cache", "unrecognised-shape"), {(d["source"], d["code"]) for d in inv["degraded"]})
         rows = inv["spaces"][0]["skills"] + inv["spaces"][0]["plugins"] + inv["findings"]
         self.assertLess(max(len(json.dumps(r)) for r in rows), 600)
         skill = next(r for r in inv["spaces"][0]["skills"] if r["name"] == "long-version")
