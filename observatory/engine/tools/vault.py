@@ -654,21 +654,34 @@ def describe_provenance(provenance: dict | None) -> str:
             f"by {issuer.get('door') or '?'}/{issuer.get('account') or '?'}")
 
 
+#: `remove_value`'s `expect` when any value may go.
+ANY_VALUE = object()
+
+
 @_serialized
-def remove_value(project: str, env: str, name: str, *, tool: str = "vault.py", why: str = "") -> bool:
-    """Delete a slot's value and metadata, keeping its rotation archives, and journal it. Answers whether a
-    value was there. For a door that revoked the value at its provider first (`credential_requests.py
-    revoke`): the open leak check of `remove` does not apply, since nothing the slot held still works."""
+def remove_value(project: str, env: str, name: str, *, tool: str = "vault.py", why: str = "",
+                 expect=ANY_VALUE) -> str:
+    """Delete a slot's value and metadata, keeping its rotation archives, and journal it. Answers `removed`,
+    `absent` or `kept`. `expect` names the value that may go, checked under the vault's own lock, so a put or
+    a rotation that lands while a door was talking to its provider is never deleted: a request id (only the
+    value whose provenance names that request), or None (only a value that carries no provenance). For a door
+    that revoked the value at its provider first (`credential_requests.py revoke`), so the open leak check of
+    `remove` does not apply: nothing the slot held still works."""
     slot = _slot(project, env, name)
     secret = f"{project}/{env}/{name}"
     if not slot.is_file():
-        return False
+        return "absent"
+    if expect is not ANY_VALUE:
+        held = _read_meta(slot).get("provenance")
+        held_request = held.get("requestId") if isinstance(held, dict) else None
+        if held_request != expect:
+            return "kept"
     meta = _meta_path(slot)
     _no_symlinks(meta)
     slot.unlink()
     meta.unlink(missing_ok=True)
     journal("remove", secret, tool=tool, **({"why": _note("why", why)} if why else {}))
-    return True
+    return "removed"
 
 
 @_serialized

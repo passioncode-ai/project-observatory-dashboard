@@ -599,12 +599,13 @@ Additive; nothing migrates. `tools/credential_requests.py` is new: it writes `cr
 with the provider's identity of the credential, a key hash or a token id), `withdrawn`, `attempt-failed`,
 `revoked`, `settled`) and its lock
 `.credential-requests.lock` in the vault's folder (`secrets/projects/`, or `OBSERVATORY_VAULT_DIR`), owner-only, names
-only; the vault's backup carries them with the rest of that folder. A slot's `meta.json` may gain `provenance` (the
+only, so whatever backs that folder up carries them. A slot's `meta.json` may gain `provenance` (the
 request id, `issuedAt`, `decidedBy`, `issuer`, `recipient` with agent, context and slot, `provider`, `preset`,
 `scope`, `limit`, `expiresAt`, `revoke`); `vault.py put` and `rotate` drop it, and the movement journal gains the
 events `provenance` and, for a value a revocation removed, `remove` with `tool` `credential_requests.py`.
 `observatory_credentials` vault rows gain `issuedOnRequest` for a slot that carries a provenance. The findings board
-gains `credential.request_waiting` and `credential.revocation_refused`, both silent without the queue file. Nothing
+gains `credential.request_waiting`, `credential.revocation_refused` and `credential.request_queue_unreadable`, all
+silent without the queue file. Nothing
 is sent: the node's check-in still sends no `credentialRequests` and reads no decision, envelope or revocation (the
 `protocols` it lists are unchanged). Downgrade: an older engine ignores the queue file and the `provenance` member, and `vault.py
 put` and `rotate` there leave a stale `provenance` beside a new value, which the newer engine drops at the slot's

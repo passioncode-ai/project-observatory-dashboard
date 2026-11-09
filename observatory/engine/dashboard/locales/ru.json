@@ -173,6 +173,8 @@
  "Key shared by several projects": "Ключ общий для нескольких проектов",
  "Key with a lifetime ceiling": "Ключ с лимитом на весь срок",
  "Key request waiting for a decision": "Запрос ключа ждёт решения",
+ "Key request queue unreadable": "Очередь запросов ключей не читается",
+ "Credential request queue partly unreadable": "Очередь запросов ключей прочитана не полностью",
  "Key revocation refused": "Отзыв ключа отклонён",
  "Key without a project": "Ключ без проекта",
  "Key without a stated purpose": "Ключ без указанного назначения",

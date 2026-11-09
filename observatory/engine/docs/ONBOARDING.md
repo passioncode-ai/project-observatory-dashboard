@@ -614,7 +614,11 @@ slot. An agent acting on the operator's word adds `--relayed-instruction "the wo
 `credential-requests.jsonl` beside the vault's movement journal, names only, and the board raises
 `credential.request_waiting` for a request nobody decided and `credential.revocation_refused` for one
 whose revocation the provider refused or did not show done (`revoke` then exits 1), and for a
-credential a failed issue could not revoke. Sending a request to an organization in a check-in and
+credential a failed issue could not revoke; `credential.request_queue_unreadable` says when lines of the
+queue could not be read, so a damaged queue never reads as an empty one. A credential the door minted
+and delivered before a later step failed is revoked again by its identity and its value deleted; a
+value put by someone else while the door ran is never deleted or overwritten. An unproved revocation
+keeps the value, since its credential may still work. Sending a request to an organization in a check-in and
 receiving its sealed envelope are not built yet: the queue serves the space that holds both the
 request and the issuing door.
 

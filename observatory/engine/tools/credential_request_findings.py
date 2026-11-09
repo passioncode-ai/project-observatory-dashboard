@@ -30,13 +30,25 @@ import credential_requests as cr  # noqa: E402
 def findings(path: pathlib.Path, today: str) -> list[dict]:
     """The board's rows over one queue file. `today` is the build's day; a row's dates are the queue's own.
     Each row's subject carries the request's id after the slot, so two requests for one slot are two rows."""
-    if not path.is_file():
+    if not path.exists():
         return []
     try:
-        rows, _degraded = cr.parse_rows(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
+        rows, degraded = cr.parse_rows(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        rows, degraded = [], [{"reason": f"the file could not be read ({type(exc).__name__})"}]
     out = []
+    if degraded:
+        # HONEST DEGRADATION: a queue that cannot be read whole is said, never shown as an empty one.
+        out.append({
+            "type": "credential.request_queue_unreadable", "subject": "credential:request-queue",
+            "severity": "warning",
+            **titled("Credential request queue partly unreadable"),
+            "detail": (f"{len(degraded)} line(s) of the credential request queue could not be read "
+                       + (f"(line {degraded[0]['line']} first)" if degraded[0].get("line") else
+                          f"({degraded[0]['reason']})")
+                       + "; the requests on them are missing from this board, which is not the same as none."),
+            "action": f"`{cr.COMMAND} list --state all` names the lines; nothing rewrites them",
+        })
     for rid, entry in cr.fold(rows).items():
         try:
             out.extend(_rows(rid, entry))

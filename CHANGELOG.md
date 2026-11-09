@@ -21,8 +21,8 @@ while the major version is 0, a minor release may change behaviour and says so h
   revoked again. The slot's metadata records the delivery's provenance (`vault.record_provenance`: issuer, recipient,
   provider, preset, scope, ceiling, end, revoke handle), which `vault.py list`, `use_secret.py names` and
   `observatory_credentials` (`issuedOnRequest`) show; every request, decision, attempt and revocation is one line of
-  `credential-requests.jsonl` beside the movement journal, and the board raises `credential.request_waiting` and
-  `credential.revocation_refused`. Sending a request to an organization in a check-in and opening its sealed envelope
+  `credential-requests.jsonl` beside the movement journal, and the board raises `credential.request_waiting`,
+  `credential.revocation_refused` and `credential.request_queue_unreadable`. Sending a request to an organization in a check-in and opening its sealed envelope
   are not built yet (OBS-454).
 - **Whose every account and key is, read-only** (OBS-411, OBS-415, organization onboarding ORG-W1 and ORG-W6;
   `docs/ONBOARDING.md`). `project-observatory full org accounts [--json]` lists every provider account this space
