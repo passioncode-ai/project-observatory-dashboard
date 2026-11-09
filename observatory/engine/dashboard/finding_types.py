@@ -152,6 +152,8 @@ LABELS: dict[str, str] = {
     "model.degraded": "Model degraded",
     "notify.channel_failing": "Notification channel failing",
     "observatory.why_unanswered": "Requests for a why left unanswered",
+    "organization.config_problem": "Organizations file not fully read",
+    "organization.unresolved": "Project with no organization (rules disagree)",
     "plugin.broken": "Plugin broken",
     "plugin.refused": "Plugin refused",
     "plugin.stale": "Plugin out of date",

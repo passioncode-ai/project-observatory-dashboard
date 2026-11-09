@@ -126,17 +126,17 @@ server = InteropServer(
         "DEGRADED: every read carries `degraded`: empty means full coverage, otherwise "
         "it names gaps; treat a read without one as a bug (writes/job handles have none). "
         "Refusals are typed `error` answers; isError means malformed input, unknown tool "
-        "or schema-invalid output.\n"
+        "or invalid output.\n"
         "WORKFLOW: `observatory_checkpoint_write` after each step (keep `leaseId`); "
         "`observatory_handoff_create`/`_accept` moves it; `observatory_workflow_list` finds it.\n"
-        "START with `observatory_overview` (counts, tiers, recent projects, worst findings, "
-        "disk). Eligible outside Git checkouts are declared in `config/tracked.json` for the next "
+        "START with `observatory_overview` (counts, tiers, findings, disk). Eligible outside Git checkouts are declared in `config/tracked.json` for the next "
         "pass; no grants or registry writes.\n"
         "READ, paged with `limit` and `cursor` → `nextCursor`, totals over the "
         "scope: `observatory_status` (pass `limit`, `detail: summary`; unpaged is "
-        "huge); `observatory_findings` filters by `projectId`; "
+        "huge); `observatory_findings` takes `projectId`; "
         "`observatory_recall`. `limit` only: `observatory_project`, `observatory_timeline`. "
-        "Also `observatory_machine` (`section`, `move`, or `explainPid`); `observatory_ssh_keys` (no private key); "
+        "Also `observatory_machine` (`section`, `move`, `explainPid`); `observatory_ssh_keys` (no private key); "
+        "`observatory_org_accounts`/`_keys`; "
         "`observatory_assistant_status`; `observatory_assistant_conversation`.\n"
         "Fabric capabilities (fabric-interop/0.1), exact schemas: "
         "`estate.survey`, `project.detail`, `project.resolve`, "
@@ -553,6 +553,56 @@ def observatory_credentials(
     if bad:
         return bad
     return _note_unknown(projectId, survey_mod.credentials(projectId))
+
+
+@server.tool()
+def observatory_org_accounts() -> dict[str, Any]:
+    """Whose every provider account is (OBS-411, organization onboarding ORG-W1): every account this space reaches
+    (repository owners, DigitalOcean teams and the `doctl` contexts with no stashed token, Cloudflare accounts,
+    Heroku teams and the Heroku user, OpenRouter accounts), each under exactly one organization (the default
+    Personal, another of `config/organizations.json`, or Not ours) with `source` (`rule`: a `match` rule names it;
+    `default`: a repository owner of yours no rule names, whose projects take the default organization, the Heroku
+    user, which no rule kind names, or every account when no organizations are configured; `external`: a
+    repository owner outside `config/ownership.json`), or listed in `needsDecision` with the reason: `conflict`
+    (two organizations claim it), `none` (a provider account no rule names, which decides no project until a rule
+    in `config/organizations.json` does), or seen and not connected (with the door's command that connects it).
+    Each account says what it holds (projects, resources, keys its door issued). `problems` names what the
+    engine does not read; `degraded` names each source not read, and `state` is `empty` (no account found;
+    `degraded` says what was not read), `partial` or `complete`.
+
+    Read-only: nothing is written, sent or decided, and no key's value is returned, printed or kept (a `doctl`
+    context is compared with the stashed tokens in memory by the DigitalOcean door, as `digitalocean.py teams`
+    does). The same answer as `project-observatory full org accounts --json` (schema `org-accounts/1`). Saying which organization an account
+    belongs to is a rule in `organizations.json` (`match.github_owners`, `digitalocean_teams`,
+    `cloudflare_accounts`, `heroku_teams`, `openrouter_accounts`)."""
+    import org_view
+    return org_view.accounts()
+
+
+@server.tool()
+def observatory_org_keys(
+    org: Annotated[str, Field(validation_alias=AliasChoices("org", "organization"),
+                              description="An organization of config/organizations.json, not the default one.")],
+) -> dict[str, Any]:
+    """Which keys would go to an organization, BY NAME (OBS-415, organization onboarding ORG-W6, ORG-R06,
+    ORG-R07): each vault slot of the projects `org` holds, and each issued from its accounts, with `class`
+    `organization` (the project and its issuing account are both the organization's), `personal`, or `ambiguous`
+    (they disagree, the account is shared or has no rule, or the key was put by hand so its issuer is unknown),
+    `why`, the issuer from the door's record (the OpenRouter and Heroku ledgers, the DigitalOcean records, the
+    movements journal for Cloudflare), and `selected` (true only when both agree, ORG-R15). `notMovable` lists the
+    doors' admin and provisioning keys, never handed over: for an account of the organization they are revoked
+    after the organization's space stashes its own (ORG-R07).
+
+    Read-only and NEVER A VALUE: slots and stashes are listed by name, and no value file is opened, so a value
+    present twice (ORG-R09) and a name the organization already holds (ORG-R10) are not checked here
+    (`notChecked`). A refusal (`error`: `invalid-organization`, `unreadable-organizations`, `no-organizations`,
+    `unknown-organization`, `default-organization`) names its `command`. The same answer as
+    `project-observatory full org keys --org NAME --json` (schema `org-keys/1`)."""
+    import org_view
+    try:
+        return org_view.keys(org)
+    except org_view.Refusal as refusal:
+        return refusal.answer()
 
 
 #: A bare project name (a folder, or an id without its prefix).

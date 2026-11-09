@@ -359,7 +359,7 @@ ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py', 'tracked.py',
     'identity_map.py', 'identifiers.py', 'derivations.py', 'folder_attribution.py', 'fabric_attribution.py', 'fabric_hub.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'tick_progress.py', 'tick_budget.py', 'workspace.py',
-    'workspace_upgrade.py', 'backup_vault.py', 'secret_store_carry.py', 'organizations.py', 'machine_view.py', 'memory_snapshot.py', 'checkout_inventory.py', 'checkout_state.py', 'checkout_graph.py', 'cache_coverage.py', 'open_unlinked.py', 'coverage_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
+    'workspace_upgrade.py', 'backup_vault.py', 'secret_store_carry.py', 'organizations.py', 'org_view.py', 'machine_view.py', 'memory_snapshot.py', 'checkout_inventory.py', 'checkout_state.py', 'checkout_graph.py', 'cache_coverage.py', 'open_unlinked.py', 'coverage_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
     'log_policy.py', 'code_freshness.py', 'session_reload.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',
     # The companion's request for a why: journal, measurement, reach (M-8).
@@ -570,7 +570,10 @@ SUITE_SECONDS = {'credential_doors': 600, 'maintenance': 480, 'tick_py': 300, 'c
                  'gate_purity': 300, 'search': 300,
                  # 47-87 s on macos-latest (#416, #419, #420, #428), then past 120 s twice: 121.5 s
                  # (#429, run 41921013085) and 122.2 s (#432, run 41963794187); OBS-335.
-                 'session_reload': 300}
+                 'session_reload': 300,
+                 # 44 cases over the organization views with real door records: 77.8 s on windows-latest
+                 # under the job's --jobs 4 (run 42561065821), past 120 s on the next run (42565089825).
+                 'organizations': 300}
 
 
 def suite_timeout(name: str, timeout: int) -> int:

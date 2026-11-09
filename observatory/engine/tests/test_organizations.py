@@ -279,7 +279,7 @@ class ProviderAccounts(Base):
         bad["organizations"]["company"]["match"]["heroku_teams"] = "company-heroku"
         problems = " | ".join(self.orgs.validate(bad))
         self.assertIn("match.aws_accounts is not a known list rule", problems)
-        self.assertIn("match.heroku_teams is not a known list rule", problems)
+        self.assertIn("match.heroku_teams must be a list of strings", problems)
 
     def test_an_account_row_says_whose_it_is_and_a_shared_one_is_nobodys(self):
         a = self.orgs.Assigner()
@@ -419,8 +419,8 @@ class ProviderAccounts(Base):
         a = self.orgs.Assigner(doc=orgs, estate_owners={"company-org"}, products={})
         self.assertEqual(a.account("heroku", ["c"])["organization"], None, "a string is not read letter by letter")
         self.assertEqual(a.assign({"id": "project:x", "owners": ["company-org"]})["source"], "default")
-        self.assertEqual(sorted(a.problems), ["company: match.heroku_teams is not a known list rule; ignored",
-                                              "company: match.repository_owners is not a known list rule; ignored"])
+        self.assertEqual(sorted(a.problems), ["company: match.heroku_teams must be a list of strings; ignored",
+                                              "company: match.repository_owners must be a list of strings; ignored"])
 
     def test_a_team_name_two_teams_bear_decides_nothing_and_is_warned_about(self):
         orgs = json.loads(json.dumps(self.config))
@@ -440,6 +440,553 @@ class ProviderAccounts(Base):
         ids = {a["id"] for a in doc["accounts"]}
         self.assertTrue(all(r["account_ref"] in ids for r in doc["resources"]))
         self.assertEqual({a["team_uuid"] for a in doc["accounts"]}, {TEAM, SHARED_TEAM})
+
+
+
+class RulesPart2(Base):
+    """OBS-412 part 2: `github_owners`, `openrouter_accounts`, one reading for every reader (ORG-R26, ORG-R28)."""
+
+    def test_github_owners_is_repository_owners_by_its_onboarding_name(self):
+        orgs = json.loads(json.dumps(ORGS))
+        orgs["organizations"]["company"]["match"] = {"github_owners": ["company-org"],
+                                                     "repository_owners": ["company-org", "company-bb"]}
+        a = self.orgs.Assigner(doc=orgs)
+        got = a.assign({"id": "project:x", "owners": ["company-org"]})
+        self.assertEqual((got["organization"], got["source"]), ("company", "rule"))
+        self.assertEqual(got["why"], "repository owner company-org", "an owner named by both rules counts once")
+        self.assertEqual(a.account("owner", ["COMPANY-ORG"])["organization"], "company")
+        self.assertIn("match.repository_owners and match.github_owners", a.account("owner", ["company-org"])["organization_why"])
+        self.assertEqual(a.account("owner", ["nobody"])["organization_source"], "none")
+        self.assertEqual(self.orgs.validate(orgs), [])
+
+    def test_an_unknown_rule_is_refused_with_the_known_ones_named(self):
+        bad = json.loads(json.dumps(ORGS))
+        bad["organizations"]["company"]["match"]["gitlab_groups"] = ["g"]
+        bad["organizations"]["company"]["match"]["openrouter_accounts"] = "main"
+        problems = self.orgs.validate(bad)
+        unknown = next(p for p in problems if "gitlab_groups" in p)
+        self.assertIn("match.gitlab_groups is not a known list rule", unknown)
+        for rule in ("github_owners", "openrouter_accounts", "digitalocean_teams"):
+            self.assertIn(rule, unknown)
+        self.assertTrue(any("match.openrouter_accounts" in p and "list of strings" in p for p in problems))
+        a = self.orgs.Assigner(doc=bad)
+        self.assertTrue(any("gitlab_groups" in p and "known:" in p for p in a.problems))
+
+    def test_an_openrouter_account_has_an_organization_and_decides_no_project(self):
+        orgs = json.loads(json.dumps(ORGS))
+        orgs["organizations"]["company"]["match"]["openrouter_accounts"] = ["main"]
+        a = self.orgs.Assigner(doc=orgs)
+        self.assertEqual(a.account("openrouter", ["main"])["organization"], "company")
+        got = a.assign({"id": "project:mine", "owners": ["person-org"]},
+                       [{"provider": "openrouter", "keys": ["main"], "label": "main", "via": "key k"}])
+        self.assertEqual(got["source"], "default", "a key's issuer is weighed per key (ORG-R06), never per project")
+
+    def test_one_reading_for_every_reader(self):
+        r = self.orgs.reading
+        self.assertEqual(r({"id": "p"}), {"state": "unset"})
+        self.assertEqual(r({"organization": "company", "organization_source": "rule"})["destinations"]["ga4Account"],
+                         "accounts/100")
+        self.assertEqual(r({"organization": "external", "organization_source": "external"})["state"], "external")
+        self.assertEqual(r({"organization": "external", "organization_source": "declared"})["state"], "external")
+        self.assertEqual(r({"organization": None, "organization_source": "conflict"})["state"], "unresolved")
+        proposed = r({"organization": "company", "organization_source": "proposed"})
+        self.assertEqual(proposed["state"], "unresolved", "a source this engine does not know is no decision")
+        self.assertNotIn("destinations", proposed)
+
+    def test_a_proposed_project_gets_no_account_in_the_session_line_the_view_or_the_findings(self):
+        import session_start
+        importlib.reload(session_start)
+        sys.path.insert(0, str(ROOT / "dashboard"))
+        import i18n
+        project = {"id": "project:co", "name": "co", "ownership": "owned", "lifecycle": "active",
+                   "organization": "company", "organization_source": "proposed", "organization_why": "rule"}
+        line = session_start.organization_line(project, i18n.Translator("en"))
+        self.assertIn("not decided (proposed: company)", line)
+        self.assertNotIn("accounts/100", line)
+        self.assertIn("организация не решена", session_start.organization_line(project, i18n.Translator("ru")))
+        import survey
+        importlib.reload(survey)
+        view = survey._project_view(project, {}, {})
+        self.assertEqual(view["organization"]["state"], "unresolved")
+        self.assertNotIn("ga4Account", view["organization"])
+        import google_findings
+        importlib.reload(google_findings)
+        doc = {"properties": [{"property": "properties/9", "project": "project:co", "account": "accounts/200"}],
+               "accounts": [{"account": "accounts/100"}, {"account": "accounts/200"}]}
+        self.assertEqual([f for f in google_findings.organization_findings(doc, [project], ORGS)
+                          if f["type"] == "analytics.property_wrong_account"], [])
+
+    def test_a_conflict_and_an_unread_rule_are_named_on_the_board(self):
+        import organization_findings
+        importlib.reload(organization_findings)
+        projects = [{"id": "project:both", "name": "both", "organization": None, "organization_source": "conflict",
+                     "organization_why": "company (repository owner a) vs person (repository owner b)"},
+                    {"id": "project:ok", "organization": "company", "organization_source": "rule"}]
+        out = organization_findings.findings(projects, ORGS)
+        self.assertEqual([(f["type"], f["subject"]) for f in out], [("organization.unresolved", "project:both")])
+        self.assertEqual(out[0]["title"], "both has no organization: its rules disagree")
+        self.assertIn("company (repository owner a) vs person", out[0]["detail"])
+        bad = json.loads(json.dumps(ORGS))
+        bad["organizations"]["company"]["match"]["aws_accounts"] = ["1"]
+        out = organization_findings.findings([], bad)
+        self.assertEqual([f["type"] for f in out], ["organization.config_problem"])
+        self.assertIn("match.aws_accounts is not a known list rule", out[0]["detail"])
+        self.assertEqual(organization_findings.findings(projects, {}), [], "silent when nothing is configured")
+        (self.home / "config" / "organizations.json").write_text("{not json")
+        self.assertEqual(self.orgs.load_problem(), "not JSON (line 1)")
+        out = organization_findings.findings(projects, {}, self.orgs.load_problem())
+        self.assertEqual([f["title"] for f in out], ["organizations.json is not read: not JSON (line 1)"])
+
+
+STAND_IN_VALUE = "synthetic-not-a-value"
+
+
+class Views(Base):
+    """OBS-411 and OBS-415: `full org accounts` and `full org keys`, read-only and without a value."""
+
+    def setUp(self):
+        super().setUp()
+        import paths
+        self.secrets = Path(paths.source_path("secret_store", paths.SECRETS))
+        self.doctl = Path(self.tmp.name).resolve() / "doctl.yaml"
+        os.environ["DOCTL_CONFIG"] = str(self.doctl)
+        orgs = json.loads(json.dumps(ORGS))
+        orgs["organizations"]["company"]["match"].update(
+            digitalocean_teams=[TEAM, SHARED_TEAM], openrouter_accounts=["company-or"],
+            cloudflare_accounts=["acc-co"], heroku_teams=["co-apps"])
+        orgs["organizations"]["person"]["match"] = {"digitalocean_teams": [SHARED_TEAM],
+                                                    "openrouter_accounts": ["main"]}
+        self.write("organizations.json", orgs)
+        self.registry("projects.json", {"projects": [
+            {"id": "project:co-web", "name": "co-web", "owners": ["company-org"], "local_folders": ["co-web"],
+             "organization": "company", "organization_source": "rule", "organization_why": "repository owner company-org"},
+            {"id": "project:mine", "name": "mine", "owners": ["person-org"], "local_folders": ["mine"],
+             "organization": "person", "organization_source": "default", "organization_why": "no rule matched"},
+            {"id": "project:both", "name": "both", "owners": ["person-org"], "local_folders": ["both"],
+             "organization": None, "organization_source": "conflict",
+             "organization_why": "company (DigitalOcean team Shared) vs person (DigitalOcean team Shared)"},
+            {"id": "project:clone", "name": "clone", "owners": ["stranger"], "local_folders": ["clone"],
+             "organization": "external", "organization_source": "external", "organization_why": "outside"}]})
+        self.registry("repositories.json", {"repositories": [
+            {"name_with_owner": "company-org/co-web", "host": "github"},
+            {"name_with_owner": "company-bb/tool", "host": "bitbucket"}]})
+        self.registry("digitalocean-account.json", {"scanned_on": "2026-11-08", "degraded": [
+            {"source": "digitalocean:doctl:default", "reason": "member of team X via doctl context default"}], "accounts": [
+            {"id": f"digitalocean:team:{SHARED_TEAM}", "team_uuid": SHARED_TEAM, "name": "Shared"}], "resources": [
+            {"id": "digitalocean:app:a3", "kind": "app", "name": "both-api", "project": "project:both",
+             "link_rule": "digitalocean-app-repo", "account_ref": f"digitalocean:team:{SHARED_TEAM}"}]})
+        gh = paths.SCRATCH / "gh"
+        gh.mkdir(parents=True, exist_ok=True)
+        for owner in ("company-org", "person-org"):
+            (gh / f"{owner}.json").write_text("[]")
+        # A door's stash and records: value files hold a planted value nothing may print, and are made
+        # unreadable to prove no value file is opened (ORG-R03, the rows' "never a value").
+        self.private("openrouter-admin/company-or", STAND_IN_VALUE)
+        self.private("openrouter-admin/company-or.meta.json", json.dumps({"kind": "provisioning"}))
+        self.private("digitalocean-admin/company-team", STAND_IN_VALUE)
+        self.private("digitalocean-admin/company-team.meta.json",
+                     json.dumps({"kind": "team", "team_uuid": TEAM, "team_name": "Company Team"}))
+        self.private("openrouter-issued.json", json.dumps({"issued": {
+            "co-web-llm": {"account": "company-or", "destination": "vault:co-web/prod/OPENROUTER_API_KEY"},
+            "mine-llm": {"account": "main", "destination": "vault:mine/prod/OPENROUTER_API_KEY"},
+            "co-from-main": {"account": "main", "destination": "vault:co-web/stage/OPENROUTER_API_KEY"},
+            "both-llm": {"account": "main", "destination": "vault:both/prod/OPENROUTER_API_KEY"},
+            "mine-from-co": {"account": "company-or", "destination": "vault:mine/local/OPENROUTER_API_KEY"}}}))
+        self.private("heroku-issued.json", json.dumps({"issued": {
+            "co-web/prod/DEPLOY_HEROKU_TOKEN": {"team": "co-apps"}}}))
+        for slot in ("co-web/prod/OPENROUTER_API_KEY", "co-web/stage/OPENROUTER_API_KEY", "co-web/prod/DEPLOY_HEROKU_TOKEN",
+                     "co-web/prod/HAND_PUT", "co-web/qa/OPENROUTER_API_KEY", "co-web/prod/CF_TOKEN",
+                     "mine/prod/OPENROUTER_API_KEY", "mine/local/OPENROUTER_API_KEY", "both/prod/OPENROUTER_API_KEY"):
+            self.private(f"projects/{slot}", STAND_IN_VALUE)
+        for slot in ("co-web/prod/BLOB_ACCESS_ID", "co-web/prod/BLOB_SECRET"):
+            self.private(f"projects/{slot}", STAND_IN_VALUE)
+        self.private("projects/movements.jsonl", "".join(json.dumps(row) + "\n" for row in (
+            {"event": "issue", "secret": "co-web/prod/CF_TOKEN", "tool": "cloudflare.py", "account": "Co Account"},
+            {"event": "issue", "secret": "co-web/prod/BLOB_*", "tool": "cloudflare.py", "account": "Co Account"})))
+        self.private("digitalocean-issued/other.meta.json", json.dumps(
+            {"label": "other", "team_uuid": "33333333-3333-4333-8333-333333333333", "team_name": "Elsewhere",
+             "vault": "mine/prod/DO_TOKEN"}))
+        self.private("projects/mine/prod/DO_TOKEN", STAND_IN_VALUE)
+        self.registry("cloudflare-account.json", {"accounts": [
+            {"id": "cloudflare:account:acc-co", "account_id": "acc-co", "name": "Co Account"},
+            {"id": "cloudflare:account:acc-loose", "account_id": "acc-loose", "name": "Loose"}], "resources": []})
+        self.doctl.write_text("access-token: " + STAND_IN_VALUE + "-doctl\n")
+        self.doctl.chmod(0o600)
+        import org_view
+        self.view = importlib.reload(org_view)
+        sys.path.insert(0, str(ROOT / "tools"))
+        for name in ("vault", "digitalocean"):
+            importlib.reload(importlib.import_module(name))
+
+    def tearDown(self):
+        for path in self.secrets.rglob("*"):
+            if path.is_file():
+                path.chmod(0o600)
+        super().tearDown()
+
+    def registry(self, name, doc):
+        import paths
+        paths.REGISTRY.mkdir(parents=True, exist_ok=True)
+        (paths.REGISTRY / name).write_text(json.dumps(doc), encoding="utf-8")
+
+    def private(self, rel, text):
+        path = self.secrets / rel
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        path.write_text(text, encoding="utf-8")
+        path.chmod(0o600)
+
+    def seal_values(self):
+        """Every value file unreadable to its own owner: a view that opened one would fail on it."""
+        for path in self.secrets.rglob("*"):
+            if path.is_file() and not path.name.endswith((".json", ".jsonl")):
+                path.chmod(0)
+
+    def test_every_account_once_under_one_organization_or_a_decision(self):
+        v = self.view.accounts()
+        self.assertEqual(v["schema"], "org-accounts/1")
+        rows = {r["id"]: r for r in v["accounts"]}
+        placed = [i for g in v["organizations"] for i in g["accounts"]] + v["needsDecision"]
+        self.assertEqual(sorted(placed), sorted(rows), "every account exactly once")
+        self.assertEqual(len(placed), len(set(placed)))
+        self.assertEqual((rows["github:company-org"]["organization"], rows["github:company-org"]["source"]),
+                         ("company", "rule"))
+        self.assertEqual((rows["github:person-org"]["organization"], rows["github:person-org"]["source"]),
+                         ("person", "default"))
+        self.assertEqual(rows["github:person-org"]["holds"]["projects"], ["project:both", "project:mine"])
+        self.assertEqual((rows["github:stranger"]["organization"], rows["github:stranger"]["source"]),
+                         ("external", "external"))
+        self.assertFalse(rows["github:stranger"]["connected"])
+        self.assertEqual(rows["bitbucket:company-bb"]["provider"], "bitbucket")
+        shared = rows[f"digitalocean:team:{SHARED_TEAM}"]
+        self.assertEqual((shared["organization"], shared["source"], shared["claimedBy"]),
+                         (None, "conflict", ["company", "person"]))
+        self.assertIn(shared["id"], v["needsDecision"])
+        self.assertEqual(shared["holds"]["projects"], ["project:both"])
+        team = rows[f"digitalocean:team:{TEAM}"]
+        self.assertEqual((team["organization"], team["connected"]), ("company", True))
+        self.assertEqual(rows["openrouter:account:company-or"]["organization"], "company")
+        self.assertEqual(rows["openrouter:account:company-or"]["holds"]["keys"], 2)
+        main = rows["openrouter:account:main"]
+        self.assertEqual((main["organization"], main["connected"]), ("person", False))
+        self.assertIn("stash --as main", main["decision"]["command"])
+        self.assertEqual(rows["heroku:team:co-apps"]["holds"]["keys"], 1)
+        self.assertFalse(rows["heroku:team:co-apps"]["connected"], "known from a ledger row alone")
+        self.assertIn("heroku:team:co-apps", v["needsDecision"])
+        self.assertEqual(rows["cloudflare:account:acc-co"]["holds"]["keys"], 3,
+                         "the Cloudflare door's issuer is read from the movements journal, an R2 pair per slot")
+        loose = rows["cloudflare:account:acc-loose"]
+        self.assertEqual((loose["organization"], loose["source"]), (None, "none"),
+                         "a provider account no rule names is undecided, as its registry row says (ORG-R26)")
+        self.assertIn(loose["id"], v["needsDecision"])
+        elsewhere = rows["digitalocean:team:33333333-3333-4333-8333-333333333333"]
+        self.assertEqual((elsewhere["connected"], elsewhere["holds"]["keys"]), (False, 1))
+        self.assertIn("digitalocean.py\" stash", elsewhere["decision"]["command"])
+        self.assertFalse([d for d in v["degraded"] if "doctl" in d["source"]],
+                         "a doctl context the scan named is a decision here, not a failed read")
+        doctl = rows["digitalocean:doctl:default"]
+        self.assertIn(doctl["id"], v["needsDecision"])
+        self.assertIn("stash --from-doctl default", doctl["decision"]["command"])
+        groups = {g["name"]: g for g in v["organizations"]}
+        self.assertEqual([g["name"] for g in v["organizations"]], ["person", "company", "external"])
+        self.assertEqual((groups["person"]["label"], groups["person"]["kind"]), ("Example Person", "personal"))
+        self.assertEqual(groups["company"]["projects"], ["project:co-web"])
+        self.assertNotIn(STAND_IN_VALUE, json.dumps(v))
+        self.assertEqual(v["state"], "complete", v["degraded"])
+
+    def test_the_accounts_text_and_the_cli_say_the_same(self):
+        import org as org_cli
+        importlib.reload(org_cli)
+        import contextlib, io
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(org_cli.main(["accounts", "--json"]), 0)
+        doc = json.loads(out.getvalue())
+        self.assertEqual(doc["needsDecision"], self.view.accounts()["needsDecision"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(org_cli.main(["accounts"]), 0)
+        text = out.getvalue()
+        self.assertIn("Example Company (local)", text)
+        self.assertIn("Needs a decision (", text)
+        self.assertIn("--from-doctl default", text)
+        self.assertNotIn(STAND_IN_VALUE, text)
+
+    def test_empty_unconfigured_and_degraded_are_said(self):
+        import paths
+        for name in ("projects.json", "repositories.json", "digitalocean-account.json", "cloudflare-account.json"):
+            (paths.REGISTRY / name).unlink()
+        v = self.view.accounts()
+        sources = {d["source"]: d["code"] for d in v["degraded"]}
+        self.assertEqual(sources["registry/projects.json"], "missing")
+        self.assertEqual(sources["digitalocean"], "not-scanned", "a stashed team with no scan is named")
+        self.assertEqual(v["state"], "partial")
+        self.write("organizations.json", {"organizations": {}, "projects": {}})
+        v = self.view.accounts()
+        self.assertFalse(v["configured"])
+        self.assertEqual(v["default"], "personal")
+        self.assertEqual(v["organizations"][0], {**v["organizations"][0], "name": "personal", "label": "Personal",
+                                                 "implicit": True})
+        self.assertTrue(all(r["source"] in ("default", "external") for r in v["accounts"]))
+        import shutil
+        shutil.rmtree(self.secrets)
+        shutil.rmtree(paths.SCRATCH / "gh")
+        self.doctl.unlink()
+        for name in os.listdir(paths.REGISTRY):
+            (paths.REGISTRY / name).unlink()
+        v = self.view.accounts()
+        self.assertEqual((v["state"], v["accounts"], v["needsDecision"]), ("empty", [], []))
+        self.assertIn("No accounts connected yet", self.view.accounts_text(v))
+
+    def test_keys_classified_by_project_and_issuer_without_opening_a_value(self):
+        self.seal_values()
+        v = self.view.keys("company")
+        self.assertEqual(v["schema"], "org-keys/1")
+        self.assertEqual([d for d in v["degraded"] if "vault" in d["source"] or "stash" in d["source"]], [])
+        k = {r["slot"]: r for r in v["keys"]}
+        own = k["co-web/prod/OPENROUTER_API_KEY"]
+        self.assertEqual((own["class"], own["selected"], own["proposal"]), ("organization", True, "hand-over"))
+        self.assertEqual(own["issuer"]["account"], "company-or")
+        self.assertEqual(k["co-web/stage/OPENROUTER_API_KEY"]["class"], "ambiguous",
+                         "the organization's project, a personal account's key (ORG-R06)")
+        self.assertIn("personal", k["co-web/stage/OPENROUTER_API_KEY"]["why"])
+        hand = k["co-web/prod/HAND_PUT"]
+        self.assertEqual((hand["class"], hand["putBy"], hand["issuer"]), ("ambiguous", "hand", None))
+        self.assertEqual(k["co-web/prod/DEPLOY_HEROKU_TOKEN"]["class"], "organization")
+        self.assertEqual(k["co-web/prod/CF_TOKEN"]["issuer"]["record"], "movements journal (cloudflare.py)")
+        self.assertEqual(k["co-web/prod/CF_TOKEN"]["class"], "organization")
+        qa = k["co-web/qa/OPENROUTER_API_KEY"]
+        self.assertEqual((qa["environmentDeclared"], qa["selected"]), (False, False))
+        self.assertEqual(k["mine/local/OPENROUTER_API_KEY"]["class"], "ambiguous",
+                         "a personal project's key issued in the organization's account is in scope, undecided")
+        self.assertNotIn("mine/prod/OPENROUTER_API_KEY", k, "a personal project's personal key is out of scope")
+        self.assertEqual(k["both/prod/OPENROUTER_API_KEY"]["class"], "personal")
+        fixed = {(n["provider"], n["label"]): n for n in v["notMovable"]}
+        self.assertEqual(fixed[("openrouter", "company-or")]["action"],
+                         "revoke after the organization's space stashes its own")
+        self.assertEqual(fixed[("digitalocean", "company-team")]["action"],
+                         "revoke after the organization's space stashes its own")
+        self.assertEqual(k["co-web/prod/BLOB_SECRET"]["class"], "organization",
+                         "an R2 pair is journalled once for both slots")
+        self.assertNotIn("mine/prod/DO_TOKEN", k, "issued in a team no rule names, in a personal project")
+        self.assertEqual(v["counts"], {"organization": 5, "personal": 1, "ambiguous": 4, "notMovable": 2})
+        self.assertEqual([p["id"] for p in v["projects"]], ["project:both", "project:co-web"])
+        self.assertNotIn(STAND_IN_VALUE, json.dumps(v))
+        self.assertIn("ORG-R09", v["notChecked"][0])
+
+    def test_cloudflare_keys_without_a_scan_read_the_admin_tokens_record(self):
+        import paths
+        (paths.REGISTRY / "cloudflare-account.json").unlink()
+        k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
+        self.assertEqual(k["co-web/prod/CF_TOKEN"]["issuer"]["source"], "none", "no scan, no stash: no id")
+        v = self.view.keys("company")
+        self.assertEqual([d["code"] for d in v["degraded"] if d["source"] == "cloudflare:journal"], ["unresolved"])
+        self.private("cloudflare-admin/co", STAND_IN_VALUE)
+        self.private("cloudflare-admin/co.meta.json", json.dumps(
+            {"kind": "admin", "accounts": [{"id": "acc-co", "name": "Co Account"}, {"id": "acc-p", "name": "Mine"}]}))
+        v = self.view.keys("company")
+        k = {r["slot"]: r for r in v["keys"]}
+        self.assertEqual(k["co-web/prod/CF_TOKEN"]["class"], "organization")
+        self.assertEqual([d for d in v["degraded"] if d["source"] == "cloudflare:journal"], [])
+        cf = next(n for n in v["notMovable"] if n["provider"] == "cloudflare")
+        self.assertTrue(cf["action"].startswith("replace:"), "a token over the organization's and other accounts")
+
+    def test_no_default_and_an_unreadable_file_are_said(self):
+        orgs = json.loads(json.dumps(ORGS))
+        orgs["organizations"]["person"].pop("default")
+        self.write("organizations.json", orgs)
+        v = self.view.accounts()
+        rows = {r["id"]: r for r in v["accounts"]}
+        self.assertEqual((rows["github:person-org"]["organization"], rows["github:person-org"]["source"]),
+                         (None, "none"))
+        self.assertIn("github:person-org", v["needsDecision"])
+        self.assertNotIn(None, [g["name"] for g in v["organizations"]])
+        self.assertTrue(any("exactly one organization must be `default`" in p for p in v["problems"]))
+        (self.home / "config" / "organizations.json").write_text("{broken", encoding="utf-8")
+        v = self.view.accounts()
+        self.assertIn("config/organizations.json: not JSON (line 1)", v["problems"])
+        self.assertIn("is read as if absent", self.view.accounts_text(v))
+        with self.assertRaises(self.view.Refusal) as caught:
+            self.view.keys("company")
+        self.assertEqual(caught.exception.code, "unreadable-organizations")
+        self.write("organizations.json", {"organizations": ORGS["organizations"], "projects": ["not", "a", "map"]})
+        self.assertIn("projects must be an object keyed by project id", self.orgs.validate(self.orgs.load()))
+        self.assertEqual(self.orgs.Assigner().assign({"id": "project:x", "owners": ["company-org"]})["source"], "rule")
+
+    def test_round_two_edges(self):
+        """Review round 2: a malformed declaration, a team name two teams bear, a door's record over the
+        journal, the Heroku user in both views, an unusable file, one degraded row per unread file."""
+        bad = json.loads(json.dumps(ORGS))
+        bad["projects"]["project:odd"] = {"organization": ["company"], "why": "a list"}
+        self.assertTrue(any("project:odd" in p for p in self.orgs.validate(bad)))
+        import organization_findings
+        importlib.reload(organization_findings)
+        self.assertEqual([f["type"] for f in organization_findings.findings([], bad)], ["organization.config_problem"])
+        a = self.orgs.Assigner(doc=bad)
+        self.assertEqual(a.assign({"id": "project:odd", "owners": ["company-org"]})["source"], "rule")
+        self.assertEqual(self.orgs.reading({"organization": ["x"], "organization_source": "declared"}, a)["state"],
+                         "unresolved", "an organization that is not a name is no decision")
+        self.assertEqual(a.destinations(["x"]), {})
+        twin = "44444444-4444-4444-8444-444444444444"
+        self.private("digitalocean-issued/twin.meta.json", json.dumps(
+            {"label": "twin", "team_uuid": twin, "team_name": "Company Team", "vault": "co-web/prod/TWIN"}))
+        who = self.view.issuers([], {}, [], {twin: [twin]})
+        self.assertEqual(who["co-web/prod/TWIN"]["keys"], [twin], "a name two teams bear names neither")
+        self.private("projects/movements.jsonl", json.dumps(
+            {"event": "rotate", "secret": "co-web/prod/OPENROUTER_API_KEY", "tool": "cloudflare.py",
+             "account": "Co Account"}) + "\n")
+        self.assertEqual(self.view.issuers([], {"co account": "acc-co"})["co-web/prod/OPENROUTER_API_KEY"]["provider"],
+                         "openrouter", "a door's own record wins over a journal row")
+        self.private("heroku-issued.json", json.dumps({"issued": {"both/prod/USER_TOKEN": {"team": None}}}))
+        self.private("projects/both/prod/USER_TOKEN", STAND_IN_VALUE)
+        k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
+        self.assertEqual((k["both/prod/USER_TOKEN"]["class"], k["both/prod/USER_TOKEN"]["issuer"]["source"]),
+                         ("personal", "default"), "the Heroku user reads the default organization in both views")
+        # Not chmod(0): Windows reads a file whatever its mode bits say. A ledger that is not JSON
+        # takes the same unreadable branch on every system.
+        (self.secrets / "openrouter-issued.json").write_text("{not json", encoding="utf-8")
+        v = self.view.accounts()
+        self.assertEqual(sum(1 for d in v["degraded"] if d["source"] == "openrouter:ledger"), 1)
+        self.write("organizations.json", {"organizations": {"acme": "x"}, "projects": {}})
+        v = self.view.accounts()
+        self.assertFalse(v["configured"])
+        self.assertTrue(any("acme" in p for p in v["problems"]))
+        self.assertIn("names no usable organization", self.view.accounts_text(v))
+
+    def test_round_three_edges(self):
+        """Review round 3: an admin key read against every account it reaches, as `accounts()` names them; a
+        malformed ledger row; a value put by hand after the Cloudflare door delivered it."""
+        orgs = json.loads(self.home.joinpath("config", "organizations.json").read_text())
+        orgs["organizations"]["company"]["match"]["digitalocean_teams"] = ["Company Team"]
+        self.write("organizations.json", orgs)
+        self.registry("digitalocean-account.json", {"accounts": [
+            {"id": f"digitalocean:team:{TEAM}", "team_uuid": TEAM, "name": "Company Team"}], "resources": []})
+        self.registry("heroku-apps.json", {"teams": ["co-apps"], "apps": []})
+        self.private("heroku-admin/me", STAND_IN_VALUE)
+        v = self.view.keys("company")
+        fixed = {(n["provider"], n["label"]): n for n in v["notMovable"]}
+        self.assertEqual(fixed[("digitalocean", "company-team")]["accounts"][0]["source"], "rule",
+                         "a team a rule names by its name is the organization's here too")
+        heroku = fixed[("heroku", "me")]
+        self.assertEqual([(x["account"], x["organization"]) for x in heroku["accounts"]],
+                         [("your Heroku user", "person"), ("co-apps", "company")])
+        self.assertTrue(heroku["action"].startswith("replace:"))
+        self.private("openrouter-issued.json", json.dumps({"issued": {"bad": ["not", "a", "row"],
+                                                                      "co-web-llm": {"account": "company-or",
+                                                                                     "destination": "vault:co-web/prod/OPENROUTER_API_KEY"}}}))
+        self.assertEqual(self.view.accounts()["schema"], "org-accounts/1", "a malformed ledger row is skipped")
+        self.assertEqual(self.view.keys("company")["schema"], "org-keys/1")
+        self.private("projects/movements.jsonl", "".join(json.dumps(r) + "\n" for r in (
+            {"event": "put", "secret": "co-web/prod/CF_TOKEN", "tool": "vault.py"},
+            {"event": "issue", "secret": "co-web/prod/CF_TOKEN", "tool": "cloudflare.py", "account": "Co Account"},
+            {"event": "put", "secret": "co-web/prod/CF_TOKEN", "tool": "vault.py"})))
+        k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
+        self.assertEqual((k["co-web/prod/CF_TOKEN"]["putBy"], k["co-web/prod/CF_TOKEN"]["class"]), ("hand", "ambiguous"),
+                         "a value put by hand after the door's delivery is no longer the door's")
+
+    def test_round_four_edges(self):
+        """Review round 4: a value put by hand after any door's delivery, hand-edited configuration files, a
+        reserved name, and the projects a group holds without organizations.json."""
+        self.private("projects/movements.jsonl", "".join(json.dumps(r) + "\n" for r in (
+            {"event": "put", "secret": "co-web/prod/OPENROUTER_API_KEY", "tool": "vault.py"},
+            {"event": "issue", "secret": "/".join(("openrouter", "company-or", "co-web-llm")), "tool": "openrouter.py",
+             "to": "vault:co-web/prod/OPENROUTER_API_KEY"},
+            {"event": "issue", "secret": "co-web/prod/DEPLOY_HEROKU_TOKEN", "tool": "heroku.py"},
+            {"event": "put", "secret": "co-web/prod/DEPLOY_HEROKU_TOKEN", "tool": "secret_prompt"},
+            {"event": "put", "secret": "co-web/prod/OPENROUTER_API_KEY", "tool": "vault.py"})))
+        k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
+        for slot in ("co-web/prod/OPENROUTER_API_KEY", "co-web/prod/DEPLOY_HEROKU_TOKEN"):
+            self.assertEqual((k[slot]["putBy"], k[slot]["selected"]), ("hand", False), slot)
+        self.private("projects/movements.jsonl", json.dumps(
+            {"event": "put", "secret": "co-web/prod/OPENROUTER_API_KEY", "tool": "vault.py"}) + "\n")
+        k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
+        self.assertEqual(k["co-web/prod/OPENROUTER_API_KEY"]["putBy"], "door",
+                         "a journal with no row of the door keeps the door's own record")
+        self.write("ownership.json", {"organizations": "company-org", "work_organizations": None})
+        self.write("products.json", {"products": ["not", "an", "object"]})
+        orgs = json.loads(self.home.joinpath("config", "organizations.json").read_text())
+        orgs["organizations"]["company"]["figma"] = "x"
+        orgs["organizations"]["external"] = {"label": "Clash"}
+        self.write("organizations.json", orgs)
+        problems = self.orgs.validate(orgs)
+        self.assertTrue(any("figma must be an object" in p for p in problems))
+        self.assertTrue(any(p.startswith("external: the name is reserved") for p in problems))
+        v = self.view.accounts()
+        self.assertEqual([g["name"] for g in v["organizations"]].count("external"), 1)
+        self.assertEqual(self.view.keys("company")["schema"], "org-keys/1")
+        self.assertEqual(self.orgs.Assigner().destinations("company").get("figmaTeam"), None)
+        self.write("organizations.json", {"organizations": {}, "projects": {}})
+        self.write("ownership.json", {"organizations": ["company-org", "person-org"]})
+        groups = {g["name"]: g for g in self.view.accounts()["organizations"]}
+        self.assertIn("project:co-web", groups["personal"]["projects"],
+                      "without organizations.json a group holds its accounts' projects")
+        self.assertEqual(groups["external"]["projects"], ["project:clone"])
+
+    def test_round_five_edges(self):
+        """Review round 5: hand-edited organizations reach the analytics rule and the board before their
+        problem is named; a registry document that is not an object is said."""
+        import google_findings, organization_findings
+        importlib.reload(google_findings)
+        importlib.reload(organization_findings)
+        doc = {"properties": [{"property": "properties/1", "project": "project:co-web", "account": "accounts/9"}],
+               "accounts": [{"account": "accounts/9"}]}
+        projects = [{"id": "project:co-web", "organization": "company", "organization_source": "rule"}]
+        for orgs in ({"organizations": {"company": {"ga4_account": "accounts/100", "ga4_legacy_accounts": ["x"]},
+                                        "person": "a string", "default": True}},
+                     {"organizations": ["not", "an", "object"]}, ["not", "an", "object"]):
+            got = google_findings.organization_findings(doc, projects, orgs)
+            self.assertIsInstance(got, list)
+            if isinstance(orgs, dict) and isinstance(orgs["organizations"], dict):
+                self.assertEqual([f["type"] for f in got if f["type"] == "analytics.property_wrong_account"],
+                                 ["analytics.property_wrong_account"])
+                self.assertEqual([f["type"] for f in organization_findings.findings(projects, orgs)],
+                                 ["organization.config_problem"])
+        self.registry("projects.json", ["not", "an", "object"])
+        v = self.view.accounts()
+        self.assertIn(("registry/projects.json", "unreadable"), [(d["source"], d["code"]) for d in v["degraded"]])
+        self.assertEqual(v["state"], "partial")
+
+    def test_round_six_edges(self):
+        """Review round 6: bytes that are not UTF-8 in the journal, a vault path that is a file, registry fields
+        of the wrong shape, a label that is not a name."""
+        path = self.secrets / "projects" / "movements.jsonl"
+        path.write_bytes(b"\xff\xfe not utf-8\n")
+        v = self.view.keys("company")
+        self.assertIn(("vault:movements", "unreadable"), [(d["source"], d["code"]) for d in v["degraded"]])
+        self.registry("heroku-apps.json", {"teams": 7, "apps": [{"team": ["x"], "project": ["y"]}]})
+        self.registry("digitalocean-account.json", {"accounts": [{"id": ["bad"], "team_uuid": TEAM}],
+                                                    "resources": [{"account_ref": ["x"], "project": ["y"]}]})
+        self.registry("repositories.json", {"repositories": 5})
+        self.assertEqual(self.view.accounts()["schema"], "org-accounts/1")
+        self.assertEqual(self.view.keys("company")["schema"], "org-keys/1")
+        orgs = json.loads(self.home.joinpath("config", "organizations.json").read_text())
+        orgs["organizations"]["company"]["label"] = ["not", "a", "name"]
+        self.write("organizations.json", orgs)
+        self.assertEqual(self.view.keys("company")["label"], "company")
+        self.assertIn("company", [g["label"] for g in self.view.accounts()["organizations"]])
+        import shutil
+        shutil.rmtree(self.secrets / "projects")
+        (self.secrets / "projects").write_text("not a folder")
+        v = self.view.keys("company")
+        self.assertIn(("vault", "unreadable"), [(d["source"], d["code"]) for d in v["degraded"]])
+
+    def test_keys_refusals_name_their_command(self):
+        for org, code in (("person", "default-organization"), ("nobody", "unknown-organization"),
+                          ("sk-or-v1-" + "a" * 40, "invalid-organization")):
+            with self.assertRaises(self.view.Refusal) as caught:
+                self.view.keys(org)
+            self.assertEqual(caught.exception.code, code)
+            self.assertNotIn("a" * 40, str(caught.exception))
+        self.write("organizations.json", {"organizations": {}, "projects": {}})
+        with self.assertRaises(self.view.Refusal) as caught:
+            self.view.keys("company")
+        self.assertEqual(caught.exception.answer()["error"], "no-organizations")
+        import org as org_cli
+        importlib.reload(org_cli)
+        import contextlib, io
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            self.assertEqual(org_cli.main(["keys", "--org", "company", "--json"]), 1)
+        self.assertEqual(json.loads(err.getvalue())["error"], "no-organizations")
 
 
 if __name__ == "__main__":

@@ -51,7 +51,21 @@
         apply an estate revision this machine verifies (against the one applied before it, or the first under the
         passkeys it pins) or a revocation-delta page: what share registrations are derived from
 
-Every answer is one JSON document on stdout; a refusal is `{"error": code, "message": ...}` on stderr, exit 1. A
+    project-observatory full org accounts [--json]
+        every provider account this space reaches (repository owners, DigitalOcean teams and the `doctl` contexts
+        with no stashed token, Cloudflare accounts, Heroku teams and user, OpenRouter accounts), each under exactly
+        one organization (the default Personal, another configured one, or Not ours) with the source of that
+        answer (`rule`, `default`, `external`), or under "needs a decision" with the reason (`conflict`: two
+        organizations claim it; `none`: a provider account no rule names; or seen and not connected, with the
+        door's command that connects it); what holds each, and what could not be read (`degraded`). Read-only
+        (OBS-411; schema `org-accounts/1`)
+    project-observatory full org keys --org NAME [--json]
+        each vault slot of the projects organization NAME holds, and each one issued from its accounts, classified
+        `organization`, `personal` or `ambiguous` with why (the project's organization, the issuing account from
+        the door's record, or put by hand); the door admin and provisioning keys as never moved. Names only: no
+        value is read (OBS-415; schema `org-keys/1`)
+
+`accounts` and `keys` print text, or with `--json` one JSON document; every other answer is one JSON document on stdout; a refusal is `{"error": code, "message": ...}` on stderr, exit 1. A
 refusal a person resolves also carries `nextStep` (in words) and `command`. Exit 1 too when every organization asked
 failed, a check-in the server refused included.
 """
@@ -92,6 +106,11 @@ def parser() -> argparse.ArgumentParser:
     repair.add_argument("--decline", metavar="REPAIR_ID", help="decline a repair that has not started")
     leave = sub.add_parser("leave", help="remove this machine's local state for one organization")
     leave.add_argument("--org", required=True)
+    accounts = sub.add_parser("accounts", help="every provider account and its organization (read-only)")
+    accounts.add_argument("--json", action="store_true", help="one JSON document (org-accounts/1)")
+    keys = sub.add_parser("keys", help="an organization's keys classified, by name only (read-only)")
+    keys.add_argument("--org", required=True, help="an organization of config/organizations.json")
+    keys.add_argument("--json", action="store_true", help="one JSON document (org-keys/1)")
     records = sub.add_parser("records", help="the estate revision and delta this machine applied")
     rsub = records.add_subparsers(dest="action", required=True)
     apply = rsub.add_parser("apply", help="verify and apply an estate revision or a delta page")
@@ -172,8 +191,29 @@ def _refusal(error) -> dict:
     return out
 
 
+def views(args) -> int:
+    """`accounts` and `keys`: read-only views over this space (`org_view.py`), which need no enrollment and none
+    of the `full` extra's node code."""
+    import org_view
+    try:
+        view = org_view.accounts() if args.command == "accounts" else org_view.keys(args.org)
+    except org_view.Refusal as refusal:
+        if args.json:
+            print(json.dumps(refusal.answer()), file=sys.stderr)
+        else:
+            print(f"refused: {refusal}" + (f"\n  {refusal.command}" if refusal.command else ""), file=sys.stderr)
+        return 1
+    if args.json:
+        print(json.dumps(view, indent=1, sort_keys=True))
+    else:
+        print(org_view.accounts_text(view) if args.command == "accounts" else org_view.keys_text(view))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    if args.command in ("accounts", "keys"):
+        return views(args)
     try:
         from node import org
     except RuntimeError as error:                          # the engine's `full` extra

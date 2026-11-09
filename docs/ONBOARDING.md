@@ -2236,9 +2236,9 @@ the registry then carries `organization`, `organization_source` and
 {"organizations": {
    "company": {"label": "Company", "ga4_account": "accounts/100",
                "figma": {"team": "Company Design", "project": "Builder"},
-               "match": {"repository_owners": ["company-org"], "products": ["product:suite"],
+               "match": {"github_owners": ["company-org"], "products": ["product:suite"],
                          "digitalocean_teams": ["Company Team"], "cloudflare_accounts": ["<account id>"],
-                         "heroku_teams": ["company-apps"]}},
+                         "heroku_teams": ["company-apps"], "openrouter_accounts": ["company"]}},
    "person":  {"label": "Person", "default": true, "ga4_account": "accounts/200",
                "ga4_legacy_accounts": {"accounts/300": ["properties/31"]},
                "figma": {"team": "Personal"}}},
@@ -2266,7 +2266,78 @@ rule names it, never the default) and `organization_why` on the account rows of
 `team_organizations` in `registry/heroku-apps.json`; the DigitalOcean and
 Cloudflare pages add an Organization column. An account claimed by two
 organizations is the shared case of the organization onboarding design's rule
-ORG-R04; the rest of that design (OBS-411 to OBS-420) is not built yet.
+ORG-R04.
+
+`github_owners` is `repository_owners` under the design's name (OBS-412 part 2):
+both are read, for an owner on any host, and an owner named by both counts once.
+`openrouter_accounts` names an OpenRouter account by the label its provisioning
+key was stashed as (`openrouter.py stash --as LABEL`). It decides that account's
+organization and the issuer side of the keys it minted, never a project's: a
+project's answer comes from its repositories, deploys and zones together
+(ORG-R26), and a key is weighed per key, so one personal key in a company
+project does not make the project a conflict. A `match` key the engine does not
+know is ignored and named with the known ones, on the emit's error output and in
+the finding `organization.config_problem`; a file that does not parse is named
+there too. A project in `conflict` gets the finding `organization.unresolved`,
+so the disagreement is on the board as well as in the session-start line.
+
+Every reader of a project's organization reads it one way
+(`organizations.reading`): the session-start line, the analytics findings and
+`observatory_project` name an organization's analytics account and design team
+only for a decided answer (`declared`, `rule`, `default`). A `conflict`, or any
+source this engine does not take for a decision (a joined organization's
+`proposed`, once OBS-413 adds it), names none of them and says to ask first.
+
+Two read-only views answer "whose is everything here" (OBS-411, OBS-415; the
+organization onboarding design, ORG-W1 and ORG-W6):
+
+```bash
+project-observatory full org accounts           # text; add --json for org-accounts/1
+project-observatory full org keys --org company  # text; add --json for org-keys/1
+```
+
+`org accounts` lists every provider account this space reaches: repository
+owners (from the registry and the GitHub scan), DigitalOcean teams (scanned or
+stashed) and the `doctl` contexts whose token is not a stashed one (the
+DigitalOcean door's own offline comparison, as `digitalocean.py teams` makes
+it), Cloudflare accounts, Heroku teams and the Heroku user, and OpenRouter
+accounts (stashed, or named by the door's ledger). Each sits under exactly one
+organization with its `source`: `rule` (a `match` rule names it), `default` (a
+repository owner of yours no rule names: its projects take the default
+organization), or `external` (a repository owner outside `ownership.json`: Not
+ours); or under `needsDecision`, with the reason (and, for an account not
+connected, the door's command that connects it), when it reads `conflict` (two
+organizations claim it), `none` (a provider account no rule names, as its
+registry row says: it decides no project until a rule does), or it is seen and
+not connected (a `doctl` context, an account only a door's record names). The
+Heroku user, which no rule kind names, reads `default`. Each says what it holds
+(projects, resources, keys its door issued). Without `organizations.json` every
+account of yours reads Personal (`implicit`), and a repository owner outside
+`ownership.json` still reads Not ours. `state` is `empty` (no account was found;
+`degraded` then says what was not read), `partial` (accounts were found and
+something in `degraded` was not read) or `complete`; `problems` repeats what
+`organizations.json` holds that the engine does not read.
+
+`org keys --org NAME` lists each vault slot of the projects NAME holds (and of
+projects whose disagreement includes it), plus each slot issued from one of its
+accounts, by name only: no value file is opened. Each slot reads `organization`
+(the project and the issuing account are both NAME's), `personal` (issued in a
+personal account, in a project whose disagreement includes NAME: it stays where
+it is; a personal key of a project NAME does not hold is not listed at all), or
+`ambiguous` (they disagree,
+the account is shared or has no rule, or the key was put by hand so its issuer is
+unknown), with why and the issuer from the door's record (the OpenRouter and
+Heroku ledgers, the DigitalOcean records, the movements journal for the
+Cloudflare door). `selected` is true only when both agree (ORG-R15), and a slot
+in an environment other than `local`, `stage` or `prod` is never selected
+(ORG-R22). The doors' admin and provisioning keys are listed under `notMovable`:
+never handed over, and for an account of NAME revoked after NAME's own space
+stashes its own (ORG-R07). A value present twice and a name NAME already holds
+need a comparison of values or NAME's context and are not checked (`notChecked`).
+The default organization, an unknown name and a workspace with no organizations
+are refused with the command to run. Agents call `observatory_org_accounts` and
+`observatory_org_keys` for the same answers. Choosing, applying and handing keys
+over (OBS-416, OBS-417) are not built yet.
 
 Agents read the destination at session start: the Claude Code plugin prints the
 project's organization, its Google Analytics account and Figma team, and the
@@ -2282,7 +2353,9 @@ The findings board checks Google Analytics against the split: a property whose
 account is not its project's organization's `ga4_account`
 (`analytics.property_wrong_account`), a new property in a legacy account
 (`analytics.legacy_account_property`), and an organization's account no service
-account can read (`analytics.organization_account_unreadable`).
+account can read (`analytics.organization_account_unreadable`). Only a project
+whose organization is decided is checked: a property of a project in conflict
+expects no account, so it is never in the wrong one.
 
 ## Upgrade, back up, restore
 

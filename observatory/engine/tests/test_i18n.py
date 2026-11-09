@@ -351,6 +351,7 @@ SESSION_HOOK_IDS = {
     "{path} is outside the configured projects folder — not declared: {reason}. It stays unobserved; run project-observatory full track local-folder PATH after fixing the cause",
     # organization_line(): whose accounts the project uses, and the duty to report resources.
     "organization unresolved: {why} — ask the operator before creating accounts",
+    "organization not decided ({source}: {name}); ask the operator before creating accounts",
     "organization: external — not the estate's accounts; create nothing on its behalf",
     "GA {account}", "Figma {team}", "organization: {name}",
     "resources recorded: {n}. Anything you create for it — analytics, Firebase/Google Cloud, servers, cloud or payment accounts, Figma files — is reported with observatory_propose {\"resources\": [...]} in the same turn",

@@ -783,6 +783,7 @@
  "only locally": "только локально",
  "open leaks": "утечки не закрыты",
  "open {name}": "открыть {name}",
+ "organization not decided ({source}: {name}); ask the operator before creating accounts": "организация не решена ({source}: {name}); спросите оператора, прежде чем создавать аккаунты",
  "organization unresolved: {why} — ask the operator before creating accounts": "организация не определена: {why}; спросите оператора, прежде чем создавать аккаунты",
  "organization: external — not the estate's accounts; create nothing on its behalf": "организация внешняя: это не наши аккаунты, ничего от её имени не создавайте",
  "organization: {name}": "организация: {name}",
@@ -2454,5 +2455,10 @@
  "Version {version} is available. Automatic updates are off, so it waits for you. Install it when you choose:": "Доступна версия {version}. Автоматические обновления выключены, поэтому она ждёт вас. Установите её, когда решите:",
  "Organization": "Организация",
  "shared": "общий",
- "undecided": "не решено"
+ "undecided": "не решено",
+ "Organizations file not fully read": "Файл организаций прочитан не полностью",
+ "Project with no organization (rules disagree)": "Проект без организации (правила расходятся)",
+ "organizations.json is not read: {reason}": "organizations.json не прочитан: {reason}",
+ "organizations.json has entries the engine does not read": "в organizations.json есть записи, которые движок не читает",
+ "{project} has no organization: its rules disagree": "у {project} нет организации: правила расходятся"
 }
