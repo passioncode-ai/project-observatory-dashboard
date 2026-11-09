@@ -7,6 +7,23 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **Narrow credentials on request** (OBS-191 parts 2 and 3; `docs/ONBOARDING.md`, scenario OSS-110). An agent files
+  `tools/credential_requests.py request --agent URN --provider P --preset NAME --slot PROJECT/ENV/NAME --reason "..."`
+  (`--context org:ID`, `--scope KEY=VALUE`, `--limit USD --reset`, `--expires-in-days N` or `--expires-at`) instead
+  of asking a person to mint a key; the request is fabric-agent-contract's `credential-request/1` and carries no value.
+  The administrator decides: `issue ID [--account LABEL]` has the issuing door (`openrouter.py`, `cloudflare.py`) mint
+  a narrowed credential ending no later than asked and deliver it straight into the slot, `refuse ID --reason R` takes
+  one of the contract's reasons, `pending ID` keeps it open, the consumer may `withdraw ID`, and `revoke ID` revokes at
+  the provider, by the credential's own identity (an OpenRouter key hash, a Cloudflare token id), with proof, and deletes
+  the slot's value only while it is the one issued; `revoke ID --settle "how"` closes one not proved. Refused before any provider
+  call: a decided request, a slot that holds a value (never overwritten), an organization this space is not enrolled
+  in, a preset whose token another slot would share; a credential whose end is unconfirmed or later than asked is
+  revoked again. The slot's metadata records the delivery's provenance (`vault.record_provenance`: issuer, recipient,
+  provider, preset, scope, ceiling, end, revoke handle), which `vault.py list`, `use_secret.py names` and
+  `observatory_credentials` (`issuedOnRequest`) show; every request, decision, attempt and revocation is one line of
+  `credential-requests.jsonl` beside the movement journal, and the board raises `credential.request_waiting`,
+  `credential.revocation_refused` and `credential.request_queue_unreadable`. Sending a request to an organization in a check-in and opening its sealed envelope
+  are not built yet (OBS-454).
 - **Whose every account and key is, read-only** (OBS-411, OBS-415, organization onboarding ORG-W1 and ORG-W6;
   `docs/ONBOARDING.md`). `project-observatory full org accounts [--json]` lists every provider account this space
   reaches (repository owners, DigitalOcean teams and the `doctl` contexts with no stashed token, Cloudflare accounts,

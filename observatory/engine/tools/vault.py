@@ -42,8 +42,9 @@ THE CONTRACT WITH AGENTS — the four rules the observatory skill makes mandator
      settle it: the retired value keeps working until revoked at the provider.
 
 METADATA IS NOT SECRET. `meta.json` beside each value (created, rotated, envs,
-`header_for`, the server a slot is bound to, and `expires_at` with its
-`expiry_reason`, which a minting door records through `record_expiry`, OBS-191)
+`header_for`, the server a slot is bound to, `expires_at` with its
+`expiry_reason`, which a minting door records through `record_expiry`, OBS-191,
+and `provenance`, the request a value was issued for, `record_provenance`)
 and `leaks.jsonl` hold names,
 dates and places — never values — so the register can be read, listed and
 rendered without touching a single secret byte.
@@ -342,6 +343,8 @@ def _write_put(slot: pathlib.Path, meta: dict, value: str, label: str, **journal
     # A NEW VALUE'S EXPIRY IS NOT THE OLD ONE'S. A door that minted it records its own
     # right after (`record_expiry`); a value put by hand reads "expiry not recorded".
     key_expiry.clear(meta)
+    # Nor its provenance: the request a value answered names that value only (OBS-191).
+    meta.pop("provenance", None)
     _atomic_write(_meta_path(slot), json.dumps(meta, indent=1), 0o600)
     journal("put", label, **journal_detail)
 
@@ -357,6 +360,7 @@ def _write_rotate(slot: pathlib.Path, meta: dict, value: str, label: str, **jour
     meta.setdefault("rotations", 0)
     meta["rotations"] += 1
     key_expiry.clear(meta)
+    meta.pop("provenance", None)
     _atomic_write(_meta_path(slot), json.dumps(meta, indent=1), 0o600)
     journal("rotate", label, archived=archive.name, scope="local_slot", **journal_detail)
     return archive
@@ -569,6 +573,117 @@ def record_expiry(project: str, env: str, name: str, expires_at: str | None,
     journal("expiry", secret, tool=tool, expires_at=at,
             **({} if at else {"reason": meta.get("expiry_reason")}))
     return key_expiry.describe(meta)
+
+
+#: The members a slot's provenance may carry (OBS-191 parts 2 and 3; the fields OBS-360 names: issuer,
+#: recipient, scopes, limit, expiry, revoke handle). Names, places and dates only, never a value.
+PROVENANCE_FIELDS = ("requestId", "issuedAt", "decidedBy", "issuer", "recipient", "provider", "preset",
+                     "scope", "limit", "expiresAt", "revoke")
+
+
+def _provenance_problem(value, where: str = "provenance") -> str | None:
+    """Why a provenance member cannot be written, or None: only strings, numbers, booleans, null, lists and
+    objects of them, no string shaped like a credential (the slot's metadata is listed and rendered)."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str) or credential_shape.find(key, uuids=False):
+                return f"{where} has a key that is not a plain name"
+            problem = _provenance_problem(item, f"{where}.{key}")
+            if problem:
+                return problem
+        return None
+    if isinstance(value, list):
+        for item in value:
+            problem = _provenance_problem(item, where)
+            if problem:
+                return problem
+        return None
+    if isinstance(value, str):
+        return f"{where} looks like it carries a credential" if credential_shape.find(value, uuids=False) else None
+    if value is None or isinstance(value, (bool, int, float)):
+        return None
+    return f"{where} is not JSON data"
+
+
+@_serialized
+def record_provenance(project: str, env: str, name: str, provenance: dict, *, tool: str = "vault.py") -> dict:
+    """Record where a slot's value came from, in its `meta.json`, and journal it (OBS-191 part 3).
+
+    Metadata only: the value is never read. Called by `credential_requests.py` right after an issuing
+    door delivered a value it minted for a request, so a reader knows, without opening the value, who
+    issued it (door and account), for whom (agent and context), what it reaches (preset, scope, limit),
+    until when, and how it is revoked. A put or a rotation of the slot drops it: provenance describes one
+    value. A slot that holds no value is refused, as `record_expiry` refuses one. Returns what was
+    written."""
+    slot = _slot(project, env, name)
+    secret = f"{project}/{env}/{name}"
+    if not slot.is_file():
+        raise VaultBoundaryError(f"nothing at {secret} to record a provenance for")
+    if not isinstance(provenance, dict) or not provenance:
+        raise VaultBoundaryError("the provenance is not an object")
+    unknown = sorted(set(provenance) - set(PROVENANCE_FIELDS))
+    if unknown:
+        raise VaultBoundaryError("the provenance carries a member this vault does not record")
+    problem = _provenance_problem(provenance)
+    if problem:
+        raise VaultBoundaryError(problem)
+    meta = _read_meta(slot)
+    meta["provenance"] = dict(provenance)
+    _atomic_write(_meta_path(slot), json.dumps(meta, indent=1), 0o600)
+    recipient = provenance.get("recipient") if isinstance(provenance.get("recipient"), dict) else {}
+    journal("provenance", secret, tool=tool, request=provenance.get("requestId"),
+            context=recipient.get("context"), provider=provenance.get("provider"))
+    return meta["provenance"]
+
+
+def provenance_of(project: str, env: str, name: str) -> dict | None:
+    """The provenance recorded beside a slot's value, or None."""
+    meta = _read_meta(_slot(project, env, name))
+    value = meta.get("provenance")
+    return value if isinstance(value, dict) else None
+
+
+def describe_provenance(provenance: dict | None) -> str:
+    """One line for `list` and `use_secret.py names`: on whose request, in which context, by which door."""
+    if not isinstance(provenance, dict):
+        return ""
+    recipient = provenance.get("recipient") if isinstance(provenance.get("recipient"), dict) else {}
+    issuer = provenance.get("issuer") if isinstance(provenance.get("issuer"), dict) else {}
+    request = str(provenance.get("requestId") or "")[:8] or "?"
+    return (f"issued on request {request} for {recipient.get('context') or '?'} "
+            f"by {issuer.get('door') or '?'}/{issuer.get('account') or '?'}")
+
+
+#: `remove_value`'s `expect` when any value may go.
+ANY_VALUE = object()
+
+
+@_serialized
+def remove_value(project: str, env: str, name: str, *, tool: str = "vault.py", why: str = "",
+                 expect=ANY_VALUE) -> str:
+    """Delete a slot's value and metadata, keeping its rotation archives, and journal it. Answers `removed`,
+    `absent` or `kept`. `expect` names the value that may go, checked under the vault's own lock, so a put or
+    a rotation that lands while a door was talking to its provider is never deleted: a request id (only the
+    value whose provenance names that request), None (only a value that carries no provenance), or a tuple of
+    those (any of them). For a door
+    that revoked the value at its provider first (`credential_requests.py revoke`), so the open leak check of
+    `remove` does not apply: nothing the slot held still works."""
+    slot = _slot(project, env, name)
+    secret = f"{project}/{env}/{name}"
+    if not slot.is_file():
+        return "absent"
+    if expect is not ANY_VALUE:
+        held = _read_meta(slot).get("provenance")
+        held_request = held.get("requestId") if isinstance(held, dict) else None
+        accepted = tuple(expect) if isinstance(expect, (tuple, list, set, frozenset)) else (expect,)
+        if held_request not in accepted:
+            return "kept"
+    meta = _meta_path(slot)
+    _no_symlinks(meta)
+    slot.unlink()
+    meta.unlink(missing_ok=True)
+    journal("remove", secret, tool=tool, **({"why": _note("why", why)} if why else {}))
+    return "removed"
 
 
 @_serialized
@@ -846,6 +961,8 @@ def cmd_list(a) -> int:
         if "expires_at" in meta:
             # Only a recorded expiry is shown: most slots hold values no door minted.
             extras.append(key_expiry.describe(meta))
+        if isinstance(meta.get("provenance"), dict):
+            extras.append(describe_provenance(meta["provenance"]))
         if not osprivacy.private(slot):
             extras.append(f"MODE {osprivacy.describe(slot).lstrip('0')} — READABLE BEYOND OWNER")
         print(f"  {project}/{env}/{name}  ({slot.stat().st_size}B"

@@ -233,6 +233,12 @@ Every credential these doors mint expires 90 days out unless told otherwise
 the value: `use_secret.py names` and `observatory_credentials` show it for a vault slot, and the
 findings `credential.expiring` and `credential.expired` name the door's rotate command. Do not
 mint without an expiry unless the task needs a credential that outlives a rotation.
+When an agent needs a narrow credential the person has not minted, file a request with
+`credential_requests.py request --agent urn:fabric:agent:<publisher>:<id> --provider P --preset NAME
+--slot <project>/<env>/<NAME> --reason "<one line>"` (no value; `presets` lists what each door
+offers). The person decides: `issue ID` mints through the door into the slot with its provenance,
+`refuse ID --reason R`, and `revoke ID` revokes at the provider and deletes the value it issued. An
+agent runs those only on the person's word, passing it with `--relayed-instruction "<words>" --source <where>`.
 They require an explicitly configured integration and the user's own admin or
 provisioning credential. They do not make a new user inherit the author's
 accounts, budgets or tokens. Limit issuance and revocation to the task's scope.

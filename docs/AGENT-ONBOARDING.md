@@ -52,6 +52,19 @@ window is the Mac app's, opened through the node's lifecycle broker; on Windows 
 the app not enrolled, or (as in every release so far) with no engine bundled inside the signed
 app, a request is answered `no-client` with that step.
 
+## A key a door can mint for you
+
+When you need a narrow credential (an OpenRouter key with a ceiling, a Cloudflare token for one zone),
+file a request instead of asking me to mint one: `python "$(project-observatory full-path)/tools/credential_requests.py"
+request --agent urn:fabric:agent:PUBLISHER:ID --provider P --preset NAME --slot PROJECT/ENV/NAME --reason "one
+line"` (`presets` lists what each door offers; an OpenRouter key needs `--limit USD`; `--context org:ID` for an
+organization's agent, at most 30 days). No value goes into it, and the reason names the need, never a path or a
+value. Deciding it is mine: `issue ID` mints through the door straight into the slot, `refuse ID --reason ...`
+refuses it. When I tell you to decide one, run that command with `--relayed-instruction "my words"
+--source WHERE`. Once issued, use the slot through `use_secret.py run` as any other; `vault.py list` says on
+which request it was issued. Never `put` a value into a slot a request is waiting for, and never issue into a
+slot that holds one: the issue is refused there.
+
 ## A key someone shared with me
 
 Another person's Observatory may share a key with my machine (`full share accept`). Use it only
