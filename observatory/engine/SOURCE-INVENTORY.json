@@ -5729,8 +5729,8 @@
       "path": "tests/test_organizations.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "06b5831fd51e87adf54b7b3c5956b8a936675f7944f39f718dac8edc1a18d645",
-      "bytes": 64971
+      "export_sha256": "269a3eb58130f3027dec26caa324aa100a679f94be70a61fe6689a2ef6af26cc",
+      "bytes": 65061
     },
     {
       "path": "tests/test_oslocks.py",
