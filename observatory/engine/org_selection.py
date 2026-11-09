@@ -657,9 +657,9 @@ def _change(org: str, draft: dict | None, record: dict | None, changes: dict, wh
     for ident, text in (changes.get("labels") or {}).items():
         if kind_of(ident) != "project":
             raise Refusal("unknown-item", f"{ident!r} is not a project; only a project carries a label")
-        row = draft["items"].get(ident)
-        decision = row["decision"] if row else sel["items"].get(ident, {}).get("decision", "include")
-        put(ident, decision, by=(row or {}).get("by", "hand"), label=_label_ok(text) if text else "")
+        row = draft["items"].get(ident) or sel["items"].get(ident) or {}
+        # A label changes what the organization reads, not who chose the project: its decision and `by` stay.
+        put(ident, row.get("decision", "include"), by=row.get("by", "hand"), label=_label_ok(text) if text else "")
     draft["updatedAt"] = _now()
     return draft
 
