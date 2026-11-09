@@ -815,6 +815,23 @@ class Inventory(unittest.TestCase):
         self.assertEqual((tool["project"], tool["behind"]), (None, True))
         self.assertEqual(inv["findings"], [])
 
+    def test_a_name_of_another_shape_is_the_folder_name_and_a_nul_path_is_ignored(self):
+        folder = self.home / ".claude" / "skills" / "big"
+        folder.mkdir(parents=True)
+        (folder / "SKILL.md").write_text("---\nname: first\n  " + "x" * 5000 + "\ndescription: d\n---\n")
+        installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
+        installed["plugins"]["tool@family"][0]["installPath"] = "/a\u0000b"
+        installed["plugins"]["x" * 300 + "@family"] = [{"scope": "user", "version": "1.0.0"}]
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
+        inv = self.inventory()
+        names = {s["name"] for s in inv["spaces"][0]["skills"]}
+        self.assertIn("big", names)
+        self.assertLess(max(len(json.dumps(r)) for r in inv["spaces"][0]["skills"]), 300)
+        self.assertNotIn("x" * 300 + "@family", {p["name"] for p in inv["spaces"][0]["plugins"]})
+        self.assertIn(("claude:installed_plugins.json", "unrecognised-shape"),
+                      {(d["source"], d["code"]) for d in inv["degraded"]})
+        self.assertNotEqual(inv["degraded"][:1], [{"source": "inventory", "code": "failed"}])
+
     def test_an_unknown_scope_behind_is_no_finding(self):
         installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
         installed["plugins"]["tool@family"][0]["scope"] = "managed"

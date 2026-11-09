@@ -792,6 +792,7 @@ def observatory_machine(
         skills["spaces"] = [{**space, "skills": [_present_fields(r) for r in space.get("skills") or []],
                              "plugins": [_present_fields(r) for r in space.get("plugins") or []]}
                             for space in skills["spaces"]]
+        skills["findings"] = [_present_fields(r) for r in skills.get("findings") or []]
         return {"measuredAt": skills["measuredAt"], "degraded": degraded, "skills": skills}
     if section == "move" and explainPid is None:
         # The agent's path to the checklist (decision D13): the CLI's own function and peers.

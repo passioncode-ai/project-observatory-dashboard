@@ -645,7 +645,8 @@ id to compare, so a store another account owns there fails later as `target-not-
 `filesystem-failed`), `target-not-writable`, `target-unsafe`, `target-slot-invalid`, `target-slot-filled`,
 `filesystem-refused`; with `--json` a refusal of the source's names is JSON too, and the `project:` sentence goes to
 stderr; a command line argparse refuses (a missing `--to-store`) stays argparse's usage text and exit 2.
-`target-in-repository` is asked of git and skipped where git cannot run. An undo after a refusal under the locks
+`target-in-repository` is asked of git and skipped where git cannot run; a git that does not answer within 60 s
+is a refusal under that code. An undo after a refusal under the locks
 happens while both are held; on Windows a held lock file cannot be removed, so a new store a refused copy made
 stays there, empty but for its lock file. A refused copy may leave an existing store and vault folder of this account at 0700 and a lock file in an
 existing vault. Unless the outcome is `unchanged`, both
@@ -677,7 +678,9 @@ confirms, OBS-491), `version`,
 `projects-folder`, `codex:config.toml`, `codex:plugins-cache`, `codex:plugins-cache:<marketplace>[:<plugin>]`, code
 `unreadable`; `claude:installed_plugins.json`, `claude:installed_plugins.json:<plugin>`, `claude:settings.json`, a
 settings label above,
-`claude:known_marketplaces.json:<name>` and `claude:marketplace:<name>`, code `unrecognised-shape`; `inventory`,
+`claude:known_marketplaces.json:<name>` and `claude:marketplace:<name>`, code `unrecognised-shape`;
+`codex:plugins-cache:<marketplace>:<plugin>`, code `ambiguous` (several unnamed folders, so the loaded copy is not
+known); `inventory`,
 code `failed`, when the inventory itself failed and the rest of the scan was kept). A plugin's `scope` is the word
 Claude Code recorded (`user`, `project`, `local`, or another such as `managed`, whose `enabled` is null). `latest`
 is read from the plugin's manifest inside the marketplace's folder first, then the catalogue entry; a plugin from
@@ -690,7 +693,9 @@ reads a scan without it as `not-surveyed` until the next scan. `observatory_mach
 (answer `{measuredAt, degraded, skills}`, `skills` holding `spaces`, `page` (`limit`, `cursor`, `nextCursor`, `order`,
 `total`), `counts`, `findings`, `open`, `degraded`) with two new optional arguments for that section, `limit`
 (1 to 100, default 100 rows of one window over the findings, then each space's plugins, then its skills; `total`
-counts those rows; `counts` stay whole; the MCP answer's rows leave out their null fields and its `degraded` is at the top
+counts those rows; `counts` stay whole; a cursor past the end answers an empty last page; a skill's `name` is its
+front matter's only when it has a name's shape, else its folder's, at most 64 characters, and a plugin recorded
+under a name of another shape is left out with `unrecognised-shape`; the MCP answer's rows leave out their null fields and its `degraded` is at the top
 only, not repeated under `skills`) and `cursor` (an invalid one answers the first page and `degraded` code
 `invalid-cursor`), and
 its overview's `sections` lists `skills`; the tool's other answers are unchanged. `full machine --skills` prints the

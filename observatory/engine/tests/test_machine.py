@@ -1191,6 +1191,9 @@ class Skills(Base):
         for cursor in ("nope", "\u00b2", "9" * 5000):
             bad = self.server.observatory_machine(section="skills", cursor=cursor)
             self.assertIn("invalid-cursor", {d["code"] for d in bad["degraded"]})
+        past = self.server.observatory_machine(section="skills", cursor="9999")
+        self.assertEqual((past["skills"]["spaces"][0]["skills"], past["skills"]["page"]["nextCursor"]), ([], None),
+                         "a cursor past the end is the end, never the first page again")
 
     def test_the_answer_stays_within_what_a_host_keeps(self):
         """The largest page (100 skills) beside a machine's worth of plugin installs, serialised as the SDK serialises it (two-space

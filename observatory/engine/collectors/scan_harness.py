@@ -684,7 +684,7 @@ def _folders(folder: Path, source: str, degraded: list[dict]) -> list[Path]:
             return sorted(Path(e.path) for e in entries if e.is_dir())
     except (FileNotFoundError, NotADirectoryError):
         return []
-    except OSError as exc:
+    except (OSError, ValueError) as exc:   # ValueError: a recorded path with a NUL in it
         degraded.append({"source": source, "code": "unreadable",
                          "reason": f"a folder could not be listed ({type(exc).__name__}); what it holds is not in "
                                    f"the inventory"})
@@ -699,11 +699,24 @@ def _is_file(path: Path, source: str, degraded: list[dict]) -> bool:
         return stat.S_ISREG(os.stat(path).st_mode)
     except (FileNotFoundError, NotADirectoryError):
         return False
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         degraded.append({"source": source, "code": "unreadable",
                          "reason": f"a skill's folder could not be searched ({type(exc).__name__}); it is not in "
                                    f"the inventory"})
         return False
+
+
+#: A name as the inventory keeps it: the shape skill and plugin names take, bounded, so one odd SKILL.md cannot make
+#: a row, and with it a page of the machine view, as long as the file.
+NAME_SHAPE = re.compile(r"[A-Za-z0-9][A-Za-z0-9:._-]{0,63}")
+PLUGIN_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?:@[A-Za-z0-9][A-Za-z0-9._-]{0,63})?")
+
+
+def _skill_name(declared, folder: str) -> str:
+    """The front matter's `name` when it has a name's shape, else the folder's name, cut to 64 characters."""
+    if isinstance(declared, str) and NAME_SHAPE.fullmatch(declared):
+        return declared
+    return folder[:64]
 
 
 def _skill_rows(folder: Path, agent: str, scope: str, extra: dict, seen: set[str],
@@ -724,7 +737,7 @@ def _skill_rows(folder: Path, agent: str, scope: str, extra: dict, seen: set[str
                                        f"the inventory"})
             continue
         meta = front_matter(text)
-        rows.append({"name": meta.get("name") or skill.parent.name, "agent": agent, "scope": scope,
+        rows.append({"name": _skill_name(meta.get("name"), skill.parent.name), "agent": agent, "scope": scope,
                      "version": skill_version(text), **extra})
     return rows
 
@@ -828,6 +841,10 @@ def _claude_plugins(claude: Path, degraded: list[dict]) -> tuple[list[dict], lis
 
     rows, skills, seen = [], [], set()
     for key in sorted(installed):
+        if not PLUGIN_KEY.fullmatch(key):
+            degraded.append({"source": "claude:installed_plugins.json", "code": "unrecognised-shape",
+                             "reason": "a plugin is recorded under a name of another shape; it is not in the inventory"})
+            continue
         records = installed[key]
         named_bad = False
         for record in (records if isinstance(records, list) else [records]):
@@ -848,7 +865,8 @@ def _claude_plugins(claude: Path, degraded: list[dict]) -> tuple[list[dict], lis
                 settings = None
             elif scope != "user":
                 where = record.get("projectPath")
-                folder = Path(where) if isinstance(where, str) and where and Path(where).is_absolute() else None
+                folder = (Path(where) if isinstance(where, str) and where and "\0" not in where
+                          and Path(where).is_absolute() else None)
                 project = folder.name if folder and folder.name else None
                 # Two projects may share a folder name in two places; a short digest of the path tells their
                 # installs apart (a board subject, an ack) without the path itself.
@@ -881,7 +899,7 @@ def _claude_plugins(claude: Path, degraded: list[dict]) -> tuple[list[dict], lis
                    "behind": (have < newest) if have and newest else None}
             rows.append(row)
             where = record.get("installPath")
-            path = Path(where) if isinstance(where, str) and where else None
+            path = Path(where) if isinstance(where, str) and where and "\0" not in where else None
             if row["enabled"] and path is not None and path.is_absolute():
                 skills += _skill_rows(path / "skills", CLAUDE_CODE, "plugin", {"plugin": key}, seen, degraded)
     return rows, skills

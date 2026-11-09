@@ -2078,7 +2078,7 @@ local install carries `projectKey`, a short digest of the project's path that te
 folder name apart without the path. An enabled Codex plugin's skills are listed with scope `plugin`. Codex plugins are read from its plugin cache; their newest
 version is not known (`latest` null). One finding waits and says so under `open`: an organization's plugin
 enabled in a person's own space needs the space's context binding (OBS-359). A record that cannot be read
-or has another shape (`installed_plugins.json`, a settings file, a marketplace catalogue, a skill's
+or has another shape, or is ambiguous (`installed_plugins.json`, a settings file, a marketplace catalogue, a skill's
 `SKILL.md`, Codex's plugin cache or `config.toml`) is named in `degraded`, never read as empty (`unreadable`, or `unrecognised-shape` for a record of another shape; `harness_root`
 `not-found` when the home folder the scan reads is not a folder); no
 scan yet, one older than the inventory, or one older than 24 hours (`stale`) is named there with the command
@@ -3490,16 +3490,17 @@ The receipt names the slot, both stores and two keyed digests (HMAC-SHA-256): of
 of what the target holds after the write. They are made under your store's estate key when it has one,
 so they compare with `full vault-digests` (the journal keeps that digest too), else under a key made for
 this copy and forgotten (the journal then keeps none). A refusal writes no value, metadata or journal line
-and removes the store and vault folders the copy had made (an existing vault keeps a lock file the copy
-made in it, which is harmless, and an existing store and vault folder of yours stay at the 0700 the copy
+and removes the store and vault folders the copy had made (on Windows, where a lock file in use cannot be
+removed, a new store stays, empty but for it; an existing vault keeps a lock file the copy made in it, which
+is harmless, and an existing store and vault folder of yours stay at the 0700 the copy
 set them to). Its codes: `invalid-slot` (the source slot's names), `source-empty`,
 `source-unreadable` (the slot, its metadata, the estate key or the leak register cannot be read as private
 files, or the slot does not hold one single-line value),
 `source-has-open-leak` (rotate and settle first), `target-not-absolute`, `target-not-plain` (`.` or `..`
 in the path), `target-link` (the store or its `projects/` is a link), `target-parent-missing`,
 `target-not-folder`, `target-is-vault-folder` (name the store that holds the vault),
-`target-in-repository` (the store would sit in a Git working tree; asked of git, so it is not checked where
-git cannot run), `same-store` (another spelling of this
+`target-in-repository` (the store would sit in a Git working tree, or git did not answer in time; asked of
+git, so it is not checked where git cannot run), `same-store` (another spelling of this
 store included), `nested-stores` (one store inside the other, your store or its vault folder included),
 `target-other-account` (a store another
 account owns: a value written from here would be unreadable there, so another OS account's store is not

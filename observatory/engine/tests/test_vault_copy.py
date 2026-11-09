@@ -210,6 +210,7 @@ class Copy(unittest.TestCase):
         self.assertEqual((code, refused["code"]), (2, "source-unreadable"))
         self.assertFalse(self.target.exists(), "a refusal leaves no store, vault folder or lock file behind")
 
+    @unittest.skipIf(os.name == "nt", "Windows keeps a file open for locking from being removed")
     def test_a_refusal_under_the_locks_undoes_what_it_created(self):
         """The slot changes while the copy waits for the locks: the second check refuses, and what this call made
         in the target store (its folder, vault folder and lock file) is removed again."""
@@ -433,6 +434,7 @@ class Copy(unittest.TestCase):
         self.assertTrue((self.target / "projects" / ".vault.lock").exists())
         self.assertTrue((self.target / "projects/alpha-web/prod/API_TOKEN").is_file())
 
+    @unittest.skipIf(os.name == "nt", "Windows keeps a file open for locking from being removed")
     def test_a_lock_file_replaced_while_waiting_is_locked_anew(self):
         """A writer that waited on a lock file another process removed locks the file now at the path."""
         sys.path.insert(0, str(TOOLS))
@@ -458,6 +460,7 @@ class Copy(unittest.TestCase):
         code, refused = self.copy()
         self.assertEqual((code, refused["code"]), (2, "target-unsafe"))
 
+    @unittest.skipIf(os.name == "nt", "Windows keeps a file open for locking from being removed")
     def test_a_refusal_under_the_locks_undoes_the_new_vault_while_still_holding_them(self):
         """The new vault's lock file is removed before the locks are let go, so no writer that waited on it can be
         holding it when it goes."""

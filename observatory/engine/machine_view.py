@@ -158,6 +158,12 @@ def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
     if cursor is not None:
         if re.fullmatch(r"[0-9]{1,9}", str(cursor)) and int(cursor) <= total:
             start = int(cursor)
+        elif re.fullmatch(r"[0-9]{1,9}", str(cursor)):
+            # Past the end (the inventory shrank between two scans): an empty last page, never the first page
+            # again, or a reader following `nextCursor` would read from the start without end.
+            start = total
+            degraded.append({"source": "cursor", "code": "invalid-cursor",
+                             "reason": "the cursor is past the end of the current inventory; nothing follows it"})
         else:
             degraded.append({"source": "cursor", "code": "invalid-cursor",
                              "reason": "the cursor is not one this answer gave; the first page is shown"})

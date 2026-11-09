@@ -900,6 +900,10 @@ def _target_store(text: str) -> pathlib.Path:
     probe = store if store.is_dir() else store.parent
     try:
         inside = safe_git.run(["rev-parse", "--is-inside-work-tree"], cwd=probe, timeout=60)
+    except subprocess.TimeoutExpired:
+        # A git that does not answer cannot say the store is outside a working tree: refused, the safe side.
+        raise CopyRefused("git did not answer in time, so whether the target store sits in a Git working tree is "
+                          "unknown; try again", "target-in-repository") from None
     except (OSError, subprocess.SubprocessError):
         inside = None   # no git to ask: no working tree that git could publish from
     if inside is not None and inside.returncode == 0 and (inside.stdout or "").strip() == "true":
