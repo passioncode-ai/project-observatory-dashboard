@@ -12,6 +12,10 @@ Two rows, silent when `config/organizations.json` is not configured:
   organization, or a file that does not parse. Each of those changes which organization a project gets without a word in
   the registry: the emit prints them to its log and nothing else did.
 
+A third, `organization.selection_new` (OBS-417, ORG-R16), one per organization with an applied selection
+(`org_selection.py`): the projects and keys found since that the organization's rules would propose. They are
+listed in the next plan and never chosen by themselves; this row is how a person hears of them.
+
 NO TIMESTAMP INSIDE A FINDING: the same registry and configuration give the same rows.
 """
 from __future__ import annotations
@@ -22,7 +26,7 @@ if _DASHBOARD not in _sys.path:
     _sys.path.append(_DASHBOARD)  # `finding_types.titled`: a title is a message id
 from finding_types import titled  # noqa: E402
 
-TYPES = ("organization.unresolved", "organization.config_problem")
+TYPES = ("organization.unresolved", "organization.config_problem", "organization.selection_new")
 ACCOUNTS_CMD = "project-observatory full org accounts"
 
 
@@ -67,5 +71,27 @@ def findings(projects: list[dict], orgs_doc: dict | None, unreadable: str | None
                        "file or a cloud resource for it until a person decides."),
             "action": ("declare it under `projects` in config/organizations.json with a `why`, or narrow the rule "
                        f"that should not match it; `{ACCOUNTS_CMD}` shows which account each rule claims"),
+        })
+    return out
+
+
+def selection_findings(rows: list[dict]) -> list[dict]:
+    """`rows`: `org_selection.new_since_all()`, each organization with an applied selection and the item ids found
+    since it. One row per organization; silent without a selection."""
+    out = []
+    for row in rows or []:
+        org, new = row.get("organization"), row.get("new") or []
+        if not isinstance(org, str) or not new:
+            continue
+        projects = sum(1 for i in new if str(i).startswith("project:"))
+        out.append({
+            "type": "organization.selection_new", "subject": f"organization:{org}", "severity": "info",
+            **titled("{n} new items may belong to {organization}", n=len(new), organization=org),
+            "detail": (f"Found since {org}'s selection was applied: {projects} project(s) and {len(new) - projects} "
+                       "key(s) its rules would propose: " + ", ".join(sorted(new)[:12])
+                       + (f", and {len(new) - 12} more" if len(new) > 12 else "")
+                       + ". None is chosen by itself; each waits for a person (ORG-R16)."),
+            "action": (f"review them with `project-observatory full org select --org {org} plan`, include the ones "
+                       "that belong to it, then apply the new form"),
         })
     return out

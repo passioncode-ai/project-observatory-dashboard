@@ -37,12 +37,12 @@ REQUIRED = ["observatory_status", "observatory_project", "observatory_timeline",
 #: Every tool name `mcp/server.py` publishes in `tools/list` (OSS-07: existing MCP tool
 #: names stay available). Changing this list is changing the published surface.
 GOLDEN_TOOLS = [
-    # observatory_* tools (28)
+    # observatory_* tools (29)
     "observatory_assistant_ask", "observatory_assistant_conversation", "observatory_assistant_status",
     "observatory_checkpoint_latest", "observatory_checkpoint_write", "observatory_credentials",
     "observatory_explain", "observatory_findings", "observatory_handoff_accept",
     "observatory_handoff_create", "observatory_handoff_get", "observatory_learn", "observatory_lesson",
-    "observatory_machine", "observatory_org_accounts", "observatory_org_keys",
+    "observatory_machine", "observatory_org_accounts", "observatory_org_keys", "observatory_org_selection",
     "observatory_overview", "observatory_project", "observatory_propose", "observatory_recall",
     "observatory_record", "observatory_resolve", "observatory_search", "observatory_secret_request",
     "observatory_ssh_keys",
@@ -495,6 +495,16 @@ async def run_credentials() -> None:
             check("org keys with no organization configured is a typed refusal with its command",
                   data.get("error") == "no-organizations" and bool(data.get("command"))
                   and data.get("degraded") == [], json.dumps(data)[:200])
+            # OBS-417: the selection answers over the wire; a relayed act without the operator's words is refused.
+            data = payload(await session.call_tool("observatory_org_selection", {"org": "example-team",
+                                                                                 "action": "show"}))
+            check("org selection show answers org-select/1 with a degraded list",
+                  data.get("schema") == "org-select/1" and data.get("state") == "empty"
+                  and data.get("degraded") == [], json.dumps(data)[:200])
+            data = payload(await session.call_tool("observatory_org_selection", {
+                "org": "example-team", "action": "apply", "digest": "sha256:" + "0" * 64}))
+            check("org selection apply without organizations is a typed refusal with its command",
+                  data.get("error") == "no-organizations" and bool(data.get("command")), json.dumps(data)[:200])
 
 
 async def run_refusals() -> None:

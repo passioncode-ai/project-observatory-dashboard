@@ -153,6 +153,7 @@ LABELS: dict[str, str] = {
     "notify.channel_failing": "Notification channel failing",
     "observatory.why_unanswered": "Requests for a why left unanswered",
     "organization.config_problem": "Organizations file not fully read",
+    "organization.selection_new": "Found since an organization's selection",
     "organization.unresolved": "Project with no organization (rules disagree)",
     "plugin.broken": "Plugin broken",
     "plugin.refused": "Plugin refused",

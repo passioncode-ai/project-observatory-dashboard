@@ -76,6 +76,7 @@ if __name__ == "__main__":
 
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from mcp.types import ToolAnnotations
+from mcp.server.mcpserver import Context
 
 # The capability tools live beside this file. `mcp/` is not a package — the SDK
 # owns the name `mcp` — so the directory itself goes on the path.
@@ -117,19 +118,20 @@ server = InteropServer(
     # exactly at the WRITE rule (tests/test_mcp_wire.py checks the length).
     instructions=(
         "SPENDS: `observatory_assistant_ask` (configured model; private dialogue/job — "
-        "`fabric.job.get`, `fabric.job.cancel`). `observatory_search` stays local "
+        "`fabric.job.get`/`.cancel`). `observatory_search` stays local "
         "(embedding-policy/1, lexical); `degraded` says so.\n"
         "WRITE: `observatory_record`, `_lesson` and `_propose` append PROPOSALS below "
-        "confidence 1; only the operator or independent corroboration promotes one.\n"
+        "confidence 1; only the operator or independent corroboration promotes one; "
+        "`_org_selection` needs the operator's `decision`.\n"
         "SECRETS: `observatory_credentials` names keys and CANNOT return a value; run its command, "
         "open no file. Missing key: `observatory_secret_request`, no chat.\n"
-        "DEGRADED: every read carries `degraded`: empty means full coverage, otherwise "
-        "it names gaps; treat a read without one as a bug (writes/job handles have none). "
+        "DEGRADED: every read carries `degraded` (empty: full coverage; else it "
+        "names gaps); treat a read without one as a bug (writes/job handles have none). "
         "Refusals are typed `error` answers; isError means malformed input, unknown tool "
         "or invalid output.\n"
         "WORKFLOW: `observatory_checkpoint_write` after each step (keep `leaseId`); "
         "`observatory_handoff_create`/`_accept` moves it; `observatory_workflow_list` finds it.\n"
-        "START with `observatory_overview` (counts, tiers, findings, disk). Eligible outside Git checkouts are declared in `config/tracked.json` for the next "
+        "START with `observatory_overview` (counts, findings, disk). Folders outside Git go to `config/tracked.json` for the next "
         "pass; no grants or registry writes.\n"
         "READ, paged with `limit` and `cursor` → `nextCursor`, totals over the "
         "scope: `observatory_status` (pass `limit`, `detail: summary`; unpaged is "
@@ -602,6 +604,76 @@ def observatory_org_keys(
     try:
         return org_view.keys(org)
     except org_view.Refusal as refusal:
+        return refusal.answer()
+
+
+def _meta_decision(ctx: "Context | None") -> Any:
+    """The operator's decision a call carries in `_meta.decision` (contract DEC-0121 AP-2), or None."""
+    try:
+        meta = ctx.request_context.meta if ctx is not None else None
+    except (ValueError, AttributeError):
+        return None
+    if meta is None:
+        return None
+    if isinstance(meta, dict):
+        return meta.get("decision")
+    extra = getattr(meta, "model_extra", None) or {}
+    return extra.get("decision", getattr(meta, "decision", None))
+
+
+@server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True))
+def observatory_org_selection(
+    org: Annotated[str, Field(validation_alias=AliasChoices("org", "organization"),
+                              description="An organization of config/organizations.json, not the default one.")],
+    action: Annotated[Literal["show", "plan", "apply", "undo", "confirm-replacement"],
+                      Field(description="show and plan read (gate none); plan with `changes`, apply, undo and "
+                                        "confirm-replacement are relayed: they need the operator's words.")] = "plan",
+    changes: Annotated[dict[str, Any] | None, Field(
+        description="plan: include/exclude (item ids: project:ID, vault:FOLDER/ENV/NAME, an account id), "
+                    "includeGroup/excludeGroup (proposed, needs-you), labels {project id: text the organization "
+                    "reads, or \"\" to clear}, keys {key id: hand-over-revoke|hand-over-keep|keep}, layout "
+                    "(separate-space, this-space, one-space), serves (the space's name), reset (true).")] = None,
+    digest: Annotated[str | None, Field(description="apply: the `digest` the plan you showed the operator "
+                                                    "answered; any other form is refused.")] = None,
+    key: Annotated[str | None, Field(description="confirm-replacement: the key, vault:FOLDER/ENV/NAME.")] = None,
+    decision: Annotated[dict[str, Any] | None, Field(
+        description="The operator's words in contract DEC-0121's shape: {by: operator, via: relayed-instruction, "
+                    "action: org.select.plan|apply|undo|confirm-replacement, target: the organization (the key for "
+                    "confirm-replacement), instruction: their words verbatim, at: when, source?}. Also read from "
+                    "_meta.decision.")] = None,
+    ctx: "Context | None" = None,
+) -> dict[str, Any]:
+    """The local selection of what goes to an organization (OBS-417, organization onboarding ORG-W5, ORG-W7,
+    ORG-W8): `org-selection/1`, owner-only and NEVER SENT; names only, never a key's value.
+
+    `plan` shows the projects, keys and accounts proposed for `org` (each with its decision, group and why; anything
+    found after an applied selection is `new` and never chosen by itself), the layout, a preview (what the
+    organization would receive: a random reference per project and only a label the operator typed; keys asked
+    for and personal values revoked once the replacement works, which cannot be undone; and the line of what stays
+    personal) and its `digest`. Show the preview to the operator before applying. `apply` with that `digest`
+    writes the next revision (each naming its predecessor's digest) and its journal: a project waits on
+    `fabric-adaptation-plan` (Fabric has no door for it yet: nothing is sent), a key on `credential-requests` and
+    `rotation` (OBS-191, OBS-416: no value is read or copied), the layout on its own step. `show` reads the record,
+    its journal with counts per kind (done, failed, waiting, planned, undone) and the human steps; `undo` restores
+    the revision before; `confirm-replacement` records that the organization's replacement for `key` works
+    (separate-space layout). Human steps are named, never taken: the passkey signing in Fabric the revision that
+    places the projects in the organization's context, the macOS administrator password, the administrator's
+    computer token. Refusals are typed answers with `command` (`operator-decision-required`, `decision-invalid`,
+    `not-previewed`, `changed-since-preview`, `no-layout`, `chosen-for-another`, `record-unreadable`, ...). The same
+    as `project-observatory full org select --org NAME ACTION --json` (schema `org-select/1`)."""
+    import org_selection as S
+    words = decision if decision is not None else _meta_decision(ctx)
+    try:
+        if action == "show":
+            return S.show(org)
+        if action == "plan":
+            return S.plan(org, changes, decision=words, caller="agent:mcp")
+        if action == "apply":
+            return S.apply(org, digest, decision=words, caller="agent:mcp")
+        if action == "undo":
+            return S.undo(org, decision=words, caller="agent:mcp")
+        return S.confirm_replacement(org, key, decision=words, caller="agent:mcp")
+    except S.Refusal as refusal:
         return refusal.answer()
 
 

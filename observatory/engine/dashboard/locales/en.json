@@ -694,5 +694,9 @@
  "{copy} is {n} commits behind its source": {
   "one": "{copy} is {n} commit behind its source",
   "other": "{copy} is {n} commits behind its source"
+ },
+ "{n} new items may belong to {organization}": {
+  "one": "{n} new item may belong to {organization}",
+  "other": "{n} new items may belong to {organization}"
  }
 }

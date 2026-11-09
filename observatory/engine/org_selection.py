@@ -1,0 +1,1107 @@
+"""The local selection record of what goes to one organization, and its apply (OBS-417; organization onboarding
+ORG-W5, ORG-W7, ORG-W8, ORG-R02, ORG-R03, ORG-R05, ORG-R11 to ORG-R16, ORG-R24, ORG-R25, ORG-R29).
+
+WHY. Choosing which projects, keys and accounts go to an organization is a decision the person makes once and may
+change later, and every later step (Fabric's adaptation plan, a credential request, a rotation, a new space) needs
+to know exactly what was chosen, by whom and when. That decision is one local record, `org-selection/1`, the same to
+the CLI (`full org select --org NAME plan|show|apply|undo|confirm-replacement`) and to an agent
+(`observatory_org_selection`).
+
+WHAT IT IS, AND WHAT IT IS NOT. The record is owner-only (`private_io`), lives in this space's store
+(`store/org-selection/`), is never sent anywhere and is never signed by a device key (ORG-R11): it is the preview
+and the journal of what Observatory does on this computer. Each revision names its predecessor's digest and its own,
+so it verifies on every read. It holds names and decisions only, never a key's value: keys are vault slots by name.
+
+WHAT APPLY DOES TODAY, AND WHAT IT DOES NOT. Apply writes the revision and a journal of steps per item. It moves
+nothing it has no door for (ORG-R25: a step that has not happened is never shown as done):
+
+* a project reaches an organization only as an `org-adaptation/1` item the person's Fabric sends with the person's
+  credential (contract DEC-0138, Fabric TP-04, contract CT-169). Fabric has no door Observatory can hand items to
+  yet, so each chosen project waits as `waiting` on `fabric-adaptation-plan`; the items are prepared here (a
+  reference random per organization, a label only when the person typed one, ORG-R03) and nothing is sent;
+* a key moves only by rotation (OBS-416, on top of the request queue of OBS-191 parts 2 and 3): a key handed over
+  waits on `credential-requests`, and its revocation, the one step that cannot be undone, waits behind it. No value
+  is read, copied or written by anything here;
+* the layout's own step (a new space, OBS-362; personal kinds moved out, OBS-426; contexts on every item, OBS-359)
+  waits on its row.
+
+What does happen: a key kept personal and an account recorded for the organization are `done` (there is nothing
+else to do for them), the revision is written, and `show` reads the journal back with its counts.
+
+DEFAULTS (ORG-R15, ORG-R16). Without a record: projects the organization's rules give it, and accounts a rule names
+for it, are proposed and chosen; projects and accounts that need a decision are listed and not chosen; a key is
+handed over (and the personal value revoked once the replacement works) only when its project and its issuing
+account agree and its project is chosen. With a record: every item keeps the record's decision, and anything found
+since is listed as `new` and never chosen by itself.
+
+THE GATES (contract DEC-0121, ORG-R23). Reading (`show`, `plan` without a change) needs nothing. Changing the plan,
+`apply`, `undo` and `confirm-replacement` are relayed: from the CLI they are the person's own act, recorded as
+such; from an agent they need the operator's words in DEC-0121's decision shape, checked by `node/actions.py`
+(the contract's `actionDecision`), and the record keeps those words as who decided. The human steps (the passkey
+signing in Fabric the estate revision that places the projects in the organization's context, R1-D12; the macOS
+administrator password for a new OS account; the administrator's computer token) are named, never taken.
+"""
+from __future__ import annotations
+
+import contextlib
+import copy
+import datetime
+import getpass
+import hashlib
+import json
+import pathlib
+import re
+import secrets
+from typing import Any
+
+import paths
+import private_io
+
+SCHEMA = "org-selection/1"
+VIEW_SCHEMA = "org-select/1"
+DRAFT_SCHEMA = "org-selection-draft/1"
+JOURNAL_SCHEMA = "org-selection-journal/1"
+LAYOUTS = ("separate-space", "this-space", "one-space")
+RECOMMENDED_LAYOUT = "separate-space"
+KEY_CHOICES = ("hand-over-revoke", "hand-over-keep", "keep")
+ITEM_CHOICES = ("include", "exclude")
+GROUPS = ("proposed", "needs-you")
+STEP_STATES = ("planned", "waiting", "done", "failed", "undone")
+#: A label the organization will read (ORG-R03): typed by the person, one line, short.
+LABEL_MAX = 80
+#: A space's name as the person gives it (a macOS user, a VM): one line, short.
+SPACE = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}")
+#: Item ids this record takes: a project, a vault slot, a provider account (`org-accounts/1` ids).
+ITEM_ID = re.compile(r"[A-Za-z][A-Za-z0-9_-]{0,31}:[^\s]{1,300}")
+#: DEC-0121 action ids of the relayed acts (`interop-common` requestKey).
+ACTIONS = {"plan": "org.select.plan", "apply": "org.select.apply", "undo": "org.select.undo",
+           "confirm-replacement": "org.select.confirm-replacement"}
+TITLES = {"plan": "Change the selection", "apply": "Apply the selection", "undo": "Undo the selection",
+          "confirm-replacement": "Confirm the replacement works"}
+#: Gate per action (DEC-0121): `plan` is `none` when it changes nothing.
+GATES = {"show": "none", "plan": "relayed", "apply": "relayed", "undo": "relayed", "confirm-replacement": "relayed"}
+CMD = "project-observatory full org select --org {org}"
+
+#: What a waiting step waits on: the missing door or decision, and the row or owner that builds it.
+DEPENDS = {
+    "fabric-adaptation-plan": {
+        "what": "Fabric's adaptation plan has no door Observatory can hand project items to yet; the item is "
+                "prepared here (a random reference, the label you typed) and nothing is sent",
+        "owner": "Fabric TP-04, contract DEC-0138 and CT-169"},
+    "fabric-entry-revision": {
+        "what": "your passkey signs, in Fabric, the estate revision that places the project in the organization's "
+                "context (R1-D12); it follows the hand-off to Fabric",
+        "owner": "Fabric (a human step: your passkey)"},
+    "space-export": {
+        "what": "the project's curated entry is exported into the organization's space once that space exists",
+        "owner": "OBS-364"},
+    "credential-requests": {
+        "what": "the space that will hold the organization's key asks the organization for its own (provider, "
+                "scopes, environment, slot name; never a value); the request queue is not built",
+        "owner": "OBS-191 parts 2 and 3, OBS-360"},
+    "rotation": {
+        "what": "consumers switch to the organization's replacement, then the personal value is revoked at its "
+                "provider with proof; the rotation door for a hand-over is not built",
+        "owner": "OBS-416"},
+    "replacement-confirmation": {
+        "what": "in a separate space this space cannot read the organization's, so the revocation waits for your "
+                "confirmation that the replacement works",
+        "owner": "you: full org select --org NAME confirm-replacement KEY"},
+    "space-create": {
+        "what": "a new OS account or VM becomes a space bound to the organization and enrolls with its own computer "
+                "token; the macOS administrator password is yours to type",
+        "owner": "OBS-362, OBS-359, OBS-414"},
+    "move-out": {
+        "what": "every personal kind in this space is carried into your personal space and verified, or removed "
+                "with its reason, before this space is bound",
+        "owner": "OBS-426"},
+    "context-binding": {
+        "what": "every project and slot of this space carries its context, so the organization sees only its own",
+        "owner": "OBS-359"},
+}
+
+#: The steps a person's body is needed for, named once each (ORG-R23); never taken by an agent.
+HUMAN_STEPS = {
+    "passkey-entry": "in Fabric, your passkey signs the estate revision that places the chosen projects in the "
+                     "organization's context (R1-D12, Fabric ADR-0178 point 7)",
+    "admin-password": "the macOS administrator password, once, when a new OS account is created for the "
+                      "organization's space",
+    "computer-token": "your administrator prepares a computer token for the organization's space in the hub "
+                      "(Computers, Prepare a computer)",
+}
+
+
+class Refusal(ValueError):
+    """A step this module does not take, with the reason and the command that changes it."""
+
+    def __init__(self, code: str, message: str, command: str | None = None, **extra: Any):
+        super().__init__(message)
+        self.code = code
+        self.command = command
+        self.extra = extra
+
+    def answer(self) -> dict:
+        out = {"error": self.code, "message": str(self), "degraded": []}
+        if self.command:
+            out["command"] = self.command
+        out.update(self.extra)
+        return out
+
+
+# ── time, digests, files ───────────────────────────────────────────────────────
+
+#: The clock; tests replace it.
+CLOCK = lambda: datetime.datetime.now(datetime.timezone.utc)  # noqa: E731
+
+
+def _now() -> str:
+    return CLOCK().replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _canonical(doc: Any) -> bytes:
+    return json.dumps(doc, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def _digest(doc: Any) -> str:
+    return "sha256:" + hashlib.sha256(_canonical(doc)).hexdigest()
+
+
+def root() -> pathlib.Path:
+    """Where every organization's selection lives in this space: owner-only, never sent."""
+    return paths.STORE / "org-selection"
+
+
+def _folder(org: str) -> pathlib.Path:
+    # An organization's name is free text: the folder is named by its digest, and the record names the organization.
+    return root() / hashlib.sha256(org.encode("utf-8")).hexdigest()[:16]
+
+
+def _read(path: pathlib.Path) -> dict | None:
+    """A JSON file of this record, or None when absent. Not owner-only, a symbolic link or not JSON: refused."""
+    if not path.exists() and not path.is_symlink():
+        return None
+    try:
+        doc = json.loads(private_io.read(path))
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise Refusal("record-unreadable", f"{path.name} of the selection does not read ({type(exc).__name__}); "
+                                           "nothing is decided from it until it does",
+                      "project-observatory full doctor") from None
+    if not isinstance(doc, dict):
+        raise Refusal("record-unreadable", f"{path.name} of the selection is not one JSON object")
+    return doc
+
+
+def _write(path: pathlib.Path, doc: dict) -> None:
+    private_io.write(path, json.dumps(doc, indent=1, sort_keys=True, ensure_ascii=False) + "\n")
+
+
+def _revisions(org: str) -> list[pathlib.Path]:
+    folder = _folder(org) / "revisions"
+    if not folder.is_dir() or folder.is_symlink():
+        return []
+    return sorted(p for p in folder.glob("[0-9]*.json") if p.stem.isdigit())
+
+
+def _verified(doc: dict, org: str, where: str) -> dict:
+    """A revision whose digest is its own body's and whose organization is the one asked (ORG-R11)."""
+    body = {k: v for k, v in doc.items() if k != "digest"}
+    if doc.get("schema") != SCHEMA or doc.get("organization") != org or doc.get("digest") != _digest(body):
+        raise Refusal("record-unreadable", f"{where} does not verify against its digest; nothing is decided from it "
+                                           "(it was changed by hand or is damaged)")
+    return doc
+
+
+def history(org: str) -> list[dict]:
+    """Every revision, oldest first, each verified and each naming its predecessor's digest."""
+    out: list[dict] = []
+    for path in _revisions(org):
+        doc = _verified(_read(path) or {}, org, f"revision {path.stem}")
+        expected = out[-1]["digest"] if out else None
+        if doc.get("predecessor") != expected or doc.get("revision") != len(out) + 1:
+            raise Refusal("record-unreadable", f"revision {path.stem} does not name the revision before it; the "
+                                               "chain is broken and nothing is decided from it")
+        out.append(doc)
+    return out
+
+
+def current(org: str) -> dict | None:
+    revs = history(org)
+    return revs[-1] if revs else None
+
+
+def _journal_path(org: str, revision: int) -> pathlib.Path:
+    return _folder(org) / "journals" / f"{revision:06d}.json"
+
+
+def journal(org: str, revision: int) -> dict | None:
+    doc = _read(_journal_path(org, revision))
+    if doc is not None and (doc.get("schema") != JOURNAL_SCHEMA or doc.get("revision") != revision
+                            or not isinstance(doc.get("items"), list)):
+        raise Refusal("record-unreadable", f"the journal of revision {revision} is not {JOURNAL_SCHEMA}")
+    return doc
+
+
+def _draft(org: str) -> dict | None:
+    doc = _read(_folder(org) / "draft.json")
+    if doc is not None and (doc.get("schema") != DRAFT_SCHEMA or doc.get("organization") != org
+                            or not isinstance(doc.get("items"), dict)):
+        raise Refusal("record-unreadable", f"the draft is not {DRAFT_SCHEMA}; drop it with "
+                                           f"`{CMD.format(org=_q(org))} plan --reset`")
+    return doc
+
+
+def _q(text: str) -> str:
+    return text if re.fullmatch(r"[A-Za-z0-9._@+-]+", text) else "'" + text.replace("'", "'\\''") + "'"
+
+
+def _space_here() -> dict:
+    """This space: the workspace's digest (as in the launchd labels) and the OS account it runs as."""
+    import service_identity
+    try:
+        account = getpass.getuser()
+    except (OSError, KeyError):
+        account = None
+    return {"workspace": service_identity.workspace_digest(), "account": account}
+
+
+# ── who decided (DEC-0121) ─────────────────────────────────────────────────────
+
+def decided(action: str, target: str, decision: Any = None, *, caller: str) -> dict:
+    """Who decided a relayed act. No decision from the CLI: the person at their terminal. With one: the operator's
+    words, checked as the contract's `actionDecision` checks them (this space's agent is T0), kept verbatim."""
+    if decision is None:
+        if caller == "cli":
+            return {"by": "person", "via": "cli"}
+        raise Refusal("operator-decision-required",
+                      f"{TITLES[action].lower()} is the person's decision: ask them, then call again with their words "
+                      "as `decision` (by operator, via relayed-instruction, action "
+                      f"{ACTIONS[action]}, target {target!r}, the words verbatim, when they said them)",
+                      gate=GATES[action], action=ACTIONS[action])
+    from node import actions
+    act = {"id": ACTIONS[action], "title": TITLES[action], "tool": "observatory.org.selection", "gate": "relayed"}
+    answer = actions.action_decision(action=act, tier="T0", caller=caller, decision=decision, target=target,
+                                     now=_now())
+    if answer.get("ok") is not True:
+        raise Refusal(answer.get("code") or "decision-invalid",
+                      "the decision is not the operator's for this action and object, or is older than 24 hours: "
+                      "ask again and send their words as they said them", gate=GATES[action], action=ACTIONS[action])
+    record = {k: copy.deepcopy(decision[k]) for k in ("by", "via", "action", "target", "instruction", "at", "source")
+              if k in decision}
+    record["caller"] = answer["recordAs"]["caller"]
+    return record
+
+
+# ── what can be chosen ─────────────────────────────────────────────────────────
+
+def _context(org: str, chosen: list[str]) -> dict:
+    """The organization's projects, keys and accounts, as `full org keys` and `full org accounts` read them."""
+    import org_view
+    try:
+        kv = org_view.keys(org, chosen)
+    except org_view.Refusal as refusal:
+        raise Refusal(refusal.code, str(refusal), refusal.command) from None
+    av = org_view.accounts()
+    degraded: list[dict] = []
+    pdoc = org_view._registry("projects.json", [], "")
+    projects = {p["id"]: p for p in org_view._project_rows(pdoc)}
+    slots = ["/".join(s) for s in org_view._slots(degraded)]
+    for d in kv["degraded"] + av["degraded"] + degraded:
+        if d not in degraded:
+            degraded.append(d)
+    return {"keys": kv, "accounts": av, "projects": projects, "slots": slots, "degraded": degraded,
+            "label": kv["label"]}
+
+
+def _candidates(org: str, ctx: dict) -> dict[str, dict]:
+    """Every item the person may choose for `org`, with its default (ORG-R15) and why. Not here: projects and
+    accounts that are somebody else's (Not ours) or the organization's not at all: they stay personal, counted."""
+    out: dict[str, dict] = {}
+    for p in ctx["keys"]["projects"]:
+        group = "proposed" if p["side"] == "organization" else "needs-you"
+        out[p["id"]] = {"id": p["id"], "kind": "project", "group": group, "why": p["why"],
+                        "default": "include" if group == "proposed" else "exclude",
+                        "name": (ctx["projects"].get(p["id"]) or {}).get("name")}
+    for a in ctx["accounts"]["accounts"]:
+        if a.get("organization") == org and a.get("source") == "rule":
+            group = "proposed"                     # a rule names it, connected here or not
+        elif a.get("source") == "conflict" and org in (a.get("claimedBy") or []):
+            group = "needs-you"
+        elif a.get("source") == "none":
+            group = "needs-you"
+        else:
+            continue
+        out[a["id"]] = {"id": a["id"], "kind": "account", "group": group, "why": a.get("why") or "",
+                        "default": "include" if group == "proposed" else "exclude",
+                        "provider": a.get("provider"), "name": a.get("name")}
+    for k in ctx["keys"]["keys"]:
+        out[k["id"]] = {"id": k["id"], "kind": "key", "group": "proposed" if k["selected"] else "needs-you",
+                        "why": k["why"], "class": k["class"], "project": k["project"], "slot": k["slot"],
+                        "default": "hand-over-revoke" if k["selected"] else "keep",
+                        "environmentDeclared": k["environmentDeclared"]}
+    return out
+
+
+def _baseline(record: dict | None) -> dict[str, dict] | None:
+    """The record's own decisions, which every later plan starts from; None before the first, or after an undo
+    back to nothing (defaults apply again)."""
+    if not record or not record.get("items"):
+        return None
+    return {i["id"]: i for i in record["items"]}
+
+
+def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> dict:
+    """The selection as it stands: the defaults, or the record's decisions with anything new listed and not
+    chosen (ORG-R16), then the person's changes in the draft."""
+    cands = _candidates(org, ctx)
+    base = _baseline(record)
+    changes = (draft or {}).get("items") or {}
+    items: dict[str, dict] = {}
+    for ident, c in cands.items():
+        row = {k: v for k, v in c.items() if k != "default"}
+        if base is None:
+            row.update(decision=c["default"], by="rule" if c["default"] in ("include", "hand-over-revoke") else
+                       "default", new=False)
+        elif ident in base:
+            row.update(decision=base[ident]["decision"], by=base[ident].get("by", "record"), new=False)
+            if base[ident].get("label"):
+                row["label"] = base[ident]["label"]
+            if base[ident].get("ref"):
+                row["ref"] = base[ident]["ref"]
+        else:
+            row.update(decision="keep" if c["kind"] == "key" else "exclude", by="default", new=True)
+        items[ident] = row
+    for ident, prior in (base or {}).items():
+        if ident not in items:
+            items[ident] = {**prior, "new": False, "notFound": True}
+    # A key follows its project when nobody chose it by hand: a project not chosen hands no key over by default.
+    chosen = {i for i, r in items.items() if r["kind"] == "project" and r["decision"] == "include"}
+    for ident, change in changes.items():
+        row = items.get(ident) or {"id": ident, "kind": change["kind"], "group": "by-hand",
+                                   "why": "you added it by hand", "new": False}
+        row.update(decision=change["decision"], by=change.get("by", "hand"))
+        if "label" in change:
+            if change["label"]:
+                row["label"] = change["label"]
+            else:
+                row.pop("label", None)
+        if change.get("decidedBy"):
+            row["decidedBy"] = change["decidedBy"]
+        items[ident] = row
+        if row["kind"] == "project":
+            (chosen.add if row["decision"] == "include" else chosen.discard)(ident)
+    for ident, row in items.items():
+        if row["kind"] == "key" and ident not in changes and row.get("by") in ("rule", "default") \
+                and row["decision"] != "keep" and row.get("project") not in chosen:
+            row.update(decision="keep", by="default",
+                       why=row["why"] + "; its project is not chosen, so nothing is asked for it")
+    layout = (draft or {}).get("layout", (record or {}).get("layout") if base is not None else None)
+    serves = (draft or {}).get("serves", (record or {}).get("serves", {}).get("space") if base is not None else None)
+    return {"items": items, "layout": layout, "serves": serves}
+
+
+def selection_digest(org: str, sel: dict) -> str:
+    """The digest of what is decided (the form the person previews, ORG-R14): the organization, the layout, the
+    space it serves, and each item's decision and label. Reasons and counts are not in it: they explain, they do not
+    decide."""
+    return _digest({"organization": org, "layout": sel["layout"], "serves": sel["serves"],
+                    "items": sorted([i["id"], i["kind"], i["decision"], i.get("label")]
+                                    for i in sel["items"].values())})
+
+
+def _others_chosen(org: str) -> dict[str, str]:
+    """project id -> another organization whose current record chose it (ORG-R05, until contract CT-141)."""
+    out: dict[str, str] = {}
+    base = root()
+    if not base.is_dir() or base.is_symlink():
+        return out
+    for folder in sorted(p for p in base.iterdir() if p.is_dir() and not p.is_symlink()):
+        revs = sorted(q for q in (folder / "revisions").glob("[0-9]*.json")) if (folder / "revisions").is_dir() else []
+        if not revs:
+            continue
+        try:
+            doc = _read(revs[-1]) or {}
+        except Refusal:
+            continue
+        other = doc.get("organization")
+        if not isinstance(other, str) or other == org:
+            continue
+        for i in doc.get("items") or []:
+            if isinstance(i, dict) and i.get("kind") == "project" and i.get("decision") == "include":
+                out.setdefault(str(i.get("id")), other)
+    return out
+
+
+# ── the preview ────────────────────────────────────────────────────────────────
+
+def _preview(org: str, ctx: dict, sel: dict) -> dict:
+    """ORG-W7 as data: what moves, where, what the organization will see, and the line that proves the rest."""
+    items = sel["items"].values()
+    projects = [i for i in items if i["kind"] == "project" and i["decision"] == "include"]
+    keys_out = [i for i in items if i["kind"] == "key" and i["decision"] != "keep"]
+    revoked = [i for i in keys_out if i["decision"] == "hand-over-revoke"]
+    accounts_in = [i for i in items if i["kind"] == "account" and i["decision"] == "include"]
+    chosen_projects = {i["id"] for i in projects}
+    stay_projects = sum(1 for pid, p in ctx["projects"].items()
+                        if pid not in chosen_projects and p.get("organization") != "external"
+                        and p.get("organization_source") != "external")
+    stay_keys = len([s for s in ctx["slots"] if f"vault:{s}" not in {i["id"] for i in keys_out}])
+    stay_accounts = sum(1 for a in ctx["accounts"]["accounts"]
+                        if a["id"] not in {i["id"] for i in accounts_in} and a.get("source") != "external")
+    human = ["passkey-entry"] if projects else []
+    if sel["layout"] == "separate-space":
+        human += ["admin-password", "computer-token"]
+    return {
+        "organization": {"projects": len(projects), "labelled": sum(1 for i in projects if i.get("label")),
+                         "sees": "each project as a reference it cannot trace back, and a name only where you typed "
+                                 "one; nothing else about your work"},
+        "keysRequested": len(keys_out),
+        "keysRevoked": len(revoked),
+        "accounts": len(accounts_in),
+        "staysPersonal": {"projects": stay_projects, "keys": stay_keys, "accounts": stay_accounts,
+                          "line": f"{stay_projects} projects and {stay_keys} keys stay personal and are never sent"},
+        "cannotBeUndone": [f"{i['id']}: the personal value is revoked at its provider once the organization's "
+                           "replacement works" for i in revoked],
+        "notMovable": ctx["keys"]["notMovable"],
+        "humanSteps": [{"step": h, "what": HUMAN_STEPS[h]} for h in human],
+        "sent": "nothing: this record never leaves this computer, and no project item is handed to Fabric yet",
+        # ORG-W5's fourth group: when this space becomes the organization's, everything personal moves out first
+        # (ORG-R27); the step is OBS-426's, named here so the preview says it before anything is applied.
+        "movesOut": ({"projects": stay_projects, "keys": stay_keys, "waitingOn": "move-out",
+                      **DEPENDS["move-out"]} if sel["layout"] == "this-space" else None),
+    }
+
+
+def _items_out(sel: dict) -> list[dict]:
+    return sorted(sel["items"].values(), key=lambda i: ({"project": 0, "key": 1, "account": 2}.get(i["kind"], 3),
+                                                        i["id"]))
+
+
+def plan(org: str, changes: dict | None = None, *, decision: Any = None, caller: str = "cli") -> dict:
+    """The plan for `org`: the selection as it stands with its digest and preview. With `changes` the draft is
+    changed first (a relayed act): `include`/`exclude` (item ids), `includeGroup`/`excludeGroup` (`proposed`,
+    `needs-you`: every member listed now, each recorded one by one, ORG-R02), `labels` ({project id: text, or ""
+    to clear}), `keys` ({key id: choice}), `layout`, `serves`, `reset`."""
+    org_ok = _org_checked(org)
+    changes = {k: v for k, v in (changes or {}).items() if v not in (None, [], {}, False)}
+    folder = _folder(org_ok)
+    # Reading the plan writes nothing, not even a lock; a change takes the organization's lock.
+    with (_locked(org_ok) if changes else contextlib.nullcontext()):
+        record = current(org_ok)
+        draft = _draft(org_ok)
+        if changes:
+            who = decided("plan", org_ok, decision, caller=caller)
+            if changes.get("reset"):
+                (folder / "draft.json").unlink(missing_ok=True)
+                draft = None
+                changes = {k: v for k, v in changes.items() if k != "reset"}
+            if changes:
+                draft = _change(org_ok, draft, record, changes, who)
+                _write(folder / "draft.json", draft)
+        ctx = _context(org_ok, _chosen_projects(draft, record))
+        sel = _effective(org_ok, ctx, draft, record)
+    return _plan_answer(org_ok, ctx, sel, record, draft)
+
+
+def _chosen_projects(draft: dict | None, record: dict | None) -> list[str]:
+    """Projects chosen by hand in the draft or the record: their keys join the plan (ORG-W6)."""
+    hand = [i for i, c in ((draft or {}).get("items") or {}).items()
+            if c.get("kind") == "project" and c.get("decision") == "include"]
+    hand += [i for i, r in (_baseline(record) or {}).items() if r["kind"] == "project" and r["decision"] == "include"]
+    return sorted(set(hand))
+
+
+def _plan_answer(org: str, ctx: dict, sel: dict, record: dict | None, draft: dict | None) -> dict:
+    digest = selection_digest(org, sel)
+    others = _others_chosen(org)
+    conflicts = [{"project": i["id"], "organization": others[i["id"]],
+                  "why": f"already chosen for {others[i['id']]}: a project belongs to one context until contract "
+                         "CT-141 decides otherwise (ORG-R05)"}
+                 for i in sel["items"].values()
+                 if i["kind"] == "project" and i["decision"] == "include" and i["id"] in others]
+    unknown = [i["id"] for i in sel["items"].values() if i.get("notFound") or
+               (i.get("group") == "by-hand" and i["kind"] == "project" and i["id"] not in ctx["projects"])]
+    applied = bool(record) and record.get("selectionDigest") == digest
+    any_items = bool(sel["items"]) or bool(record)
+    state = ("empty" if not any_items else "conflict" if conflicts else "partial" if ctx["degraded"] else "complete")
+    q = CMD.format(org=_q(org))
+    if conflicts:
+        step, cmd = "clear the projects another organization already holds", f"{q} plan --exclude PROJECT"
+    elif not any_items:
+        step, cmd = ("no project, key or account here is proposed for this organization; add one by hand or a rule",
+                     f"{q} plan --include PROJECT")
+    elif sel["layout"] is None:
+        step, cmd = ("choose where the organization's work lives first (a separate space is recommended)",
+                     f"{q} plan --layout {RECOMMENDED_LAYOUT} --serves SPACE")
+    elif sel["layout"] == "separate-space" and not sel["serves"]:
+        step, cmd = "name the space this selection serves (the new OS account or VM)", f"{q} plan --serves SPACE"
+    elif applied:
+        step, cmd = "this is the applied selection; nothing to apply", f"{q} show"
+    else:
+        step, cmd = "review the preview, then apply this exact form", f"{q} apply --digest {digest}"
+    return {"schema": VIEW_SCHEMA, "answer": "plan", "generatedAt": _now(), "organization": org,
+            "label": ctx["label"], "state": state, "digest": digest, "applied": applied,
+            "layout": sel["layout"], "recommendedLayout": RECOMMENDED_LAYOUT, "serves": sel["serves"],
+            "madeIn": _space_here(), "draft": draft is not None,
+            "current": None if not record else {"revision": record["revision"], "digest": record["digest"],
+                                                "selectionDigest": record["selectionDigest"]},
+            "items": _items_out(sel), "new": sorted(i["id"] for i in sel["items"].values() if i.get("new")),
+            "conflicts": conflicts, "unknown": sorted(unknown), "preview": _preview(org, ctx, sel),
+            "nextStep": step, "command": cmd, "gates": GATES, "degraded": ctx["degraded"]}
+
+
+def _org_checked(org: Any, *, configured: bool = True) -> str:
+    """A usable organization name; with `configured`, one `config/organizations.json` names and is not the default
+    (the same refusals as `full org keys`), checked before any lock or file is touched. `show`, `undo` and
+    `confirm-replacement` take a name only: a record outlives a rule removed later."""
+    import credential_shape
+    import org_view
+    if not isinstance(org, str) or not org.strip() or len(org) > 200 or credential_shape.shaped(org):
+        raise Refusal("invalid-organization", f"{credential_shape.echo(org)} is not an organization name",
+                      "project-observatory full org accounts")
+    if configured:
+        try:
+            org_view.organization_checked(org)
+        except org_view.Refusal as refusal:
+            raise Refusal(refusal.code, str(refusal), refusal.command) from None
+    return org
+
+
+class _locked:
+    """One writer per organization's selection at a time (the CLI, the MCP server, a second terminal)."""
+
+    def __init__(self, org: str):
+        self.path = _folder(org) / ".lock"
+        self.cm = None
+
+    def __enter__(self):
+        private_io.parent(self.path.parent)
+        self.cm = private_io.lock(self.path)
+        self.cm.__enter__()
+        return self
+
+    def __exit__(self, *exc):
+        return self.cm.__exit__(*exc)
+
+
+def _label_ok(text: Any) -> str:
+    import credential_shape
+    if not isinstance(text, str) or len(text) > LABEL_MAX or any(ord(c) < 32 or ord(c) == 127 for c in text) \
+            or credential_shape.shaped(text):
+        raise Refusal("invalid-label", f"a label is one line of at most {LABEL_MAX} characters the organization will "
+                                       "read, never shaped like a credential")
+    return text.strip()
+
+
+def _change(org: str, draft: dict | None, record: dict | None, changes: dict, who: dict) -> dict:
+    """The draft with one person's changes, each item recorded one by one with who decided (ORG-R02, ORG-R11)."""
+    known = {"include", "exclude", "includeGroup", "excludeGroup", "labels", "keys", "layout", "serves"}
+    extra = sorted(set(changes) - known)
+    if extra:
+        raise Refusal("invalid-change", f"unknown change {extra[0]!r}; the changes are: " + ", ".join(sorted(known)))
+    draft = copy.deepcopy(draft) if draft else {"schema": DRAFT_SCHEMA, "organization": org, "items": {}}
+    if "layout" in changes:
+        if changes["layout"] not in LAYOUTS:
+            raise Refusal("invalid-layout", f"the layout is one of: {', '.join(LAYOUTS)}")
+        draft["layout"] = changes["layout"]
+    if "serves" in changes:
+        if not isinstance(changes["serves"], str) or not SPACE.fullmatch(changes["serves"]):
+            raise Refusal("invalid-space", "a space is named by up to 64 letters, digits, spaces, dots, dashes or "
+                                           "underscores (the OS account or VM the organization's work lives in)")
+        draft["serves"] = changes["serves"]
+    hand = [i for i, c in draft["items"].items() if c.get("kind") == "project" and c.get("decision") == "include"]
+    for ident in changes.get("include") or []:
+        if isinstance(ident, str) and ident.startswith("project:"):
+            hand.append(ident)
+    ctx = _context(org, sorted(set(hand)))
+    cands = _candidates(org, ctx)
+    sel = _effective(org, ctx, draft, record)
+
+    def kind_of(ident: Any) -> str:
+        if not isinstance(ident, str) or not ITEM_ID.fullmatch(ident):
+            raise Refusal("unknown-item", "an item is a project (project:ID), a key (vault:FOLDER/ENV/NAME) or an "
+                                          "account as `full org accounts` names it", f"{CMD.format(org=_q(org))} plan")
+        if ident in sel["items"]:
+            return sel["items"][ident]["kind"]
+        if ident in ctx["projects"]:
+            return "project"
+        raise Refusal("unknown-item", f"{ident!r} is not a project, key or account this space knows for "
+                                      f"{org}", f"{CMD.format(org=_q(org))} plan")
+
+    def put(ident: str, decision: str, by: str = "hand", **more: Any) -> None:
+        row = dict(draft["items"].get(ident) or {})
+        row.update(kind=kind_of(ident), decision=decision, by=by, decidedBy=who, **more)
+        draft["items"][ident] = row
+
+    for verb in ("include", "exclude"):
+        for ident in changes.get(verb) or []:
+            kind = kind_of(ident)
+            if kind == "key":
+                put(ident, "hand-over-revoke" if verb == "include" else "keep")
+            else:
+                put(ident, verb)
+    for verb, decision in (("includeGroup", "include"), ("excludeGroup", "exclude")):
+        group = changes.get(verb)
+        if group is None:
+            continue
+        if group not in GROUPS:
+            raise Refusal("invalid-group", f"a group is one of: {', '.join(GROUPS)}")
+        members = sorted(i for i, c in cands.items() if c["group"] == group and c["kind"] != "key")
+        for ident in members:
+            put(ident, decision, by="group", group=group)
+    for ident, choice in (changes.get("keys") or {}).items():
+        if kind_of(ident) != "key":
+            raise Refusal("unknown-item", f"{ident!r} is not a key; a key's choice is one of {', '.join(KEY_CHOICES)}")
+        if choice not in KEY_CHOICES:
+            raise Refusal("invalid-choice", f"a key's choice is one of: {', '.join(KEY_CHOICES)}")
+        put(ident, choice)
+    for ident, text in (changes.get("labels") or {}).items():
+        if kind_of(ident) != "project":
+            raise Refusal("unknown-item", f"{ident!r} is not a project; only a project carries a label")
+        row = draft["items"].get(ident)
+        decision = row["decision"] if row else sel["items"].get(ident, {}).get("decision", "include")
+        put(ident, decision, by=(row or {}).get("by", "hand"), label=_label_ok(text) if text else "")
+    draft["updatedAt"] = _now()
+    return draft
+
+
+# ── apply, undo, confirm ───────────────────────────────────────────────────────
+
+def _steps(item: dict, layout: str) -> list[dict]:
+    """The journal's steps for one item (ORG-R12), in order; a step with nothing to wait on is `done`."""
+    def waiting(step: str, on: str, **more: Any) -> dict:
+        return {"step": step, "state": "waiting", "waitingOn": on, **more}
+
+    if item["kind"] == "project" and item["decision"] == "include":
+        steps = [waiting("hand-to-fabric", "fabric-adaptation-plan"),
+                 {"step": "entry-signed", "state": "planned", "waitingOn": "fabric-entry-revision",
+                  "humanStep": "passkey-entry"}]
+        if layout == "separate-space":
+            steps.append(waiting("export-curated-entry", "space-export"))
+        return steps
+    if item["kind"] == "key" and item["decision"] != "keep":
+        steps = [waiting("credential-request", "credential-requests"),
+                 {"step": "switch-consumers", "state": "planned", "waitingOn": "rotation"}]
+        if item["decision"] == "hand-over-revoke":
+            steps.append({"step": "revoke-personal", "state": "planned", "cannotBeUndone": True,
+                          "waitingOn": "replacement-confirmation" if layout == "separate-space" else "rotation"})
+        return steps
+    if item["kind"] == "key":
+        return [{"step": "stays-personal", "state": "done"}]
+    if item["kind"] == "account" and item["decision"] == "include":
+        return [{"step": "recorded", "state": "done"}]
+    return []
+
+
+def _layout_steps(layout: str) -> list[dict]:
+    on = {"separate-space": ("create-space", "space-create"), "this-space": ("move-out", "move-out"),
+          "one-space": ("bind-contexts", "context-binding")}[layout]
+    return [{"step": on[0], "state": "waiting", "waitingOn": on[1]}]
+
+
+def _journal_for(record: dict) -> dict:
+    at = record["decidedAt"]
+    items = []
+    if record.get("layout"):
+        items.append({"id": "layout:" + record["layout"], "kind": "layout",
+                      "steps": [{**s, "at": at} for s in _layout_steps(record["layout"])]})
+    for item in record["items"]:
+        steps = _steps(item, record.get("layout"))
+        if steps:
+            items.append({"id": item["id"], "kind": item["kind"], "steps": [{**s, "at": at} for s in steps]})
+    return {"schema": JOURNAL_SCHEMA, "organization": record["organization"], "revision": record["revision"],
+            "recordDigest": record["digest"], "items": items}
+
+
+def counts(jdoc: dict | None) -> dict:
+    """Per kind, how many items are done, failed, waiting, planned or undone (ORG-R25): an item is as far as its
+    least finished step."""
+    out: dict[str, dict] = {}
+    order = ("failed", "waiting", "planned", "undone", "done")
+    for item in (jdoc or {}).get("items") or []:
+        states = {s.get("state") for s in item.get("steps") or []}
+        worst = next((s for s in order if s in states), "done")
+        row = out.setdefault(item.get("kind", "other"), {s: 0 for s in STEP_STATES})
+        row[worst] += 1
+    return out
+
+
+def _record(org: str, sel: dict, digest: str, prior: dict | None, who: dict, *, kind: str = "select",
+            undoes: str | None = None) -> dict:
+    refs = {}
+    for rec in history(org):
+        for i in rec.get("items") or []:
+            if i.get("ref"):
+                refs[i["id"]] = i["ref"]
+    items = []
+    for i in _items_out(sel):
+        row = {k: i[k] for k in ("id", "kind", "decision", "why", "by") if k in i}
+        for k in ("label", "group", "decidedBy", "project", "slot", "class", "provider", "name"):
+            if i.get(k) is not None:
+                row[k] = i[k]
+        if row["kind"] == "project" and row["decision"] == "include":
+            # ORG-R03: random per organization, never derived from the estate; the same project keeps its reference.
+            row["ref"] = refs.get(row["id"]) or i.get("ref") or secrets.token_hex(16)
+        items.append(row)
+    space = _space_here()
+    serves = ({"space": sel["serves"], "here": False} if sel["layout"] == "separate-space"
+              else {"space": None, "here": True, **space})
+    body = {"schema": SCHEMA, "organization": org, "revision": (prior or {}).get("revision", 0) + 1,
+            "predecessor": (prior or {}).get("digest"), "kind": kind, "layout": sel["layout"], "madeIn": space,
+            "serves": serves, "decidedAt": _now(), "decidedBy": who, "selectionDigest": digest, "items": items}
+    if undoes:
+        body["undoes"] = undoes
+    body["digest"] = _digest(body)
+    return body
+
+
+def _supersede(org: str, prior: dict | None, kept: set[str]) -> None:
+    """The prior revision's journal after a new revision: steps of items the new one no longer carries the same way
+    are `undone` (nothing of them left this computer); the rest carry over in the new journal."""
+    if not prior:
+        return
+    jdoc = journal(org, prior["revision"])
+    if not jdoc:
+        return
+    for item in jdoc["items"]:
+        if item["id"] in kept:
+            continue
+        for s in item["steps"]:
+            if s["state"] in ("planned", "waiting", "done"):
+                s["state"], s["at"] = "undone", _now()
+    _write(_journal_path(org, prior["revision"]), jdoc)
+
+
+def apply(org: str, digest: Any, *, decision: Any = None, caller: str = "cli") -> dict:
+    """Write the selection as the next revision and start its journal, only in the form the person previewed
+    (ORG-R14). The same form again changes nothing (ORG-R12)."""
+    org_ok = _org_checked(org)
+    q = CMD.format(org=_q(org_ok))
+    if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
+        raise Refusal("not-previewed", "apply takes the digest the preview showed, so only the form the person saw is "
+                                       "applied", f"{q} plan")
+    with _locked(org_ok):
+        record = current(org_ok)
+        draft = _draft(org_ok)
+        ctx = _context(org_ok, _chosen_projects(draft, record))
+        sel = _effective(org_ok, ctx, draft, record)
+        now_digest = selection_digest(org_ok, sel)
+        if digest != now_digest:
+            raise Refusal("changed-since-preview", "the selection changed since that preview (a change, a new rule, "
+                                                   "a project or key found since): review it again", f"{q} plan",
+                          digest=now_digest)
+        if record and record.get("selectionDigest") == now_digest:
+            who = decided("apply", org_ok, decision, caller=caller)
+            _resume(org_ok, record)
+            return _apply_answer(org_ok, record, "unchanged", who)
+        if sel["layout"] is None:
+            raise Refusal("no-layout", "choose where the organization's work lives before anything is applied "
+                                       "(ORG-R29)", f"{q} plan --layout {RECOMMENDED_LAYOUT} --serves SPACE")
+        if sel["layout"] == "separate-space" and not sel["serves"]:
+            raise Refusal("no-serving-space", "name the space this selection serves", f"{q} plan --serves SPACE")
+        others = _others_chosen(org_ok)
+        clash = sorted(i["id"] for i in sel["items"].values()
+                       if i["kind"] == "project" and i["decision"] == "include" and i["id"] in others)
+        if clash:
+            raise Refusal("chosen-for-another", f"{clash[0]} is already chosen for {others[clash[0]]}; a project "
+                                                "belongs to one context until contract CT-141 decides otherwise "
+                                                "(ORG-R05)", f"{q} plan --exclude {clash[0]}")
+        who = decided("apply", org_ok, decision, caller=caller)
+        rec = _record(org_ok, sel, now_digest, record, who)
+        _commit(org_ok, record, rec)
+    return _apply_answer(org_ok, rec, "applied", who)
+
+
+def _commit(org: str, prior: dict | None, rec: dict) -> None:
+    """Write a revision so that an interruption at any point resumes (ORG-R12): the journal first (a revision is
+    never without its journal), then the revision (the commit point), then the prior journal's superseded steps and
+    the consumed draft, which `_resume` finishes when the same form is applied again."""
+    jdoc = _journal_for(rec)
+    carried = _carry(org, prior, jdoc)
+    _write(_journal_path(org, rec["revision"]), jdoc)
+    _write(_folder(org) / "revisions" / f"{rec['revision']:06d}.json", rec)
+    _supersede(org, prior, carried)
+    (_folder(org) / "draft.json").unlink(missing_ok=True)
+
+
+def _resume(org: str, rec: dict) -> None:
+    """Finish what an interrupted `_commit` left: a missing journal, the prior journal's superseded steps, the
+    draft. Each part is idempotent."""
+    revs = history(org)
+    prior = revs[-2] if len(revs) >= 2 else None
+    jdoc = journal(org, rec["revision"])
+    if jdoc is None:
+        jdoc = _journal_for(rec)
+        carried = _carry(org, prior, jdoc)
+        _write(_journal_path(org, rec["revision"]), jdoc)
+    else:
+        carried = _carry(org, prior, copy.deepcopy(jdoc))
+    _supersede(org, prior, carried)
+    (_folder(org) / "draft.json").unlink(missing_ok=True)
+
+
+def _carry(org: str, prior: dict | None, jdoc: dict) -> set[str]:
+    """An item the new revision carries the same way keeps the progress the prior journal recorded (a confirmation,
+    a step another door finished): applying a changed selection never resets what already happened. Returns the
+    ids carried; every other item of the prior journal is superseded."""
+    if not prior:
+        return set()
+    old = {i["id"]: i for i in (journal(org, prior["revision"]) or {}).get("items") or []}
+    carried = set()
+    for item in jdoc["items"]:
+        before = old.get(item["id"])
+        if before and [s["step"] for s in before["steps"]] == [s["step"] for s in item["steps"]]:
+            item["steps"] = copy.deepcopy(before["steps"])
+            carried.add(item["id"])
+    return carried
+
+
+def _apply_answer(org: str, rec: dict, outcome: str, who: dict) -> dict:
+    jdoc = journal(org, rec["revision"])
+    c = counts(jdoc)
+    waiting = any(r["waiting"] or r["planned"] for r in c.values())
+    return {"schema": VIEW_SCHEMA, "answer": "apply", "organization": org, "outcome": outcome,
+            "state": "waiting" if waiting else "complete", "revision": rec["revision"], "digest": rec["digest"],
+            "selectionDigest": rec["selectionDigest"], "decidedBy": rec["decidedBy"] if outcome == "applied" else who,
+            "counts": c, "waitingOn": _waiting_on(jdoc), "fabricItems": fabric_items(rec),
+            "humanSteps": [{"step": h, "what": HUMAN_STEPS[h]} for h in _human(rec)],
+            "nextStep": ("nothing is sent and nothing moved that has no door yet; each waiting step names what it "
+                         "waits on" if waiting else "every item is done"),
+            "command": f"{CMD.format(org=_q(org))} show", "degraded": []}
+
+
+def _human(rec: dict) -> list[str]:
+    out = []
+    if any(i["kind"] == "project" and i["decision"] == "include" for i in rec.get("items") or []):
+        out.append("passkey-entry")
+    if rec.get("layout") == "separate-space":
+        out += ["admin-password", "computer-token"]
+    return out
+
+
+def _waiting_on(jdoc: dict | None) -> list[dict]:
+    seen: dict[str, int] = {}
+    for item in (jdoc or {}).get("items") or []:
+        for s in item["steps"]:
+            if s["state"] in ("waiting", "planned") and s.get("waitingOn"):
+                seen[s["waitingOn"]] = seen.get(s["waitingOn"], 0) + 1
+    return [{"on": k, "items": n, **DEPENDS.get(k, {})} for k, n in sorted(seen.items())]
+
+
+def fabric_items(rec: dict | None) -> list[dict]:
+    """The `org-adaptation/1` items this record would hand to Fabric (ORG-R03): a reference, the kind, and a label
+    only where the person typed one. Nothing else about a project is in them, and nothing hands them over yet."""
+    out = []
+    for i in (rec or {}).get("items") or []:
+        if i.get("kind") == "project" and i.get("decision") == "include" and i.get("ref"):
+            item = {"ref": i["ref"], "kind": "project"}
+            if i.get("label"):
+                item["label"] = i["label"]
+            out.append(item)
+    return sorted(out, key=lambda x: x["ref"])
+
+
+def undo(org: str, *, decision: Any = None, caller: str = "cli") -> dict:
+    """Restore the revision before the current one, exactly, as a new revision (ORG-R13). Refused once a project's
+    entry revision is signed in Fabric: a project then comes back only by a take-back (OBS-419)."""
+    org_ok = _org_checked(org, configured=False)
+    q = CMD.format(org=_q(org_ok))
+    with _locked(org_ok):
+        revs = history(org_ok)
+        if not revs:
+            raise Refusal("nothing-to-undo", "no selection has been applied for this organization", f"{q} plan")
+        cur = revs[-1]
+        jdoc = journal(org_ok, cur["revision"])
+        signed = [i["id"] for i in (jdoc or {}).get("items") or []
+                  if any(s["step"] == "entry-signed" and s["state"] == "done" for s in i["steps"])]
+        if signed:
+            raise Refusal("entry-signed", f"{signed[0]} is already in the organization's context (your passkey signed "
+                                          "its entry in Fabric); taking it back is a new estate revision your "
+                                          "passkey signs (OBS-419)", "project-observatory full org unassign PROJECT "
+                                                                     f"--org {_q(org_ok)}")
+        who = decided("undo", org_ok, decision, caller=caller)
+        if cur.get("kind") == "undo":
+            # Undoing an undo restores what the undo removed: the revision it undid.
+            restored = next((r for r in revs if r["digest"] == cur.get("undoes")), None)
+        else:
+            restored = revs[-2] if len(revs) >= 2 else None
+        if restored is not None:
+            sel = {"items": {i["id"]: dict(i) for i in restored["items"]}, "layout": restored.get("layout"),
+                   "serves": (restored.get("serves") or {}).get("space")}
+        else:
+            sel = {"items": {}, "layout": None, "serves": None}
+        rec = _record(org_ok, sel, selection_digest(org_ok, sel), cur, who, kind="undo", undoes=cur["digest"])
+        _commit(org_ok, cur, rec)
+    answer = _apply_answer(org_ok, rec, "undone", who)
+    answer["answer"] = "undo"
+    answer["restored"] = None if restored is None else {"revision": restored["revision"], "digest": restored["digest"]}
+    return answer
+
+
+def confirm_replacement(org: str, key: Any, *, decision: Any = None, caller: str = "cli") -> dict:
+    """Record the person's confirmation that the organization's replacement for `key` works (ORG-R08): in the
+    separate-space layout the personal space cannot read the organization's, so the revocation waits for it. The
+    revocation itself is OBS-416's rotation door, not built: the step then waits on `rotation`."""
+    org_ok = _org_checked(org, configured=False)
+    q = CMD.format(org=_q(org_ok))
+    ident = key if isinstance(key, str) and key.startswith("vault:") else f"vault:{key}" if isinstance(key, str) else ""
+    with _locked(org_ok):
+        rec = current(org_ok)
+        item = next((i for i in (rec or {}).get("items") or [] if i["id"] == ident and i["kind"] == "key"), None)
+        if item is None:
+            raise Refusal("not-in-record", "that key is not in the applied selection", f"{q} show")
+        if item["decision"] != "hand-over-revoke":
+            raise Refusal("not-revoking", "the selection keeps that key's personal value, so there is no revocation to "
+                                          "confirm", f"{q} plan --key {ident}=hand-over-revoke")
+        if rec.get("layout") != "separate-space":
+            raise Refusal("confirmation-not-needed", "in one space the journal's own signal (replacement received, "
+                                                     "consumers switched) is the confirmation; nothing is asked of "
+                                                     "you", f"{q} show")
+        who = decided("confirm-replacement", ident, decision, caller=caller)
+        jdoc = journal(org_ok, rec["revision"]) or _journal_for(rec)
+        entry = next(i for i in jdoc["items"] if i["id"] == ident)
+        step = next(s for s in entry["steps"] if s["step"] == "revoke-personal")
+        outcome = "already-confirmed" if step.get("confirmedAt") else "confirmed"
+        if outcome == "confirmed":
+            step.update(confirmedAt=_now(), confirmedBy=who, waitingOn="rotation")
+            _write(_journal_path(org_ok, rec["revision"]), jdoc)
+    return {"schema": VIEW_SCHEMA, "answer": "confirm-replacement", "organization": org_ok, "key": ident,
+            "outcome": outcome, "state": "waiting", "step": step, "waitingOn": [{"on": "rotation", **DEPENDS["rotation"]}],
+            "nextStep": "the personal value is revoked once the rotation door exists (OBS-416); it keeps working until "
+                        "then", "command": f"{q} show", "degraded": []}
+
+
+# ── show ───────────────────────────────────────────────────────────────────────
+
+def show(org: str) -> dict:
+    """The applied selection, its journal with counts per kind (ORG-W8, ORG-R25), its history, the items Fabric
+    would receive, and what is new since it (ORG-R16). Read-only."""
+    org_ok = _org_checked(org, configured=False)
+    q = CMD.format(org=_q(org_ok))
+    degraded: list[dict] = []
+    try:
+        revs = history(org_ok)
+        draft = _draft(org_ok)
+    except Refusal as refusal:
+        return {"schema": VIEW_SCHEMA, "answer": "show", "organization": org_ok, "state": "error",
+                "error": refusal.code, "message": str(refusal), "command": refusal.command or f"{q} plan --reset",
+                "degraded": []}
+    if not revs:
+        return {"schema": VIEW_SCHEMA, "answer": "show", "organization": org_ok, "state": "empty", "record": None,
+                "draft": draft is not None, "history": [], "nextStep": "no selection is applied for this organization",
+                "command": f"{q} plan", "degraded": []}
+    rec = revs[-1]
+    jdoc = journal(org_ok, rec["revision"])
+    new: list[str] = []
+    try:
+        hand = [i["id"] for i in rec["items"] if i["kind"] == "project" and i["decision"] == "include"]
+        ctx = _context(org_ok, hand)
+        sel = _effective(org_ok, ctx, None, rec)
+        new = sorted(i["id"] for i in sel["items"].values() if i.get("new"))
+        degraded = ctx["degraded"]
+    except Refusal as refusal:
+        degraded.append({"source": "config/organizations.json", "code": refusal.code, "reason": str(refusal),
+                         "effect": "what is new since the record is not listed"})
+    c = counts(jdoc)
+    failed = any(r["failed"] for r in c.values())
+    waiting = any(r["waiting"] or r["planned"] for r in c.values())
+    state = "error" if failed else "waiting" if waiting else "partial" if degraded else "complete"
+    step = (f"{len(new)} item(s) found since this record: proposed, never chosen by themselves"
+            if new else "each waiting step names what it waits on")
+    command = f"{q} plan"
+    if jdoc is None and (rec["items"] or rec.get("layout")):
+        # An apply stopped between its journal and its revision's follow-ups (ORG-R12): never shown as done.
+        state, step = "waiting", ("the journal of this revision is missing (an interrupted apply): apply the same "
+                                  "form again to resume it")
+        command = f"{q} apply --digest {rec['selectionDigest']}"
+    if not rec["items"] and not rec.get("layout"):
+        state = "empty"
+    return {"schema": VIEW_SCHEMA, "answer": "show", "organization": org_ok, "state": state, "record": rec,
+            "journal": jdoc, "counts": c, "waitingOn": _waiting_on(jdoc), "fabricItems": fabric_items(rec),
+            "humanSteps": [{"step": h, "what": HUMAN_STEPS[h]} for h in _human(rec)],
+            "history": [{"revision": r["revision"], "kind": r["kind"], "digest": r["digest"],
+                         "decidedAt": r["decidedAt"], "by": r["decidedBy"].get("by"), "via": r["decidedBy"].get("via")}
+                        for r in revs],
+            "new": new, "draft": draft is not None, "nextStep": step, "command": command, "degraded": degraded}
+
+
+def new_since_all() -> list[dict]:
+    """Every organization with an applied selection and what was found since it (ORG-R16), for the findings board.
+    An organization that cannot be read is skipped: the board names nothing it did not read."""
+    out = []
+    base = root()
+    if not base.is_dir() or base.is_symlink():
+        return out
+    for folder in sorted(p for p in base.iterdir() if p.is_dir() and not p.is_symlink()):
+        revs = sorted(q for q in (folder / "revisions").glob("[0-9]*.json")) if (folder / "revisions").is_dir() else []
+        if not revs:
+            continue
+        try:
+            org = (_read(revs[-1]) or {}).get("organization")
+            if not isinstance(org, str) or _folder(org) != folder:
+                continue
+            view = show(org)
+        except Refusal:
+            continue
+        if view.get("new"):
+            out.append({"organization": org, "new": view["new"]})
+    return out
+
+
+# ── text ──────────────────────────────────────────────────────────────────────
+
+def text(view: dict) -> str:
+    """`full org select` without `--json`: ORG-W5 to ORG-W8 as lines."""
+    a = view.get("answer")
+    if a == "plan":
+        p = view["preview"]
+        lines = [f"What goes to {view['label']} ({view['state']})",
+                 f"  layout: {view['layout'] or 'not chosen (recommended: ' + view['recommendedLayout'] + ')'}"
+                 + (f", for the space {view['serves']}" if view.get("serves") else "")]
+        for kind, title in (("project", "Projects"), ("key", "Keys"), ("account", "Accounts")):
+            rows = [i for i in view["items"] if i["kind"] == kind]
+            if not rows:
+                continue
+            lines.append(f"{title} ({len(rows)})")
+            for i in rows:
+                mark = "[x]" if i["decision"] not in ("exclude", "keep") else "[ ]"
+                extra = f" -> {i['decision']}" if kind == "key" else ""
+                tag = " (new since the record)" if i.get("new") else ""
+                label = f", label for the organization: {i['label']!r}" if i.get("label") else ""
+                lines.append(f"  {mark} {i['id']}{extra}{tag}{label}: {i['why']}")
+        for c in view["conflicts"]:
+            lines.append(f"conflict: {c['project']}: {c['why']}")
+        lines.append(f"The organization would receive {p['organization']['projects']} project item(s) "
+                     f"({p['organization']['labelled']} with a name you typed); {p['keysRequested']} key(s) asked "
+                     f"for, {p['keysRevoked']} personal value(s) revoked once the replacement works (cannot be undone)")
+        lines.append(p["staysPersonal"]["line"] + ".")
+        for h in p["humanSteps"]:
+            lines.append(f"your step: {h['what']}")
+        lines.append(f"digest: {view['digest']}")
+        lines.append(f"next: {view['nextStep']}\n  {view['command']}")
+    elif a == "show":
+        lines = [f"Selection for {view['organization']} ({view['state']})"]
+        if view.get("record"):
+            r = view["record"]
+            lines.append(f"  revision {r['revision']} ({r['kind']}), decided {r['decidedAt']} by "
+                         f"{r['decidedBy'].get('by')} via {r['decidedBy'].get('via')}; layout {r.get('layout')}")
+            for kind, row in sorted(view["counts"].items()):
+                lines.append(f"  {kind}: " + ", ".join(f"{n} {s}" for s, n in row.items() if n))
+            for w in view["waitingOn"]:
+                lines.append(f"  waiting ({w['items']}): {w['on']}: {w.get('what', '')} [{w.get('owner', '')}]")
+        for n in view.get("new") or []:
+            lines.append(f"  new since the record (not chosen): {n}")
+        if view.get("error"):
+            lines.append(f"  {view['error']}: {view['message']}")
+        lines.append(f"next: {view['nextStep']}\n  {view['command']}")
+    else:
+        lines = [f"{a}: {view.get('outcome')} ({view.get('state')})"]
+        if view.get("revision"):
+            lines.append(f"  revision {view['revision']} {view['digest']}")
+        for kind, row in sorted((view.get("counts") or {}).items()):
+            lines.append(f"  {kind}: " + ", ".join(f"{n} {s}" for s, n in row.items() if n))
+        for w in view.get("waitingOn") or []:
+            lines.append(f"  waiting ({w.get('items', 1)}): {w['on']}: {w.get('what', '')} [{w.get('owner', '')}]")
+        lines.append(f"next: {view['nextStep']}\n  {view['command']}")
+    for d in view.get("degraded") or []:
+        lines.append(f"not read: {d.get('source')}: {d.get('reason')}")
+    return "\n".join(lines)

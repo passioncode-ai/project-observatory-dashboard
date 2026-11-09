@@ -753,9 +753,9 @@ def _groups(a, default: str, rows: list[dict], projects: list[dict]) -> list[dic
 
 # ── keys ───────────────────────────────────────────────────────────────────────
 
-def keys(org: str) -> dict:
-    """Each vault slot of the projects `org` holds, classified for it (ORG-R06), and the door admin keys that
-    never move (ORG-R07). Names only: no slot, stash or value file is opened."""
+def organization_checked(org: object) -> "tuple[dict, organizations.Assigner]":
+    """`org` as an organization a key or a selection can go to: a usable name in a readable
+    `config/organizations.json`, and not its default (Personal). The refusals name their command."""
     import credential_shape
     if not isinstance(org, str) or not org.strip() or len(org) > 200 or credential_shape.shaped(org):
         raise Refusal("invalid-organization", f"{credential_shape.echo(org)} is not an organization name",
@@ -776,6 +776,18 @@ def keys(org: str) -> dict:
     if org == a.default:
         raise Refusal("default-organization", f"{org!r} is the default organization (Personal): its keys stay where "
                                               "they are; name the organization they would go to", ACCOUNTS_CMD)
+    return doc, a
+
+
+def keys(org: str, chosen: "list[str] | tuple[str, ...]" = ()) -> dict:
+    """Each vault slot of the projects `org` holds, classified for it (ORG-R06), and the door admin keys that
+    never move (ORG-R07). Names only: no slot, stash or value file is opened.
+
+    `chosen`: project ids the person chose for `org` by hand in the selection (OBS-417, `org_selection.py`). Each
+    one known to the registry joins the scope as the organization's, by that decision, so its keys are listed and
+    classified as for a project the rules give the organization (ORG-W6 lists the keys of the chosen projects). An
+    id the registry does not know is ignored here; the selection names it."""
+    doc, a = organization_checked(org)
     degraded: list[dict] = []
     pdoc = _registry("projects.json", degraded, "no project is known to be the organization's, so no key is in scope")
     projects = _project_rows(pdoc)
@@ -790,6 +802,10 @@ def keys(org: str) -> dict:
             scope[p["id"]] = {"side": "organization", "why": f"the project is {org}'s ({r['source']}: {r['why']})"}
         elif p.get("organization_source") == "conflict" and org in a.hits(p, claims.get(p["id"])):
             scope[p["id"]] = {"side": "conflict", "why": f"the project's rules disagree ({p.get('organization_why')})"}
+    known = {p["id"] for p in projects}
+    for pid in chosen or ():
+        if pid in known and (scope.get(pid) or {}).get("side") != "organization":
+            scope[pid] = {"side": "organization", "why": f"you chose the project for {org}"}
     slots = _slots(degraded)
     do_keys = organizations.account_keys("digitalocean", _rows(do, "accounts"))
     do_by_uuid = {str(t["team_uuid"]): do_keys.get(t["id"]) or [str(t["team_uuid"])]

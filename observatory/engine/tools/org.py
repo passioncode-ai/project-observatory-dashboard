@@ -65,7 +65,20 @@
         the door's record, or put by hand); the door admin and provisioning keys as never moved. Names only: no
         value is read (OBS-415; schema `org-keys/1`)
 
-`accounts` and `keys` print text, or with `--json` one JSON document; every other answer is one JSON document on stdout; a refusal is `{"error": code, "message": ...}` on stderr, exit 1. A
+    project-observatory full org select --org NAME [plan|show|apply|undo|confirm-replacement KEY] [--json]
+        the local selection record of what goes to organization NAME (OBS-417; `org-selection/1`, owner-only, never
+        sent): `plan` (the default) shows the projects, keys and accounts proposed for it with the layout, what the
+        organization would receive and what stays personal, and its digest; `--include ID`, `--exclude ID`,
+        `--include-group proposed|needs-you`, `--exclude-group ...`, `--label PROJECT=TEXT`, `--key KEY=CHOICE`
+        (hand-over-revoke, hand-over-keep, keep), `--layout separate-space|this-space|one-space`, `--serves SPACE`
+        and `--reset` change the draft item by item. `apply --digest D` writes the next revision only in the form the
+        preview showed and starts its journal: a project waits for Fabric's adaptation plan (nothing is sent), a key
+        waits for the request queue and the rotation (no value is read or copied), the layout waits for its step.
+        `show` reads the journal back with its counts and what was found since; `undo` restores the revision before;
+        `confirm-replacement KEY` records that the organization's replacement for KEY works (separate-space layout).
+        An agent passes the operator's words with `--decision JSON` or `--decision-file FILE` (contract DEC-0121)
+
+`accounts`, `keys` and `select` print text, or with `--json` one JSON document; every other answer is one JSON document on stdout; a refusal is `{"error": code, "message": ...}` on stderr, exit 1. A
 refusal a person resolves also carries `nextStep` (in words) and `command`. Exit 1 too when every organization asked
 failed, a check-in the server refused included.
 """
@@ -111,6 +124,29 @@ def parser() -> argparse.ArgumentParser:
     keys = sub.add_parser("keys", help="an organization's keys classified, by name only (read-only)")
     keys.add_argument("--org", required=True, help="an organization of config/organizations.json")
     keys.add_argument("--json", action="store_true", help="one JSON document (org-keys/1)")
+    select = sub.add_parser("select", help="the local selection of what goes to an organization (owner-only, "
+                                           "never sent)")
+    select.add_argument("--org", required=True, help="an organization of config/organizations.json")
+    select.add_argument("action", nargs="?", default="plan",
+                        choices=("plan", "show", "apply", "undo", "confirm-replacement"))
+    select.add_argument("key", nargs="?", metavar="KEY", help="confirm-replacement: the key (vault:FOLDER/ENV/NAME)")
+    select.add_argument("--include", action="append", metavar="ID", help="choose an item (repeatable)")
+    select.add_argument("--exclude", action="append", metavar="ID", help="leave an item out (repeatable)")
+    select.add_argument("--include-group", choices=("proposed", "needs-you"),
+                        help="choose every member of a group as listed now")
+    select.add_argument("--exclude-group", choices=("proposed", "needs-you"),
+                        help="leave out every member of a group as listed now")
+    select.add_argument("--label", action="append", metavar="PROJECT=TEXT",
+                        help="the name the organization reads for a project; empty TEXT clears it")
+    select.add_argument("--key", dest="keys", action="append", metavar="KEY=CHOICE",
+                        help="hand-over-revoke, hand-over-keep or keep")
+    select.add_argument("--layout", choices=("separate-space", "this-space", "one-space"))
+    select.add_argument("--serves", metavar="SPACE", help="the space the selection serves (separate-space layout)")
+    select.add_argument("--reset", action="store_true", help="drop the draft before any other change")
+    select.add_argument("--digest", help="apply: the digest the preview showed")
+    select.add_argument("--decision", metavar="JSON", help="the operator's words, contract DEC-0121's shape")
+    select.add_argument("--decision-file", metavar="FILE", help="the same, from a file")
+    select.add_argument("--json", action="store_true", help="one JSON document (org-select/1)")
     records = sub.add_parser("records", help="the estate revision and delta this machine applied")
     rsub = records.add_subparsers(dest="action", required=True)
     apply = rsub.add_parser("apply", help="verify and apply an estate revision or a delta page")
@@ -210,10 +246,69 @@ def views(args) -> int:
     return 0
 
 
+def _pairs(values: list[str] | None, what: str) -> dict:
+    out = {}
+    for value in values or []:
+        ident, sep, rest = value.partition("=")
+        if not sep:
+            raise ValueError(f"{what} takes ID=VALUE")
+        out[ident] = rest
+    return out
+
+
+def select(args) -> int:
+    """`select`: the local selection record (`org_selection.py`), which needs no enrollment and sends nothing."""
+    import org_selection as S
+
+    def refuse(refusal) -> int:
+        if args.json:
+            print(json.dumps(refusal.answer()), file=sys.stderr)
+        else:
+            print(f"refused: {refusal}" + (f"\n  {refusal.command}" if refusal.command else ""), file=sys.stderr)
+        return 1
+    try:
+        decision = None
+        if args.decision is not None or args.decision_file:
+            try:
+                raw = args.decision if args.decision is not None else Path(args.decision_file).read_text(encoding="utf-8")
+                decision = json.loads(raw)
+            except (OSError, ValueError):
+                raise S.Refusal("decision-invalid", "the decision is not one JSON object in contract DEC-0121's shape")
+        caller = "cli" if decision is None else "agent:cli"
+        if args.action == "plan":
+            try:
+                changes = {"include": args.include, "exclude": args.exclude, "includeGroup": args.include_group,
+                           "excludeGroup": args.exclude_group, "labels": _pairs(args.label, "--label"),
+                           "keys": _pairs(args.keys, "--key"), "layout": args.layout, "serves": args.serves,
+                           "reset": args.reset}
+            except ValueError as error:
+                raise S.Refusal("invalid-change", str(error))
+            view = S.plan(args.org, changes, decision=decision, caller=caller)
+        elif args.action == "show":
+            view = S.show(args.org)
+        elif args.action == "apply":
+            view = S.apply(args.org, args.digest, decision=decision, caller=caller)
+        elif args.action == "undo":
+            view = S.undo(args.org, decision=decision, caller=caller)
+        else:
+            if not args.key:
+                raise S.Refusal("not-in-record", "confirm-replacement names the key: vault:FOLDER/ENV/NAME")
+            view = S.confirm_replacement(args.org, args.key, decision=decision, caller=caller)
+    except S.Refusal as refusal:
+        return refuse(refusal)
+    if args.json:
+        print(json.dumps(view, indent=1, sort_keys=True, ensure_ascii=False))
+    else:
+        print(S.text(view))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     if args.command in ("accounts", "keys"):
         return views(args)
+    if args.command == "select":
+        return select(args)
     try:
         from node import org
     except RuntimeError as error:                          # the engine's `full` extra

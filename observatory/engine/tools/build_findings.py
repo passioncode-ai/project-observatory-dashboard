@@ -1790,6 +1790,12 @@ def collect() -> list[dict]:
     # A CONFLICT NAMED ON THE BOARD, and the rules the engine does not read (OBS-412, tools/organization_findings.py).
     import organization_findings
     out.extend(organization_findings.findings(_projects, _orgs, organizations.load_problem()))
+    # WHAT WAS FOUND SINCE A SELECTION (OBS-417, ORG-R16): proposed in the next plan, never chosen by itself.
+    try:
+        import org_selection
+        out.extend(organization_findings.selection_findings(org_selection.new_since_all()))
+    except Exception as exc:  # noqa: BLE001 - one unreadable selection must not cost the board its other rows
+        print(f"organization selection findings skipped ({type(exc).__name__})", file=sys.stderr)
     # WHO ASKS FOR SECRETS, AND HOW OFTEN. The keyserver's journal is written on
     # every reveal, and a journal read by nothing can hold a burst of reveals of
     # one variable that no row on this board ever names.
