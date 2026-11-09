@@ -841,7 +841,9 @@ class Views(Base):
         k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
         self.assertEqual((k["both/prod/USER_TOKEN"]["class"], k["both/prod/USER_TOKEN"]["issuer"]["source"]),
                          ("personal", "default"), "the Heroku user reads the default organization in both views")
-        (self.secrets / "openrouter-issued.json").chmod(0)
+        # Not chmod(0): Windows reads a file whatever its mode bits say. A ledger that is not JSON
+        # takes the same unreadable branch on every system.
+        (self.secrets / "openrouter-issued.json").write_text("{not json", encoding="utf-8")
         v = self.view.accounts()
         self.assertEqual(sum(1 for d in v["degraded"] if d["source"] == "openrouter:ledger"), 1)
         self.write("organizations.json", {"organizations": {"acme": "x"}, "projects": {}})
