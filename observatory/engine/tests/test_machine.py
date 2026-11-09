@@ -1141,6 +1141,14 @@ class Skills(Base):
         self.assertIn("full scan-harness", d["reason"])
         self.assertIn("configure integrations harness true", d["reason"])
         self.assertEqual(out["skills"]["open"][0]["waitsOn"], "OBS-359")
+        self.assertEqual(out["skills"]["page"], {"limit": None, "cursor": "0", "nextCursor": None, "total": 0})
+
+    def test_odd_rows_in_the_scan_do_not_break_the_section(self):
+        self.harness({"generated_at": self.now(), "inventory": {"spaces": [{"space": "this-account",
+                                                                            "skills": {"a": 1}, "plugins": ["x"]}]}})
+        out = self.server.observatory_machine(section="skills")
+        self.assertEqual(out["skills"]["counts"], {"skills": 0, "plugins": 0, "findings": 0})
+        self.assertEqual(out["skills"]["page"]["total"], 0)
 
     def test_a_scan_before_the_inventory_is_named(self):
         self.harness({"generated_at": "2026-01-01T00:00:00Z", "skills": []})

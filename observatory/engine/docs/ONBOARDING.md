@@ -2066,7 +2066,8 @@ never a finding), and the
 newest version its marketplace publishes as the marketplace's local copy records it (`latest`, with
 `marketplaceUpdated`), in Claude Code's own order: the plugin's `.claude-plugin/plugin.json` inside the
 marketplace's folder, else its catalogue entry's `version` (a manifest that cannot be read, or names no release,
-gives no `latest`). A plugin from a Git repository or a URL has no `latest` (its manifest is not in the local
+a plugin folder missing from the local copy, and a catalogue that sets `metadata.pluginRoot`, which is not
+followed yet, give no `latest`). A plugin from a Git repository or a URL has no `latest` (its manifest is not in the local
 copy), nor does one from a marketplace that is a local folder (served in place): nothing is fetched. A plugin
 behind that version and not known to be disabled (`enabled` true, or null) is a finding (`plugin-behind`, with `claude plugin update NAME --scope SCOPE` as the step, run
 in the project's folder for a project or local install), and the board shows it as `harness.plugin_behind`;
@@ -2076,7 +2077,8 @@ folder name apart without the path. An enabled Codex plugin's skills are listed 
 version is not known (`latest` null). One finding waits and says so under `open`: an organization's plugin
 enabled in a person's own space needs the space's context binding (OBS-359). A record that cannot be read
 or has another shape (`installed_plugins.json`, a settings file, a marketplace catalogue, a skill's
-`SKILL.md`, Codex's plugin cache or `config.toml`) is named in `degraded`, never read as empty (`unreadable`, or `unrecognised-shape` for a record of another shape); no
+`SKILL.md`, Codex's plugin cache or `config.toml`) is named in `degraded`, never read as empty (`unreadable`, or `unrecognised-shape` for a record of another shape; `harness_root`
+`not-found` when the home folder the scan reads is not a folder); no
 scan yet, one older than the inventory, or one older than 24 hours (`stale`) is named there with the command
 that fills it. Agents read the same answer with `observatory_machine(section="skills")`, 200 skills a page
 (`limit`, and `cursor` from `skills.page.nextCursor`; plugins, findings and counts always whole).
@@ -3457,8 +3459,8 @@ that hold it. The design: [docs/design/VAULT-DIGESTS.md](https://github.com/pass
 
 ### Copy a key into another store on this machine
 
-Another space on this machine (a second account's store, or a space you are preparing) gets a key from
-your store with one command, without the value ever being printed, put in an argument, a file outside the
+Another store of yours on this machine (a space you are preparing, another workspace's store) gets a key
+from your store with one command, without the value ever being printed, put in an argument, a file outside the
 two stores, or a log (OBS-476):
 
 ```sh
@@ -3492,7 +3494,8 @@ in the path), `target-link` (the store or its `projects/` is a link), `target-pa
 `target-not-folder`, `target-is-vault-folder` (name the store that holds the vault),
 `target-in-repository` (the store would sit in a Git working tree), `same-store` (another spelling of this
 store included), `nested-stores` (one store inside the other, your store or its vault folder included), `target-other-account` (a store another
-account owns: a value written from here would be unreadable there; not checked on Windows), `target-not-writable`,
+account owns: a value written from here would be unreadable there, so another OS account's store is not
+served yet, OBS-489; not checked on Windows), `target-not-writable`,
 `target-unsafe` (a file or folder in the target fails the vault's own checks: a link below `projects/`, a
 slot or metadata file that is not owner-only, does not parse or is not UTF-8), `target-slot-invalid`,
 `target-slot-filled`, `filesystem-refused` (the file system refused before anything was written).

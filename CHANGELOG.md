@@ -9,7 +9,7 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 - **A key copied into another store on this machine** (OBS-476; `docs/ONBOARDING.md`, scenario OSS-111).
   `tools/vault.py copy PROJECT ENV NAME --to-store PATH [--to-slot SLOT] [--replace] [--json]` copies one slot into
-  another secret store (another account's space, or a space being prepared), reading and writing the value inside
+  another secret store this account owns (a space being prepared, another workspace's store), reading and writing the value inside
   one process: never printed, never in an argument, a file outside the two stores or a log. The source stays; both
   stores' movement journals record `copied`, each naming the other store and slot; both stores' locks are held. A
   filled target slot is refused unless `--replace` (the old value is archived there). The receipt (`vault-copy/1`)

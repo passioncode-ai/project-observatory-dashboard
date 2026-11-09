@@ -131,7 +131,7 @@ estate key moves only as a file (`key export FILE`, then `key import FILE` on th
 
 ## A key into another store on this machine
 
-To give another space on this machine (a second account's store, or a space being prepared) one of my keys,
+To give another store of mine on this machine (a space being prepared, another workspace's store) one of my keys,
 run `python "$(project-observatory full-path)/tools/vault.py" copy PROJECT ENV NAME --to-store PATH --json`
 (`--to-slot NAME` or `PROJECT/ENV/NAME` for another slot there). Never copy a key with `cat`, a pipe, a
 named pipe or `use_secret.py run`: `copy` reads and writes the value inside one process, keeps my slot,
@@ -140,8 +140,8 @@ digests that must read `match: true`. A target slot that holds another value is 
 (`target-slot-filled`); pass `--replace` only when I say so. Every refusal has a `code`, exits 2 and leaves the
 target without a value, metadata or journal line from it; `outcome: failed` (exit 1) means a write may have been partial:
 read both journals before retrying; `target-unsafe` means a file in the target fails the vault's own checks: say which;
-`target-other-account` means the store belongs to another OS account and this account cannot write it for
-that account: say so, do not work around it. A copy to another machine is not this command (OBS-194).
+`target-other-account` means the store belongs to another OS account, which this command does not serve (OBS-489):
+say so, do not work around it. A copy to another machine is not this command (OBS-194).
 
 ## Waking, stopping and restarting my apps
 

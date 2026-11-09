@@ -406,9 +406,13 @@ class Copy(unittest.TestCase):
 
     def test_a_file_system_refusal_before_the_first_write_is_a_refusal(self):
         self.put()
+        p = self.run_patched("def refuse(store):\n    raise PermissionError(13, 'denied')\n"
+                             "vault._writable_by_this_account = refuse\n")
+        self.assertEqual(p.stdout.strip(), "filesystem-refused", p.stderr)
+        self.assertFalse(self.target.exists())
         p = self.run_patched("def refuse():\n    raise PermissionError(13, 'denied')\n"
                              "vault._copy_digest_key = refuse\n")
-        self.assertEqual(p.stdout.strip(), "filesystem-refused", p.stderr)
+        self.assertEqual(p.stdout.strip(), "source-unreadable", "the estate key is the source store's")
         self.assertFalse(self.target.exists())
 
     def test_another_copy_filling_the_new_vault_first_keeps_its_lock_file(self):
@@ -428,6 +432,25 @@ class Copy(unittest.TestCase):
         self.assertEqual(p.stdout.strip(), "target-slot-filled", p.stderr)
         self.assertTrue((self.target / "projects" / ".vault.lock").exists())
         self.assertTrue((self.target / "projects/alpha-web/prod/API_TOKEN").is_file())
+
+    def test_a_lock_file_replaced_while_waiting_is_locked_anew(self):
+        """A writer that waited on a lock file another process removed locks the file now at the path."""
+        sys.path.insert(0, str(TOOLS))
+        code = ("import os, sys; sys.path.insert(0, %r); import vault, pathlib\n"
+                "store = pathlib.Path(%r)\n"
+                "real_flock = vault.oslocks.flock\n"
+                "calls = []\n"
+                "def flock(fd, op):\n"
+                "    real_flock(fd, op)\n"
+                "    calls.append(fd)\n"
+                "    if len(calls) == 1:\n"
+                "        os.unlink(store / '.vault.lock')\n"
+                "vault.oslocks.flock = flock\n"
+                "with vault._mutation_lock(store):\n"
+                "    print(len(calls), (store / '.vault.lock').exists())\n" % (str(TOOLS), str(self.vault)))
+        self.put()
+        p = subprocess.run([sys.executable, "-c", code], env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(p.stdout.split(), ["2", "True"], p.stderr)
 
     def test_a_human_refusal_names_its_code(self):
         self.put()

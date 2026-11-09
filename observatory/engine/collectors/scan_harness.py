@@ -757,10 +757,17 @@ def _marketplace_latest(name: str, market: dict, degraded: list[dict], cache: di
     source = entry.get("source")
     if not isinstance(source, str) or not source.strip() or "://" in source:
         return None, None
+    # A catalogue that sets `metadata.pluginRoot` keeps its plugins under it, by a rule this inventory does not
+    # follow yet (OBS-486); its manifests are not looked for, so no entry version stands in for one.
+    if isinstance(catalogue.get("metadata"), dict) and catalogue["metadata"].get("pluginRoot"):
+        return None, None
     try:
         folder = (root / source).resolve()
         folder.relative_to(root.resolve())
     except (OSError, ValueError):
+        return None, None
+    if not folder.is_dir():
+        # The plugin's folder is not in the local copy: whatever manifest Claude Code installs from is unknown.
         return None, None
     path = folder / ".claude-plugin" / "plugin.json"
     before = len(degraded)
@@ -890,7 +897,11 @@ def _codex_plugins(home: Path, degraded: list[dict], skills: list[dict], seen: s
     if not markets:
         return []
     config = _inventory_doc(home / ".codex" / "config.toml", "codex:config.toml", degraded, kind="toml")
-    table = (config or {}).get("plugins") if isinstance((config or {}).get("plugins"), dict) else {}
+    table = (config or {}).get("plugins", {})
+    if not isinstance(table, dict):
+        degraded.append({"source": "codex:config.toml", "code": "unrecognised-shape",
+                         "reason": "its `plugins` is not a table; which Codex plugins are enabled is not known"})
+        config, table = None, {}
     rows = []
     for market in markets:
         plugins = [p for p in _folders(market, f"codex:plugins-cache:{market.name}", degraded)
@@ -931,6 +942,10 @@ def inventory(home: Path, roots: list[Path]) -> dict:
     person's own needs the space's context binding (OBS-359); the answer says so in `open`."""
     claude = home / ".claude"
     degraded: list[dict] = []
+    if not home.is_dir():
+        degraded.append({"source": "harness_root", "code": "not-found",
+                         "reason": "the home folder the harness scan reads is not a folder (sources.harness_root); "
+                                   "set it with `project-observatory full configure sources harness_root ~`"})
     seen: set[str] = set()
     skills = _skill_rows(claude / "skills", CLAUDE_CODE, "user", {}, seen, degraded)
     for root in dict.fromkeys(r.resolve() for r in roots):

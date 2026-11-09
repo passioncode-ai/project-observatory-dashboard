@@ -434,6 +434,7 @@ class Harness(unittest.TestCase):
         # A plugin behind its marketplace (OBS-477): installed at 1.0.0, the marketplace's local copy says 1.1.0.
         market = self.home / ".claude/plugins/marketplaces/family"
         (market / ".claude-plugin").mkdir(parents=True)
+        (market / "tool").mkdir()   # the plugin's folder, without a manifest: the entry's version is the newest
         (market / ".claude-plugin/marketplace.json").write_text(json.dumps(
             {"name": "family", "plugins": [{"name": "tool", "version": "1.1.0", "source": "./tool"}]}))
         installed = json.loads((self.home / ".claude/plugins/installed_plugins.json").read_text())
@@ -512,6 +513,7 @@ class Inventory(unittest.TestCase):
             {"name": "escape", "source": "../../outside"},
             {"name": "far", "source": {"source": "github", "repo": "example-org/far"}}]})
         write_json(market / "plugins" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "2.0.0"})
+        (market / "tool").mkdir()   # in the local copy, with no manifest: the catalogue entry's version stands
         write_json(self.base / "outside" / ".claude-plugin" / "plugin.json", {"name": "escape", "version": "9.0.0"})
         installs = self.base / "cache"
         tool = installs / "tool" / "1.0.0"
@@ -634,6 +636,7 @@ class Inventory(unittest.TestCase):
         doc = json.loads(catalogue.read_text())
         doc["plugins"].append({"name": "idle", "version": "3.1.0", "source": "./idle"})
         write_json(catalogue, doc)
+        (self.base / "markets" / "family" / "idle").mkdir()
         write_json(self.projects / "alpha-web" / ".claude" / "settings.local.json",
                    {"enabledPlugins": {"tool@family": True}})
         inv = self.inventory()
@@ -764,6 +767,31 @@ class Inventory(unittest.TestCase):
         self.assertIsNone(local["version"])
         self.assertIn(("codex", "plugin", "local-skill"),
                       {(s["agent"], s["scope"], s["name"]) for s in inv["spaces"][0]["skills"]})
+
+    def test_a_missing_plugin_folder_or_a_plugin_root_gives_no_latest(self):
+        (self.base / "markets" / "family" / "tool").rmdir()
+        tool = next(p for p in self.inventory()["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertEqual((tool["latest"], tool["behind"]), (None, None))
+        (self.base / "markets" / "family" / "tool").mkdir()
+        catalogue = self.base / "markets" / "family" / ".claude-plugin" / "marketplace.json"
+        doc = json.loads(catalogue.read_text())
+        doc["metadata"] = {"pluginRoot": "./plugins"}
+        write_json(catalogue, doc)
+        inv = self.inventory()
+        tool = next(p for p in inv["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertEqual((tool["latest"], tool["behind"]), (None, None), "a plugin root is not followed yet")
+        self.assertEqual(inv["findings"], [])
+
+    def test_a_home_that_is_no_folder_is_named(self):
+        inv = self.mod.inventory(self.base / "absent-home", [])
+        self.assertEqual([(d["source"], d["code"]) for d in inv["degraded"]], [("harness_root", "not-found")])
+
+    def test_codex_plugins_of_another_shape_are_named(self):
+        write_json(self.home / ".codex" / "config.toml", 'plugins = "all"\n')
+        inv = self.inventory()
+        self.assertIn(("codex:config.toml", "unrecognised-shape"), {(d["source"], d["code"]) for d in inv["degraded"]})
+        helper = next(p for p in inv["spaces"][0]["plugins"] if p["agent"] == "codex")
+        self.assertIsNone(helper["enabled"])
 
     def test_an_unknown_scope_behind_is_no_finding(self):
         installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())

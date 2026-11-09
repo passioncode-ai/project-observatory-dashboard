@@ -87,6 +87,8 @@ def carried(hygiene: dict) -> dict | None:
     return {"checkouts": len(stale), "measured_at": min(stamps) if stamps else None}
 
 
+#: The page of an answer that has no skills to page.
+EMPTY_PAGE = {"limit": None, "cursor": "0", "nextCursor": None, "total": 0}
 #: Past this age the skills section says its scan is stale.
 SKILLS_STALE_HOURS = 24
 #: What the skills section always answers, so a reader can tell an empty inventory from an unread one.
@@ -113,16 +115,23 @@ def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
                                             "(`project-observatory full configure integrations harness true` and "
                                             "`project-observatory full configure sources harness_root ~`), then run "
                                             "`project-observatory full scan-harness`"}
-        return {"measuredAt": None, "spaces": [], "counts": {"skills": 0, "plugins": 0, "findings": 0},
+        return {"measuredAt": None, "spaces": [], "page": EMPTY_PAGE,
+                "counts": {"skills": 0, "plugins": 0, "findings": 0},
                 "findings": [], "open": SKILLS_OPEN, "degraded": [problem]}
     inventory = doc.get("inventory") if isinstance(doc, dict) else None
     if not isinstance(inventory, dict):
         return {"measuredAt": doc.get("generated_at") if isinstance(doc, dict) else None, "spaces": [],
+                "page": EMPTY_PAGE,
                 "counts": {"skills": 0, "plugins": 0, "findings": 0}, "findings": [], "open": SKILLS_OPEN,
                 "degraded": [{"source": "harness.json", "code": "not-surveyed",
                               "reason": "the last harness scan predates the skills inventory; run "
                                         "`project-observatory full scan-harness`"}]}
-    spaces = [s for s in inventory.get("spaces") or [] if isinstance(s, dict)]
+    spaces = [{**s, "skills": [r for r in s.get("skills") or [] if isinstance(r, dict)]
+                  if isinstance(s.get("skills"), list) else [],
+               "plugins": [r for r in s.get("plugins") or [] if isinstance(r, dict)]
+                  if isinstance(s.get("plugins"), list) else []}
+              for s in (inventory.get("spaces") if isinstance(inventory.get("spaces"), list) else [])
+              if isinstance(s, dict)]
     findings = [f for f in inventory.get("findings") or [] if isinstance(f, dict)]
     degraded = [d for d in inventory.get("degraded") or [] if isinstance(d, dict)]
     try:

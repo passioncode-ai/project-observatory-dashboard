@@ -779,13 +779,9 @@ def observatory_machine(
     the same function `full machine-move status` runs. It writes nothing and makes no
     machine id; every step it names is a CLI verb a person or an agent runs.
 
-    `section="skills"` answers every skill and plugin of this space (OBS-477): name, version,
-    scope (user, project or plugin; a plugin's install scope user, project or local) and the
-    agent that loads it (claude-code, codex), whether a plugin is enabled, the newest version
-    its marketplace's LOCAL copy publishes, and findings (`plugin-behind`). Read from the last
-    harness scan, never fetched; `open` names the finding that waits (an organization's plugin
-    in a person's own space, OBS-359), `degraded` every record that could not be read. The skills
-    come 200 at a time (`limit`, `cursor` from `skills.page.nextCursor`).
+    `section="skills"`: every skill and plugin here with version, scope and agent, a plugin's
+    enabled state and its marketplace's newest LOCAL version, findings (`plugin-behind`), `open`
+    (OBS-359) and `degraded`; from the last harness scan; 200 skills a page (`cursor`).
     """
     if section == "skills" and explainPid is None:
         import machine_view

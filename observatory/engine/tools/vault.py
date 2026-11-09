@@ -197,12 +197,29 @@ def _mutation_lock(store: pathlib.Path | None = None):
     _private_dirs(store, store)
     lock = store / ".vault.lock"
     _no_symlinks(lock)
-    fd = osprivacy.open(lock, os.O_CREAT | os.O_RDWR | osprivacy.NONBLOCK | osprivacy.NOFOLLOW, 0o600)
+    # The lock held must still be the file at the lock's path: a lock file removed while this process waited (a
+    # copy that undid a vault it had made, OBS-476) would otherwise be held here while the next writer locks a new
+    # file of the same name and runs beside this one. On a mismatch the new file is locked instead.
+    while True:
+        fd = osprivacy.open(lock, os.O_CREAT | os.O_RDWR | osprivacy.NONBLOCK | osprivacy.NOFOLLOW, 0o600)
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                raise VaultBoundaryError("Vault lock must be a regular file")
+            os.fchmod(fd, 0o600)
+            oslocks.flock(fd, oslocks.LOCK_EX)
+            held = os.fstat(fd)
+            try:
+                here = os.stat(lock, follow_symlinks=False)
+                same = (held.st_dev, held.st_ino) == (here.st_dev, here.st_ino)
+            except FileNotFoundError:
+                same = False
+        except BaseException:
+            os.close(fd)
+            raise
+        if same:
+            break
+        os.close(fd)
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
-            raise VaultBoundaryError("Vault lock must be a regular file")
-        os.fchmod(fd, 0o600)
-        oslocks.flock(fd, oslocks.LOCK_EX)
         for journal_path in (store / MOVES.name, store / LEAKS.name):
             _no_symlinks(journal_path)
             if journal_path.exists() and not journal_path.is_file():
@@ -960,7 +977,8 @@ def _copy_digest_key() -> tuple[str, str | None]:
 
 def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str | None = None,
               replace: bool = False, tool: str = "vault.py") -> dict:
-    """Copy one slot's value into another secret store on this machine (OBS-476) and answer the receipt.
+    """Copy one slot's value into another secret store this account owns on this machine (OBS-476) and answer the
+    receipt.
 
     The value is read and written inside this process: never printed, never in an argument, a file outside the two
     stores, the environment or a log. Both stores' movement journals record `copied`, each naming the other store
@@ -992,20 +1010,22 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
         if _holds(outer, inner):
             raise CopyRefused(f"the stores are nested ({shown_path(outer.resolve())} holds "
                               f"{shown_path(inner.resolve())}); copy between two separate stores", "nested-stores")
-    if not src.is_file():
-        raise CopyRefused(f"nothing at {src_label} to copy; `vault.py list {project}` shows the slots", "source-empty")
-    if _unsettled_for(src_label):
-        raise CopyRefused(f"{src_label} has an open leak; copying it spreads a value that may be revoked. Rotate it, "
-                          f"settle the leak (`vault.py settle {project} {env} {name} ...`), then copy",
-                          "source-has-open-leak")
     try:
+        if not src.is_file():
+            raise CopyRefused(f"nothing at {src_label} to copy; `vault.py list {project}` shows the slots",
+                              "source-empty")
+        if _unsettled_for(src_label):
+            raise CopyRefused(f"{src_label} has an open leak; copying it spreads a value that may be revoked. Rotate "
+                              f"it, settle the leak (`vault.py settle {project} {env} {name} ...`), then copy",
+                              "source-has-open-leak")
         _writable_by_this_account(store)
     except OSError as exc:
         raise CopyRefused(f"the file system refused before anything was written ({type(exc).__name__})",
                           "filesystem-refused") from None
     t_label = f"{t_project}/{t_env}/{t_name}"
     t_slot = target_vault / t_project / t_env / t_name
-    source_store = shown_path(STORE.parent.resolve())
+    # The source's store: its vault folder's parent when the vault is a store's `projects/`, else the vault folder.
+    source_store = shown_path((STORE.parent if STORE.name == "projects" else STORE).resolve())
 
     def source_value() -> str:
         """The source slot's one value; any boundary the vault's reader refuses is `source-unreadable`."""
@@ -1043,12 +1063,17 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
 
     try:
         checked(source_value())
-        key, key_id = _copy_digest_key()
     except (VaultBoundaryError, ValueError) as exc:
         raise target_side(exc) from None
     except OSError as exc:
         raise CopyRefused(f"the file system refused before anything was written ({type(exc).__name__})",
                           "filesystem-refused") from None
+    try:
+        key, key_id = _copy_digest_key()
+    except (VaultBoundaryError, ValueError, OSError):
+        # The estate key lives in the source's vault: a key file that cannot be read is the source's problem.
+        raise CopyRefused("the source store's estate key cannot be read as a private file; restore it with "
+                          "`full vault-digests key import FILE`", "source-unreadable") from None
 
     def keyed(text: str) -> str:
         return hmac.new(bytes.fromhex(key), text.encode("utf-8"), hashlib.sha256).hexdigest()
@@ -1509,8 +1534,9 @@ def main(argv: list[str]) -> int:
     p = sub.add_parser("copy", help="copy one slot into another secret store on this machine, with a receipt")
     _slot_args(p)
     p.add_argument("--to-store", required=True, metavar="PATH",
-                   help="the other store: the folder that holds its projects/ vault (another account's space, or a "
-                        "space being prepared), absolute; created when missing")
+                   help="the other store, one this account owns: the folder that holds its projects/ vault (a space "
+                        "being prepared, another workspace's store), absolute; created when missing; a store another "
+                        "OS account owns is refused (target-other-account)")
     p.add_argument("--to-slot", metavar="SLOT", help="NAME, or PROJECT/ENV/NAME, in the other store (default: the same slot)")
     p.add_argument("--replace", action="store_true",
                    help="replace a value the target slot already holds; the old one is archived there")
@@ -1554,6 +1580,11 @@ def main(argv: list[str]) -> int:
         print(f"vault: {exc}", file=sys.stderr)
         return 2
     except (OSError, ValueError):
+        if copy_json:
+            print(json.dumps({"schema": COPY_SCHEMA, "outcome": "refused", "code": "filesystem-refused",
+                              "reason": "the private file system or input validation refused the operation"},
+                             indent=1, ensure_ascii=False))
+            return 2
         print("vault: private filesystem or input validation refused the operation", file=sys.stderr)
         return 2
 

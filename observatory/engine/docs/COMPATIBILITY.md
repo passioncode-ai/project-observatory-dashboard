@@ -653,7 +653,12 @@ under the estate key), which an older
 and carries the source's `expires_at`, `expiry_reason`, `expiry_recorded`, `expiry_by` and `provenance`. Module
 interface: `vault.copy_slot`, `vault.CopyRefused` (a `VaultBoundaryError` with `code`); `vault._mutation_lock`,
 `vault._private_dirs`, `vault._atomic_write`, `vault._append_private` take an optional store and `vault.journal` an
-optional `_store`, each defaulting to this machine's vault, so every existing call behaves as before.
+optional `_store`, each defaulting to this machine's vault, so every existing call behaves as before. One change
+for every writer: `vault._mutation_lock` now checks, once it holds the lock, that the lock file is still the file
+at the lock's path (device and inode) and locks the new one when it is not, so a lock file removed while a writer
+waited never lets two writers in. A store another OS account owns is refused (`target-other-account`); OBS-489
+holds that case. An estate key in the source store that cannot be read is `source-unreadable`. The source store
+is named as its vault folder's parent when the vault folder is `projects/`, else as the vault folder.
 
 The harness scan (`store/raw/harness.json`) gains `inventory` (OBS-477): `spaces` (one, `this-account`, home `~`)
 with `skills` (`name`, `agent` `claude-code` or `codex`, `scope` `user`, `project` or `plugin`, `version`, and
@@ -670,7 +675,10 @@ with `skills` (`name`, `agent` `claude-code` or `codex`, `scope` `user`, `projec
 code `failed`, when the inventory itself failed and the rest of the scan was kept). A plugin's `scope` is the word
 Claude Code recorded (`user`, `project`, `local`, or another such as `managed`, whose `enabled` is null). `latest`
 is read from the plugin's manifest inside the marketplace's folder first, then the catalogue entry; a plugin from
-another source, or from a marketplace that is a local folder, has none. The section adds `stale` (source
+another source, from a marketplace that is a local folder, whose folder is missing from the local copy, or whose
+catalogue sets `metadata.pluginRoot`, has none. A home folder that is not a folder adds `harness_root` `not-found`;
+Codex's `config.toml` whose `plugins` is not a table adds `codex:config.toml` `unrecognised-shape`. Every answer of
+the section carries `page`. The section adds `stale` (source
 `harness.json`) to its `degraded` for a scan older than 24 hours. No path is recorded. An older reader ignores the key; the machine view
 reads a scan without it as `not-surveyed` until the next scan. `observatory_machine` takes `section: "skills"`
 (answer `{measuredAt, degraded, skills}`, `skills` holding `spaces`, `page` (`limit`, `cursor`, `nextCursor`,
