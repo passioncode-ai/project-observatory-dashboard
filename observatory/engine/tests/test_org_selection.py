@@ -1294,6 +1294,17 @@ class ReviewRoundFourteen(Base):
             org_cli.main(["select", "--org", "acme", "plan", "--layout", planted])
         self.assertNotIn(planted, err.getvalue())
 
+    def test_the_cli_never_repeats_a_rejected_value_that_is_not_an_identifier(self):
+        import org as org_cli
+        importlib.reload(org_cli)
+        for argv in (["select", "--org", "acme", "plan", "--layout", "correct horse battery staple"],
+                     ["select", "--org", "acme", "plan", "--layout", "one-space", "--frob", "correct horse"]):
+            err = io.StringIO()
+            with self.subTest(argv=argv), contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+                org_cli.main(argv)
+            self.assertNotIn("horse", err.getvalue())
+            self.assertIn("characters, not shown", err.getvalue())
+
     def test_undo_that_cannot_restore_says_so(self):
         self.sel.apply("acme", self.ready(include=["project:notes"])["digest"])
         self.sel.apply("acme", self.sel.plan("acme", {"exclude": ["project:notes"]})["digest"])

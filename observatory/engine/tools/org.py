@@ -100,12 +100,23 @@ NODE = paths.setting_path("OBSERVATORY_NODE", paths.HOME / "node")
 
 
 class _Parser(argparse.ArgumentParser):
-    """argparse quotes a rejected value back (`invalid choice: '...'`): a value shaped like a credential, pasted
-    into the wrong place, is redacted before it is printed."""
+    """argparse quotes a rejected value back (`invalid choice: '...'`, `unrecognized arguments: ...`): each value
+    the caller typed is named as a refusal names it (`credential_shape.echo`: quoted only when it is a well-formed
+    identifier, otherwise only its length), and anything shaped like a credential is redacted."""
 
     def error(self, message):  # noqa: D401 - argparse's own hook
+        import re
         import credential_shape
+        message = re.sub(r"'([^'\n]*)'", lambda m: credential_shape.echo(m.group(1)), message)
         super().error(credential_shape.redact(message))
+
+    def parse_known_args(self, args=None, namespace=None):
+        # argparse joins unrecognized arguments with spaces before `error` sees them: each is named here, whole.
+        namespace, extras = super().parse_known_args(args, namespace)
+        if extras and self.prog == "project-observatory full org":
+            import credential_shape
+            self.error("unrecognized arguments: " + " ".join(credential_shape.echo(a) for a in extras))
+        return namespace, extras
 
 
 def parser() -> argparse.ArgumentParser:
