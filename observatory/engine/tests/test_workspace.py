@@ -218,6 +218,32 @@ class WorkspaceTests(unittest.TestCase):
         self.assertFalse(verdict['clean'])
         self.assertTrue(workspace.verdict({})['clean'], 'nothing to say is clean')
 
+    def test_doctor_warns_when_digitalocean_teams_are_stashed_but_the_integration_is_off(self):
+        # OBS-421: a stashed team token reads nothing while integrations.digitalocean is off, and
+        # nothing said so: doctor names the switch and its command, without reading a value.
+        self.run_cli('init')
+        doc = json.loads(self.run_cli('doctor').stdout)
+        self.assertEqual(doc['digitalocean'], {'integration': False, 'teams_stashed': 0})
+        self.assertNotIn('digitalocean-off', [r['code'] for r in doc['attention']])
+        stash = self.home / 'secrets' / 'digitalocean-admin'
+        stash.mkdir(parents=True, mode=0o700)
+        (stash / 'example-team').write_text('synthetic-value-' + 'x' * 20 + '\n')
+        (stash / 'example-team').chmod(0o600)
+        (stash / 'example-team.meta.json').write_text(json.dumps({'kind': 'team', 'team_name': 'Example Team'}))
+        (stash / 'example-team.meta.json').chmod(0o600)
+        out = self.run_cli('doctor').stdout
+        self.assertNotIn('synthetic-value-', out)
+        doc = json.loads(out)
+        self.assertEqual(doc['digitalocean']['teams_stashed'], 1)
+        row = next(r for r in doc['attention'] if r['code'] == 'digitalocean-off')
+        self.assertEqual((row['area'], row['severity']), ('integrations', 'warning'))
+        self.assertEqual(row['step'], 'project-observatory full configure integrations digitalocean true')
+        self.assertIn('1 DigitalOcean team', row['text'])
+        self.run_cli('configure', 'integrations', 'digitalocean', 'true')
+        doc = json.loads(self.run_cli('doctor').stdout)
+        self.assertEqual(doc['digitalocean'], {'integration': True, 'teams_stashed': 1})
+        self.assertNotIn('digitalocean-off', [r['code'] for r in doc['attention']])
+
     def test_a_dead_or_stuck_tick_is_a_warning_and_a_fresh_one_is_not(self):
         import sys
         sys.path.insert(0, str(ROOT))

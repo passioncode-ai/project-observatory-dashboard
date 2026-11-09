@@ -3,6 +3,114 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.35.8 (2026-11-09)
+
+The wiki gains a readable page of the installed agents beside its JSON. Organizations can match provider accounts
+(DigitalOcean and Heroku teams, Cloudflare accounts), and doctor says when DigitalOcean team tokens are stashed but
+the integration is off. An organization certificate is rotated before anyone is told it is expiring, and installing
+the tick reloads it without racing launchd.
+
+### Added
+
+- **`inventory/agents.md`, a readable page of the installed agents beside `inventory/agents.json`** (OBS-317,
+  first half). The wiki projection writes it from `registry/agents.json`, with the frontmatter of the other inventory
+  notes: one row per service key with its product,
+  version (the manifest's provider revision), where it answers, its contract pin, who holds it (the supervisor, its
+  label and state) and its MCP declarations, ordered by service key, with a header saying it is generated. It carries
+  no path, token or plist. The wiki links `[[inventory/agents]]`, and the tick's `links` step reported that note
+  missing on every tick.
+- **DigitalOcean onboarding signals** (OBS-421, `docs/ONBOARDING.md`). `full doctor` reports `digitalocean`
+  (`integration`, `teams_stashed`, counted from the door's records, never a value) and, when team tokens are stashed
+  while `integrations.digitalocean` is off, an `attention` row `digitalocean-off` with the step
+  `project-observatory full configure integrations digitalocean true`. `digitalocean.py teams` names each `doctl`
+  context whose token is not a stashed one, offline (team unknown); `teams --probe` and the collector ask DigitalOcean
+  which team it is with that context's own token (10 s each, the collector only while its deadline allows) and name a
+  team with no stash: "member of team X via doctl context Y: no token stashed; `digitalocean.py stash --from-doctl Y`"
+  (in the scan's `degraded` as `digitalocean:doctl:Y`). A context name shaped like a credential is never printed and
+  gets no command; no value is printed or written.
+- **Organizations match provider accounts** (OBS-412 part 1, `docs/COMPATIBILITY.md`). `config/organizations.json`
+  `match` takes `digitalocean_teams` (a team's uuid or name), `cloudflare_accounts` (an account id) and
+  `heroku_teams` (a team name) beside `repository_owners` and `products`. A project matches one only through a
+  resource the registry already ties to it (a DigitalOcean app or a Cloudflare Pages project or zone with a measured
+  `project`, a Heroku app linked by its rule); an account two organizations claim is shared and assigns nothing.
+  The account rows of `registry/digitalocean-account.json` and `registry/cloudflare-account.json` carry
+  `organization`, `organization_source` (`rule`, `conflict`, `none`) and `organization_why`, and
+  `registry/heroku-apps.json` carries `team_organizations`, all only when organizations are configured; the
+  DigitalOcean and Cloudflare pages show an Organization column then. Every resource row names its account row
+  (`account_ref`); account rows carry `team_uuid` or `account_id`. A team name two teams bear decides nothing (the
+  emit warns; name the uuid), and a `match` rule that is not a list of strings is ignored and named instead of being
+  read letter by letter. With organizations configured, `registry/projects.json` is written once per emit, after the
+  provider documents.
+
+### Fixed
+
+- **An organization certificate is rotated before doctor and `org status` call it expiring** (OBS-423). A 7-day
+  certificate read `expiring` three days before its end, while the maintenance pass rotated it only at two thirds of
+  its validity, 2.33 days before the end: for 16 hours a person was told to run `full org rotate` by hand (seen
+  2026-11-08: `daysLeft: 2.41`, `rotationDue: false`). A rotation is now due at two thirds or an hour before the
+  `expiring` notice, whichever comes first, never in the first half of the validity (so before the notice for
+  certificates of about 6 days or more), judged on the server's clock.
+- **`install_launchd.py install` reloads the tick through the waiting helpers** (OBS-424). It sent `bootout` and at
+  once `bootstrap`, which launchd refuses while the bootout is still finishing (the race OBS-410 fixed elsewhere);
+  it now uses `stop_job` and `start_job`, and names a stop that did not finish.
+
+## 0.35.7 (2026-11-08)
+
+A backup's secret store can be checked without touching the live one. A weekly restore check into a temporary
+home used to verify the home only, because the store goes back only into the folder its settings name, the live
+one; `--secret-store-verify-into DIR` writes it into a disposable folder and reads every file back against the
+snapshot's manifest. It also brings the server back on a Mac that updated to 0.35.6, where the repaired
+definition left it unloaded.
+
+### Fixed
+
+- **The server comes back after an update to 0.35.6 on macOS** (OBS-410). `full maintain ensure` rewrote the
+  server's definition and reloaded it with a bootstrap that launchd refused while the old process was still exiting,
+  so the server stayed unloaded and the update reported nothing. Reloads now wait for the bootout and retry the
+  bootstrap; a reload that fails is `reload-failed`, naming the jobs left `unloaded` or `not_reloaded`; the update
+  loads a job it started again once ensure has run; and, once, a workspace updated to 0.35.6 whose server has its
+  definition and Fabric descriptor in place but is not loaded gets it loaded again by the first `maintain ensure` or
+  pass of 0.35.7 (the update to 0.35.7 runs one), answered under `jobs.recovered`.
+
+### Added
+
+- **`full restore --secret-store-verify-into DIR` checks a backup's secret store without touching the live one**
+  (OBS-394, `docs/COMPATIBILITY.md`, `docs/CLI-COMPATIBILITY.md`). Each store the snapshot carried is written into
+  `DIR/<name>/` (folders 0700, files 0600) and read back against the snapshot's manifest, every SHA-256, size,
+  folder and link, and the answer reads `secret_store: verified` with `files`, `bytes`, `links`, `directories`,
+  `skipped` and `verified`, the number of stores verified. The folder the snapshot's settings name is never written or locked, so a restore check into a
+  temporary home, from this machine's backup or another's, needs no `--secret-store-target`; the restore record
+  doctor reads is not written. It works with a whole restore and with `--secret-store-only`, which then needs no
+  workspace, and answers `nothing-to-verify` when the snapshot carried no store. The copy stays in `DIR` for you to
+  remove; one that fails to verify, or whose restore fails after it, is removed (`secret-store-verify-failed`,
+  exit 1). A DIR that is not empty, or lies in the new home, a workspace on this machine, the snapshot file, a
+  backups folder or a secret store's folder (by name or by identity, `/System/Volumes/Data/...` included), is
+  refused (`secret-store-verify-into-not-empty`, `secret-store-verify-into-refused`), as is the flag beside
+  `--secret-store-target` or another `--secret-store` policy (`secret-store-verify-into-conflict`) and a run
+  where a workspace on this machine has settings that do not read (`secret-store-verify-into-unchecked`), all
+  exit 2 with nothing written. A DIR beside a carried `.obsnap` is fine.
+
+## 0.35.6 (2026-11-08)
+
+Background jobs keep running when their virtual environment is rebuilt on another Python. Until now every job
+definition named a folder of one Python release, and a venv moved from 3.14 to 3.15 left the maintenance job, the
+tick and the server failing on every run. After installing: `project-observatory full maintain ensure` (an
+account with no GUI session also needs the administrator's two steps it prints).
+
+### Fixed
+
+- **Job definitions name no Python release** (OBS-393, `docs/COMPATIBILITY.md`). The pass, the check, the tick,
+  the server and the per-install manifest run `<venv>/bin/python3 -P -m observatory.job PROGRAM`, a new module that
+  starts the same program in the same process; the working folder is the workspace home. A checkout and a Windows
+  venv keep naming their files. No definition is written for an interpreter that cannot start it.
+- **Repair compares the whole definition**, not only the interpreter, on macOS and, new, for the systemd tick and
+  server on Linux, keeping the tick's interval, the server's port, its `PATH` and anything the installer does not
+  write (in a systemd unit, its `Environment=` variables), and dropping the server's old `LowPriorityIO` and `Nice`; a job that was not loaded stays unloaded; `full maintain ensure` repairs the tick and the server too. A
+  daemon root runs from an older definition keeps answering `waiting-for-root` until root applies the new one.
+- **Doctor names `job-path-missing` and `venv-home-missing`.**
+- **The plugin hooks find the engine after a venv rebuild**, and `full maintain ensure` refreshes their settings
+  when they name a folder that is gone. The observatory-log plugin moves to 0.35.6.
+
 ## 0.35.5 (2026-11-08)
 
 The secret store kept outside the workspace now comes back with a workspace restored on another computer. Until now

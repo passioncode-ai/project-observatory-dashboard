@@ -236,5 +236,211 @@ class Surfaces(Base):
         self.assertNotIn("organization", bare)
 
 
+TEAM = "11111111-1111-4111-8111-111111111111"
+SHARED_TEAM = "22222222-2222-4222-8222-222222222222"
+
+
+def do_doc(infra_registry):
+    """`registry/digitalocean-account.json` as `infra_registry` builds it: one app linked to
+    project:shop through a repository the registry holds, one app linked to nothing, one team shared."""
+    scan = {"scanned_on": "2026-11-08", "degraded": [], "teams": [
+        {"label": "company-team", "team_uuid": TEAM, "team_name": "Company Team", "token_kind": "stash",
+         "apps": [{"id": "a1", "name": "shop-api", "serving": True, "repositories": ["shop-org/shop"]},
+                  {"id": "a2", "name": "suite-bot", "serving": True, "repositories": []}]},
+        {"label": "shared-team", "team_uuid": SHARED_TEAM, "team_name": "Shared Team", "token_kind": "stash",
+         "apps": [{"id": "a3", "name": "both-api", "serving": True, "repositories": ["shop-org/both"]}]}]}
+    repos = [{"id": "repository:shop-org/shop", "name_with_owner": "shop-org/shop", "host": "github"},
+             {"id": "repository:shop-org/both", "name_with_owner": "shop-org/both", "host": "github"}]
+    relations = [{"type": "implemented_by", "from": "project:shop", "to": "repository:shop-org/shop"},
+                 {"type": "implemented_by", "from": "project:both", "to": "repository:shop-org/both"}]
+    return infra_registry.digitalocean_document(scan, repos, relations, "2026-11-08")
+
+
+class ProviderAccounts(Base):
+    """OBS-412 part 1: `digitalocean_teams`, `cloudflare_accounts` and `heroku_teams` (ORG-R04)."""
+
+    def setUp(self):
+        super().setUp()
+        sys.path.insert(0, str(ROOT / "collectors"))
+        import infra_registry
+        self.infra = infra_registry
+        orgs = json.loads(json.dumps(ORGS))
+        orgs["organizations"]["company"]["match"].update(
+            digitalocean_teams=["Company Team", SHARED_TEAM], cloudflare_accounts=["acc-company"],
+            heroku_teams=["company-heroku"])
+        orgs["organizations"]["person"]["match"] = {"digitalocean_teams": [SHARED_TEAM]}
+        self.write("organizations.json", orgs)
+        self.config = orgs
+
+    def test_the_new_rules_validate_and_an_unknown_one_is_named(self):
+        self.assertEqual(self.orgs.validate(self.config), [])
+        bad = json.loads(json.dumps(self.config))
+        bad["organizations"]["company"]["match"]["aws_accounts"] = ["1"]
+        bad["organizations"]["company"]["match"]["heroku_teams"] = "company-heroku"
+        problems = " | ".join(self.orgs.validate(bad))
+        self.assertIn("match.aws_accounts is not a known list rule", problems)
+        self.assertIn("match.heroku_teams is not a known list rule", problems)
+
+    def test_an_account_row_says_whose_it_is_and_a_shared_one_is_nobodys(self):
+        a = self.orgs.Assigner()
+        self.assertEqual(a.account("digitalocean", [TEAM, "Company Team"])["organization"], "company")
+        self.assertEqual(a.account("digitalocean", ["x", "company team"])["organization"], "company",
+                         "a team name matches in any case")
+        shared = a.account("digitalocean", [SHARED_TEAM, "Shared Team"])
+        self.assertEqual((shared["organization"], shared["organization_source"]), (None, "conflict"))
+        self.assertIn("company and person", shared["organization_why"])
+        none = a.account("cloudflare", ["acc-other"])
+        self.assertEqual((none["organization"], none["organization_source"]), (None, "none"),
+                         "an account no rule names is undecided, never the default")
+        self.assertEqual(a.account("cloudflare", ["acc-company"])["organization"], "company")
+        self.assertEqual(a.account("heroku", ["company-heroku"])["organization"], "company")
+        self.assertEqual(a.account("heroku", ["acc-company"])["organization"], None,
+                         "a rule names accounts of its own provider only")
+
+    def test_a_project_is_assigned_only_through_resources_the_registry_ties_to_it(self):
+        doc = do_doc(self.infra)
+        accounts = self.orgs.project_accounts(digitalocean=doc)
+        self.assertEqual(sorted(accounts), ["project:both", "project:shop"],
+                         "suite-bot names no repository: its team is no evidence for any project")
+        self.assertEqual(accounts["project:shop"], [{"provider": "digitalocean", "keys": [TEAM, "Company Team"],
+                                                     "label": "Company Team", "via": "app shop-api"}])
+        a = self.orgs.Assigner()
+        got = a.assign({"id": "project:shop", "owners": ["shop-org"]}, accounts["project:shop"])
+        self.assertEqual((got["organization"], got["source"]), ("company", "rule"))
+        self.assertIn("DigitalOcean team Company Team (app shop-api)", got["why"])
+        both = a.assign({"id": "project:both", "owners": ["shop-org"]}, accounts["project:both"])
+        self.assertEqual((both["organization"], both["source"]), (None, "conflict"),
+                         "a project in a shared team is decided per project, never guessed")
+        self.assertEqual(a.assign({"id": "project:shop", "owners": ["shop-org"]})["source"], "external",
+                         "without the accounts the answer is what it was")
+
+    def test_cloudflare_and_heroku_reach_the_project_the_same_way(self):
+        cf = {"accounts": [{"id": "cloudflare:account:acc-company", "account_id": "acc-company", "name": "Co"}],
+              "resources": [{"id": "cloudflare:pages:acc-company/site", "kind": "pages", "name": "site",
+                             "project": "project:site", "link_rule": "pages-source-repo",
+                             "account_ref": "cloudflare:account:acc-company"},
+                            {"id": "cloudflare:worker:acc-company/w", "kind": "worker", "name": "w", "project": None,
+                             "link_rule": None, "account_ref": "cloudflare:account:acc-company"}]}
+        heroku = [{"id": "heroku:api", "name": "api", "team": "company-heroku", "project": "project:api",
+                   "link_rule": "heroku-github-repo"},
+                  {"id": "heroku:mine", "name": "mine", "team": "personal", "project": "project:mine",
+                   "link_rule": "heroku-github-repo"},
+                  {"id": "heroku:loose", "name": "loose", "team": "company-heroku", "project": None,
+                   "link_rule": None}]
+        accounts = self.orgs.project_accounts(cloudflare=cf, heroku_apps=heroku)
+        self.assertEqual(sorted(accounts), ["project:api", "project:site"])
+        a = self.orgs.Assigner()
+        self.assertEqual(a.assign({"id": "project:site"}, accounts["project:site"])["organization"], "company")
+        self.assertIn("Heroku team company-heroku (app api)",
+                      a.assign({"id": "project:api"}, accounts["project:api"])["why"])
+
+    def test_reassign_changes_only_undeclared_projects_and_says_which(self):
+        doc = do_doc(self.infra)
+        accounts = self.orgs.project_accounts(digitalocean=doc)
+        a = self.orgs.Assigner()
+        shop = {"id": "project:shop", "owners": ["person-org"], **{
+            f"organization{k}": v for k, v in (("", "person"), ("_source", "default"), ("_why", "no rule matched"))}}
+        declared = {"id": "project:both", "owners": [], "organization": "person",
+                    "organization_source": "declared", "organization_why": "the operator"}
+        changed = self.orgs.reassign(a, [shop, declared], accounts)
+        self.assertEqual(changed, ["project:shop"])
+        self.assertEqual((shop["organization"], shop["organization_source"]), ("company", "rule"))
+        self.assertEqual(declared["organization"], "person")
+        self.assertEqual(self.orgs.reassign(a, [shop, declared], accounts), [], "a second pass changes nothing")
+
+    def test_the_emit_writes_account_organizations_and_assigns_through_them(self):
+        import subprocess
+        sys.path.insert(0, str(ROOT / "tests"))
+        from emitter_fixture import seed
+        root = Path(self.tmp.name).resolve() / "estate"
+        root.mkdir()
+        env = seed(root)
+        self.write("products.json", {"products": {}, "roles": []})
+        self.write("organizations.json", {"organizations": {
+            "company": {"label": "Company", "match": {"digitalocean_teams": ["Company Team"]}},
+            "person": {"label": "Person", "default": True}}})
+        (root / "raw" / "digitalocean.json").write_text(json.dumps({"scanned_on": "2026-11-08", "degraded": [], "teams": [
+            {"label": "company-team", "team_uuid": TEAM, "team_name": "Company Team", "token_kind": "stash",
+             "apps": [{"id": "a1", "name": "service-api", "serving": True, "repositories": ["fixture/service"]}]},
+            {"label": "other-team", "team_uuid": SHARED_TEAM, "team_name": "Other Team", "token_kind": "stash",
+             "apps": []}]}), encoding="utf-8")
+        p = subprocess.run([sys.executable, "collectors/emit_registry.py", str(root / "raw")], cwd=ROOT, env=env,
+                           capture_output=True, text=True, timeout=300)
+        self.assertEqual(p.returncode, 0, (p.stdout + p.stderr)[-600:])
+        self.assertIn("1 project(s) assigned through their provider accounts", p.stdout)
+        projects = {x["id"]: x for x in json.loads((root / "registry" / "projects.json").read_text())["projects"]}
+        a = projects["project:fixture-a"]
+        self.assertEqual((a["organization"], a["organization_source"]), ("company", "rule"))
+        self.assertIn("DigitalOcean team Company Team (app service-api)", a["organization_why"])
+        self.assertEqual(projects["project:fixture-b"]["organization_source"], "external",
+                         "a project with no resource in a named account keeps the answer it had")
+        accounts = {x["team_uuid"]: x for x in
+                    json.loads((root / "registry" / "digitalocean-account.json").read_text())["accounts"]}
+        self.assertEqual(accounts[TEAM]["organization"], "company")
+        self.assertEqual((accounts[SHARED_TEAM]["organization"], accounts[SHARED_TEAM]["organization_source"]),
+                         (None, "none"))
+
+    def test_a_second_emit_with_nothing_new_carries_the_projects_date(self):
+        """Review of #479, finding 1: projects.json was written twice per emit, first without the
+        account-derived organizations, so its `updated_on` moved every day with the same content."""
+        import subprocess
+        sys.path.insert(0, str(ROOT / "tests"))
+        from emitter_fixture import seed
+        root = Path(self.tmp.name).resolve() / "estate"
+        root.mkdir()
+        env = seed(root)
+        self.write("products.json", {"products": {}, "roles": []})
+        self.write("organizations.json", {"organizations": {
+            "company": {"label": "Company", "match": {"digitalocean_teams": [TEAM]}},
+            "person": {"label": "Person", "default": True}}})
+        (root / "raw" / "digitalocean.json").write_text(json.dumps({"scanned_on": "2026-11-08", "degraded": [], "teams": [
+            {"label": "company-team", "team_uuid": TEAM, "team_name": "Company Team", "token_kind": "stash",
+             "apps": [{"id": "a1", "name": "service-api", "serving": True, "repositories": ["fixture/service"]}]}]}),
+            encoding="utf-8")
+        reg = root / "registry" / "projects.json"
+
+        def emit():
+            p = subprocess.run([sys.executable, "collectors/emit_registry.py", str(root / "raw")], cwd=ROOT, env=env,
+                               capture_output=True, text=True, timeout=300)
+            self.assertEqual(p.returncode, 0, (p.stdout + p.stderr)[-600:])
+            return json.loads(reg.read_text(encoding="utf-8"))
+
+        first = emit()
+        self.assertEqual({x["id"]: x["organization"] for x in first["projects"]}["project:fixture-a"], "company")
+        first["updated_on"] = "2026-01-01"                    # as an earlier day's emit wrote it
+        reg.write_text(json.dumps(first), encoding="utf-8")
+        second = emit()
+        self.assertEqual(second["updated_on"], "2026-01-01", "nothing changed, so the date is carried")
+        self.assertEqual(second["projects"], first["projects"])
+
+    def test_a_string_where_a_list_belongs_matches_nothing_and_is_named(self):
+        orgs = json.loads(json.dumps(self.config))
+        orgs["organizations"]["company"]["match"] = {"heroku_teams": "c", "repository_owners": "company-org"}
+        a = self.orgs.Assigner(doc=orgs, estate_owners={"company-org"}, products={})
+        self.assertEqual(a.account("heroku", ["c"])["organization"], None, "a string is not read letter by letter")
+        self.assertEqual(a.assign({"id": "project:x", "owners": ["company-org"]})["source"], "default")
+        self.assertEqual(sorted(a.problems), ["company: match.heroku_teams is not a known list rule; ignored",
+                                              "company: match.repository_owners is not a known list rule; ignored"])
+
+    def test_a_team_name_two_teams_bear_decides_nothing_and_is_warned_about(self):
+        orgs = json.loads(json.dumps(self.config))
+        orgs["organizations"]["company"]["match"] = {"digitalocean_teams": ["Twin"]}
+        orgs["organizations"]["person"]["match"] = {"digitalocean_teams": [SHARED_TEAM]}
+        a = self.orgs.Assigner(doc=orgs)
+        accounts = [{"id": "digitalocean:team:" + TEAM, "team_uuid": TEAM, "name": "Twin"},
+                    {"id": "digitalocean:team:" + SHARED_TEAM, "team_uuid": SHARED_TEAM, "name": "twin"}]
+        warnings = self.orgs.annotate_accounts(a, "digitalocean", accounts)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("'Twin', the name of 2 teams here", warnings[0])
+        self.assertEqual([x["organization"] for x in accounts], [None, "person"], "the uuid still decides")
+        self.assertEqual(self.orgs.account_keys("digitalocean", accounts)["digitalocean:team:" + TEAM], [TEAM])
+
+    def test_rows_name_their_account_row(self):
+        doc = do_doc(self.infra)
+        ids = {a["id"] for a in doc["accounts"]}
+        self.assertTrue(all(r["account_ref"] in ids for r in doc["resources"]))
+        self.assertEqual({a["team_uuid"] for a in doc["accounts"]}, {TEAM, SHARED_TEAM})
+
+
 if __name__ == "__main__":
     unittest.main()

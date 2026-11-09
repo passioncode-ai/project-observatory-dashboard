@@ -587,6 +587,9 @@ def doctor(base: Path) -> dict:
             # OBS-79 L2r: which helper drives enrolled apps (the signed app's or a source build) and why; inert,
             # with no codesign run, until something is enrolled in config/node-lifecycle.json.
             "lifecycle_helper": _lifecycle_helper(base),
+            # OBS-421: DigitalOcean team tokens stashed while the integration is off read nothing; counted
+            # from the door's records, never a value, with the switch's command in `attention`.
+            "digitalocean": _digitalocean(doc),
             # With the agent on, whether it has a model and a budget: a fresh
             # models.json has neither, and the refusal a call meets says less.
             **({"agent": config.model_readiness(base, _key_report())}
@@ -617,7 +620,8 @@ def verdict(report: dict) -> dict:
     so they are the source; each is credited to the section that raised it, and a code is taken
     once, from its first row. Each missing source is its own `source-missing` row (one per source:
     two switches needing one folder have one fix). A dead, interrupted or stuck tick is a `tick-<verdict>`
-    row. Other sections (organizations, meter, session servers, analytics, review) are not read yet.
+    row. DigitalOcean team tokens stashed while the integration is off are a `digitalocean-off` row
+    (OBS-421). Other sections (organizations, meter, session servers, analytics, review) are not read yet.
     Doctor stays a report: its exit code does not follow the verdict."""
     areas: dict = {}
     for area in ("backups", "machine_backup"):
@@ -640,6 +644,11 @@ def verdict(report: dict) -> dict:
         source = str(row.get("source") or "")
         add(("source-missing", source), "sources", "source-missing", f"{source}: {row.get('problem')}",
             row.get("fix"))
+    do = report.get("digitalocean") if isinstance(report.get("digitalocean"), dict) else {}
+    if do.get("teams_stashed") and do.get("integration") is False:
+        add("digitalocean-off", "integrations", "digitalocean-off",
+            f"{do['teams_stashed']} DigitalOcean team token(s) are stashed, but integrations.digitalocean is off, "
+            "so no team is read", DIGITALOCEAN_ON)
     tick = report.get("tick") if isinstance(report.get("tick"), dict) else {}
     if tick.get("verdict") in TICK_WARNINGS:
         code = f"tick-{tick['verdict']}"
@@ -647,6 +656,26 @@ def verdict(report: dict) -> dict:
         # row carries the tick's own reason and no step.
         add(code, "tick", code, f"the scheduled tick is {tick['verdict']}: {tick.get('why') or ''}".rstrip(": "), None)
     return {"attention": attention, "clean": not any(row["severity"] == "warning" for row in attention)}
+
+
+#: The switch that lets the tick read the DigitalOcean teams the door holds (OBS-421).
+DIGITALOCEAN_ON = "project-observatory full configure integrations digitalocean true"
+
+
+def _digitalocean(doc: dict) -> dict:
+    """The DigitalOcean switch and how many team tokens the door holds (`tools/digitalocean.py`
+    `stashes`, which reads the records beside the values, never a value). A stash the door refuses
+    (a symbolic link, an unreadable record) is named, never raised."""
+    on = (doc.get("integrations") or {}).get("digitalocean") is True
+    tools = str(config.SOURCE / "tools")
+    if tools not in sys.path:
+        sys.path.insert(0, tools)
+    try:
+        import digitalocean
+        teams = len(digitalocean.stashes())
+    except Exception as exc:  # noqa: BLE001: doctor reports, it does not stop
+        return {"integration": on, "teams_stashed": None, "reason": type(exc).__name__}
+    return {"integration": on, "teams_stashed": teams}
 
 
 def _analytics(base: Path) -> dict:

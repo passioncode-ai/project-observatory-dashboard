@@ -577,6 +577,15 @@ every Droplet, app, database and volume with its project, team, state, stated mo
 findings, beside Heroku under Infrastructure. A cost the listing does not state (an app, a database,
 a volume) reads "not stated", never a zero. The Cloudflare page has the same six columns. A page
 never connected names the switch and the door's commands; a scan that read nothing names why.
+Two signals keep a team from going unread in silence (OBS-421): `full doctor` reports how many team
+tokens are stashed (`digitalocean.teams_stashed`, counted from the records, never a value) and, while
+`integrations.digitalocean` is off, an `attention` row `digitalocean-off` whose step is
+`project-observatory full configure integrations digitalocean true`; and `teams` names each `doctl`
+context whose token is not a stashed one, offline (team unknown), while `teams --probe` and the collector
+ask DigitalOcean which team the context's token answers for (10 s each) and name a team with no stash
+("member of team X via doctl context Y: no token stashed; `digitalocean.py stash --from-doctl Y`", in the
+scan's `degraded` as `digitalocean:doctl:Y`). No value is printed, and a context name shaped like a
+credential is not printed either.
 
 **A DigitalOcean managed database's password, without printing it.**
 `tools/digitalocean.py` uses the operator's `doctl` context. `db list` and
@@ -1069,7 +1078,9 @@ GitHub marketplace `passioncode-ai/project-observatory-dashboard`, installs
 installed and shipped versions and anything the hooks would miss; `full agent
 uninstall` reverses it. The hook environment it writes is `OBSERVATORY_ROOT`
 (the engine), `OBSERVATORY_HOME` (the workspace) and `OBSERVATORY_PYTHON` (the
-interpreter that runs the hooks). `install` says "installed" only after Claude Code's
+interpreter that runs the hooks: the engine's venv `bin/python3`). When a venv rebuilt on
+another Python leaves `OBSERVATORY_ROOT` naming a folder that is gone, the hooks find the
+engine under the interpreter's venv and `full maintain ensure` rewrites the value (OBS-393). `install` says "installed" only after Claude Code's
 own `installed_plugins.json` lists the plugin, and reports the version it lists
 (`installed_version`) beside the one this engine ships; a `claude` that exits 0 without
 installing is refused and nothing is written to settings. `uninstall` removes the keys
@@ -1871,7 +1882,9 @@ same summary.
   (each `<id>.<instance>.json` descriptor in the services directory): where it answers,
   the contract its manifest pins, who supervises it and whether launchd has it loaded or
   running, and which MCP declarations reach it by its origin. The wiki projection mirrors it
-  to `inventory/agents.json`. Nothing of a descriptor's `auth` is copied, and no row is guessed
+  to `inventory/agents.json` and writes a readable page beside it, `inventory/agents.md` (OBS-317):
+  one row per service key with its product, version, where it answers, contract pin, who holds it
+  and its MCP declarations, generated and never to be edited. Nothing of a descriptor's `auth` is copied, and no row is guessed
   from a name. A descriptor, manifest or launchd answer that could not be read is listed under
   `degraded`; without an MCP scan (`project-observatory full scan-mcp`) a row's
   `mcp_declarations` is `null`, not empty. URLs fail closed: an origin or repository that is
@@ -2223,7 +2236,9 @@ the registry then carries `organization`, `organization_source` and
 {"organizations": {
    "company": {"label": "Company", "ga4_account": "accounts/100",
                "figma": {"team": "Company Design", "project": "Builder"},
-               "match": {"repository_owners": ["company-org"], "products": ["product:suite"]}},
+               "match": {"repository_owners": ["company-org"], "products": ["product:suite"],
+                         "digitalocean_teams": ["Company Team"], "cloudflare_accounts": ["<account id>"],
+                         "heroku_teams": ["company-apps"]}},
    "person":  {"label": "Person", "default": true, "ga4_account": "accounts/200",
                "ga4_legacy_accounts": {"accounts/300": ["properties/31"]},
                "figma": {"team": "Personal"}}},
@@ -2231,11 +2246,27 @@ the registry then carries `organization`, `organization_source` and
 ```
 
 The first answer wins: a declaration (`projects` here, or `organization` in
-`project_overrides.json`), then a `match` rule on repository owner or product,
-then `external` when every repository owner is outside the estate
+`project_overrides.json`), then a `match` rule on repository owner, product or
+provider account, then `external` when every repository owner is outside the estate
 (`ownership.json`), then the `default` organization. Two organizations matching
 one project is reported as a `conflict` and assigns neither. An empty file turns
 the feature off.
+
+The provider account rules (OBS-412 part 1) are `digitalocean_teams` (a team's
+uuid, or its name while no other team here bears it; the emit warns about a name
+two teams bear), `cloudflare_accounts` (an account id) and `heroku_teams` (a team
+name). A rule that is not a list of strings is ignored and named. A project matches one only through a resource the registry already ties
+to it: a DigitalOcean app or a Cloudflare Pages project or zone whose `project`
+was measured through a repository or a site, a Heroku app linked by its rule. A
+team's name alone never assigns a project. Each account says whose it is in its
+own document: `organization`, `organization_source` (`rule`; `conflict` when two
+organizations claim it, a shared account that assigns nothing; `none` when no
+rule names it, never the default) and `organization_why` on the account rows of
+`registry/digitalocean-account.json` and `registry/cloudflare-account.json`, and
+`team_organizations` in `registry/heroku-apps.json`; the DigitalOcean and
+Cloudflare pages add an Organization column. An account claimed by two
+organizations is the shared case of the organization onboarding design's rule
+ORG-R04; the rest of that design (OBS-411 to OBS-420) is not built yet.
 
 Agents read the destination at session start: the Claude Code plugin prints the
 project's organization, its Google Analytics account and Figma team, and the
@@ -2411,6 +2442,41 @@ Without a release that does this, `full backups decrypt FILE DIR` opens the snap
 `DIR/external/secret_store/` is the store to copy into place by hand; such a copy must recreate each link the
 manifest lists under `externals[].links` (`ln -s TARGET PATH` inside the store: links are recorded, never
 stored as links), and then delete `DIR`, which holds every key in plaintext.
+
+**Checking a backup's store without touching the live one.** A restore check (a weekly restore of the newest
+backup into a temporary home, say) proves the store opens without writing where the settings point, which on
+the machine that took the backup is the store in use:
+
+```sh
+project-observatory --home NEW_EMPTY_HOME full restore SNAPSHOT --secret-store-verify-into DIR [--json]
+project-observatory full restore SNAPSHOT --secret-store-only --secret-store-verify-into DIR [--json]
+```
+
+Each carried store is written into `DIR/<name>/` (folders 0700, files 0600) and read back: every file's size
+and SHA-256 against the snapshot's manifest, every folder and link, nothing unlisted. The answer's
+`secret_store` reads `verified` with `files`, `bytes`, `links`, `directories`, `skipped` (files the snapshot did
+not carry, and links a system without them cannot make), `left_at` and `into`, and `verified`, the number of
+stores verified; `stores` lists each when there are several. With `--secret-store-only`, a snapshot that carried
+no store answers `status: nothing-to-verify` and writes nothing. The folder the settings name is never written, locked or swept, so a snapshot from another
+machine needs no `--secret-store-target`, and the restore record doctor reads is not written: a verification
+neither raises nor clears `backups-secret-store-not-restored`. With `--secret-store-only` no workspace is
+needed. The verified copy stays in `DIR`, every key in plaintext, for you to remove when the check is done; a copy that fails to verify
+is removed at once (`secret-store-verify-failed`, exit 1, and no home is restored), and a restore that fails
+after the copy removes it and the folders it made for `DIR`. The temporary home's restored settings still name
+the live store, so run no other command against that home, and remove it with `DIR` once the check is done. Refused, exit 2, nothing
+written: `secret-store-verify-into-not-empty` (DIR holds something, or is a link or a file),
+`secret-store-verify-into-refused` (DIR is, holds or lies inside the new home, this workspace or the default
+one, the snapshot file (a DIR beside it, such as `~/obs-transfer/verify` next to a carried `.obsnap`, is fine),
+a backups folder, a folder that the snapshot's settings or a
+workspace's settings name in `sources.secret_store` or `sources.secrets`, `OBSERVATORY_SECRETS` or
+`OBSERVATORY_VAULT_DIR`, or one of the places a store is never written; compared by name and by identity, so a
+linked parent or macOS's `/System/Volumes/Data/...` spelling of the same folder is refused too; on a volume
+without inode numbers, such as FAT or exFAT, the name alone decides), `secret-store-verify-into-unchecked` (a
+workspace on this machine whose settings do not read, so the store folders they name are unknown; repair them
+first), and
+`secret-store-verify-into-conflict` (beside `--secret-store-target` or a `--secret-store` policy other than
+`auto`, which only mean something when the store is written in place). A tampered carried file is refused
+before anything is written (`secret-store-manifest-mismatch`).
 
 **A slot that stays on this machine on purpose** (a root seed, an administrator token whose single home is
 this machine) is marked once, and no snapshot carries it from then on:
@@ -3256,6 +3322,16 @@ How the job gets scheduled:
 - The `observatory-log` plugin's session hook schedules it where it is missing. On Linux
   without a systemd user manager, the hook runs the pass itself, and the check too while
   updates are off.
+
+Every job definition (the pass, the check, the tick, the server) names the engine's virtual
+environment interpreter and a program name, `<venv>/bin/python3 -P -m observatory.job maintain run`,
+never a folder of one Python release such as `lib/python3.14/site-packages`, so a venv rebuilt on
+another Python keeps its jobs running (OBS-393). A definition that differs from the one the
+installer would write now is rewritten by `project-observatory full maintain ensure` (all four jobs
+under launchd and systemd; on Windows the pass and the check) and by the next pass (the tick and the
+server), keeping what the installer does not write; `full doctor` names one whose program, argument
+or folder is gone (`job-path-missing`). An account with no GUI session answers `waiting-for-root`
+with the administrator's two steps, `remove` then `apply`.
 
 `OBSERVATORY_SYSTEM_SETUP=0` in the environment keeps every one of these away from launchd,
 systemd, Task Scheduler and the credential store: `full init` answers `not-scheduled-here`,

@@ -559,6 +559,42 @@ class EnrollmentEndToEnd(unittest.TestCase):
                          self.server.certs[first]['key'])
         self.assertTrue(self.make().check_in()['ok'])
 
+    def test_a_certificate_said_to_be_expiring_is_rotated_by_the_tick(self):
+        """OBS-423: on 2026-11-08 `org status` read `expiring`, daysLeft 2.41 and rotationDue false: a 7-day
+        certificate turns `expiring` 3 days before its end, the 2/3 rule only 2.33 days before it, so for
+        16 hours a person was told to rotate by hand while the maintenance pass rotated nothing."""
+        first = self.enroll()['certificate']['serial']
+        self.now[0] += 7 * 86400 - 2.41 * 86400
+        before = self.make().describe()['certificate']
+        self.assertEqual((before['state'], before['daysLeft']), ('expiring', 2.41))
+        self.assertTrue(before['rotationDue'], 'a certificate a person is told to renew is due for the pass')
+        report = self.make().tick()
+        self.assertEqual(report['rotate'], {'result': 'done'})
+        after = self.make().describe()['certificate']
+        self.assertNotEqual(after['serial'], first)
+        self.assertEqual(after['state'], 'valid')
+
+    def test_rotation_is_due_before_the_expiring_notice_and_never_in_the_first_half(self):
+        from node.org import EXPIRY_WARNING_SECONDS, notice
+        self.enroll()
+        enrollment = self.make()
+        for days in (2, 7, 30, 90):
+            start = self.now[0]
+            iso_at = lambda t: dt.datetime.fromtimestamp(t, dt.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+            state = {'certificate': {'serial': 's', 'notBefore': iso_at(start),
+                                     'notAfter': iso_at(start + days * 86400)}}
+            for step in range(0, days * 96):
+                at = start + step * 900                       # every maintenance pass
+                self.now[0] = at
+                said = notice(ORG, state, at)['state']
+                due = enrollment.rotation_due(state)
+                if said == 'expiring' and at >= start + days * 86400 / 2:
+                    self.assertTrue(due, (days, step))
+                if at < start + days * 86400 / 2:
+                    self.assertFalse(due, ('rotated in the first half', days, step))
+            self.now[0] = start
+        self.assertEqual(EXPIRY_WARNING_SECONDS, 3 * 86400)
+
     def test_nothing_of_shares_or_grant_usage_before_the_protocol_is_listed(self):
         self.enroll()
         self.apply(share_record())

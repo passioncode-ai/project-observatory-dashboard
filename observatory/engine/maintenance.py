@@ -770,36 +770,160 @@ def _services():
     return services if services.available() else None
 
 
-def step_jobs(launch=None) -> dict:
-    """The tick and server jobs run on the engine's interpreter (0.19.3).
+def step_jobs(launch=None, base: Path | None = None) -> dict:
+    """The tick and server jobs run from the definition the installer would write now (0.19.3, OBS-393).
 
-    Before 0.19.3 their plists could name the installer's interpreter instead, and an
-    update restarts them from the files as they are, so an install that had it wrong
-    stayed wrong. A plist that names another interpreter is rewritten and reloaded —
-    the tick only while it is not running (otherwise the next pass), the server at
-    once, which costs its clients a reconnect."""
+    Before 0.19.3 their plists could name the installer's interpreter instead, and a venv rebuilt
+    on another Python release left them naming `lib/python3.X/site-packages` files that no longer
+    exist (OBS-393). An update restarts them from the files as they are, so an install that had
+    it wrong stayed wrong. A definition that differs from the installer's in a key it writes
+    (`install_launchd.repair_definitions`, `repair_systemd` on Linux) is rewritten: the tick only
+    while it is not running (otherwise the next pass). A launchd job that was loaded is reloaded and
+    one that was not stays unloaded; a running systemd server is restarted, which costs its clients
+    a reconnect. A drift that cannot be mended here is answered under `skipped`, with its reason."""
+    recover = False
     if launch is None:
-        if sys.platform != "darwin" or shutil.which("launchctl") is None:
+        if sys.platform == "darwin" and shutil.which("launchctl") is not None:
+            launch, recover = _install_launchd(), True
+        elif sys.platform.startswith("linux") and shutil.which("systemctl") is not None:
+            return _step_systemd_jobs(_install_launchd())
+        else:
             return {"result": "not-applicable"}
-        launch = _install_launchd()
+    out = _step_launchd_jobs(launch)
+    if recover:
+        try:
+            lost = recover_lost_server(base or config.home(), launch)
+        except Exception as exc:  # noqa: BLE001 — a recovery never fails a pass
+            lost = {"job": "server", "result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
+        if lost:
+            out["recovered"] = lost
+    return out
+
+
+#: The release whose job repair could leave the server unloaded after its update (OBS-410).
+LOST_SERVER_RELEASE = "0.35.6"
+#: Written once the recovery below has run, so a server a person boots out later stays out.
+LOST_SERVER_MARKER = "server-recovery-obs410.json"
+
+
+def recover_lost_server(base: Path, launch, *, descriptor: Path | None = None, override=None) -> dict | None:
+    """Load the server 0.35.6 left unloaded after its update, once (OBS-410).
+
+    0.35.6's `maintain ensure` rewrote the server's definition and sent `bootstrap` while launchd was
+    still finishing the bootout, so the server stayed unloaded; an update from 0.35.6 runs 0.35.6's own
+    code, which only restarts what is loaded, and a pass leaves an unloaded job alone. A server whose
+    definition and Fabric descriptor are both in place but whose label is not loaded was lost, not
+    turned off (`serverd.py --uninstall` removes both), when this workspace was updated to 0.35.6. A label the operator
+    disabled (Fabric Dashboards' stop, LC-14) stays off. Every decided outcome writes the marker, so the check runs
+    until it decides once and never again; only a load launchd refused is tried at the next pass."""
+    marker = base / "store" / "raw" / LOST_SERVER_MARKER  # paths-check: allow — the workspace `base` passed in, which need not be this process's paths.HOME; a test redirects it through `base`
+    if marker.exists():
+        return None
+    try:
+        lines = (base / "store" / "logs" / "update.jsonl").read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    updated = False
+    for line in lines:
+        try:
+            row = json.loads(line)
+        except ValueError:
+            continue
+        if row.get("event") == "updated" and row.get("to") == LOST_SERVER_RELEASE:
+            updated = True
+            break
+    if not updated:
+        return None
+    import fabric_service
+    import service_identity
+    job = next(j for j in launch.managed_jobs(base) if j["name"] == "server")
+    described = descriptor or fabric_service.descriptor_path(service_identity.SERVICE_ID,
+                                                             service_identity.instance(base))
+
+    def done(result: str) -> None:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(json.dumps({"at": datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"), "result": result}) + "\n", encoding="utf-8")
+
+    if not (Path(job["plist"]).exists() and described.exists()):
+        done("no-server")
+        return None
+    if launch.job_loaded(job["label"]):
+        done("loaded")
+        return None
+    if override is None:
+        override = fabric_service.launchd_override
+    if override(job["label"]) == "disabled":
+        done("disabled")
+        return None
+    ok, detail = launch.start_job(job["plist"])
+    if ok:
+        done("loaded-again")
+        return {"job": "server", "result": "loaded-again"}
+    return {"job": "server", "result": "load-failed", "detail": str(detail)[:200]}
+
+
+def _step_launchd_jobs(launch) -> dict:
     try:
         drift = launch.repair_interpreters(write=False)
+        skipped = [{"job": j["name"], "missing": j.get("missing", []), "reason": j["skipped"]}
+                   for j in drift if j.get("skipped")]
+        drift = [j for j in drift if not j.get("skipped")]
         if not drift:
-            return {"result": "ok"}
+            return {"result": "skipped" if skipped else "ok", **({"skipped": skipped} if skipped else {})}
         ready = [j for j in drift if not (j["name"] == "tick" and launch.job_running(j["label"]))]
         if ready:
             launch.repair_interpreters(write=True, only={j["name"] for j in ready})
         fixed = []
         for job in ready:
+            row = {"job": job["name"], "was": job["was"], "now": job["now"]}
             if launch.job_loaded(job["label"]):
-                launch.stop_job(job["label"])
-            ok, detail = launch.start_job(job["plist"])
-            fixed.append({"job": job["name"], "was": job["was"], "now": job["now"],
-                          "reloaded": ok, **({} if ok else {"detail": str(detail)[:200]})})
+                stopped, detail = launch.stop_job(job["label"])
+                ok, detail = launch.start_job(job["plist"]) if stopped else (False, detail)
+                row.update(reloaded=ok, **({} if ok else {"detail": str(detail)[:200]}),
+                           **({} if stopped else {"still_loaded": True}))
+            else:
+                # Not loaded before (a person stopped it, or it was never started): the definition is
+                # mended and stays unloaded.
+                row["reloaded"] = False
+                row["loaded"] = False
+            fixed.append(row)
+        waiting = [j["name"] for j in drift if j not in ready]
+        failed = [r for r in fixed if r.get("reloaded") is False and r.get("loaded") is not False]
+        lost = [r["job"] for r in failed if not r.get("still_loaded")]
+        stale = [r["job"] for r in failed if r.get("still_loaded")]
+        result = "reload-failed" if failed else ("repaired" if fixed else "waiting")
+        return {"result": result, "jobs": fixed, **({"unloaded": lost} if lost else {}),
+                **({"not_reloaded": stale} if stale else {}),
+                **({"waiting": waiting} if waiting else {}), **({"skipped": skipped} if skipped else {})}
+    except Exception as exc:  # noqa: BLE001 — a repair never fails a pass
+        return {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
+
+
+def _step_systemd_jobs(launch) -> dict:
+    """`step_jobs` on Linux: the tick's and the server's systemd user units (OBS-393)."""
+    try:
+        rows = {row["name"]: row["handle"] for row in launch.systemd_unit_files()}
+        drift = launch.repair_systemd(write=False)
+        skipped = [{"job": j["name"], "missing": j.get("missing", []), "reason": j["skipped"]}
+                   for j in drift if j.get("skipped")]
+        drift = [j for j in drift if not j.get("skipped")]
+        if not drift:
+            return {"result": "skipped" if skipped else "ok", **({"skipped": skipped} if skipped else {})}
+        ready = [j for j in drift if not (j["name"] == "tick" and rows["tick"].running())]
+        fixed = []
+        if ready:
+            launch.repair_systemd(write=True, only={j["name"] for j in ready})
+            for job in ready:
+                row = {"job": job["name"], "changed": job["changed"]}
+                if job["name"] == "server" and rows["server"].running():
+                    ok, detail = rows["server"].restart()
+                    row.update(restarted=ok, **({} if ok else {"detail": str(detail)[:200]}))
+                fixed.append(row)
         waiting = [j["name"] for j in drift if j not in ready]
         return {"result": "repaired" if fixed else "waiting", "jobs": fixed,
-                **({"waiting": waiting} if waiting else {})}
-    except Exception as exc:  # noqa: BLE001 — a repair never fails a pass
+                **({"waiting": waiting} if waiting else {}), **({"skipped": skipped} if skipped else {})}
+    except Exception as exc:  # noqa: BLE001: a repair never fails a pass
         return {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
 
 
@@ -1104,7 +1228,7 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
             report["snapshot"] = step_snapshot(base, state, at, services, sleep=sleep)
             report["machine"] = step_machine(base, at, machine)
             if services is not None:
-                report["jobs"] = step_jobs()
+                report["jobs"] = step_jobs(base=base)
         if not report["update"]["result"].startswith("updated"):
             report["org"] = step_org(base, commands or Commands(base))
             try:
@@ -1452,25 +1576,48 @@ class LaunchdSchedule:
                     self._headless = False
         return self._headless
 
+    #: Where root's space_daemons.py writes the daemon it loads (root:wheel 0644, readable by all).
+    DAEMONS = Path("/Library/LaunchDaemons")
+
+    def root_copy_stale(self, doc: dict) -> bool:
+        """Root's loaded daemon was made from another definition than DOC: its program or working
+        folder differs (space_daemons.py copies both unchanged). False when it cannot be read, so
+        the answer is never invented (OBS-393)."""
+        path = self.DAEMONS / f"{self.label}.plist"
+        try:
+            daemon = plistlib.loads(path.read_bytes()) if path.is_file() else None
+        except (OSError, ValueError, plistlib.InvalidFileException):
+            daemon = None
+        if not isinstance(daemon, dict):
+            return False
+        return any(daemon.get(key) != doc.get(key) for key in ("ProgramArguments", "WorkingDirectory"))
+
+    def background_definition(self) -> Path:
+        """The definition root's space_daemons.py loads: the account's background folder."""
+        import machine_identity
+        return machine_identity.background_dir(Path.home()) / f"{self.label}.plist"
+
     @property
     def definition(self) -> Path:
         """Where the definition lives: ~/Library/LaunchAgents, or the background folder when headless."""
         if self.headless():
-            import machine_identity
-            return machine_identity.background_dir(Path.home()) / f"{self.label}.plist"
+            return self.background_definition()
         return self.plist
 
-    def document(self) -> dict:
+    def document(self, kept_from: Path | None = None) -> dict:
         env = self.launch.environment()
         # PATH comes from whoever runs the installer, and a terminal and an agent session
         # differ: an installed job keeps the PATH it has, so the definition does not flip
-        # (and get reloaded) with each caller (review F1).
-        source = self.definition if self.definition.is_file() else self.plist
+        # (and get reloaded) with each caller (review F1). KEPT_FROM names the definition the
+        # document is compared with (root's background copy), so the PATH is read from that one.
+        source = kept_from or (self.definition if self.definition.is_file() else self.plist)
         if source.is_file():
             try:
                 kept = (plistlib.loads(source.read_bytes()).get("EnvironmentVariables") or {}).get("PATH")
             except (OSError, ValueError, plistlib.InvalidFileException):
                 kept = None
+            # Never a Cellar or another account's folder, even when an older release kept one (OBS-393).
+            kept = self.launch.kept_path(kept)
             if kept:
                 env["PATH"] = kept
         env["OBSERVATORY_HOME"] = str(self.base)
@@ -1481,14 +1628,17 @@ class LaunchdSchedule:
             "Label": self.label,
             # RunAtLoad starts the pass at login with everything else; its check waits
             # FIRST_CHECK_DELAY seconds after the start (LC-16).
-            "ProgramArguments": [self.launch.stable_interpreter(engine_python()),
-                                 str(config.SOURCE / "tools" / "maintain.py"), JOBS[self.job]["action"],
-                                 *(["--first-check-delay", str(FIRST_CHECK_DELAY)] if self.job == "maintain" else [])],
+            # Version-free (OBS-393): the venv's stable interpreter and the launcher's program name,
+            # never a path inside `lib/python3.X/site-packages`, which a venv rebuilt on another Python
+            # release no longer has (launchd failed every run with exit 78). A checkout names the file.
+            "ProgramArguments": self.launch.job_argv("maintain", *self.arguments(),
+                                                     python=self.launch.stable_interpreter(engine_python())),
             "StartInterval": JOBS[self.job]["interval"],
             # The check job does not run at load: the pass does (its check 90 s after the login),
             # and the check's first run is one interval later, never the pass's moment (review H1).
             "RunAtLoad": self.job == "maintain",
-            "WorkingDirectory": str(config.SOURCE),
+            # The workspace home, never site-packages; the launcher starts the program in the engine.
+            "WorkingDirectory": str(self.launch.job_cwd(self.base)),
             "StandardOutPath": str(logs / f"{self.job}.log"),
             "StandardErrorPath": str(logs / f"{self.job}.err"),
             # Not "Background" with LowPriorityIO: on a loaded machine that throttling
@@ -1499,6 +1649,11 @@ class LaunchdSchedule:
             "EnvironmentVariables": env,
             "Umask": 0o077,
         }
+
+    def arguments(self) -> list[str]:
+        """The program's own arguments: the action, and for the pass its first-check delay."""
+        return [JOBS[self.job]["action"],
+                *(["--first-check-delay", str(FIRST_CHECK_DELAY)] if self.job == "maintain" else [])]
 
     def installed(self) -> bool:
         return self.definition.is_file()
@@ -1532,6 +1687,18 @@ class LaunchdSchedule:
             # an agent loaded too would run every pass twice (OBS-361 part 2), so it is booted out.
             if self.launch.job_loaded(self.label):
                 self.launch.stop_job(self.label)
+            background = self.background_definition()
+            try:
+                current = plistlib.loads(background.read_bytes()) if background.is_file() else None
+            except (OSError, ValueError, plistlib.InvalidFileException):
+                current = None
+            # Compared with the document whose PATH is the background copy's own, so a caller with
+            # another PATH does not read as a change (and a waiting-for-root) on every ensure.
+            doc = self.document(kept_from=background) if background.is_file() else doc
+            if (current is not None and current != doc) or self.root_copy_stale(doc):
+                # Root's daemon was made from a definition the builder no longer writes (a path of a
+                # venv rebuilt on another Python, OBS-393): only root can replace it, remove then apply.
+                return self._install_background(doc, target=background)
             return {"schedule": self.kind, "label": self.label, "changed": False, "domain": "system",
                     "load": "loaded"}
         current = plistlib.loads(self.plist.read_bytes()) if self.installed() else None
@@ -1566,7 +1733,7 @@ class LaunchdSchedule:
             stream.write(plistlib.dumps(doc))
         os.replace(tmp, target)
 
-    def _install_background(self, doc: dict) -> dict:
+    def _install_background(self, doc: dict, target: Path | None = None) -> dict:
         """`install` with no GUI session (OBS-361 part 2): the definition goes to the background folder, and the
         administrator loads it with space_daemons.py. A copy left in ~/Library/LaunchAgents by an earlier
         attempt is removed, so a later sign-in at the screen never starts the job a second time."""
@@ -1574,7 +1741,7 @@ class LaunchdSchedule:
         import machine_move
         home, uid = Path.home(), self.launch.uid()
         machine_identity.ensure_private_dir(machine_identity.background_dir(home), home)
-        target = self.definition
+        target = target or self.definition
         try:
             current = plistlib.loads(target.read_bytes()) if target.is_file() else None
         except (OSError, ValueError, plistlib.InvalidFileException):
@@ -1602,7 +1769,9 @@ class LaunchdSchedule:
                "definition": str(target), "load": "loaded" if loaded else "waiting-for-root",
                **({"removed_agent_copy": str(self.plist)} if agent_copy and loaded else {}),
                **({"agent_copy_kept": str(self.plist)} if agent_copy and not loaded else {})}
-        if loaded and not changed:
+        if loaded and not changed and not self.root_copy_stale(doc):
+            # Root's daemon runs this very definition. One it loaded from an earlier definition still
+            # waits for root's remove, then apply, though the background copy is already the new one.
             return out
         # root's apply refuses a label that is already loaded: a new definition is removed, then applied.
         steps = ([machine_move.root_step("remove", self.label, uid)] if loaded else []) + [
@@ -1676,7 +1845,9 @@ class SystemdSchedule:
         return f'"{value}"'
 
     def service_text(self) -> str:
-        python = _install_launchd().stable_interpreter(engine_python())
+        launch = _install_launchd()
+        argv = launch.job_argv("maintain", JOBS[self.job]["action"],
+                               python=launch.stable_interpreter(engine_python()))
         return "\n".join([
             "[Unit]",
             (f"Description=Project Observatory maintenance (updates and backups) for {self.base}"
@@ -1684,8 +1855,9 @@ class SystemdSchedule:
             "",
             "[Service]",
             "Type=oneshot",
-            f"ExecStart={self.quote(python)} {self.quote(str(config.SOURCE / 'tools' / 'maintain.py'))} "
-            f"{JOBS[self.job]['action']}",
+            # Version-free (OBS-393), as the launchd job: no path inside `lib/python3.X`.
+            "ExecStart=" + " ".join(self.quote(a) for a in argv[:-1]) + f" {argv[-1]}",
+            f"WorkingDirectory={self.quote(str(launch.job_cwd(self.base)))}",
             f"Environment={self.quote('OBSERVATORY_HOME=' + str(self.base))}",
             'Environment="OBSERVATORY_SYSTEM_SETUP=1"',
             "Nice=10",
@@ -1777,12 +1949,13 @@ class TaskSchedulerSchedule:
     def __init__(self, base: Path, runner=None, job: str = "maintain"):
         import osschedule
         self.base = base
-        python = _install_launchd().stable_interpreter(engine_python())
+        launch = _install_launchd()
+        python = launch.stable_interpreter(engine_python())
         job = osschedule.Job(
             name=job, workspace=base,
-            argv=(python, str(config.SOURCE / "tools" / "maintain.py"), JOBS[job]["action"]),
+            argv=tuple(launch.job_argv("maintain", JOBS[job]["action"], python=python)),
             env=(("OBSERVATORY_HOME", str(base)), ("OBSERVATORY_PYTHON", python), ("OBSERVATORY_SYSTEM_SETUP", "1")),
-            cwd=config.SOURCE, stdout=base / "store" / "logs" / f"{job}.log", stderr=base / "store" / "logs" / f"{job}.err",
+            cwd=launch.job_cwd(base), stdout=base / "store" / "logs" / f"{job}.log", stderr=base / "store" / "logs" / f"{job}.err",
             interval_seconds=JOBS[job]["interval"], at_login=True,
             first_delay_seconds=FIRST_CHECK_DELAY if job == "maintain" else CHECK_FIRST_DELAY,
             phase_seconds=0 if job == "maintain" else CHECK_FIRST_DELAY,
@@ -1872,13 +2045,31 @@ def ensure(base: Path, *, schedule=None, store=None, explicit: bool = False) -> 
         out["schedule"] = {"result": "off", "detail": "turned off with `maintain uninstall`; "
                                                      "`project-observatory full maintain ensure` turns it on"}
         return out
+    probe = schedule is None
     schedule = schedule or schedule_for(base)
     try:
         out["schedule"] = schedule.install()
     except (config.ConfigurationError, OSError) as exc:
         out["schedule"] = {"result": "unscheduled", "detail": str(exc)[:300],
                            "fallback": "the observatory-log plugin runs the pass at each new session"}
+    if probe and probes_allowed():
+        # The tick and the server too (OBS-393): a definition the installer would no longer write (a
+        # path of a venv rebuilt on another Python) is rewritten and reloaded here, so a person's
+        # `maintain ensure` mends every job, not only the two it schedules.
+        out["jobs"] = step_jobs(base=base)
+        out["hook_env"] = _refresh_hook_env()
     return out
+
+
+def _refresh_hook_env() -> dict:
+    """The plugin hooks' environment in Claude Code's settings, rewritten when it names an engine
+    folder or interpreter that is gone (OBS-393, `agent_plugin.refresh_hook_env`)."""
+    try:
+        _install_launchd()
+        import agent_plugin
+        return agent_plugin.refresh_hook_env()
+    except Exception as exc:  # noqa: BLE001 - scheduling never fails on the hooks' settings
+        return {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
 
 
 def unschedule(base: Path, *, schedule=None) -> dict:
@@ -1893,6 +2084,77 @@ def unschedule(base: Path, *, schedule=None) -> dict:
 
 
 # --- what doctor and the Health page read -------------------------------------------
+
+def _definition_files(base: Path) -> list[tuple[str, Path]]:
+    """(job, file) for every job definition of this workspace on this machine that exists: the pass, the
+    check, the tick and the server (launchd's agent folder and the background folder root loads from,
+    or systemd user units). Labels and unit names come from BASE, the workspace asked about."""
+    found: list[tuple[str, Path]] = []
+    if sys.platform == "darwin":
+        import machine_identity
+        background = machine_identity.background_dir(Path.home())
+        for job in JOBS:
+            label = f"org.project-observatory.{_instance_digest(base)}.{job}"
+            for folder in (Path.home() / "Library" / "LaunchAgents", background):
+                found.append((job, folder / f"{label}.plist"))
+        try:
+            launch = _install_launchd()
+            found += [(row["name"], Path(row["plist"])) for row in launch.managed_jobs(base)]
+        except Exception:  # noqa: BLE001 - a status never fails doctor
+            pass
+    elif sys.platform != "win32":
+        for job in JOBS:
+            units = SystemdSchedule(base, job=job)
+            found.append((job, units.units / f"{units.name}.service"))
+        try:
+            found += [(row["name"], row["service"]) for row in _install_launchd().systemd_unit_files(base)]
+        except Exception:  # noqa: BLE001 - a status never fails doctor
+            pass
+    return [(job, path) for job, path in found if path.is_file() and not path.is_symlink()]
+
+
+def _systemd_paths(text: str) -> dict:
+    """ExecStart's words and WorkingDirectory of a unit file, in the plist's shape, for the same check."""
+    doc: dict = {}
+    for line in text.splitlines():
+        key, _, value = line.partition("=")
+        if key == "ExecStart":
+            try:
+                doc["ProgramArguments"] = shlex.split(value)
+            except ValueError:
+                pass
+        elif key == "WorkingDirectory":
+            doc["WorkingDirectory"] = value.strip().strip('"')
+    return doc
+
+
+def stale_definitions(base: Path) -> list[dict]:
+    """The job definitions that name a program, an argument or a working folder that does not exist
+    (OBS-393): `[{job, definition, missing}]`. Read from the files; nothing is asked of launchd."""
+    out: list[dict] = []
+    try:
+        files = _definition_files(base)
+        launch = _install_launchd()
+    except Exception:  # noqa: BLE001 - a status never fails doctor
+        return out
+    for job, path in files:
+        try:
+            raw = path.read_bytes()
+            doc = plistlib.loads(raw) if path.suffix == ".plist" else _systemd_paths(raw.decode("utf-8", "replace"))
+        except (OSError, ValueError, plistlib.InvalidFileException):
+            continue
+        missing = launch.missing_paths(doc)
+        if missing:
+            out.append({"job": job, "definition": str(path), "missing": missing})
+    return out
+
+
+def _venv_problem() -> str | None:
+    try:
+        return _install_launchd().venv_home_problem()
+    except Exception:  # noqa: BLE001 - a status never fails doctor
+        return None
+
 
 #: Backup warning codes a maintenance item already says in its own words (OBS-349).
 BACKUP_TWINS = frozenset({"backups-no-passphrase", "backups-unencrypted-local"})
@@ -1931,6 +2193,19 @@ def status(base: Path, *, schedule=None) -> dict:
     elif not scheduled:
         warn("not-scheduled", "updates and daily backups are not scheduled on this machine yet: "
                               "`project-observatory full maintain ensure`")
+    stale = stale_definitions(base)
+    if stale:
+        named = "; ".join(f"{row['job']} ({', '.join(row['missing'][:3])})" for row in stale)
+        warn("job-path-missing", f"a background job's definition names a path that does not exist, so launchd or "
+                                 f"systemd cannot start it (a virtual environment rebuilt on another Python leaves "
+                                 f"this): {named}; `project-observatory full maintain ensure` rewrites them",
+             step="project-observatory full maintain ensure", jobs=[row["job"] for row in stale])
+    venv = _venv_problem()
+    if venv:
+        # No step: the engine cannot rebuild the environment it runs in; a person recreates it.
+        warn("venv-home-missing", f"{venv}. Its interpreter may still start through another link; if the jobs "
+                                  "fail, recreate the environment from an installed Python, install the engine into "
+                                  "it again, then run `project-observatory full maintain ensure`")
     if not auto_enabled(base):
         warn("auto-off", f"{SWITCH_LABEL}: off — new releases wait for you: `project-observatory full auto-update on`")
     available = available_update(base)
@@ -2035,7 +2310,7 @@ def status(base: Path, *, schedule=None) -> dict:
 def restore_latest(base: Path, *, store=None, label: str | None = None, same_machine: bool | None = None,
                    second_machine: bool | None = None, unknown: str = "second", stdin_value: str | None = None,
                    ask: bool = False, secret_store: str = "auto", secret_store_names: bool = False,
-                   secret_store_target: str | None = None) -> dict:
+                   secret_store_target: str | None = None, secret_store_verify_into=None) -> dict:
     """Restore the newest backup a workspace at this path left (D7). Only into an empty home.
 
     When backups of more than one workspace exist under this name (a reinstall that could
@@ -2056,11 +2331,17 @@ def restore_latest(base: Path, *, store=None, label: str | None = None, same_mac
 
     `secret_store` is the policy for a secret store the snapshot carried (OBS-350): `full init` passes
     `keep`, so a reinstall over a surviving store never fails or overwrites it. A refusal of the store
-    (`secret-store-not-empty`, ...) is raised as it is: an older backup would meet the same store."""
+    (`secret-store-not-empty`, ...) is raised as it is: an older backup would meet the same store.
+    `secret_store_verify_into` verifies the carried stores into that folder instead (OBS-394,
+    `workspace_upgrade.restore`)."""
     import secret_store_carry
     import workspace_upgrade
     if base.exists() and any(p.name != ".workspace.lock" for p in base.iterdir()):
         raise config.ConfigurationError("Restore requires a new empty destination; existing state is never overwritten")
+    if secret_store_verify_into is not None:
+        # Before any passphrase is asked (OBS-394): a contradiction and a place that is never written.
+        secret_store_carry.verify_conflict(secret_store, secret_store_target)
+        secret_store_carry.check_verify_into(secret_store_verify_into, [(base, "the new home")], require_empty=False)
     found = backup_vault.candidates(base)
     if label:
         found = [c for c in found if c["label"] == label]
@@ -2117,7 +2398,8 @@ def restore_latest(base: Path, *, store=None, label: str | None = None, same_mac
                                                same_machine=same_machine, second_machine=second_machine,
                                                unknown=unknown, secret_store=secret_store,
                                                secret_store_names=secret_store_names,
-                                               secret_store_target=secret_store_target)
+                                               secret_store_target=secret_store_target,
+                                               secret_store_verify_into=secret_store_verify_into)
         except secret_store_carry.CarryRefused as exc:
             if exc.code != "secret-store-manifest-mismatch":
                 raise

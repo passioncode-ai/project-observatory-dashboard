@@ -6,10 +6,12 @@ restored on another computer gets its keys back; then tag, verify and install it
 
 ## State now
 
-- Open: the release PR, then the tag `v0.35.5`, its run, verification and the local install; then the drill on the
-  second Mac with its host agent.
-- Waits: none beyond the release run (watched by the releasing session's background job).
-- Next task: merge the release PR, push the tag, verify, install, record the receipts here; then OBS-393.
+- Open: the «machine lost» drill on the second Mac with its host agent (G15, OBS-381); the install on the release
+  manager's own machine, which answered `--version` 0.35.4 when these receipts were written; a restore check that can
+  verify the carried store without touching the live one (OBS-394).
+- Waits: release 0.35.6 waits on OBS-393's review (PR #474); no watcher of this record runs, the next release session
+  reads the PR.
+- Next task: release 0.35.6 with OBS-393 (PR #474, background jobs name no Python release) once its review is done.
 
 ## What it releases
 
@@ -55,4 +57,17 @@ restored on another computer gets its keys back; then tag, verify and install it
 
 ## Receipts
 
-To be recorded after the release run.
+- Release PR #473 merged as `633f1b60` on 2026-11-08T07:06:52Z.
+- Tag `v0.35.5` (tag object `89e3679c`) on `633f1b60`. Release run
+  [42471332631](https://github.com/passioncode-ai/project-observatory-dashboard/actions/runs/42471332631): the first
+  attempt failed only in `windows (arm64, windows-11-arm)` at "Bundle the NSIS installer", with
+  `failed to bundle project: http status: 504` while downloading `nsis-3.11.zip` from github.com (a transient error of
+  the download, not of the code); a rerun of the failed jobs succeeded, and every job of attempt 2 ended in success,
+  the feed and publish jobs included. The release published 19 files on 2026-11-08T11:18:15Z.
+- Verified by the release manager on 2026-11-08: `shasum -a 256 -c SHA256SUMS --ignore-missing` answered the wheel
+  OK; `gpg --verify SHA256SUMS.asc SHA256SUMS` answered `VALIDSIG 63B30DC324BD697487AA31944FAFB8AEC803B6A7`;
+  `gh attestation verify project_observatory-0.35.5-py3-none-any.whl -R passioncode-ai/project-observatory-dashboard
+  --signer-repo passioncode-ai/.github` exited 0.
+- On the second Mac: its host agent installed 0.35.5 into its spaces from a wheel downloaded with `gh` and checked
+  against `SHA256SUMS`, because anonymous downloads from github.com answered 503 there.
+- The release manager's own machine still answered `--version` 0.35.4 when these receipts were written (State now).

@@ -159,8 +159,8 @@ STARTED = time.time()
 # The application version, stated once in configuration.py. A literal here said
 # 0.1.0 in /health and in the Server header through every release up to 0.3.3.
 VERSION = configuration.VERSION
-#: Drain budget on SIGTERM. launchd's `ExitTimeOut` sits above it.
-EXIT_TIMEOUT = 30
+#: Drain budget on SIGTERM. launchd's `ExitTimeOut` sits above it (install_launchd.server_document).
+EXIT_TIMEOUT = install_launchd.SERVER_EXIT_TIMEOUT
 SURFACES = {"dashboard": {"path": "/", "login": False},
             "events": {"path": "/fabric/v1/events"},
             # What the assistant's paid model calls cost, self-reported (contract DEC-0021, OBS-53).
@@ -1035,28 +1035,9 @@ def relay_health(relay) -> str | None:
 
 
 def build_plist() -> dict:
-    return {
-        "Label": LABEL,
-        # The venv's interpreter or a keg's `opt` link, never a Cellar path (LC-05).
-        "ProgramArguments": [install_launchd.stable_interpreter(configuration.engine_python()),
-                             str(ROOT / "tools/serverd.py"), "--run", "--port", str(PORT)],
-        "RunAtLoad": True,
-        "KeepAlive": True,
-        # fabric-service/0.1 supervisor rules: a crash loop is bounded, and
-        # SIGKILL comes only after the SIGTERM drain has had its time.
-        "ThrottleInterval": 10,
-        "ExitTimeOut": EXIT_TIMEOUT + 10,
-        # STANDARD, NOT BACKGROUND. The server answers Fabric Dashboards' probe and
-        # every agent's MCP call while the Mac is busy. As a Background job with
-        # Nice 5 and low-priority I/O, macOS starved it under load: on 2026-10-01
-        # the host recorded it "not answering" 30 times in a day while the process
-        # ran without one restart. The tick stays background work; the server is not.
-        "ProcessType": "Standard",
-        "StandardErrorPath": str(paths.STATE / "logs/serverd.err"),
-        "StandardOutPath": str(paths.STATE / "logs/serverd.out"),
-        "EnvironmentVariables": install_launchd.environment(),
-        "Umask": 0o077,
-    }
+    """The launchd definition: `install_launchd.server_document`, so the maintenance pass rebuilds
+    the very same one when it repairs a drifted plist (OBS-393)."""
+    return install_launchd.server_document(PORT)
 
 
 def install() -> int:
@@ -1119,15 +1100,9 @@ def install() -> int:
 
 
 def server_job():
-    """The server for Task Scheduler or systemd (`osschedule`), as `build_plist` describes it for
-    launchd: started at logon, restarted on failure, no time limit, standard priority."""
-    import osschedule
-    return osschedule.Job(name="server", workspace=paths.HOME,
-                          argv=(install_launchd.stable_interpreter(configuration.engine_python()),
-                                str(ROOT / "tools/serverd.py"), "--run", "--port", str(PORT)),
-                          env=tuple(sorted(install_launchd.environment().items())), cwd=ROOT,
-                          stdout=paths.STATE / "logs/serverd.out", stderr=paths.STATE / "logs/serverd.err",
-                          time_limit_seconds=EXIT_TIMEOUT + 10, background=False)
+    """The server for Task Scheduler or systemd (`osschedule`): `install_launchd.server_job`, so the
+    maintenance pass rebuilds the very same unit when it repairs a drifted one (OBS-393)."""
+    return install_launchd.server_job(PORT)
 
 
 def _supervisor_record(job) -> dict:
@@ -1187,7 +1162,8 @@ def install_other(wait_seconds: float = 30.0) -> int:
 def uninstall_other() -> int:
     import osschedule
     try:
-        job = osschedule.supervisor(server_job())
+        # The task's name only: with a venv whose interpreter is gone the builder refuses (OBS-393).
+        job = osschedule.handle("server", paths.HOME)
         result = job.uninstall()
     except (osschedule.ScheduleError, configuration.ConfigurationError) as exc:
         print(f"Not removed: {exc}", file=sys.stderr)

@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The application release is **0.35.5**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
+The application release is **0.35.8**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
 
 ## SQLite runtime prerequisite
 
@@ -350,6 +350,70 @@ platform, so neither a machine bundle nor a workspace snapshot carries them:
 | `machine-move/peers/` | 0.31.0 | the other machine's facts (`full machine-move facts --out FILE`, schema `observatory-machine-facts/1`: `machine`, `generated_at`, `engine_version`, `platform`, `ssh[]` of `file` and `fingerprint`, `device`, `jobs[]`, `elsewhere[]`, `restore`, `omitted`), placed by the person; written whole through a temporary file and a link, never over an existing name; `full machine-move status` reads every `*.json` here | never written by the engine; a file that does not read is named in `degraded`; deleting one forgets that machine |
 | `machine-id` | 0.30.1 | a random machine id, written only where the platform has no machine identifier of its own (macOS, most Linux and Windows have one) | deleting it gives the machine a new id: bundles and snapshots it took before then read as another machine's |
 
+## Background jobs name no Python release (OBS-393, 0.35.6)
+
+No migration and no new workspace file. Until 0.35.5 every job definition named files inside the engine's
+`<venv>/lib/python3.X/site-packages/`: the maintenance pass and the five-minute check
+(`tools/maintain.py`, with that folder as `WorkingDirectory`), the tick (`tools/tick.sh`, `tools/tick.py` under
+systemd), the server (`tools/serverd.py`) and the per-install manifest `<home>/config/fabric-agent.json`
+(`mcp/server.py`). A venv rebuilt on another Python minor release (3.14 to 3.15) no longer has that folder, so
+launchd failed every run with exit 78, and the repair rewrote only the interpreter.
+
+- A definition written by this release names the venv's stable interpreter and a program name:
+  `<venv>/bin/python3 -P -m observatory.job maintain run --first-check-delay 90` (likewise `maintain check`, `tick`,
+  `tick-py`, `serverd --run --port N`, and `mcp --stdio --home HOME` in the manifest). `observatory/job.py` is a new
+  module of the package; on macOS and Linux it replaces itself with the very program the old definition named
+  (`python <engine>/tools/maintain.py run ...`, `/bin/bash <engine>/tools/tick.sh`), with SIGPIPE and SIGXFSZ at
+  their defaults, so the process, its arguments, its folder (the engine) and its signals are what they were; on
+  Windows it runs the program in its own process. `WorkingDirectory` (launchd), `WorkingDirectory=` (systemd, new in
+  the pass's unit) and the Task Scheduler folder are the workspace home. An engine run from a checkout, whose paths
+  name no Python release, keeps naming its files as before; so does a Windows venv (`Lib\site-packages` names no
+  release). A root-owned `space_daemons.py` accepts the new definitions unchanged: the program is still the venv's
+  interpreter, and the workspace home is inside the account's home.
+- No definition names an interpreter that cannot start the launcher: when the interpreter is not the engine venv's
+  own `bin/python3`, or that is a link to a Python that is gone, installing or repairing a job is refused with that
+  reason (`maintain ensure` answers `unscheduled`, a repair answers `skipped`). A `pyvenv.cfg` `home` that is gone
+  while `bin/python3` still starts is not refused; doctor names it. `install_launchd.py status|uninstall|run-now` and
+  `serverd.py --uninstall` on Linux and Windows need no buildable job, so they work with such a venv.
+- Repair compares every key the installer writes with the installed definition. `install_launchd.repair_definitions`
+  (the old name `repair_interpreters` still answers) mends the tick and the server on macOS, and
+  `install_launchd.repair_systemd` their systemd user units on Linux (then `daemon-reload`); each keeps the tick's
+  interval, the server's port, the installed `PATH` (without a Homebrew Cellar folder or one another account can
+  write) and probe limit. In a plist every key and variable the installer does not write stays (`Disabled`,
+  `HTTPS_PROXY`, `SSL_CERT_FILE`, ...), except keys an earlier installer wrote and this one drops (the server's
+  `LowPriorityIO` and `Nice`, the throttling that starved it under load). In a systemd unit only `Environment=`
+  variables stay; any other directive of a person's goes in a drop-in (`systemctl --user edit <unit>`, a
+  `<unit>.d/*.conf` file), which a rewrite never touches. A found row gains `changed` and `missing`; a drift that cannot be mended here is answered
+  under `skipped` with its reason. The maintenance pass applies it: a running tick waits for the next pass, a launchd
+  job is reloaded only when it was loaded, and a running systemd server is restarted. `full maintain ensure` now does
+  the same for the tick and the server after scheduling its own two jobs, answering `jobs`, and refreshes the hooks'
+  settings (`hook_env`). Task Scheduler's tick and server are not migrated: their venv paths name no release.
+- For an account with no GUI session, or one whose job root runs as a system daemon, a drifted background definition
+  is rewritten and the answer is `waiting-for-root` with root's `remove`, then `apply`, never a bootout of a running
+  pass. The answer stays `waiting-for-root` while root's loaded copy (`/Library/LaunchDaemons/<label>.plist`, readable
+  by every account) names another program or folder than the current definition, and the background copy is compared
+  with a document carrying its own `PATH`, so an ensure from another shell does not ask root again.
+- Doctor and `full maintain status` name `job-path-missing` (a launchd definition of the pass, the check, the tick
+  or the server, or a systemd unit of any of the four, whose program, an argument or its folder does not exist; Task
+  Scheduler's are not read; step `project-observatory full maintain ensure`) and `venv-home-missing` (the engine's
+  `pyvenv.cfg` names a `home` that is gone: its interpreter may still start through another link, and if the jobs fail a
+  person recreates the venv; no step).
+- The plugin hooks: `full agent install` still writes `OBSERVATORY_ROOT` (hooks of every plugin version read it) and
+  now names the venv's stable interpreter (`<venv>/bin/python3`, the one the jobs name) in `OBSERVATORY_PYTHON`
+  rather than the installer's `sys.executable`. `full maintain ensure` rewrites both when they name a path that is
+  gone and `OBSERVATORY_HOME` is this workspace (`agent_plugin.refresh_hook_env`); `full agent uninstall` also
+  removes such a stale value an earlier install wrote. The hooks of plugin 0.35.6 (`session-start.sh`,
+  `record-turn.sh`) treat a root that does not exist as unset and find the engine under an absolute
+  `OBSERVATORY_PYTHON`'s venv, in the `lib/python3.X` its `pyvenv.cfg` names; `handling-secrets` falls back to
+  `project-observatory full-path`. The plugin and its skills move from 0.30.0 to 0.35.6 together.
+- On a machine that already failed: install this release into the venv (`project-observatory full update --apply`,
+  or a reinstall of the package), then `project-observatory full maintain ensure`; where it answers
+  `waiting-for-root`, an administrator runs the two `sudo` steps it prints, in order. Then
+  `project-observatory full doctor` shows no `job-path-missing`.
+- Going back to 0.35.5 or earlier leaves definitions naming `-m observatory.job`, which those releases do not ship.
+  Their `full maintain ensure` rewrites the pass and the check; the tick and the server need their installers again
+  (`install_launchd.py install`, `serverd.py --install`, run with the older engine's interpreter).
+
 ## Workspace restore: a carried secret store put back (OBS-350 part 2, the release after 0.35.4)
 
 Additive; the snapshot format stays 1 and nothing migrates. `full restore` writes each store a snapshot
@@ -422,6 +486,93 @@ store's `next` as its step (also on Health); a store put in that folder by a lat
 clears it (doctor lists the folder's top level, never reads a file). An older engine ignores the file. The store's `projects/movements.jsonl` gains one `restore-store` row per write (`secret` `store/*`,
 `tool` `workspace_upgrade.py`, `snapshot`, `taken_on`, `files`, `state`; never a value), which an older `vault.py`
 reads as any other movement. An older engine reading a snapshot this release writes still restores the home only.
+
+## Reloading a repaired job waits for launchd (OBS-410, 0.35.7)
+
+No migration. 0.35.6 rewrote a drifted job definition and reloaded the job with `launchctl bootout` then
+`bootstrap`; launchd refuses a bootstrap while the bootout of the same label is still finishing (the server is
+given 40 s to exit), so after `full update` to 0.35.6 the server could stay unloaded, and a pass leaves an unloaded
+job alone. From 0.35.7 a reload waits until the label is gone (up to 45 s) and retries a bootstrap launchd refuses
+for now (exits 5, 37 and 125) up to five times; a reload that still fails answers `jobs.result: reload-failed`,
+naming the jobs it left `unloaded` and those still running their old definition (`not_reloaded`); `full update`
+checks the jobs it started once `maintain ensure` has run and loads one that is gone, or names it under
+`services_not_restarted`. A workspace that was updated to 0.35.6 (its `store/logs/update.jsonl` says so) and whose
+server has its launchd definition and Fabric descriptor in place but is not loaded gets the server loaded again,
+once, by the first `maintain ensure` or pass of 0.35.7 (the update to 0.35.7 runs `maintain ensure`), answered
+under `jobs.recovered`; the new file `store/raw/server-recovery-obs410.json` records the first decided outcome
+(`loaded`, `loaded-again`, `no-server`, `disabled`), after which the check never runs again, so a server a person
+boots out later stays out; only a load launchd refuses is tried again at the next pass. A server turned off with
+`serverd.py --uninstall` (which removes the definition and the descriptor) or stopped in Fabric Dashboards (a
+disabled label) is never loaded; one booted out by hand with a plain `launchctl bootout` before the update to 0.35.6
+cannot be told from a lost one and is loaded once. A workspace whose schedule was turned off with
+`maintain uninstall` has no pass and is not recovered. By hand:
+`OBSERVATORY_SYSTEM_SETUP=1 python "$(project-observatory full-path)/tools/serverd.py" --install`.
+
+## Workspace restore: verifying a carried secret store into a disposable folder (OBS-394, 0.35.7)
+
+Additive; the snapshot format stays 1 and nothing migrates. `full restore` takes `--secret-store-verify-into DIR`,
+with a whole restore and with `--secret-store-only`: each store the snapshot carried is written into
+`DIR/<name>/` (folders 0700, files 0600 through osprivacy) and read back against the manifest (every file's size
+and SHA-256, every folder, every link's target on POSIX, nothing unlisted), instead of into the folder the
+settings name. That folder is never written, locked, swept or recorded, so no confirmation is asked for a
+snapshot from another machine, and `store/raw/secret-store-restore.json` is neither written nor removed (doctor's
+`backups-secret-store-not-restored` is not raised or cleared by a verification). The verified copy is left in
+`DIR`; the caller removes it. With `--secret-store-only` and the flag, no workspace is needed. The answer's
+`secret_store` reads `state` `verified` with `name`, `left_at` and `into` in display form and the counts `files`,
+`bytes`, `links`, `directories` and `skipped` (the snapshot's `not_carried` files plus links not made on
+Windows), `verified` (the number of stores verified, also beside `not-in-snapshot` and `not-applicable`),
+`stores` when there are several, or `not-in-snapshot` / `not-applicable` as before; a whole restore answers
+`external_sources_included` false, and `--secret-store-only` answers `status` `store-verified`, or
+`nothing-to-verify` (exit 0) when the snapshot carried no store. Refusals, exit 2, nothing written:
+`secret-store-verify-into-refused` (DIR is, holds or lies inside the new home or the workspace, the workspace
+`OBSERVATORY_HOME` names and the default one (`osprivacy.default_home`) when either is another folder, the
+snapshot and its file (not the folder holding the file), each of those workspaces' backups folder, any folder the snapshot's
+settings (after the home rewrite) or one of those workspaces' settings name in `sources.secret_store`,
+`sources.secrets` or a key a carried store was recorded under, `OBSERVATORY_SECRETS` or `OBSERVATORY_VAULT_DIR`,
+or a place `secret-store-target-refused` names; compared resolved and case-folded, and by identity: each
+existing folder's device and inode, so a linked parent or macOS's `/System/Volumes/Data/...` view of a folder
+is the same folder, except on a volume that reports inode 0 (FAT, exFAT, some network shares on Windows), where
+the resolved-name compare decides alone), `secret-store-verify-into-unchecked` (a workspace on this machine,
+the destination or one of the live ones, whose settings do not read: its store folders are unknown, so the
+verification refuses rather than skipping it),
+`secret-store-verify-into-not-empty` (DIR holds anything, or is a link or a file) and
+`secret-store-verify-into-conflict` (with `--secret-store-target` or a `--secret-store` other than `auto`); a
+tampered carried file stays `secret-store-manifest-mismatch`. The place and the contradiction are checked before a
+passphrase is asked (`full restore --latest` included), and DIR is checked again right before the first write;
+a missing DIR is made with a plain mkdir (0700, each missing parent too), and each `DIR/<name>/` the same way: one
+that appears between the check and that mkdir is refused (`secret-store-verify-into-not-empty`) and left as it
+is, never removed by the cleanup. Failure, exit 1, every copy the run
+made removed and no home restored: `secret-store-verify-failed` (a written file or link that does not match), or
+`secret-store-write-failed` (a write that failed); a restore that fails after the copy (an interrupt
+included) removes it and the folders it made, so `--latest` falling back to an older snapshot finds DIR as it
+was. `workspace_upgrade.restore` and `restore_store_only` and
+`maintenance.restore_latest` gain the keyword `secret_store_verify_into`; `secret_store_carry` gains
+`verify_into`, `verify_summary`, `discard_verified`, `check_verify_into`, `verify_conflict` and
+`setting_folders`. Without the flag
+every command line answers as before.
+
+## Registry and doctor: readable agents page, account organizations, DigitalOcean signals (OBS-317, OBS-412 part 1, OBS-421, OBS-423, 0.35.8)
+
+Additive; nothing migrates and no setting changes. With `features.wiki_projection` on, the projection writes
+`inventory/agents.md` beside `inventory/agents.json` in the wiki (generated, overwritten on each projection, built
+from `registry/agents.json` alone, with the inventory notes' frontmatter; no path or token), and its report `store/raw/projection.json` gains `pages`.
+`registry/digitalocean-account.json` and `registry/cloudflare-account.json`: every resource row gains `account_ref`
+(its account row's `id`), DigitalOcean account rows gain `team_uuid` and Cloudflare account rows `account_id`. When
+`config/organizations.json` names organizations, those account rows also carry `organization`,
+`organization_source` (`rule`, `conflict`, `none`) and `organization_why`, and `registry/heroku-apps.json` carries
+`team_organizations` (`team` and the same three fields); without the file nothing new is written. `match` accepts
+`digitalocean_teams` (a team's uuid, or its name while no other team here bears it), `cloudflare_accounts` and
+`heroku_teams`; an older engine ignores the new keys, so a project they assigned falls back to the older answer there.
+A rule that is not a list of strings is ignored and named on the emit's error output. A project assigned through a
+provider account reads `organization_source` `rule` with the account and the resource in `organization_why`. With
+organizations configured, `registry/projects.json` is written once per emit, after the provider documents, from the
+rows as they stood after the projects; an unchanged document keeps its `updated_on`. `full doctor` gains `digitalocean`
+(`integration`, `teams_stashed`, or `teams_stashed` null with `reason`) and the `attention` code `digitalocean-off`.
+The raw DigitalOcean scan's `degraded` may hold `digitalocean:doctl:<context>` rows. Organization certificates are
+rotated earlier (at two thirds of their validity or an hour before the three-day `expiring` notice, whichever comes
+first, never in the first half, so before the notice for certificates of about 6 days or more; OBS-423): nothing in
+the enrollment's files changes. Downgrade: an older engine reads
+every added field as an unknown key and leaves `inventory/agents.md` in the wiki as it was last written.
 
 ## Migration checksums: the same under every Python (OBS-387, 0.35.4)
 

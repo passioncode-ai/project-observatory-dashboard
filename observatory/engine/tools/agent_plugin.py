@@ -4,7 +4,8 @@
 install  adds the GitHub marketplace, installs the plugin, turns plugin
          auto-update ON (pass --no-auto-update to keep it off) and sets
          OBSERVATORY_ROOT / OBSERVATORY_HOME / OBSERVATORY_PYTHON for the
-         plugin's hooks. It reports "installed" only when Claude Code's own
+         plugin's hooks; `maintain ensure` refreshes them when they name a
+         folder that is gone (OBS-393). It reports "installed" only when Claude Code's own
          installed_plugins.json lists the plugin afterwards.
 status   reports the marketplace source, auto-update, installed version and
          whether the hooks can find this engine and workspace.
@@ -220,18 +221,70 @@ def shipped_version() -> str:
     return json.loads(manifest.read_text(encoding="utf-8"))["version"]
 
 
+def _install_launchd():
+    sys.path.insert(0, str(ROOT / "tools"))
+    import install_launchd
+    return install_launchd
+
+
 def workspace_env() -> dict:
+    """What the hooks read. `OBSERVATORY_PYTHON` is the engine's venv interpreter as the background
+    jobs name it (`<venv>/bin/python3`, never the installer's `python3.14`, OBS-393).
+    `OBSERVATORY_ROOT` is this engine's folder: hooks of every plugin version read it, and a venv
+    rebuilt on another Python release leaves it naming a folder that is gone, which the hooks of
+    0.35.6 and later treat as unset (they find the engine under OBSERVATORY_PYTHON's venv) and
+    `refresh_hook_env` rewrites at the next `maintain ensure`."""
+    launch = _install_launchd()
+    try:
+        python = launch.stable_interpreter(configuration.engine_python())
+    except configuration.ConfigurationError:
+        python = configuration.engine_python()
     return {"OBSERVATORY_ROOT": str(ROOT), "OBSERVATORY_HOME": str(configuration.home()),
-            "OBSERVATORY_PYTHON": sys.executable}
+            "OBSERVATORY_PYTHON": python}
+
+
+def put_hook_env(settings: dict) -> dict:
+    """Write workspace_env() into SETTINGS; returns the values it replaced."""
+    wanted = workspace_env()
+    env = settings.setdefault("env", {})
+    previous = {k: env.get(k) for k in ENV_KEYS}
+    env.update(wanted)
+    return {k: v for k, v in previous.items() if v and v != wanted[k]}
+
+
+def _gone(value) -> bool:
+    return isinstance(value, str) and os.path.isabs(value) and not os.path.lexists(value)
+
+
+def refresh_hook_env() -> dict:
+    """Rewrite the hook environment `agent install` wrote when it names an engine folder or an
+    interpreter that no longer exists (a venv rebuilt on another Python, OBS-393), for this same
+    workspace only. Nothing is written when the settings name no OBSERVATORY_HOME, another
+    workspace, or paths that exist. Answers {"result": ok | refreshed | not-ours | error}."""
+    try:
+        path = settings_path()
+        if not path.is_file():
+            return {"result": "ok"}
+        settings = read_json(path)
+        env = settings.get("env") or {}
+        if env.get("OBSERVATORY_HOME") != str(configuration.home()):
+            return {"result": "not-ours"}
+        stale = [k for k in ("OBSERVATORY_ROOT", "OBSERVATORY_PYTHON") if _gone(env.get(k))]
+        if not stale:
+            return {"result": "ok"}
+        replaced = put_hook_env(settings)
+        write_json(path, settings)
+        return {"result": "refreshed", "keys": stale, "replaced": replaced}
+    except (PluginError, configuration.ConfigurationError, OSError, ValueError) as exc:
+        return {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
 
 
 def write_hook_env() -> dict:
     """Point the plugin's hooks at this engine and workspace; returns the replaced values."""
     settings = read_json(settings_path())
-    previous_env = {k: (settings.get("env") or {}).get(k) for k in ENV_KEYS}
-    settings.setdefault("env", {}).update(workspace_env())
+    replaced = put_hook_env(settings)
     write_json(settings_path(), settings)
-    return {k: v for k, v in previous_env.items() if v and v != workspace_env()[k]}
+    return replaced
 
 
 def install(auto_update: bool = True) -> dict:
@@ -290,8 +343,7 @@ def install(auto_update: bool = True) -> dict:
     settings.setdefault("extraKnownMarketplaces", {})[MARKETPLACE] = {
         "source": dict(SOURCE), "autoUpdate": auto_update}
     settings.setdefault("enabledPlugins", {})[PLUGIN] = True
-    previous_env = {k: (settings.get("env") or {}).get(k) for k in ENV_KEYS}
-    settings.setdefault("env", {}).update(workspace_env())
+    replaced = put_hook_env(settings)
     write_json(settings_path(), settings)
     known = read_json(known_path())
     if MARKETPLACE in known:
@@ -299,8 +351,7 @@ def install(auto_update: bool = True) -> dict:
         write_json(known_path(), known)
     steps.append(f"auto-update {'on' if auto_update else 'off'}")
     return {"status": "installed", "plugin": PLUGIN, "installed_version": have, "shipped_version": ship,
-            "source": SOURCE, "auto_update": auto_update, "env": workspace_env(), "replaced_env": {k: v for k, v in previous_env.items()
-                                                      if v and v != workspace_env()[k]},
+            "source": SOURCE, "auto_update": auto_update, "env": workspace_env(), "replaced_env": replaced,
             "steps": steps, "next": "Restart Claude Code sessions: plugins load at session start."}
 
 
@@ -389,7 +440,11 @@ def uninstall() -> dict:
                      "and its hooks still read it")
     else:
         for k, v in workspace_env().items():
-            if (settings.get("env") or {}).get(k) == v:
+            have = (settings.get("env") or {}).get(k)
+            # Also a value an earlier install wrote that names a folder gone since (a venv rebuilt on
+            # another Python, OBS-393): it is this engine's own key, and nothing else reads it.
+            if have == v or (k != "OBSERVATORY_HOME" and _gone(have)
+                             and ("observatory" in str(have) or k == "OBSERVATORY_PYTHON")):
                 changed = _drop(settings, "env", k) or changed
     if changed:
         write_json(settings_path(), settings)

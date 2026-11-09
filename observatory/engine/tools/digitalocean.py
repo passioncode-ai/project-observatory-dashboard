@@ -76,6 +76,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -839,7 +840,7 @@ def token_ok(value: object) -> bool:
 
 
 def _wire(method: str, url: str, token: str, *, body: bytes | None = None,
-          content_type: str = "application/json") -> dict:
+          content_type: str = "application/json", timeout: float = 30) -> dict:
     """One call. The error names the endpoint and the status, never a header or a body."""
     import urllib.error
     import urllib.request
@@ -851,7 +852,7 @@ def _wire(method: str, url: str, token: str, *, body: bytes | None = None,
         req = urllib.request.Request(url, data=body, method=method,
                                      headers={"Authorization": f"Bearer {token}", "Content-Type": content_type,
                                               "User-Agent": "project-observatory"})
-        with urllib.request.urlopen(req, timeout=30) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             raw = r.read()
     except urllib.error.HTTPError as e:
         # Retry-After is the provider's RESPONSE header, a number of seconds: no credential.
@@ -869,9 +870,11 @@ def _wire(method: str, url: str, token: str, *, body: bytes | None = None,
     return doc if isinstance(doc, dict) else {}
 
 
-def _api(path: str, token: str, payload: dict | None = None, method: str | None = None) -> dict:
+def _api(path: str, token: str, payload: dict | None = None, method: str | None = None,
+         timeout: float = 30) -> dict:
     data = json.dumps(payload).encode() if payload is not None else None
-    return _wire(method or ("POST" if data is not None else "GET"), api_base() + path, token, body=data)
+    return _wire(method or ("POST" if data is not None else "GET"), api_base() + path, token, body=data,
+                 timeout=timeout)
 
 
 def _pages(path: str, token: str, key: str, limit: int = 50) -> list[dict]:
@@ -887,9 +890,9 @@ def _pages(path: str, token: str, key: str, limit: int = 50) -> list[dict]:
     raise DoorError(f"{_endpoint(path)} has more than {limit} pages; refusing to read further")
 
 
-def account_of(token: str) -> dict:
+def account_of(token: str, timeout: float = 30) -> dict:
     """{user_uuid, team_uuid, team_name, status} of a token. Never the email."""
-    a = _api("/v2/account", token).get("account") or {}
+    a = _api("/v2/account", token, timeout=timeout).get("account") or {}
     team = a.get("team") or {}
     return {"user_uuid": a.get("uuid"), "team_uuid": team.get("uuid"), "team_name": team.get("name"),
             "status": a.get("status")}
@@ -1049,18 +1052,13 @@ def _stash_value(value: str, source: str) -> str:
     return f"{'replaced' if existed else 'stashed'}: team {acct['team_name']!r} as {label!r} (role {role or 'unknown'})"
 
 
-def cmd_stash(from_doctl: str | None) -> int:
-    if not from_doctl:
-        if osprivacy.is_terminal(sys.stdin):
-            raise DoorError("give the team's token on stdin, from a protected file: "
-                            "`digitalocean.py stash < token-file`, or `stash --from-doctl CONTEXT`")
-        print(_stash_value(one_value(sys.stdin.read()), "stdin"))
-        return 0
+def doctl_config_contexts(quiet: bool = False) -> dict[str, str]:
+    """{context: token} from doctl's config file, or {} when there is none. Never printed."""
     path = doctl_config_path()
     if path.is_symlink():
         raise DoorError("doctl's config is a symbolic link; refusing to follow it")
     try:
-        ctxs = doctl_contexts(private_io.read(path) if path.is_file() else "")
+        return doctl_contexts(private_io.read(path) if path.is_file() else "")
     except RuntimeError:
         # doctl writes its config 0600; a wider file is still readable, but say so. Opened without
         # following a link, and only as a regular file.
@@ -1070,7 +1068,84 @@ def cmd_stash(from_doctl: str | None) -> int:
             if not _stat.S_ISREG(os.fstat(f.fileno()).st_mode):
                 raise DoorError("doctl's config is not a regular file") from None
             ctxs = doctl_contexts(f.read())
-        print("note: doctl's config is readable beyond its owner; `chmod 600` it", file=sys.stderr)
+        if not quiet:
+            print("note: doctl's config is readable beyond its owner; `chmod 600` it", file=sys.stderr)
+        return ctxs
+
+
+#: Seconds one `GET /v2/account` for a doctl context may take when its team is asked (`--probe`, the collector).
+PROBE_TIMEOUT = 10
+
+
+def unstashed_contexts(probe: bool = False, may_ask=None) -> list[dict]:
+    """Every doctl context whose team has no token stashed here (OBS-421).
+
+    Offline by default: a context whose token is a stashed value is covered, every other one is listed
+    as {context, team_uuid: None, probed: False}; doctl's config holds no team names. With `probe` its
+    team is asked of DigitalOcean with the context's own token (`GET /v2/account`, PROBE_TIMEOUT), a
+    context of a stashed team is covered, and the rest read {context, team_uuid, team_name, probed: True}
+    or {context, reason, probed: True}. `may_ask()` false stops the asking (a step's deadline): the rest
+    are listed unprobed with the reason. Values stay in memory. No doctl config: an empty list."""
+    ctxs = doctl_config_contexts(quiet=True)
+    if not ctxs:
+        return []
+    st = stashes()
+    held = [private_io.read(path).strip() for _label, path, _m in st]
+    teams = {m.get("team_uuid") for _l, _p, m in st if m.get("team_uuid")}
+    out, seen = [], set()
+    # A name that can be printed first, so a team reached by two contexts is named through the one a
+    # person can type.
+    shown = private_files.credential_shape.shown
+    for name in sorted(ctxs, key=lambda n: (shown(n) != n, n)):
+        value = ctxs[name]
+        if any(_same(value, v) for v in held):
+            continue
+        if not probe:
+            out.append({"context": name, "team_uuid": None, "probed": False})
+            continue
+        if may_ask is not None and not may_ask():
+            out.append({"context": name, "team_uuid": None, "probed": False,
+                        "reason": "not asked: the step's deadline came first"})
+            continue
+        try:
+            acct = account_of(value, timeout=PROBE_TIMEOUT)
+        except DoorError as e:
+            out.append({"context": name, "team_uuid": None, "probed": True, "reason": str(e)[:160]})
+            continue
+        if acct.get("team_uuid") in teams or acct.get("team_uuid") in seen:
+            continue
+        seen.add(acct.get("team_uuid"))
+        out.append({"context": name, "team_uuid": acct.get("team_uuid"), "team_name": acct.get("team_name"),
+                    "probed": True})
+    return out
+
+
+def unstashed_line(row: dict, door: str = "digitalocean.py") -> str:
+    """One sentence per unstashed context, with the step that stashes it. The context's name is quoted
+    for a shell; a name shaped like a credential is never printed and no command is suggested with it."""
+    name = row["context"]
+    shown = private_files.credential_shape.shown(name)
+    if shown != name:
+        return (f"doctl context {shown}: no token stashed for its team; its name is shaped like a credential, "
+                "so no command is printed: rename the context in doctl's config, then stash it by the new name")
+    step = f"`{door} stash --from-doctl {shlex.quote(name)}`"
+    if row.get("team_uuid"):
+        return f"member of team {row.get('team_name')} via doctl context {name}: no token stashed; {step}"
+    if row.get("probed"):
+        return f"doctl context {name}: DigitalOcean named no team for it ({row.get('reason')}); {step} once it answers"
+    why = f" ({row['reason']})" if row.get("reason") else " (`teams --probe` asks DigitalOcean which team it is)"
+    return f"doctl context {name}: its token is not a stashed one, team unknown{why}; {step}"
+
+
+def cmd_stash(from_doctl: str | None) -> int:
+    if not from_doctl:
+        if osprivacy.is_terminal(sys.stdin):
+            raise DoorError("give the team's token on stdin, from a protected file: "
+                            "`digitalocean.py stash < token-file`, or `stash --from-doctl CONTEXT`")
+        print(_stash_value(one_value(sys.stdin.read()), "stdin"))
+        return 0
+    path = doctl_config_path()
+    ctxs = doctl_config_contexts()
     if not ctxs:
         raise DoorError(f"no doctl context holds a token (looked in doctl's config: {path.name})")
     wanted = sorted(ctxs) if from_doctl == "all" else [from_doctl]
@@ -1112,10 +1187,21 @@ def _same(a: str, b: str) -> bool:
     return hmac.compare_digest(a.encode(), b.encode())
 
 
+def _doctl_lines(probe: bool = False) -> list[str]:
+    """`teams`' last section: doctl contexts of teams with no stash here (OBS-421); a failure is a note.
+    Offline unless `probe`: only then is a context's token sent to DigitalOcean."""
+    try:
+        return [unstashed_line(r) for r in unstashed_contexts(probe=probe)]
+    except (DoorError, OSError, RuntimeError) as e:
+        return [f"doctl's contexts were not read: {str(e)[:160] if isinstance(e, DoorError) else type(e).__name__}"]
+
+
 def cmd_teams(probe: bool) -> int:
     st = stashes()
     if not st:
         print("no team stashed; `digitalocean.py stash < token-file` or `stash --from-doctl all`")
+        for line in _doctl_lines(probe):
+            print(f"  {line}")
         return 0
     values = {label: private_io.read(path).strip() for label, path, _m in st}
     by_team: dict[str, list[str]] = {label: [] for label, _p, _m in st}
@@ -1173,6 +1259,11 @@ def cmd_teams(probe: bool) -> int:
               + ("" if probe else " (`teams --probe` asks the provider which team each is)") + ":")
         for s in unknown:
             print(f"    {s}")
+    doctl_lines = _doctl_lines(probe)
+    if doctl_lines:
+        print("doctl contexts of teams with no token stashed here:")
+        for line in doctl_lines:
+            print(f"    {line}")
     return 0
 
 
@@ -1644,7 +1735,8 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("stash", help="a team's own token on stdin (or from a doctl context); never handed out")
     p.add_argument("--from-doctl", metavar="CONTEXT", help="import doctl's context by name, or `all`")
     p = sub.add_parser("teams", help="every stashed team: role, record, the vault slots that belong to it")
-    p.add_argument("--probe", action="store_true", help="ask the provider which team an unmatched slot is")
+    p.add_argument("--probe", action="store_true", help="ask the provider which team an unmatched slot, and an "
+                   "unstashed doctl context, is; without it nothing is sent")
     p = sub.add_parser("members", help="what the public API says about a team's members")
     p.add_argument("--team", required=True)
     team = sub.add_parser("team", help="team management").add_subparsers(dest="cmd", required=True)

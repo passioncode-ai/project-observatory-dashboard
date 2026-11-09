@@ -17,11 +17,36 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-11-09: release 0.35.8](runs/2026-11-09-release-0.35.8/README.md): engine 0.35.8 (`observatory-log` stays
+0.35.6): a readable `inventory/agents.md` in the wiki (OBS-317, first half), DigitalOcean onboarding signals in doctor
+and the collector (OBS-421), organizations matched through DigitalOcean and Heroku teams and Cloudflare accounts
+(OBS-412 part 1), the organization certificate rotated before its `expiring` notice (OBS-423), the tick's install
+reloaded without racing launchd (OBS-424).
+
+Next: tag `v0.35.8`, verify and install it on both Macs (receipts in the record).
+
+[2026-11-08: release 0.35.7](runs/2026-11-08-release-0.35.7/README.md): engine 0.35.7 (`observatory-log` stays
+0.35.6): `full restore --secret-store-verify-into DIR` verifies a backup's carried secret store in a disposable
+folder without touching the live one (OBS-394).
+
+Released 2026-11-09 (tag `v0.35.7` on `714cc099`; the release run needed a rerun after its guard waited out a slow
+`check.yml` and a Windows flake, OBS-382), verified and installed on the release manager's machine; receipts in the
+record. Next: the second Mac's install and the «machine lost» drill result.
+
+[2026-11-08: release 0.35.6](runs/2026-11-08-release-0.35.6/README.md): engine 0.35.6 and `observatory-log` 0.35.6:
+background jobs, plugin hooks and the installed manifest name no Python release, so a venv rebuilt on another Python
+keeps them working; `full maintain ensure` repairs the pass, the check, the tick and the server (OBS-393).
+
+Released 2026-11-08 (tag `v0.35.6` on `db205ebb`), verified and installed; the server it left unloaded on a Mac was
+fixed in 0.35.7 (OBS-410); receipts in the record.
+
 [2026-11-08: release 0.35.5](runs/2026-11-08-release-0.35.5/README.md): engine 0.35.5 (`observatory-log` stays
 0.30.0): `full restore` puts the secret store kept outside the workspace back on another computer, under a policy for
 one already there, with `--secret-store-only` and doctor's not-restored warning (OBS-350 part 2).
 
-Next: tag `v0.35.5`, verify and install (receipts in the record); then the «machine lost» drill with the second Mac.
+Released 2026-11-08 (tag `v0.35.5` on `633f1b60`; the release run's Windows arm64 job needed one rerun after a 504 from
+github.com), verified and installed on the second Mac; receipts in the record. Next: 0.35.6 with OBS-393 (PR #474),
+then the «machine lost» drill with the second Mac.
 
 [2026-11-08: release 0.35.4](runs/2026-11-08-release-0.35.4/README.md): engine 0.35.4 (`observatory-log` stays
 0.30.0): migration checksums the same under every Python (OBS-387), the maintenance schedule in an account with no

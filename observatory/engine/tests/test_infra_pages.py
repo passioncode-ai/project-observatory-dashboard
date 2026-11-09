@@ -591,6 +591,25 @@ class Pages(unittest.TestCase):
         self.assertIn('id="infra"', page)
 
 
+class AccountOrganizations(unittest.TestCase):
+    """OBS-412 part 1: an account row's organization reaches the Accounts table, only when configured."""
+
+    def test_the_column_appears_only_with_organizations_and_names_shared_and_undecided(self):
+        doc = infra_registry.digitalocean_document(DO_SCAN, REPOS, RELATIONS, "2026-10-26")
+        self.assertTrue(all(r.get("account_ref") == "digitalocean:team:" + DO_SCAN["teams"][0]["team_uuid"]
+                            for r in doc["resources"]))
+        bare = infra_page.infra_html("digitalocean", payload_with(digitalocean=doc), Translator())
+        self.assertNotIn('data-t="Organization"', bare, "no organizations.json, no column")
+        for org, source, word in (("company", "rule", "company"), (None, "conflict", 'data-t="shared"'),
+                                  (None, "none", 'data-t="undecided"')):
+            with self.subTest(source=source):
+                tagged = json.loads(json.dumps(doc))
+                tagged["accounts"][0].update(organization=org, organization_source=source, organization_why="w")
+                body = infra_page.infra_html("digitalocean", payload_with(digitalocean=tagged), Translator())
+                self.assertIn('data-t="Organization"', body)
+                self.assertIn(word, body)
+
+
 # ─────────────────────────── 5. the whole chain ──────────────────────────────
 
 class Chain(unittest.TestCase):
