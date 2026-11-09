@@ -136,7 +136,8 @@ def validate(doc: dict) -> list[str]:
     if not isinstance(declared, dict):
         return out + ["projects must be an object keyed by project id"]
     for pid, row in declared.items():
-        if not isinstance(row, dict) or row.get("organization") not in orgs and row.get("organization") != "external":
+        named = row.get("organization") if isinstance(row, dict) else None
+        if not isinstance(named, str) or named not in orgs and named != "external":
             out.append(f"{pid}: organization must name a configured organization or `external`")
         elif not row.get("why"):
             out.append(f"{pid}: a declared organization needs a `why`")
@@ -248,12 +249,13 @@ class Assigner:
         if not self.active:
             return None
         pid = project["id"]
-        if project.get("organization"):
+        if project.get("organization") and isinstance(project["organization"], str):
             return {"organization": project["organization"], "source": "declared",
                     "why": "project_overrides.json"}
         row = self.declared.get(pid)
-        if isinstance(row, dict) and row.get("organization"):
-            return {"organization": row["organization"], "source": "declared", "why": row.get("why", "")}
+        # A declaration names an organization by its name; anything else is not one, and `validate` says so.
+        if isinstance(row, dict) and row.get("organization") and isinstance(row["organization"], str):
+            return {"organization": row["organization"], "source": "declared", "why": str(row.get("why", ""))}
         owners = {o.lower() for o in project.get("owners") or []}
         hits = self.hits(project, accounts)
         if len(hits) == 1:
@@ -296,7 +298,7 @@ class Assigner:
 
     def destinations(self, organization: str | None) -> dict:
         """Where this organization's accounts are: what an agent creating one needs."""
-        org = self.orgs.get(organization or "") or {}
+        org = (self.orgs.get(organization) if isinstance(organization, str) else None) or {}
         out = {}
         if org.get("label"):
             out["label"] = org["label"]

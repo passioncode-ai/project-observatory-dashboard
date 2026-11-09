@@ -812,6 +812,44 @@ class Views(Base):
         self.assertIn("projects must be an object keyed by project id", self.orgs.validate(self.orgs.load()))
         self.assertEqual(self.orgs.Assigner().assign({"id": "project:x", "owners": ["company-org"]})["source"], "rule")
 
+    def test_round_two_edges(self):
+        """Review round 2: a malformed declaration, a team name two teams bear, a door's record over the
+        journal, the Heroku user in both views, an unusable file, one degraded row per unread file."""
+        bad = json.loads(json.dumps(ORGS))
+        bad["projects"]["project:odd"] = {"organization": ["company"], "why": "a list"}
+        self.assertTrue(any("project:odd" in p for p in self.orgs.validate(bad)))
+        import organization_findings
+        importlib.reload(organization_findings)
+        self.assertEqual([f["type"] for f in organization_findings.findings([], bad)], ["organization.config_problem"])
+        a = self.orgs.Assigner(doc=bad)
+        self.assertEqual(a.assign({"id": "project:odd", "owners": ["company-org"]})["source"], "rule")
+        self.assertEqual(self.orgs.reading({"organization": ["x"], "organization_source": "declared"}, a)["state"],
+                         "decided")
+        self.assertEqual(a.destinations(["x"]), {})
+        twin = "44444444-4444-4444-8444-444444444444"
+        self.private("digitalocean-issued/twin.meta.json", json.dumps(
+            {"label": "twin", "team_uuid": twin, "team_name": "Company Team", "vault": "co-web/prod/TWIN"}))
+        who = self.view.issuers([], {}, [], {twin: [twin]})
+        self.assertEqual(who["co-web/prod/TWIN"]["keys"], [twin], "a name two teams bear names neither")
+        self.private("projects/movements.jsonl", json.dumps(
+            {"event": "rotate", "secret": "co-web/prod/OPENROUTER_API_KEY", "tool": "cloudflare.py",
+             "account": "Co Account"}) + "\n")
+        self.assertEqual(self.view.issuers([], {"co account": "acc-co"})["co-web/prod/OPENROUTER_API_KEY"]["provider"],
+                         "openrouter", "a door's own record wins over a journal row")
+        self.private("heroku-issued.json", json.dumps({"issued": {"both/prod/USER_TOKEN": {"team": None}}}))
+        self.private("projects/both/prod/USER_TOKEN", OR_TOKEN)
+        k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
+        self.assertEqual((k["both/prod/USER_TOKEN"]["class"], k["both/prod/USER_TOKEN"]["issuer"]["source"]),
+                         ("personal", "default"), "the Heroku user reads the default organization in both views")
+        (self.secrets / "openrouter-issued.json").chmod(0)
+        v = self.view.accounts()
+        self.assertEqual(sum(1 for d in v["degraded"] if d["source"] == "openrouter:ledger"), 1)
+        self.write("organizations.json", {"organizations": {"acme": "x"}, "projects": {}})
+        v = self.view.accounts()
+        self.assertFalse(v["configured"])
+        self.assertTrue(any("acme" in p for p in v["problems"]))
+        self.assertIn("names no usable organization", self.view.accounts_text(v))
+
     def test_keys_refusals_name_their_command(self):
         for org, code in (("person", "default-organization"), ("nobody", "unknown-organization"),
                           ("sk-or-v1-" + "a" * 40, "invalid-organization")):

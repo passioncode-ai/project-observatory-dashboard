@@ -568,8 +568,9 @@ def observatory_org_accounts() -> dict[str, Any]:
     connected. Each account says what it holds (projects, resources, keys its door issued). `problems` names a rule the
     engine does not read; `degraded` names each source not read, and `state` is `empty`, `partial` or `complete`.
 
-    Read-only: nothing is written, sent or decided, and no key's value is read (a `doctl` context is compared with
-    the stashed tokens in memory by the DigitalOcean door, as `digitalocean.py teams` does). The same answer as
+    Read-only: nothing is written, sent or decided, and no key's value is returned, printed or kept (a `doctl`
+    context is compared with the stashed tokens in memory by the DigitalOcean door, as `digitalocean.py teams`
+    does). The same answer as
     `project-observatory full org accounts --json` (schema `org-accounts/1`). Saying which organization an account
     belongs to is a rule in `organizations.json` (`match.github_owners`, `digitalocean_teams`,
     `cloudflare_accounts`, `heroku_teams`, `openrouter_accounts`)."""

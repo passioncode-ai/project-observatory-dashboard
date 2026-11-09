@@ -2311,15 +2311,18 @@ names, as its registry row says: it decides no project until a rule does), or it
 is seen and not connected (a `doctl` context, an account only a door's record
 names). Each says what it holds
 (projects, resources, keys its door issued). Without `organizations.json` every
-account reads Personal (`implicit`). `state` is `empty`, `partial` (something in
+account of yours reads Personal (`implicit`), and a repository owner outside
+`ownership.json` still reads Not ours. `state` is `empty`, `partial` (something in
 `degraded` was not read) or `complete`; `problems` repeats the rules the engine
 does not read.
 
 `org keys --org NAME` lists each vault slot of the projects NAME holds (and of
 projects whose disagreement includes it), plus each slot issued from one of its
 accounts, by name only: no value file is opened. Each slot reads `organization`
-(the project and the issuing account are both NAME's), `personal` (a personal
-account's key in a project that is not NAME's), or `ambiguous` (they disagree,
+(the project and the issuing account are both NAME's), `personal` (issued in a
+personal account, in a project whose disagreement includes NAME: it stays where
+it is; a personal key of a project NAME does not hold is not listed at all), or
+`ambiguous` (they disagree,
 the account is shared or has no rule, or the key was put by hand so its issuer is
 unknown), with why and the issuer from the door's record (the OpenRouter and
 Heroku ledgers, the DigitalOcean records, the movements journal for the

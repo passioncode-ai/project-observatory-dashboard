@@ -208,7 +208,7 @@ def _slots(degraded: list) -> list[tuple[str, str, str]]:
 # ── who issued each key ────────────────────────────────────────────────────────
 
 def issuers(degraded: list, cloudflare_accounts: dict[str, str] | None = None,
-            slots: list[str] | None = None) -> dict[str, dict]:
+            slots: list[str] | None = None, digitalocean_keys: dict[str, list[str]] | None = None) -> dict[str, dict]:
     """vault slot `FOLDER/ENV/NAME` -> the account that issued its value, from the door that minted it:
     the OpenRouter ledger (`vault:` destinations), the DigitalOcean records, the Heroku ledger, and the
     movements journal for the Cloudflare door (its vault writers keep no record of their own). Each:
@@ -218,7 +218,12 @@ def issuers(degraded: list, cloudflare_accounts: dict[str, str] | None = None,
     The Cloudflare door journals an R2 pair as one movement, `FOLDER/ENV/PREFIX_*`: it stands for every slot
     of `slots` under that folder and environment whose name starts with `PREFIX_`. The journal names an
     account by its name; `cloudflare_accounts` (`cloudflare_names`) turns it into the id a rule names, and a
-    name it cannot turn is said in `degraded`, never read as an account no rule names."""
+    name it cannot turn is said in `degraded`, never read as an account no rule names. A DigitalOcean team
+    is named by what a rule may name it by (`digitalocean_keys`, team uuid -> `organizations.account_keys`):
+    its uuid, and its name only while no other team here bears it.
+
+    A door's own record wins over the journal: the journal only names slots no other door recorded, and of
+    its rows the latest for a slot."""
     out: dict[str, dict] = {}
     for name, row in sorted(_openrouter_ledger(degraded).items()):
         dest = str((row or {}).get("destination") or "")
@@ -228,7 +233,9 @@ def issuers(degraded: list, cloudflare_accounts: dict[str, str] | None = None,
                                          "record": f"openrouter ledger ({name})"}
     for rec in _digitalocean_records(degraded):
         if rec.get("vault"):
-            keys = [str(k) for k in (rec.get("team_uuid"), rec.get("team_name")) if k]
+            uuid = rec.get("team_uuid")
+            keys = ((digitalocean_keys or {}).get(str(uuid)) or [str(uuid)]) if uuid else \
+                [str(rec["team_name"])] if rec.get("team_name") else []
             out[str(rec["vault"])] = {"provider": "digitalocean", "rule": "digitalocean", "keys": keys,
                                       "account": rec.get("team_name") or rec.get("team_label") or "?",
                                       "accountId": f"digitalocean:team:{rec.get('team_uuid') or rec.get('team_label')}",
@@ -245,6 +252,7 @@ def issuers(degraded: list, cloudflare_accounts: dict[str, str] | None = None,
                          "accountId": "heroku:user", "record": "heroku ledger"}
     names = cloudflare_accounts or {}
     unresolved: set[str] = set()
+    recorded = set(out)
     for row in _movements(degraded):
         if row.get("tool") != "cloudflare.py" or row.get("event") not in ("issue", "rotate"):
             continue
@@ -261,9 +269,9 @@ def issuers(degraded: list, cloudflare_accounts: dict[str, str] | None = None,
         if slot.endswith("_*"):
             stem = slot[:-1]                                     # FOLDER/ENV/PREFIX_
             for one in slots or []:
-                if one.startswith(stem):
+                if one.startswith(stem) and one not in recorded:
                     out[one] = who
-        else:
+        elif slot not in recorded:
             out[slot] = who
     for acct in sorted(unresolved):
         degraded.append({"source": "cloudflare:journal", "code": "unresolved",
@@ -325,7 +333,7 @@ def accounts() -> dict:
     doc = organizations.load()
     a = organizations.Assigner(doc=doc)
     problems = ([f"config/organizations.json: {problem}"] if problem else []) + (
-        organizations.validate(doc) if a.active else [])
+        organizations.validate(doc) if doc.get("organizations") else [])
     default = a.default if a.active else IMPLICIT_DEFAULT
     estate = organizations._estate_owners()
     acc = _Accounts()
@@ -487,7 +495,9 @@ def accounts() -> dict:
     # whose own token is stashed is already listed above. The Heroku user is the one exception, reached through
     # the Heroku admin token whenever one is stashed.
     slots = ["/".join(x) for x in _slots([])]
-    for slot, who in sorted(issuers(degraded, cf_names, slots).items()):
+    do_by_uuid = {str(t["team_uuid"]): do_keys.get(t.get("id")) or [str(t["team_uuid"])]
+                  for t in (do or {}).get("accounts") or [] if isinstance(t, dict) and t.get("team_uuid")}
+    for slot, who in sorted(issuers(degraded, cf_names, slots, do_by_uuid).items()):
         if who["provider"] == "openrouter":
             continue                                            # counted from the ledger above, once per key
         row = acc.rows.get(who["accountId"])
@@ -495,7 +505,7 @@ def accounts() -> dict:
             row = acc.add(who["accountId"], who["provider"], "user" if who["accountId"] == "heroku:user" else
                           "team" if who["provider"] in ("heroku", "digitalocean") else "account", who["account"],
                           who["keys"], who["rule"],
-                          connected=who["accountId"] == "heroku:user" and bool(hk_stashed), via=who["record"])
+                          connected=who["provider"] == "heroku" and bool(hk_stashed), via=who["record"])
             if not row["connected"]:
                 row["decision"] = {"reason": "a door's record names it, and no token for it is stashed here",
                                    "command": STASH[who["provider"]]}
@@ -516,6 +526,7 @@ def accounts() -> dict:
     out_rows = [_decide(row, a, default, estate) for row in sorted(acc.rows.values(), key=lambda r: r["id"])]
     groups = _groups(a, default, out_rows, projects)
     needs = [r["id"] for r in out_rows if r.get("decision")]
+    degraded = _once(degraded)
     state = "empty" if not out_rows else ("partial" if degraded else "complete")
     return {"schema": ACCOUNTS_SCHEMA, "generatedAt": _now(), "state": state, "configured": a.active,
             "default": default, "organizations": groups, "accounts": out_rows, "needsDecision": needs,
@@ -556,6 +567,17 @@ def _passed_on(provider: str, doc: dict | None, degraded: list) -> None:
                              "reason": str(d.get("reason") or "")[:200],
                              "effect": "that account's rows are as the last good scan saw them",
                              **({"since": (doc or {}).get("scanned_on")} if (doc or {}).get("scanned_on") else {})})
+
+
+def _once(rows: list[dict]) -> list[dict]:
+    """`degraded` with each row once: two readers of one unreadable file each name it."""
+    seen, out = set(), []
+    for d in rows:
+        key = (d.get("source"), d.get("code"), d.get("reason"))
+        if key not in seen:
+            seen.add(key)
+            out.append(d)
+    return out
 
 
 def _quote(text: str) -> str:
@@ -677,7 +699,10 @@ def keys(org: str) -> dict:
         elif p.get("organization_source") == "conflict" and org in a.hits(p, claims.get(p["id"])):
             scope[p["id"]] = {"side": "conflict", "why": f"the project's rules disagree ({p.get('organization_why')})"}
     slots = _slots(degraded)
-    who = issuers(degraded, cloudflare_names(cf, degraded), ["/".join(x) for x in slots])
+    do_keys = organizations.account_keys("digitalocean", (do or {}).get("accounts") or [])
+    do_by_uuid = {str(t["team_uuid"]): do_keys.get(t.get("id")) or [str(t["team_uuid"])]
+                  for t in (do or {}).get("accounts") or [] if isinstance(t, dict) and t.get("team_uuid")}
+    who = issuers(degraded, cloudflare_names(cf, degraded), ["/".join(x) for x in slots], do_by_uuid)
     resolve = _vault_resolver(projects)
     rows = []
     for folder, env, name in slots:
@@ -686,8 +711,7 @@ def keys(org: str) -> dict:
         side = scope.get(pid or "")
         issuer = who.get(slot)
         iorg = (a.account(issuer["rule"], issuer["keys"]) if issuer and issuer["rule"]
-                else {"organization": None, "organization_source": "none",
-                      "organization_why": "no rule kind names this account"} if issuer else None)
+                else _no_rule_kind(a) if issuer else None)
         if side is None and not (iorg and iorg["organization"] == org):
             continue
         cls, why = _classify(org, a.default, side, issuer, iorg)
@@ -705,6 +729,7 @@ def keys(org: str) -> dict:
             row["selected"] = False
         rows.append(row)
     fixed = _not_movable(org, a, degraded)
+    degraded = _once(degraded)
     counts = {c: sum(1 for r in rows if r["class"] == c) for c in ("organization", "personal", "ambiguous")}
     counts["notMovable"] = len(fixed)
     state = "empty" if not rows and not fixed else ("partial" if degraded else "complete")
@@ -715,6 +740,15 @@ def keys(org: str) -> dict:
             "notChecked": ["values present twice in this space (ORG-R09) and names the organization already holds "
                            "(ORG-R10) need a comparison of values or the organization's context; neither is read here"],
             "problems": organizations.validate(doc), "degraded": degraded}
+
+
+def _no_rule_kind(a) -> dict:
+    """The Heroku user, which no rule kind can name: the default organization's, as `accounts()` reads it."""
+    if a.default:
+        return {"organization": a.default, "organization_source": "default",
+                "organization_why": "no rule kind names a Heroku user account; its own apps are the default's"}
+    return {"organization": None, "organization_source": "none",
+            "organization_why": "no rule kind names a Heroku user account, and no organization is the default"}
 
 
 def _classify(org: str, default: str | None, side: dict | None, issuer: dict | None, iorg: dict | None):
@@ -730,7 +764,7 @@ def _classify(org: str, default: str | None, side: dict | None, issuer: dict | N
         return "ambiguous", f"issued in {acct}, which is {org}'s, but {psay}"
     if src == "conflict":
         return "ambiguous", f"{psay}; it was issued in {acct}, which is shared ({iorg['organization_why']})"
-    if src == "rule" and iorg["organization"] == default:
+    if src in ("rule", "default") and default and iorg["organization"] == default:
         if side and side["side"] == "conflict":
             return "personal", f"issued in {acct}, which is personal, and {psay}"
         return "ambiguous", f"{psay}, but it was issued in {acct}, which is personal"
@@ -784,8 +818,12 @@ def accounts_text(view: dict) -> str:
     unread = next((p for p in view["problems"] if p.startswith("config/organizations.json:")), None)
     if unread:
         lines.append(f"{unread}: it is read as if absent, so every account reads Personal until it is fixed.")
+    elif not view["configured"] and view["problems"]:
+        lines.append("config/organizations.json names no usable organization (the problems are below), so every "
+                     "account of yours reads Personal.")
     elif not view["configured"]:
-        lines.append("No config/organizations.json: you are in no organization, and every account is personal.")
+        lines.append("No config/organizations.json: you are in no organization, and every account of yours is "
+                     "personal; repository owners outside config/ownership.json read Not ours.")
     rows = {r["id"]: r for r in view["accounts"]}
     for g in view["organizations"]:
         lines.append(f"{g['label']} ({g['kind']}): {len(g['accounts'])} account(s), {len(g['projects'])} project(s)")
