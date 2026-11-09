@@ -65,8 +65,24 @@
         the door's record, or put by hand); the door admin and provisioning keys as never moved. Names only: no
         value is read (OBS-415; schema `org-keys/1`)
 
-`accounts` and `keys` print text, or with `--json` one JSON document; every other answer is one JSON document on stdout; a refusal is `{"error": code, "message": ...}` on stderr, exit 1. A
-refusal a person resolves also carries `nextStep` (in words) and `command`. Exit 1 too when every organization asked
+    project-observatory full org select --org NAME [plan|show|apply|undo|confirm-replacement KEY] [--json]
+        the local selection record of what goes to organization NAME (OBS-417; `org-selection/1`, owner-only, never
+        sent): `plan` (the default) shows the projects, keys and accounts proposed for it with the layout, what the
+        organization would receive and what stays personal, and its digest; `--include ID`, `--exclude ID`,
+        `--include-group proposed|needs-you`, `--exclude-group ...`, `--label PROJECT=TEXT`, `--key KEY=CHOICE`
+        (hand-over-revoke, hand-over-keep, keep), `--layout separate-space|this-space|one-space`, `--serves SPACE`
+        and `--reset` change the draft item by item. `apply --digest D` writes the next revision only in the form the
+        preview showed and starts its journal: a project waits for Fabric's adaptation plan (nothing is sent), a key
+        waits for the request queue and the rotation (no value is read or copied), the layout waits for its step.
+        `show` reads the journal back with its counts and what was found since; `undo` restores the revision before;
+        `confirm-replacement KEY` records that the organization's replacement for KEY works (separate-space layout).
+        An agent passes the operator's words with `--decision JSON` or `--decision-file FILE` (contract DEC-0121).
+        Gates: `plan` without a change and `show` none; a change, `apply`, `undo` and `confirm-replacement`
+        relayed (the operator's words for an agent); your passkey signing in Fabric, the macOS administrator
+        password and the administrator's computer token human
+
+`accounts`, `keys` and `select` print text, or with `--json` one JSON document; every other answer is one JSON document on stdout; a refusal is `{"error": code, "message": ...}` on stderr, exit 1. A
+refusal a person resolves also carries `command` (and, outside `select`, `nextStep` in words). Exit 1 too when every organization asked
 failed, a check-in the server refused included.
 """
 from __future__ import annotations
@@ -83,9 +99,47 @@ import paths  # noqa: E402
 NODE = paths.setting_path("OBSERVATORY_NODE", paths.HOME / "node")
 
 
+class _Parser(argparse.ArgumentParser):
+    """argparse repeats rejected values back (`invalid choice: ...`, `ambiguous option: ...`, `unrecognized
+    arguments: ...`), quoted one way or another or not at all. Every word the caller typed that is not a well-formed
+    identifier is named only by its length (`credential_shape.echo`) wherever it appears in the message, and anything
+    shaped like a credential is redacted: no refusal repeats a value the caller sent."""
+
+    #: The words being parsed, kept by the top parser for its subparsers' messages.
+    typed: list[str] = []
+
+    def error(self, message):  # noqa: D401 - argparse's own hook
+        import credential_shape
+        hidden: dict[str, str] = {}
+        import re
+        for word in _Parser.typed:
+            for part in {word, word.partition("=")[2]} - {""}:
+                said = credential_shape.echo(part)
+                if said != repr(part) and not re.fullmatch(r"--?[A-Za-z][A-Za-z0-9-]*", part):
+                    hidden[part] = said                # neither an identifier nor an option's name: never repeated
+        for part in sorted(hidden, key=len, reverse=True):
+            # Quoted as argparse quotes it, or bare where it stands as its own word (never inside another word,
+            # so a typed `-` leaves `--layout` and `separate-space` as they are).
+            message = message.replace(repr(part), hidden[part])
+            message = re.sub(r"(?<![\w-])" + re.escape(part) + r"(?![\w-])", lambda _m, h=hidden[part]: h, message)
+        super().error(credential_shape.redact(message))
+
+    def parse_known_args(self, args=None, namespace=None):
+        top = getattr(self, "top", False)
+        if top:
+            _Parser.typed = [str(a) for a in (sys.argv[1:] if args is None else args)]
+        namespace, extras = super().parse_known_args(args, namespace)
+        if extras and top:
+            # argparse joins unrecognized arguments with spaces: each is named here, whole.
+            import credential_shape
+            self.error("unrecognized arguments: " + " ".join(credential_shape.echo(a) for a in extras))
+        return namespace, extras
+
+
 def parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="project-observatory full org",
+    p = _Parser(prog="project-observatory full org",
                                 description="This machine's organization enrollments (fabric-device/0.1).")
+    p.top = True                                       # the parser that keeps the typed words for its subparsers
     sub = p.add_subparsers(dest="command", required=True)
     enroll = sub.add_parser("enroll", help="enroll with an enrollment token from the vault")
     enroll.add_argument("--server", required=True, help="the organization server, https:// and an authority")
@@ -111,6 +165,29 @@ def parser() -> argparse.ArgumentParser:
     keys = sub.add_parser("keys", help="an organization's keys classified, by name only (read-only)")
     keys.add_argument("--org", required=True, help="an organization of config/organizations.json")
     keys.add_argument("--json", action="store_true", help="one JSON document (org-keys/1)")
+    select = sub.add_parser("select", help="the local selection of what goes to an organization (owner-only, "
+                                           "never sent)")
+    select.add_argument("--org", required=True, help="an organization of config/organizations.json")
+    select.add_argument("action", nargs="?", default="plan",
+                        choices=("plan", "show", "apply", "undo", "confirm-replacement"))
+    select.add_argument("key", nargs="?", metavar="KEY", help="confirm-replacement: the key (vault:FOLDER/ENV/NAME)")
+    select.add_argument("--include", action="append", metavar="ID", help="choose an item (repeatable)")
+    select.add_argument("--exclude", action="append", metavar="ID", help="leave an item out (repeatable)")
+    select.add_argument("--include-group", choices=("proposed", "needs-you"),
+                        help="choose every member of a group as listed now")
+    select.add_argument("--exclude-group", choices=("proposed", "needs-you"),
+                        help="leave out every member of a group as listed now")
+    select.add_argument("--label", action="append", metavar="PROJECT=TEXT",
+                        help="the name the organization reads for a project; empty TEXT clears it")
+    select.add_argument("--key", dest="keys", action="append", metavar="KEY=CHOICE",
+                        help="hand-over-revoke, hand-over-keep or keep")
+    select.add_argument("--layout", choices=("separate-space", "this-space", "one-space"))
+    select.add_argument("--serves", metavar="SPACE", help="the space the selection serves (separate-space layout)")
+    select.add_argument("--reset", action="store_true", help="drop the draft before any other change")
+    select.add_argument("--digest", help="apply: the digest the preview showed")
+    select.add_argument("--decision", metavar="JSON", help="the operator's words, contract DEC-0121's shape")
+    select.add_argument("--decision-file", metavar="FILE", help="the same, from a file")
+    select.add_argument("--json", action="store_true", help="one JSON document (org-select/1)")
     records = sub.add_parser("records", help="the estate revision and delta this machine applied")
     rsub = records.add_subparsers(dest="action", required=True)
     apply = rsub.add_parser("apply", help="verify and apply an estate revision or a delta page")
@@ -210,10 +287,87 @@ def views(args) -> int:
     return 0
 
 
+def _pairs(values: list[str] | None, what: str) -> dict:
+    out = {}
+    for value in values or []:
+        ident, sep, rest = value.partition("=")
+        if not sep:
+            raise ValueError(f"{what} takes ID=VALUE")
+        out[ident] = rest
+    return out
+
+
+def select(args) -> int:
+    """`select`: the local selection record (`org_selection.py`), which needs no enrollment and sends nothing."""
+    import org_selection as S
+
+    def refuse(refusal) -> int:
+        if args.json:
+            print(json.dumps(refusal.answer()), file=sys.stderr)
+        else:
+            print(f"refused: {refusal}" + (f"\n  {refusal.command}" if refusal.command else ""), file=sys.stderr)
+        return 1
+    try:
+        plan_only = {"--include": args.include, "--exclude": args.exclude, "--include-group": args.include_group,
+                     "--exclude-group": args.exclude_group, "--label": args.label, "--key": args.keys,
+                     "--layout": args.layout, "--serves": args.serves, "--reset": args.reset}
+        stray = [flag for flag, value in plan_only.items() if value] if args.action != "plan" else []
+        if args.digest and args.action != "apply":
+            stray.append("--digest")
+        if args.key and args.action != "confirm-replacement":
+            stray.append("KEY")
+        if args.action == "show" and (args.decision is not None or args.decision_file):
+            stray.append("--decision")
+        if stray:
+            # A flag the action does not take would be dropped without a word: refused instead.
+            owner = {"--digest": "apply", "KEY": "confirm-replacement",
+                     "--decision": "a change, apply, undo or confirm-replacement"}.get(stray[0], "plan")
+            raise S.Refusal("invalid-change", f"{stray[0]} belongs to {owner}, not to {args.action}")
+        decision = None
+        if args.decision is not None or args.decision_file:
+            try:
+                raw = args.decision if args.decision is not None else Path(args.decision_file).read_text(encoding="utf-8")
+                decision = json.loads(raw)
+            except (OSError, ValueError, RecursionError):      # nested past Python's limit: not a decision either
+                decision = None
+            if not isinstance(decision, dict):
+                # `null`, a list or a string is not a decision: never read as "no decision", which is the person's own.
+                raise S.Refusal("decision-invalid", "the decision is not one JSON object in contract DEC-0121's shape")
+        caller = "cli" if decision is None else "agent:cli"
+        if args.action == "plan":
+            try:
+                changes = {"include": args.include, "exclude": args.exclude, "includeGroup": args.include_group,
+                           "excludeGroup": args.exclude_group, "labels": _pairs(args.label, "--label"),
+                           "keys": _pairs(args.keys, "--key"), "layout": args.layout, "serves": args.serves,
+                           "reset": args.reset}
+            except ValueError as error:
+                raise S.Refusal("invalid-change", str(error))
+            view = S.plan(args.org, changes, decision=decision, caller=caller)
+        elif args.action == "show":
+            view = S.show(args.org)
+        elif args.action == "apply":
+            view = S.apply(args.org, args.digest, decision=decision, caller=caller)
+        elif args.action == "undo":
+            view = S.undo(args.org, decision=decision, caller=caller)
+        else:
+            if not args.key:
+                raise S.Refusal("not-in-record", "confirm-replacement names the key: vault:FOLDER/ENV/NAME")
+            view = S.confirm_replacement(args.org, args.key, decision=decision, caller=caller)
+    except S.Refusal as refusal:
+        return refuse(refusal)
+    if args.json:
+        print(json.dumps(view, indent=1, sort_keys=True, ensure_ascii=False))
+    else:
+        print(S.text(view))
+    return 1 if view.get("state") == "error" else 0          # a damaged record is never a success to a script
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     if args.command in ("accounts", "keys"):
         return views(args)
+    if args.command == "select":
+        return select(args)
     try:
         from node import org
     except RuntimeError as error:                          # the engine's `full` extra
