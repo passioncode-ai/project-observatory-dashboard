@@ -2387,7 +2387,8 @@ rules or its applied selection (`chosen-for-another`, until contract CT-141
 decides a project may be in two), a project that is Not ours (`not-ours`; `conflict-unchecked` when another organization's record does
 not read, so the check cannot be made), and a change to an item whose
 irreversible step is done (`entry-signed`, `already-revoked`). It is also refused
-while `registry/projects.json` does not read (`registry-unreadable`), while the
+while `registry/projects.json` does not read (`registry-unreadable`) or the
+vault's slots do not list (`vault-unreadable`), while the
 source of a chosen item did not read this time (`source-unreadable`: the choice
 stays, and the plan lists the item under `unread`), or when a chosen item is no
 longer found here although its source read (`items-not-found`), since each would

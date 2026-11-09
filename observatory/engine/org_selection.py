@@ -205,7 +205,11 @@ def _revisions(org: str) -> list[pathlib.Path]:
     folder = _folder(org) / "revisions"
     if not folder.is_dir() or folder.is_symlink():
         return []
-    return sorted(p for p in folder.glob("[0-9]*.json") if p.stem.isdigit())
+    try:
+        return sorted(p for p in folder.glob("[0-9]*.json") if p.stem.isdigit())
+    except OSError as exc:
+        raise Refusal("record-unreadable", f"the selection's revisions do not list ({type(exc).__name__}); nothing "
+                                           "is decided from them", "project-observatory full doctor") from None
 
 
 def _verified(doc: dict, org: str, where: str) -> dict:
@@ -264,8 +268,13 @@ def _draft(org: str) -> dict | None:
     except Refusal as refusal:
         raise Refusal(refusal.code, f"the draft does not read: {refusal}", f"{CMD.format(org=_q(org))} plan --reset") \
             from None
-    if doc is not None and (doc.get("schema") != DRAFT_SCHEMA or doc.get("organization") != org
-                            or not isinstance(doc.get("items"), dict)):
+    rows_ok = isinstance((doc or {}).get("items"), dict) and all(
+        isinstance(r, dict) and r.get("kind") in ("project", "key", "account")
+        and r.get("decision") in (ITEM_CHOICES if r.get("kind") != "key" else KEY_CHOICES)
+        for r in (doc or {}).get("items", {}).values()) if doc is not None else True
+    if doc is not None and (doc.get("schema") != DRAFT_SCHEMA or doc.get("organization") != org or not rows_ok
+                            or doc.get("layout", None) not in (None, *LAYOUTS)
+                            or not isinstance(doc.get("serves", ""), (str, type(None)))):
         raise Refusal("record-unreadable", f"the draft is not {DRAFT_SCHEMA}; drop it and start again",
                       f"{CMD.format(org=_q(org))} plan --reset")
     return doc
@@ -291,16 +300,24 @@ def _node_actions():
     """The engine's `node.actions` (the contract's `actionDecision`), whatever else this process imported as `node`:
     `tools/node.py` is a module of that name, and a door that put `tools/` first on the path shadows the package.
     Then the package is loaded under a private name from its own folder, so its relative imports still resolve."""
-    try:
-        from node import actions
-        return actions
-    except ImportError:
-        pass
     import importlib
     import importlib.util
+    engine = pathlib.Path(__file__).resolve().parent / "node"
+    loaded = sys.modules.get("node")
+    if loaded is not None and getattr(loaded, "__path__", None) and \
+            pathlib.Path(list(loaded.__path__)[0]).resolve() == engine:
+        from node import actions                       # the engine's package is the one imported
+        return actions
+    if loaded is None:
+        spec = importlib.util.find_spec("node")
+        if spec is not None and spec.submodule_search_locations and \
+                pathlib.Path(list(spec.submodule_search_locations)[0]).resolve() == engine:
+            from node import actions                   # importing `node` now finds the engine's package
+            return actions
+    # Otherwise never import the name `node` (that would leave tools/node.py behind for every later import):
     name = "_observatory_engine_node"
     if name not in sys.modules:
-        folder = pathlib.Path(__file__).resolve().parent / "node"
+        folder = engine
         spec = importlib.util.spec_from_file_location(name, folder / "__init__.py",
                                                       submodule_search_locations=[str(folder)])
         package = importlib.util.module_from_spec(spec)
@@ -467,7 +484,9 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
     for ident, change in changes.items():
         row = items.get(ident) or {"id": ident, "kind": change["kind"], "group": "by-hand",
                                    "why": "you added it by hand", "new": False}
-        row.update(decision=change["decision"], by=change.get("by", "hand"), new=False)
+        decided_now = change.get("by", "hand") in ("hand", "group")
+        row.update(decision=change["decision"], by=change.get("by", "hand"),
+                   new=row.get("new", False) and not decided_now)
         if row.get("group") == "by-hand" or ident not in cands:
             # Chosen or left out by hand, not proposed by a rule: the record says so, not an older reason.
             row.update(group="by-hand", why="you chose it by hand" if change["decision"] not in ("exclude", "keep")
@@ -521,7 +540,7 @@ def _unread_source(kind: Any, ident: str, ctx: dict) -> str | None:
         src = str(d.get("source") or "")
         if kind == "project" and src == "registry/projects.json":
             return src
-        if kind == "key" and src.startswith("vault"):
+        if kind == "key" and src == "vault":
             return src
         provider = ident.split(":", 1)[0]
         if kind == "account" and (src.split(":", 1)[0] == provider or src == f"registry/{provider}-account.json"
@@ -637,9 +656,9 @@ def _preview(org: str, ctx: dict, sel: dict) -> dict:
     default = ctx.get("default")
 
     def personal(organization: Any) -> bool:
-        # Personal: the default organization's, or no organization yet (a conflict, nothing configured). Another
-        # organization's projects, keys and accounts are not personal and are not counted as such.
-        return organization in (None, default)
+        # Stays personal: the default organization's, no organization yet (a conflict, nothing configured), or this
+        # organization's that the person leaves out. Another organization's are not counted as personal.
+        return organization in (None, default, org)
     stay_projects = sum(1 for pid, p in ctx["projects"].items()
                         if pid not in chosen_projects and p.get("organization_source") != "external"
                         and personal(p.get("organization")))
@@ -661,8 +680,12 @@ def _preview(org: str, ctx: dict, sel: dict) -> dict:
         "keysRevoked": len(revoked),
         "accounts": len(accounts_in),
         "staysPersonal": ({"projects": None, "keys": None, "accounts": None,
-                           "line": "what stays personal is not known: registry/projects.json did not read"}
-                          if any(d.get("source") == "registry/projects.json" for d in ctx["degraded"]) else
+                           "line": "what stays personal is not known: " + (
+                               "registry/projects.json" if any(d.get("source") == "registry/projects.json"
+                                                               for d in ctx["degraded"]) else "the vault")
+                           + " did not read"}
+                          if any(d.get("source") in ("registry/projects.json", "vault") for d in ctx["degraded"])
+                          else
                           {"projects": stay_projects, "keys": stay_keys, "accounts": stay_accounts,
                            "line": f"{stay_projects} projects and {stay_keys} keys stay personal and are never sent"}),
         "cannotBeUndone": [f"{i['id']}: the personal value is revoked at its provider once the organization's "
@@ -744,16 +767,17 @@ def _plan_answer(org: str, ctx: dict, sel: dict, record: dict | None, draft: dic
     unread = [i["id"] for i in sel["items"].values() if i.get("unread")]
     applied = bool(record) and record.get("selectionDigest") == digest
     any_items = bool(sel["items"]) or bool(record)
-    registry_unread = any(d.get("source") == "registry/projects.json" for d in ctx["degraded"])
+    registry_unread = any(d.get("source") in ("registry/projects.json", "vault") for d in ctx["degraded"])
     state = ("partial" if registry_unread and not conflicts else "empty" if not any_items else "conflict"
              if conflicts else "partial" if ctx["degraded"] or unknown or unread else "complete")
     undecided = sorted(i["id"] for i in sel["items"].values() if i.get("new"))
     q = CMD.format(org=_q(org))
     if record and _unfinished(org, record):
+        state = "waiting"                              # never complete while the last apply has not finished
         step, cmd = RESUME_STEP, f"{q} apply --digest {record['selectionDigest']}"
     elif registry_unread:
-        step, cmd = ("registry/projects.json did not read, so what is proposed is not known; nothing is applied until "
-                     "it reads", "project-observatory full doctor")
+        step, cmd = ("registry/projects.json or the vault did not read, so what is proposed is not known; nothing is "
+                     "applied until both read", "project-observatory full doctor")
     elif conflicts:
         step, cmd = "clear the projects another organization already holds", f"{q} plan --exclude PROJECT"
     elif not any_items:
@@ -919,10 +943,9 @@ def _change(org: str, draft: dict | None, record: dict | None, changes: dict, wh
             raise Refusal("unknown-item", f"{_echo(ident)} is not a project; only a project carries a label")
         row = draft["items"].get(ident) or sel["items"].get(ident) or {}
         # A label changes what the organization reads, never whether the project goes (ORG-R02): its decision and
-        # `by` stay, and a project nobody chose stays out. On an item found since the record, typing a label is
-        # deciding it, so it is recorded as the person's.
-        by = "hand" if row.get("new") or not row else row.get("by", "hand")
-        put(ident, row.get("decision", "exclude"), by=by, label=_label_ok(text) if text else "")
+        # `by` stay, a project nobody chose stays out, and an item found since stays new until a person decides it.
+        put(ident, row.get("decision", "exclude"), by=row.get("by", "hand") if row else "hand",
+            label=_label_ok(text) if text else "")
     draft["updatedAt"] = _now()
     # Each change is its own draft, named at random: a revision removes the draft it consumed by this name, never
     # one changed since (two changes can fall in one second).
@@ -1139,6 +1162,10 @@ def _complete(org: str, ctx: dict, sel: dict) -> None:
     identity, and which keys are its, come from it), and every chosen item must still be known here. A degraded
     provider read does not stop an apply; these two do, because they would change what the record says silently."""
     q = CMD.format(org=_q(org))
+    if any(d.get("source") == "vault" for d in ctx["degraded"]):
+        raise Refusal("vault-unreadable", "the vault's slots do not list, so which keys go is not known; nothing is "
+                                          "applied until they list (no value is read either way)",
+                      "project-observatory full doctor")
     if any(d.get("source") == "registry/projects.json" for d in ctx["degraded"]):
         raise Refusal("registry-unreadable", "registry/projects.json does not read, so which projects and keys are "
                                              "chosen is not known; nothing is applied until it reads",
@@ -1469,6 +1496,7 @@ def show(org: str) -> dict:
     command = f"{q} plan"
     if not rec["items"] and not rec.get("layout"):
         state = "empty"
+        step = "nothing is selected; the next plan starts from the defaults"
     if _unfinished(org_ok, rec):
         # An apply or undo stopped after its revision was written (ORG-R12): never shown as done or empty. The
         # record's own digest finishes it whatever the plan reads now (`apply` resumes before anything else).

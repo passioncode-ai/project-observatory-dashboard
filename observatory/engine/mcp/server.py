@@ -587,7 +587,8 @@ def observatory_org_keys(
                               description="An organization of config/organizations.json, not the default one.")],
 ) -> dict[str, Any]:
     """Which keys would go to an organization, BY NAME (OBS-415, organization onboarding ORG-W6, ORG-R06,
-    ORG-R07): each vault slot of the projects `org` holds, and each issued from its accounts, with `class`
+    ORG-R07): each vault slot of the projects `org` holds (and of the projects its applied selection chose,
+    `observatory_org_selection`), and each issued from its accounts, with `class`
     `organization` (the project and its issuing account are both the organization's), `personal`, or `ambiguous`
     (they disagree, the account is shared or has no rule, or the key was put by hand so its issuer is unknown),
     `why`, the issuer from the door's record (the OpenRouter and Heroku ledgers, the DigitalOcean records, the

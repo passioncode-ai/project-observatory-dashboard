@@ -961,8 +961,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "05aaf5f9dad6de42d34e6b8d02a3acc908f135ad484690687e793733cdec0e3d",
-      "bytes": 301552,
+      "export_sha256": "bf288a1819226260aa23011ab8180df7840ccc6c6738a08603dff7b409e4f439",
+      "bytes": 301606,
       "upstream_modified": true
     },
     {
@@ -3201,8 +3201,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "e40fd421416376dec60880c5f4700be99bb884606bb78ae69be703315af799bd",
-      "bytes": 129269,
+      "export_sha256": "8d8f82b7b369f0d7a0de998a2194fab98ab4749459e1021770a4e80abd268c9a",
+      "bytes": 129352,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -3530,8 +3530,8 @@
       "path": "org_selection.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "512b992208311a49873212e9c8586ac48d1ff606630114985ac311adb0a23a90",
-      "bytes": 94074
+      "export_sha256": "fadff331748a7d1fe67f372f851d82fbf3f8f36427a91fb0a625ca85ce6ce145",
+      "bytes": 96332
     },
     {
       "path": "org_view.py",
@@ -5736,8 +5736,8 @@
       "path": "tests/test_org_selection.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "22569f3995e08134a8801f01ee723cced6382a25db1ae7c86453b1108bdf2e3c",
-      "bytes": 78012
+      "export_sha256": "d398de5f19f0ca5990a7538258b2be89526eec179513292e2204236d5cad5ef1",
+      "bytes": 81306
     },
     {
       "path": "tests/test_organizations.py",
@@ -7227,8 +7227,8 @@
       "path": "tools/org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4970dde0b870e4110a34aad13c9e0db1737893365644ebf037cee760c1963076",
-      "bytes": 22449
+      "export_sha256": "fe7b3ee58b06cfca153477a7bd0979ba364e440ca9791d80f960530e1f749489",
+      "bytes": 22729
     },
     {
       "path": "tools/organization_findings.py",

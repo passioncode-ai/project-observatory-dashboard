@@ -758,9 +758,10 @@ class ReviewRoundFour(Base):
         v = self.sel.plan("acme", {"labels": {"project:gamma": "Gamma"}})
         self.sel.apply("acme", v["digest"])
         row = next(i for i in self.sel.current("acme")["items"] if i["id"] == "project:gamma")
-        self.assertEqual((row["decision"], row["label"], row["by"]), ("exclude", "Gamma", "hand"),
-                         "typing a label on an item found since decides it, so it is recorded")
+        self.assertEqual((row["decision"], row["label"], row["by"]), ("exclude", "Gamma", "default"),
+                         "the label is kept, and a label alone decides nothing")
         self.assertTrue(self.sel.plan("acme")["applied"])
+        self.assertEqual(self.sel.show("acme")["new"], ["project:gamma"], "still waiting for a person")
 
     def test_an_undo_reads_applied_beside_an_item_found_since(self):
         self.sel.apply("acme", self.ready()["digest"])
@@ -1040,6 +1041,77 @@ class ReviewRoundNine(Base):
         v = self.sel.plan("acme")
         named = [(d["source"], d["code"]) for d in v["degraded"]]
         self.assertEqual(len(named), len(set(named)), named)
+
+
+class ReviewRoundTen(Base):
+    """What the tenth review found: each case reproduced, then fixed."""
+
+    def vault_unlistable(self):
+        root = self.secrets / "projects"
+        moved = root.with_name("projects-away")
+        root.rename(moved)
+        root.write_text("not a folder")
+        return root, moved
+
+    def test_a_vault_that_does_not_list_is_never_counted_or_applied(self):
+        v = self.ready()
+        root, moved = self.vault_unlistable()
+        try:
+            v = self.sel.plan("acme")
+            self.assertEqual(v["state"], "partial")
+            self.assertIsNone(v["preview"]["staysPersonal"]["keys"])
+            self.assertIn("the vault did not read", v["preview"]["staysPersonal"]["line"])
+            with self.assertRaises(self.sel.Refusal) as caught:
+                self.sel.apply("acme", v["digest"])
+            self.assertEqual(caught.exception.code, "vault-unreadable")
+        finally:
+            root.unlink()
+            moved.rename(root)
+
+    def test_plan_reads_waiting_while_the_last_apply_is_unfinished(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        v = self.sel.plan("acme", {"exclude": ["project:beta-api"]})
+        journal_one = self.sel._journal_path("acme", 1).read_text()
+        self.sel.apply("acme", v["digest"])
+        self.sel._journal_path("acme", 1).write_text(journal_one)
+        self.assertEqual(self.sel.plan("acme")["state"], "waiting")
+
+    def test_what_stays_personal_counts_what_the_person_leaves_out(self):
+        v = self.ready(exclude=["project:beta-api"])
+        self.assertEqual(v["preview"]["staysPersonal"]["projects"], 3, "notes, shared-tool and beta-api")
+
+    def test_a_hand_edited_draft_row_is_refused_not_a_crash(self):
+        self.ready()
+        path = self.sel._folder("acme") / "draft.json"
+        doc = json.loads(path.read_text())
+        doc["items"]["project:alpha-web"] = {"decision": "include"}
+        path.write_text(json.dumps(doc))
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.plan("acme")
+        self.assertIn("plan --reset", caught.exception.command)
+
+    def test_show_after_an_undo_to_nothing_says_so(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        self.sel.undo("acme")
+        shown = self.sel.show("acme")
+        self.assertEqual(shown["state"], "empty")
+        self.assertIn("nothing is selected", shown["nextStep"])
+
+    def test_the_package_is_never_replaced_by_tools_node(self):
+        saved = {k: sys.modules[k] for k in list(sys.modules) if k == "node" or k.startswith("node.")}
+        tools = str(ROOT / "tools")
+        try:
+            for k in saved:
+                del sys.modules[k]
+            sys.path.insert(0, tools)
+            self.sel._node_actions()
+            self.assertNotEqual(getattr(sys.modules.get("node"), "__file__", ""), str(ROOT / "tools" / "node.py"),
+                                "the name `node` is never bound to tools/node.py by the selection")
+        finally:
+            sys.path.remove(tools)
+            for k in [k for k in sys.modules if k == "node" or k.startswith("node.")]:
+                del sys.modules[k]
+            sys.modules.update(saved)
 
 
 class WhatTheOrganizationSees(Base):

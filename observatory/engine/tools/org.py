@@ -76,7 +76,10 @@
         waits for the request queue and the rotation (no value is read or copied), the layout waits for its step.
         `show` reads the journal back with its counts and what was found since; `undo` restores the revision before;
         `confirm-replacement KEY` records that the organization's replacement for KEY works (separate-space layout).
-        An agent passes the operator's words with `--decision JSON` or `--decision-file FILE` (contract DEC-0121)
+        An agent passes the operator's words with `--decision JSON` or `--decision-file FILE` (contract DEC-0121).
+        Gates: `plan` without a change and `show` none; a change, `apply`, `undo` and `confirm-replacement`
+        relayed (the operator's words for an agent); your passkey signing in Fabric, the macOS administrator
+        password and the administrator's computer token human
 
 `accounts`, `keys` and `select` print text, or with `--json` one JSON document; every other answer is one JSON document on stdout; a refusal is `{"error": code, "message": ...}` on stderr, exit 1. A
 refusal a person resolves also carries `nextStep` (in words) and `command`. Exit 1 too when every organization asked
