@@ -138,7 +138,8 @@ named pipe or `use_secret.py run`: `copy` reads and writes the value inside one 
 records `copied` in both stores' movement journals, and answers a receipt (`vault-copy/1`) with keyed
 digests that must read `match: true`. A target slot that holds another value is refused
 (`target-slot-filled`); pass `--replace` only when I say so. Every refusal has a `code`, exits 2 and leaves the
-target as it was; `outcome: failed` (exit 1) means a write may be partial: read both journals before retrying;
+target without a value, metadata or journal line from it; `outcome: failed` (exit 1) means a write may have been partial:
+read both journals before retrying; `target-unsafe` means a file in the target fails the vault's own checks: say which;
 `target-other-account` means the store belongs to another OS account and this account cannot write it for
 that account: say so, do not work around it. A copy to another machine is not this command (OBS-194).
 

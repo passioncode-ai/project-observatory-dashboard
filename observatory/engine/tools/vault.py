@@ -844,12 +844,14 @@ def _target_store(text: str) -> pathlib.Path:
     links), the store itself never a link. Refused when it is relative, a link, a file, a vault folder (the store
     is the folder that HOLDS `projects/`, as `sources.secret_store` does), or when its parent does not exist."""
     expanded = os.path.expanduser(text or "")
-    # `..` and `.` are folded first, so `<store>/projects/..` is the store it names, not a second spelling of it
-    # that the same-store check would miss (and whose lock this process would then wait on forever).
-    raw = pathlib.Path(os.path.normpath(expanded)) if expanded else pathlib.Path("")
+    raw = pathlib.Path(expanded) if expanded else pathlib.Path("")
     if not raw.is_absolute():
         raise CopyRefused("the target store must be an absolute path (the folder that holds its `projects/` vault)",
                           "target-not-absolute")
+    # `.` and `..` are refused, not folded: folded by text, `/x/link/../s` is not the folder the system reaches
+    # through the link, and left in, `<store>/projects/..` is a second spelling of a store.
+    if any(part in (".", "..") for part in re.split(r"[\\/]+", expanded)):
+        raise CopyRefused("name the target store by its plain absolute path, without `.` or `..`", "target-not-plain")
     if raw.is_symlink():
         raise CopyRefused("the target store is a symbolic link; name the folder it points at", "target-link")
     if not raw.parent.is_dir():
@@ -885,6 +887,10 @@ def _writable_by_this_account(store: pathlib.Path) -> None:
         if not os.access(folder, os.W_OK | os.X_OK):
             raise CopyRefused(f"this account cannot write into {shown_path(folder)}", "target-not-writable")
         found = True
+    if found and store.is_dir():
+        # This account's own store, owner-only before anything goes in, so no other account can swap its
+        # `projects/` between this check and the write.
+        osprivacy.private_folder(store)
     if not found and not os.access(store.parent, os.W_OK | os.X_OK):
         raise CopyRefused(f"this account cannot create the store in {shown_path(store.parent)}", "target-not-writable")
 
@@ -979,6 +985,14 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
                           "source-has-open-leak")
     t_label = f"{t_project}/{t_env}/{t_name}"
     t_slot = target_vault / t_project / t_env / t_name
+    source_store = shown_path(STORE.parent.resolve())
+
+    def source_value() -> str:
+        """The source slot's one value; any boundary the vault's reader refuses is `source-unreadable`."""
+        try:
+            return _read_private(src).strip()
+        except (VaultBoundaryError, ValueError) as exc:
+            raise CopyRefused(f"{src_label} cannot be read as a private slot ({exc})", "source-unreadable") from None
 
     def checked(value: str) -> str:
         """The refusals that depend on the two values, run before anything is written and again under the locks."""
@@ -994,51 +1008,71 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
             return "replaced"
         return "copied"
 
-    checked(_read_private(src).strip())
+    def target_side(exc: VaultBoundaryError) -> CopyRefused:
+        """A refusal of the vault's own boundaries on the target side (a link below `projects/`, a slot or metadata
+        file that is not owner-only or does not parse) under one code, never the source's `invalid-slot`."""
+        if isinstance(exc, CopyRefused):
+            return exc
+        return CopyRefused(f"the target store refused it: {exc}", "target-unsafe")
+
+    try:
+        checked(source_value())
+    except VaultBoundaryError as exc:
+        raise target_side(exc) from None
     key, key_id = _copy_digest_key()
 
     def keyed(text: str) -> str:
         return hmac.new(bytes.fromhex(key), text.encode("utf-8"), hashlib.sha256).hexdigest()
 
-    # What this call creates in the target store, removed again if a refusal comes under the locks (the slot changed
-    # while the copy waited for them), so a refusal leaves the target as it found it.
+    # What this call creates in the target store is removed again when a refusal comes after it (the slots changed
+    # while the copy waited for the locks, or a target file failed the vault's checks): the store folder and the
+    # vault folder when they are empty, and the lock file only inside a vault folder this call made (no other writer
+    # can be holding that one; a lock file left in an existing vault is harmless and is kept, never unlinked under
+    # a writer that may have opened it).
     created = not store.exists()
     vault_created = not target_vault.exists()
-    lock_created = not (target_vault / ".vault.lock").exists()
-    if created:
-        store.mkdir(mode=0o700)
-        osprivacy.private_folder(store)
-    _private_dirs(target_vault, target_vault)
-    # One order for the two locks, by the folders' identity, so two copies in opposite directions never wait on
-    # each other however each spells the stores.
-    first, second = sorted((STORE, target_vault), key=lambda f: (f.stat().st_dev, f.stat().st_ino))
+    outcome = archived = digest = None
+    written = False
     try:
+        if created:
+            store.mkdir(mode=0o700)
+            osprivacy.private_folder(store)
+        _private_dirs(target_vault, target_vault)
+        # One order for the two locks, by the folders' identity, so two copies in opposite directions never wait on
+        # each other however each spells the stores.
+        first, second = sorted((STORE, target_vault), key=lambda f: (f.stat().st_dev, f.stat().st_ino))
         with _mutation_lock(first), _mutation_lock(second):
             if not src.is_file():
                 raise CopyRefused(f"nothing at {src_label} to copy", "source-empty")
-            value = _read_private(src).strip()
+            value = source_value()
             outcome = checked(value)
-            source_meta = _read_meta(src)
-            meta = _read_meta(t_slot)
-            archived = None
-            if outcome == "replaced":
-                old = _read_private(t_slot).strip()
-                stamp = now().replace(":", "") + "-" + uuid.uuid4().hex[:12]
-                archive = t_slot.with_name(f"{t_slot.name}.retired-{stamp}")
-                _atomic_write(archive, old, root=target_vault)
-                archived = archive.name
-                meta["rotated"] = now()
-                meta["rotations"] = int(meta.get("rotations") or 0) + 1
             digest_from = keyed(value)
             if outcome != "unchanged":
+                try:
+                    source_meta = _read_meta(src)
+                except VaultBoundaryError as exc:
+                    raise CopyRefused(f"{src_label}'s metadata cannot be read ({exc})", "source-unreadable") from None
+                meta = _read_meta(t_slot)
+                written = True
+                if outcome == "replaced":
+                    old = _read_private(t_slot).strip()
+                    stamp = now().replace(":", "") + "-" + uuid.uuid4().hex[:12]
+                    archive = t_slot.with_name(f"{t_slot.name}.retired-{stamp}")
+                    _atomic_write(archive, old, root=target_vault)
+                    archived = archive.name
+                    meta["rotated"] = now()
+                    meta["rotations"] = int(meta.get("rotations") or 0) + 1
                 _atomic_write(t_slot, value, root=target_vault)
                 meta.setdefault("created", now())
                 meta["updated"] = now()
                 key_expiry.clear(meta)
                 meta.pop("provenance", None)
-                meta.update({k: source_meta[k] for k in COPY_META if k in source_meta})
-                meta["copied_from"] = {"store": shown_path(STORE.parent), "slot": src_label, "at": now()}
+                carried = [k for k in COPY_META if k in source_meta]
+                meta.update({k: source_meta[k] for k in carried})
+                meta["copied_from"] = {"store": source_store, "slot": src_label, "at": now()}
                 _atomic_write(_meta_path(t_slot), json.dumps(meta, indent=1), 0o600, root=target_vault)
+            else:
+                carried = []
             digest_to = keyed(_read_private(t_slot).strip())
             digest = {"algorithm": "HMAC-SHA-256", "key": "estate" if key_id else "one-time", "keyId": key_id,
                       "from": digest_from, "to": digest_to, "match": digest_from == digest_to}
@@ -1047,21 +1081,24 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
                 common = {"tool": tool, "outcome": outcome, "digest_key": digest["key"],
                           **({"key_id": key_id, "digest": digest_from} if key_id else {})}
                 journal("copied", src_label, to_store=shown_path(store), to_slot=t_label, **common)
-                journal("copied", t_label, _store=target_vault, from_store=shown_path(STORE.parent),
+                journal("copied", t_label, _store=target_vault, from_store=source_store,
                         from_slot=src_label, **({"archived": archived} if archived else {}), **common)
-    except CopyRefused:
-        if lock_created:
+    except VaultBoundaryError as exc:
+        if written:
+            # Past the first write a refusal is a failure: something may be in the target, and it is reported by
+            # `cmd_copy` as `failed`, never undone blind.
+            raise OSError(f"the target store refused a write midway: {exc}") from None
+        if vault_created:
             (target_vault / ".vault.lock").unlink(missing_ok=True)
         for folder, made in ((target_vault, vault_created), (store, created)):
             if made:
                 with contextlib.suppress(OSError):
                     folder.rmdir()
-        raise
+        raise target_side(exc) from None
     return {"schema": COPY_SCHEMA, "outcome": outcome, "at": now(),
-            "from": {"store": shown_path(STORE.parent), "slot": src_label, "kept": True},
+            "from": {"store": source_store, "slot": src_label, "kept": True},
             "to": {"store": shown_path(store), "slot": t_label, "storeCreated": created, "archived": archived},
-            "carried": [k for k in COPY_META if k in source_meta] if outcome != "unchanged" else [],
-            "digest": digest}
+            "carried": carried, "digest": digest}
 
 
 def cmd_copy(a) -> int:
@@ -1076,9 +1113,9 @@ def cmd_copy(a) -> int:
             print(f"vault: copy refused ({exc.code or 'invalid-slot'}): {exc}; nothing was written", file=sys.stderr)
         return 2
     except OSError as exc:
-        reason = (f"a read or a write failed ({type(exc).__name__}); the target slot and the two journals may be "
-                  f"partly written: read `vault.py movements` in both stores and the target slot's metadata before "
-                  f"copying again")
+        reason = (f"a read or a write failed ({type(exc).__name__}); the target slot and the two journals may have "
+                  f"been partly written: read `vault.py movements` in both stores and the target slot's metadata "
+                  f"before copying again")
         if a.json:
             print(json.dumps({"schema": COPY_SCHEMA, "outcome": "failed", "code": "filesystem-failed",
                               "reason": reason}, indent=1, ensure_ascii=False))

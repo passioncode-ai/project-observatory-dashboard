@@ -179,7 +179,10 @@ class Copy(unittest.TestCase):
         p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", str(self.vault), "--json")
         self.assertEqual(json.loads(p.stdout)["code"], "target-is-vault-folder")
         p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", str(self.vault) + "/..", "--json")
-        self.assertEqual(json.loads(p.stdout)["code"], "same-store", "another spelling of this store")
+        self.assertEqual(json.loads(p.stdout)["code"], "target-not-plain", "`..` is refused, never folded")
+        p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store",
+                           str(self.base / "space") + os.sep + "." + os.sep + "secrets", "--json")
+        self.assertEqual(json.loads(p.stdout)["code"], "target-not-plain")
         p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store",
                            str(self.base / "absent" / "secrets"), "--json")
         self.assertEqual(json.loads(p.stdout)["code"], "target-parent-missing")
@@ -289,6 +292,58 @@ class Copy(unittest.TestCase):
         self.outputs.append(p.stdout + p.stderr)
         self.assertEqual(p.stdout.strip(), "target-other-account", p.stderr)
         self.assertFalse((self.target / "projects").exists())
+
+    def test_a_target_file_failing_the_vault_checks_is_target_unsafe_and_leaves_nothing_new(self):
+        self.put()
+        self.assertEqual(self.copy()[0], 0)
+        lock = self.target / "projects" / ".vault.lock"
+        lock.unlink()
+        (self.target / "projects/alpha-web/prod/API_TOKEN.meta.json").write_text("{not json")
+        p = self.vault_cmd("rotate", "alpha-web", "prod", "API_TOKEN", value=VALUE_B)
+        self.assertEqual(p.returncode, 0, p.stderr)
+        code, refused = self.copy("--replace")
+        self.assertEqual((code, refused["code"]), (2, "target-unsafe"))
+        self.assertEqual((self.target / "projects/alpha-web/prod/API_TOKEN").read_text().strip(), VALUE_A)
+        if os.name != "nt":
+            (self.target / "projects/alpha-web/prod/API_TOKEN").chmod(0o644)
+            code, refused = self.copy()
+            self.assertEqual((code, refused["code"]), (2, "target-unsafe"), "a slot readable by others")
+
+    def test_the_same_value_is_unchanged_even_beside_unreadable_metadata(self):
+        self.put()
+        self.assertEqual(self.copy()[0], 0)
+        (self.target / "projects/alpha-web/prod/API_TOKEN.meta.json").write_text("{not json")
+        code, receipt = self.copy()
+        self.assertEqual((code, receipt["outcome"]), (0, "unchanged"))
+
+    @unittest.skipUnless(os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() != 0,
+                         "a folder this account may not write; root may write anywhere")
+    def test_a_store_this_account_cannot_write_into_is_refused(self):
+        self.put()
+        locked = self.base / "locked"
+        locked.mkdir()
+        try:
+            locked.chmod(0o500)
+            p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", str(locked / "secrets"), "--json")
+            self.assertEqual(json.loads(p.stdout)["code"], "target-not-writable")
+        finally:
+            locked.chmod(0o700)
+        self.assertEqual(list(locked.iterdir()), [])
+
+    def test_an_existing_store_of_this_account_is_made_owner_only(self):
+        self.put()
+        self.target.mkdir()
+        if os.name != "nt":
+            self.target.chmod(0o777)
+        self.assertEqual(self.copy()[0], 0)
+        if os.name != "nt":
+            self.assertEqual(self.target.stat().st_mode & 0o777, 0o700)
+
+    def test_the_two_stores_are_named_by_their_real_paths(self):
+        self.put()
+        code, receipt = self.copy()
+        self.assertEqual(receipt["from"]["store"], str(self.source_store.resolve()))
+        self.assertEqual(receipt["to"]["store"], str(self.target.resolve()))
 
     def test_a_human_refusal_names_its_code(self):
         self.put()

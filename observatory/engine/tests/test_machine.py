@@ -1154,14 +1154,23 @@ class Skills(Base):
         self.assertEqual(out["degraded"][0]["code"], "unreadable")
 
     def test_the_inventory_with_its_findings_counts_and_degraded(self):
-        self.harness({"generated_at": "2026-01-03T00:00:00Z", "inventory": self.INVENTORY})
+        self.harness({"generated_at": self.now(), "inventory": self.INVENTORY})
         out = self.server.observatory_machine(section="skills")
         skills = out["skills"]
         self.assertEqual(skills["counts"], {"skills": 1, "plugins": 1, "findings": 1})
         self.assertEqual(skills["findings"][0]["code"], "plugin-behind")
         self.assertEqual(out["degraded"], self.INVENTORY["degraded"])
-        self.assertEqual(out["measuredAt"], "2026-01-03T00:00:00Z")
         self.assertIn("skills", self.server.observatory_machine()["sections"])
+
+    @staticmethod
+    def now() -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def test_an_old_scan_is_named_stale(self):
+        self.harness({"generated_at": "2026-01-03T00:00:00Z", "inventory": {**self.INVENTORY, "degraded": []}})
+        out = self.server.observatory_machine(section="skills")
+        self.assertEqual([(d["source"], d["code"]) for d in out["degraded"]], [("harness.json", "stale")])
+        self.assertEqual(out["skills"]["counts"]["plugins"], 1, "the lists stay, named as old")
 
     def test_full_machine_skills_prints_the_same_section(self):
         self.harness({"generated_at": "2026-01-03T00:00:00Z", "inventory": self.INVENTORY})

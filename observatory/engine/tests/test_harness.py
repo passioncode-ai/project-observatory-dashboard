@@ -654,11 +654,66 @@ class Inventory(unittest.TestCase):
         self.assertEqual(helper["version"], "0.10.0")
 
     def test_a_record_of_an_unknown_shape_is_named(self):
-        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", {"version": 2, "plugins": []})
         write_json(self.home / ".claude" / "settings.json", {"enabledPlugins": ["tool@family"]})
-        inv = self.inventory()
+        known = json.loads((self.home / ".claude" / "plugins" / "known_marketplaces.json").read_text())
+        known["other"] = "not-an-object"
+        write_json(self.home / ".claude" / "plugins" / "known_marketplaces.json", known)
+        installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
+        installed["plugins"]["stray@other"] = [{"scope": "user", "version": "1.0.0"}]
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
+        catalogue = self.base / "markets" / "family" / ".claude-plugin" / "marketplace.json"
+        write_json(catalogue, {"name": "family", "plugins": {"tool": {}}})
+        found = {(d["source"], d["code"]) for d in self.inventory()["degraded"]}
+        self.assertEqual(found, {("claude:settings.json", "unrecognised-shape"),
+                                 ("claude:known_marketplaces.json:other", "unrecognised-shape"),
+                                 ("claude:marketplace:family", "unrecognised-shape")})
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", {"version": 2, "plugins": []})
         self.assertIn(("claude:installed_plugins.json", "unrecognised-shape"),
-                      {(d["source"], d["code"]) for d in inv["degraded"]})
+                      {(d["source"], d["code"]) for d in self.inventory()["degraded"]})
+
+    def test_the_plugin_manifest_wins_over_the_catalogue_entry_as_in_claude_code(self):
+        write_json(self.base / "markets" / "family" / "tool" / ".claude-plugin" / "plugin.json",
+                   {"name": "tool", "version": "1.0.0"})
+        tool = next(p for p in self.inventory()["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertEqual((tool["latest"], tool["latestFrom"], tool["behind"]), ("1.0.0", "plugin-manifest", False))
+        write_json(self.base / "markets" / "family" / "tool" / ".claude-plugin" / "plugin.json",
+                   {"name": "tool", "version": "2.0.0"})
+        tool = next(p for p in self.inventory()["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertEqual((tool["latest"], tool["behind"]), ("2.0.0", True), "the entry's 1.2.0 is not what installs")
+
+    def test_a_folder_marketplace_is_never_behind_and_a_root_project_has_no_name(self):
+        known = json.loads((self.home / ".claude" / "plugins" / "known_marketplaces.json").read_text())
+        known["family"]["source"] = {"source": "directory", "path": "/somewhere"}
+        write_json(self.home / ".claude" / "plugins" / "known_marketplaces.json", known)
+        installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
+        installed["plugins"]["kit@family"][0]["projectPath"] = "/"
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
+        inv = self.inventory()
+        plugins = {p["name"]: p for p in inv["spaces"][0]["plugins"] if p["agent"] == "claude-code"}
+        self.assertIsNone(plugins["tool@family"]["behind"])
+        self.assertEqual(inv["findings"], [])
+        self.assertEqual((plugins["kit@family"]["project"], plugins["kit@family"]["enabled"]), (None, None))
+
+    def test_a_skill_version_is_read_at_the_top_or_under_metadata_only(self):
+        self.assertEqual(self.mod.skill_version("---\nname: a\nversion: 1.0.0\n---\n"), "1.0.0")
+        self.assertEqual(self.mod.skill_version("---\nname: a\nmetadata:\n  version: 2.1.0\n---\n"), "2.1.0")
+        self.assertIsNone(self.mod.skill_version("---\nname: a\nrequires:\n  version: 3.0.0\n---\n"))
+
+    def test_a_folder_that_cannot_be_listed_is_named_not_read_as_empty(self):
+        from unittest.mock import patch
+        real = os.scandir
+        blocked = {str(self.home / ".claude" / "skills"), str(self.home / ".codex" / "plugins" / "cache")}
+
+        def scandir(path="."):
+            if str(path) in blocked:
+                raise PermissionError(13, "Permission denied")
+            return real(path)
+        with patch.object(self.mod.os, "scandir", side_effect=scandir):
+            inv = self.inventory()
+        found = {(d["source"], d["code"]) for d in inv["degraded"]}
+        self.assertIn(("skills:claude-code:user", "unreadable"), found)
+        self.assertIn(("codex:plugins-cache", "unreadable"), found)
+        self.assertNotIn(str(self.home), json.dumps(inv["degraded"]))
 
     def test_enabled_is_unknown_when_the_setting_has_another_shape(self):
         write_json(self.home / ".claude" / "settings.json", {"enabledPlugins": ["tool@family"]})
@@ -673,7 +728,8 @@ class Inventory(unittest.TestCase):
         plugins = {(p["name"], p["scope"]): p for p in self.inventory()["spaces"][0]["plugins"]
                    if p["agent"] == "claude-code"}
         self.assertEqual(plugins[("tool@family", "user")]["version"], None)
-        self.assertEqual(plugins[("bare", "user")]["marketplace"], None, "an unknown scope reads as user")
+        self.assertEqual((plugins[("bare", "galaxy")]["marketplace"], plugins[("bare", "galaxy")]["enabled"]),
+                         (None, None), "an unknown scope keeps its word and an unknown enabled state")
 
 
 if __name__ == "__main__":

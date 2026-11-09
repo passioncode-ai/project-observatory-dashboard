@@ -86,6 +86,8 @@ def carried(hygiene: dict) -> dict | None:
     return {"checkouts": len(stale), "measured_at": min(stamps) if stamps else None}
 
 
+#: Past this age the skills section says its scan is stale.
+SKILLS_STALE_HOURS = 24
 #: What the skills section always answers, so a reader can tell an empty inventory from an unread one.
 SKILLS_OPEN = [{"finding": "organization-plugin-in-personal-space", "waitsOn": "OBS-359",
                 "reason": "which space is a person's own needs the space's context binding (OBS-359); until then an "
@@ -117,11 +119,21 @@ def skills_section() -> dict:
                                         "`project-observatory full scan-harness`"}]}
     spaces = [s for s in inventory.get("spaces") or [] if isinstance(s, dict)]
     findings = [f for f in inventory.get("findings") or [] if isinstance(f, dict)]
+    degraded = [d for d in inventory.get("degraded") or [] if isinstance(d, dict)]
+    try:
+        measured = datetime.strptime(str(doc.get("generated_at")), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        measured = None
+    # The tick refreshes the scan every half hour while the harness integration is on; a day without one means it
+    # stopped (the integration turned off, the tick not running), and the lists describe that day, not today.
+    if measured is None or datetime.now(timezone.utc) - measured > timedelta(hours=SKILLS_STALE_HOURS):
+        degraded.append({"source": "harness.json", "code": "stale",
+                         "reason": f"the harness scan is older than {SKILLS_STALE_HOURS} hours or carries no time; "
+                                   f"run `project-observatory full scan-harness`"})
     return {"measuredAt": doc.get("generated_at"), "spaces": spaces,
             "counts": {"skills": sum(len(s.get("skills") or []) for s in spaces),
                        "plugins": sum(len(s.get("plugins") or []) for s in spaces), "findings": len(findings)},
-            "findings": findings, "open": inventory.get("open") or SKILLS_OPEN,
-            "degraded": [d for d in inventory.get("degraded") or [] if isinstance(d, dict)]}
+            "findings": findings, "open": inventory.get("open") or SKILLS_OPEN, "degraded": degraded}
 
 
 def summary(explain_pid: int | None = None) -> dict:

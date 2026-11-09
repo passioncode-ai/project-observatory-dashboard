@@ -629,12 +629,20 @@ tool and no finding, and leaves `store/org-selection/` untouched.
 ## Vault: a slot copied into another store; machine view: the skills section (OBS-476, OBS-477, the release after 0.35.9)
 
 Additive; nothing migrates. `tools/vault.py copy PROJECT ENV NAME --to-store PATH [--to-slot SLOT] [--replace]
-[--json]` is a new subcommand (OBS-476): `PATH` is a store, the folder that holds a `projects/` vault, created 0700
-when missing. Its receipt is `vault-copy/1` (`outcome` `copied`, `replaced` or `unchanged`; `from` and `to` with
-`store` in display form and `slot`; `to.storeCreated`, `to.archived`; `carried`; `digest` with `algorithm`
+[--json]` is a new subcommand (OBS-476): `PATH` is a store, the folder that holds a `projects/` vault, named by a
+plain absolute path (`.` and `..` refused as `target-not-plain`), created 0700 when missing; an existing one of this
+account, and its vault folder, are set to 0700 before anything goes in. Its receipt is `vault-copy/1` (`outcome` `copied`, `replaced` or `unchanged`; `from` and `to` with
+`store` in display form (the resolved path, `~/...` inside the home) and `slot`; `from.kept`, `to.storeCreated`,
+`to.archived`; `carried`; `digest` with `algorithm`
 `HMAC-SHA-256`, `key` `estate` or `one-time`, `keyId`, `from`, `to`, `match`); a refusal is
 `{"schema": "vault-copy/1", "outcome": "refused", "code", "reason"}` with `--json`, exit 2, the target left as it
-was; a failed read or write is `outcome: failed`, code `filesystem-failed`, exit 1, as is a digest mismatch. Both
+was (a lock file the copy made in an existing vault is kept); a failed read or write is `outcome: failed`, code
+`filesystem-failed`, exit 1; a digest mismatch prints the receipt with `digest.match: false` and exits 1. The codes:
+`invalid-slot` (the source's names), `source-empty`, `source-unreadable`, `source-has-open-leak`,
+`target-not-absolute`, `target-not-plain`, `target-link`, `target-parent-missing`, `target-not-folder`,
+`target-is-vault-folder`, `same-store`, `nested-stores`, `target-other-account` (POSIX only: Windows has no account
+id to compare, so a store another account owns there fails later as `target-not-writable`, `target-unsafe` or
+`filesystem-failed`), `target-not-writable`, `target-unsafe`, `target-slot-invalid`, `target-slot-filled`. Both
 stores' `movements.jsonl` gain a `copied` row (`to_store`, `to_slot` in the source's; `from_store`, `from_slot`,
 `archived` after a replace in the target's; `outcome` and `digest_key` in both, and `key_id` and `digest` only
 under the estate key), which an older
@@ -651,10 +659,15 @@ with `skills` (`name`, `agent` `claude-code` or `codex`, `scope` `user`, `projec
 `marketplaceUpdated`, `behind`), `findings` (`plugin-behind`), `open` and its own `degraded` (`source`
 `claude:installed_plugins.json`, `claude:settings.json`, `claude:known_marketplaces.json`,
 `claude:marketplace:<name>`, `claude:marketplace:<name>:<plugin>`, `claude:project-settings:<project>`,
-`claude:local-settings:<project>`, `skill:<agent>:<scope>:<folder>`, `codex:config.toml`, `codex:plugins-cache`,
-`codex:plugins-cache:<marketplace>`, code `unreadable`; `claude:installed_plugins.json` also `unrecognised-shape`;
-`inventory`, code `failed`, when the inventory itself failed and the rest of the scan was kept). No path is
-recorded. An older reader ignores the key; the machine view
+`claude:local-settings:<project>`, `skill:<agent>:<scope>:<folder>`, `skills:<agent>:<scope>[:<project or plugin>]`,
+`projects-folder`, `codex:config.toml`, `codex:plugins-cache`, `codex:plugins-cache:<marketplace>[:<plugin>]`, code
+`unreadable`; `claude:installed_plugins.json`, `claude:settings.json`, a settings label above,
+`claude:known_marketplaces.json:<name>` and `claude:marketplace:<name>`, code `unrecognised-shape`; `inventory`,
+code `failed`, when the inventory itself failed and the rest of the scan was kept). A plugin's `scope` is the word
+Claude Code recorded (`user`, `project`, `local`, or another such as `managed`, whose `enabled` is null). `latest`
+is read from the plugin's manifest inside the marketplace's folder first, then the catalogue entry; a plugin from
+another source, or from a marketplace that is a local folder, has none. The section adds `stale` (source
+`harness.json`) to its `degraded` for a scan older than 24 hours. No path is recorded. An older reader ignores the key; the machine view
 reads a scan without it as `not-surveyed` until the next scan. `observatory_machine` takes `section: "skills"`
 (answer `{measuredAt, degraded, skills}`, `skills` holding `spaces`, `counts`, `findings`, `open`, `degraded`), and
 its overview's `sections` lists `skills`; the tool's other answers are unchanged. `full machine --skills` prints the
