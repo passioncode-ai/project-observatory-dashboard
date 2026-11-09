@@ -365,8 +365,11 @@ def _context(org: str, chosen: list[str]) -> dict:
         slot = f"{folder}/{env}/{name}"
         slots.append(slot)
         owner[slot] = resolve(folder)
-    for d in kv["degraded"] + av["degraded"] + degraded:
-        if d not in degraded:
+    seen = {(d.get("source"), d.get("code"), d.get("reason")) for d in degraded}
+    for d in kv["degraded"] + av["degraded"]:
+        key = (d.get("source"), d.get("code"), d.get("reason"))
+        if key not in seen:
+            seen.add(key)
             degraded.append(d)
     return {"keys": kv, "accounts": av, "projects": projects, "slots": slots, "slotProject": owner,
             "default": assigner.default, "degraded": degraded, "label": kv["label"]}
@@ -520,8 +523,10 @@ def _unread_source(kind: Any, ident: str, ctx: dict) -> str | None:
             return src
         if kind == "key" and src.startswith("vault"):
             return src
-        if kind == "account" and (src.split(":", 1)[0] == ident.split(":", 1)[0] or src.startswith("registry/")
-                                  or src == "github"):
+        provider = ident.split(":", 1)[0]
+        if kind == "account" and (src.split(":", 1)[0] == provider or src == f"registry/{provider}-account.json"
+                                  or (provider in ("github", "bitbucket", "gitlab")
+                                      and src in ("github", "registry/projects.json", "registry/repositories.json"))):
             return src
     return None
 
@@ -532,8 +537,11 @@ def selection_digest(org: str, sel: dict) -> str:
     decide."""
     # Only the form's rows (`_effective`, `inForm`): what the record holds and what somebody decided. A row listed
     # beside it (found since, undecided) is not in the record either, so the applied form reads applied.
+    # Whether a person decided a row is part of the form too: excluding by hand what the record left out by default
+    # is a decision the record must keep, or the row would read as found since forever (ORG-R16).
     return _digest({"organization": org, "layout": sel["layout"], "serves": sel["serves"],
-                    "items": sorted([i["id"], i["kind"], i["decision"], i.get("label")]
+                    "items": sorted([i["id"], i["kind"], i["decision"], i.get("label"),
+                                     i.get("by") in ("hand", "group")]
                                     for i in sel["items"].values() if i.get("inForm", True))})
 
 
@@ -652,8 +660,11 @@ def _preview(org: str, ctx: dict, sel: dict) -> dict:
         "keysRequested": len(keys_out),
         "keysRevoked": len(revoked),
         "accounts": len(accounts_in),
-        "staysPersonal": {"projects": stay_projects, "keys": stay_keys, "accounts": stay_accounts,
-                          "line": f"{stay_projects} projects and {stay_keys} keys stay personal and are never sent"},
+        "staysPersonal": ({"projects": None, "keys": None, "accounts": None,
+                           "line": "what stays personal is not known: registry/projects.json did not read"}
+                          if any(d.get("source") == "registry/projects.json" for d in ctx["degraded"]) else
+                          {"projects": stay_projects, "keys": stay_keys, "accounts": stay_accounts,
+                           "line": f"{stay_projects} projects and {stay_keys} keys stay personal and are never sent"}),
         "cannotBeUndone": [f"{i['id']}: the personal value is revoked at its provider once the organization's "
                            "replacement works" for i in revoked],
         "notMovable": ctx["keys"]["notMovable"],
@@ -733,12 +744,16 @@ def _plan_answer(org: str, ctx: dict, sel: dict, record: dict | None, draft: dic
     unread = [i["id"] for i in sel["items"].values() if i.get("unread")]
     applied = bool(record) and record.get("selectionDigest") == digest
     any_items = bool(sel["items"]) or bool(record)
-    state = ("empty" if not any_items else "conflict" if conflicts else "partial" if ctx["degraded"] or unknown
-             or unread else "complete")
-    undecided = sorted(i["id"] for i in sel["items"].values() if i.get("new") and not i.get("inForm", True))
+    registry_unread = any(d.get("source") == "registry/projects.json" for d in ctx["degraded"])
+    state = ("partial" if registry_unread and not conflicts else "empty" if not any_items else "conflict"
+             if conflicts else "partial" if ctx["degraded"] or unknown or unread else "complete")
+    undecided = sorted(i["id"] for i in sel["items"].values() if i.get("new"))
     q = CMD.format(org=_q(org))
     if record and _unfinished(org, record):
         step, cmd = RESUME_STEP, f"{q} apply --digest {record['selectionDigest']}"
+    elif registry_unread:
+        step, cmd = ("registry/projects.json did not read, so what is proposed is not known; nothing is applied until "
+                     "it reads", "project-observatory full doctor")
     elif conflicts:
         step, cmd = "clear the projects another organization already holds", f"{q} plan --exclude PROJECT"
     elif not any_items:
@@ -1068,7 +1083,7 @@ def _irreversible(org: str, prior: dict | None, sel: dict) -> None:
             raise Refusal("entry-signed", f"{item['id']} is already in the organization's context (your passkey "
                                           "signed its entry in Fabric); taking it back is a new estate revision "
                                           "your passkey signs (OBS-419)",
-                          f"project-observatory full org unassign PROJECT --org {_q(org)}")
+                          f"{q} show")
         raise Refusal("already-revoked", f"{item['id']}'s personal value is already revoked at its provider; the "
                                          "selection cannot keep it personal", f"{q} show")
 
@@ -1304,8 +1319,7 @@ def undo(org: str, *, decision: Any = None, caller: str = "cli") -> dict:
         if signed:
             raise Refusal("entry-signed", f"{signed[0]} is already in the organization's context (your passkey signed "
                                           "its entry in Fabric); taking it back is a new estate revision your "
-                                          "passkey signs (OBS-419)", "project-observatory full org unassign PROJECT "
-                                                                     f"--org {_q(org_ok)}")
+                                          "passkey signs (OBS-419, not built yet)", f"{q} show")
         if cur.get("kind") == "undo":
             # Undoing an undo restores what the undo removed: the revision it undid.
             restored = next((r for r in revs if r["digest"] == cur.get("undoes")), None)
@@ -1511,7 +1525,8 @@ def text(view: dict) -> str:
             for i in rows:
                 mark = "[x]" if i["decision"] not in ("exclude", "keep") else "[ ]"
                 extra = f" -> {i['decision']}" if kind == "key" else ""
-                tag = f" (new since {view.get('newSince') or 'the record'})" if i.get("new") else ""
+                tag = (f" (new: not in the record of {view['newSince']})" if view.get("newSince") else " (new)") \
+                    if i.get("new") else ""
                 label = f", label for the organization: {i['label']!r}" if i.get("label") else ""
                 lines.append(f"  {mark} {i['id']}{extra}{tag}{label}: {i['why']}")
         for c in view["conflicts"]:

@@ -622,7 +622,7 @@ class ReviewRoundThree(Base):
     """What the third review found: each case reproduced, then fixed."""
 
     def test_a_change_that_leaves_the_applied_form_keeps_no_draft(self):
-        self.sel.apply("acme", self.ready()["digest"])
+        self.sel.apply("acme", self.ready(exclude=["project:shared-tool"])["digest"])
         v = self.sel.plan("acme", {"exclude": ["project:shared-tool"]})
         self.assertEqual((v["applied"], v["draft"]), (True, False))
         self.assertIn("nothing to apply", v["nextStep"])
@@ -1010,6 +1010,38 @@ class ReviewRoundEight(Base):
         self.assertEqual(caught.exception.code, "conflict-unchecked")
 
 
+class ReviewRoundNine(Base):
+    """What the ninth review found: each case reproduced, then fixed."""
+
+    def test_a_row_proposed_again_can_be_decided_out(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        moved = [dict(p, organization="acme", organization_source="rule", organization_why="repository owner acme-inc")
+                 if p["id"] == "project:shared-tool" else p for p in PROJECTS]
+        self.registry("projects.json", {"projects": moved})
+        self.assertEqual(self.sel.show("acme")["new"], ["project:shared-tool"])
+        self.assertIn("1 item(s) found since wait for you", self.sel.plan("acme")["nextStep"])
+        v = self.sel.plan("acme", {"exclude": ["project:shared-tool"]})
+        self.assertFalse(v["applied"], "deciding it out is a change the record must keep")
+        self.assertEqual(self.sel.apply("acme", v["digest"])["outcome"], "applied")
+        self.assertEqual(self.sel.show("acme")["new"], [])
+
+    def test_an_unread_registry_is_partial_never_empty(self):
+        import paths
+        (paths.REGISTRY / "projects.json").unlink()
+        v = self.sel.plan("quiet")
+        self.assertEqual(v["state"], "partial")
+        self.assertIn("did not read", v["nextStep"])
+        self.assertIsNone(v["preview"]["staysPersonal"]["projects"])
+        self.assertIn("not known", v["preview"]["staysPersonal"]["line"])
+
+    def test_a_degraded_source_is_named_once(self):
+        import paths
+        (paths.REGISTRY / "projects.json").unlink()
+        v = self.sel.plan("acme")
+        named = [(d["source"], d["code"]) for d in v["degraded"]]
+        self.assertEqual(len(named), len(set(named)), named)
+
+
 class WhatTheOrganizationSees(Base):
     """ORG-R03: a reference random per organization and a label only when typed; nothing is handed over."""
 
@@ -1083,7 +1115,7 @@ class UndoAndConfirm(Base):
         with self.assertRaises(self.sel.Refusal) as caught:
             self.sel.undo("acme")
         self.assertEqual(caught.exception.code, "entry-signed")
-        self.assertIn("unassign", caught.exception.command)
+        self.assertIn("OBS-419", str(caught.exception))
 
     def replacement_arrived(self, revision=1):
         """What OBS-191 and OBS-416 will write once they exist: the request answered and consumers switched."""
