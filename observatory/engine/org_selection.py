@@ -1054,6 +1054,9 @@ def _change(org: str, draft: dict | None, record: dict | None, changes: dict, wh
         members = sorted(i for i, c in cands.items() if c["group"] == group and c["kind"] != "key"
                          and not sel["items"].get(i, {}).get("new"))
         for ident in members:
+            if named.get(ident) not in (None, verb.removesuffix("Group")):
+                raise Refusal("invalid-change", f"{_echo(ident)} is named by `{named[ident]}` and is in the group "
+                                                f"`{verb}` takes; decide each item once per change")
             put(ident, decision, by="group", group=group)
     for ident, choice in (changes.get("keys") or {}).items():
         if kind_of(ident) != "key":
@@ -1517,7 +1520,13 @@ def undo(org: str, *, decision: Any = None, caller: str = "cli") -> dict:
             raise Refusal(foreign[0]["code"], f"{foreign[0]['project']} is {foreign[0]['why']}", f"{q} show")
         if ctx is None:
             import org_view
-            listed = {p["id"] for p in org_view._project_rows(org_view._registry("projects.json", [], ""))}
+            unread_registry: list = []
+            listed = {p["id"] for p in org_view._project_rows(org_view._registry("projects.json", unread_registry, ""))}
+            if unread_registry and any(r["kind"] == "project" and r["decision"] == "include"
+                                       for r in sel["items"].values()):
+                raise Refusal("registry-unreadable", "registry/projects.json does not read, so whether the projects "
+                                                     "that would come back are still here is not known; nothing is "
+                                                     "undone until it reads", "project-observatory full doctor")
             gone = sorted(i for i, r in sel["items"].items() if r["kind"] == "project" and r["decision"] == "include"
                           and i not in listed)
             if gone:

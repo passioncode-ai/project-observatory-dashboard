@@ -1463,6 +1463,49 @@ class ReviewRoundSeventeen(Base):
         self.assertEqual(self.items(v)[ident]["decision"], "include")
 
 
+class ReviewRoundNineteen(Base):
+    """What the nineteenth review found: each case reproduced, then fixed."""
+
+    def cli_error(self, *argv) -> str:
+        import org as org_cli
+        importlib.reload(org_cli)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+            org_cli.main(["select", "--org", "acme", "plan", *argv])
+        return err.getvalue()
+
+    def test_the_cli_never_repeats_any_part_of_a_rejected_value(self):
+        for argv, secret in ((["--inc=hunter2pass"], "hunter2"), (["--layout", "it's sekrit"], "sekrit"),
+                             (["--layout", "it's sekrit"], "it"), (["--include-group", "x\"y'z"], "z")):
+            with self.subTest(argv=argv, secret=secret):
+                text = self.cli_error(*argv).rpartition("error:")[2]
+                self.assertNotIn(secret, text.replace("--include", "").replace("--layout", "")
+                                 .replace("invalid", "").replace("choice", ""))
+                self.assertIn("characters, not shown", text)
+        self.assertIn("--layout", self.cli_error("--layout", "it's sekrit"), "the option's name stays readable")
+        self.assertIn("'one-spac'", self.cli_error("--layout", "one-spac"), "a typo of an identifier is shown")
+
+    def test_a_group_never_overrides_an_item_decided_in_the_same_change(self):
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.plan("acme", {"exclude": ["project:beta-api"], "includeGroup": "proposed"})
+        self.assertEqual(caught.exception.code, "invalid-change")
+        v = self.sel.plan("acme", {"include": ["project:beta-api"], "includeGroup": "proposed"})
+        self.assertEqual(self.items(v)["project:beta-api"]["decision"], "include")
+
+    def test_undo_without_the_configuration_names_an_unread_registry(self):
+        self.sel.apply("acme", self.ready(include=["project:notes"])["digest"])
+        self.sel.apply("acme", self.sel.plan("acme", {"exclude": ["project:notes"]})["digest"])
+        orgs = json.loads(json.dumps(ORGS))
+        del orgs["organizations"]["acme"]
+        (self.home / "config" / "organizations.json").write_text(json.dumps(orgs))
+        import paths
+        (paths.REGISTRY / "projects.json").write_text("{")
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.undo("acme")
+        self.assertEqual(caught.exception.code, "registry-unreadable")
+        self.assertEqual(len(self.sel._revisions("acme")), 2, "nothing was undone")
+
+
 class WhatTheOrganizationSees(Base):
     """ORG-R03: a reference random per organization and a label only when typed; nothing is handed over."""
 

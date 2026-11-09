@@ -100,20 +100,34 @@ NODE = paths.setting_path("OBSERVATORY_NODE", paths.HOME / "node")
 
 
 class _Parser(argparse.ArgumentParser):
-    """argparse quotes a rejected value back (`invalid choice: '...'`, `unrecognized arguments: ...`): each value
-    the caller typed is named as a refusal names it (`credential_shape.echo`: quoted only when it is a well-formed
-    identifier, otherwise only its length), and anything shaped like a credential is redacted."""
+    """argparse repeats rejected values back (`invalid choice: ...`, `ambiguous option: ...`, `unrecognized
+    arguments: ...`), quoted one way or another or not at all. Every word the caller typed that is not a well-formed
+    identifier is named only by its length (`credential_shape.echo`) wherever it appears in the message, and anything
+    shaped like a credential is redacted: no refusal repeats a value the caller sent."""
+
+    #: The words being parsed, kept by the top parser for its subparsers' messages.
+    typed: list[str] = []
 
     def error(self, message):  # noqa: D401 - argparse's own hook
-        import re
         import credential_shape
-        message = re.sub(r"'([^'\n]*)'", lambda m: credential_shape.echo(m.group(1)), message)
+        hidden: dict[str, str] = {}
+        import re
+        for word in _Parser.typed:
+            for part in {word, word.partition("=")[2]} - {""}:
+                said = credential_shape.echo(part)
+                if said != repr(part) and not re.fullmatch(r"--?[A-Za-z][A-Za-z0-9-]*", part):
+                    hidden[part] = said                # neither an identifier nor an option's name: never repeated
+        for part in sorted(hidden, key=len, reverse=True):
+            message = message.replace(repr(part), hidden[part]).replace(part, hidden[part])
         super().error(credential_shape.redact(message))
 
     def parse_known_args(self, args=None, namespace=None):
-        # argparse joins unrecognized arguments with spaces before `error` sees them: each is named here, whole.
+        top = self.prog == "project-observatory full org"
+        if top:
+            _Parser.typed = [str(a) for a in (sys.argv[1:] if args is None else args)]
         namespace, extras = super().parse_known_args(args, namespace)
-        if extras and self.prog == "project-observatory full org":
+        if extras and top:
+            # argparse joins unrecognized arguments with spaces: each is named here, whole.
             import credential_shape
             self.error("unrecognized arguments: " + " ".join(credential_shape.echo(a) for a in extras))
         return namespace, extras
