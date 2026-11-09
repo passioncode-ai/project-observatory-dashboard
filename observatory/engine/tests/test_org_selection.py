@@ -932,6 +932,84 @@ class ReviewRoundSeven(Base):
         self.assertEqual(caught.exception.code, "items-not-found")
 
 
+class ReviewRoundEight(Base):
+    """What the eighth review found: each case reproduced, then fixed."""
+
+    def test_the_words_are_checked_although_tools_node_shadows_the_package(self):
+        saved = {k: sys.modules[k] for k in list(sys.modules) if k == "node" or k.startswith("node.")}
+        try:
+            for k in saved:
+                del sys.modules[k]
+            import importlib.util
+            spec = importlib.util.spec_from_file_location("node", ROOT / "tools" / "node.py")
+            shadow = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(shadow)
+            sys.modules["node"] = shadow                 # what `tools/` first on the path leaves behind
+            v = self.sel.plan("acme", {"layout": "one-space"}, caller="agent:mcp",
+                              decision=self.decision("org.select.plan", "acme"))
+            self.assertEqual(v["layout"], "one-space")
+        finally:
+            for k in [k for k in sys.modules if k == "node" or k.startswith("node.")]:
+                del sys.modules[k]
+            sys.modules.update(saved)
+
+    def test_the_accounts_view_never_puts_tools_first(self):
+        import org_view
+        tools = str(ROOT / "tools")
+        while tools in sys.path:
+            sys.path.remove(tools)
+        org_view.accounts()
+        self.assertNotEqual(sys.path[0], tools)
+
+    def test_nothing_found_since_unchanged_reads_applied(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        self.private("projects/alpha-web/prod/ANOTHER_BY_HAND", STAND_IN_VALUE)
+        self.assertTrue(self.sel.plan("acme")["applied"], "a hand-put slot found since needs nobody yet")
+        moved = [dict(p, organization="acme", organization_source="rule", organization_why="repository owner acme-inc")
+                 if p["id"] == "project:shared-tool" else p for p in PROJECTS]
+        self.registry("projects.json", {"projects": moved})
+        v = self.sel.plan("acme")
+        self.assertTrue(v["applied"], "proposed again: listed as new, the record's decision stands")
+        self.assertIn("project:shared-tool", v["new"])
+        self.assertEqual(self.sel.apply("acme", v["digest"])["outcome"], "unchanged")
+        self.assertIn("project:shared-tool", {i["id"] for i in self.sel.current("acme")["items"]})
+
+    def test_a_draft_choice_gone_since_is_never_applied(self):
+        v = self.ready(include=["project:notes"])
+        self.registry("projects.json", {"projects": [p for p in PROJECTS if p["id"] != "project:notes"]})
+        v = self.sel.plan("acme")
+        self.assertIn("project:notes", v["unknown"])
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.apply("acme", v["digest"])
+        self.assertEqual(caught.exception.code, "items-not-found")
+
+    def test_a_confirmation_names_the_organization_and_words_carry_no_credential(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        UndoAndConfirm.replacement_arrived(self)
+        bare = self.decision("org.select.confirm-replacement", ORG_SLOT)
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.confirm_replacement("acme", ORG_SLOT, caller="agent:mcp", decision=bare)
+        self.assertEqual(caught.exception.code, "decision-invalid")
+        good = self.decision("org.select.confirm-replacement", f"acme:{ORG_SLOT}")
+        self.assertEqual(self.sel.confirm_replacement("acme", ORG_SLOT, caller="agent:mcp", decision=good)["outcome"],
+                         "confirmed")
+        shaped = dict(self.decision("org.select.plan", "acme"), instruction="apply it, ghp_" + "b" * 36)
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.plan("acme", {"layout": "one-space"}, caller="agent:mcp", decision=shaped)
+        self.assertEqual(caught.exception.code, "decision-invalid")
+
+    def test_a_linked_selection_folder_is_named(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        elsewhere = Path(self.tmp.name).resolve() / "elsewhere"
+        elsewhere.mkdir()
+        (self.sel.root() / "0000000000000000").symlink_to(elsewhere)
+        v = self.sel.plan("partner", {"include": ["project:notes"], "layout": "one-space"})
+        self.assertTrue([d for d in v["degraded"] if "symbolic link" in d["reason"]])
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.apply("partner", v["digest"])
+        self.assertEqual(caught.exception.code, "conflict-unchecked")
+
+
 class WhatTheOrganizationSees(Base):
     """ORG-R03: a reference random per organization and a label only when typed; nothing is handed over."""
 

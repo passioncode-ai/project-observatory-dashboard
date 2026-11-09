@@ -454,7 +454,9 @@ def accounts() -> dict:
         _not_scanned("digitalocean", degraded)
     try:
         if str(paths.ROOT / "tools") not in sys.path:
-            sys.path.insert(0, str(paths.ROOT / "tools"))
+            # Appended, never first: `tools/` holds `node.py` and `runtime_identity.py`, which would shadow the
+            # engine's `node` package and module of the same names for every later import in this process.
+            sys.path.append(str(paths.ROOT / "tools"))
         import digitalocean
         import credential_shape
         for i, c in enumerate(digitalocean.unstashed_contexts(probe=False)):

@@ -638,7 +638,7 @@ def observatory_org_selection(
     key: Annotated[str | None, Field(description="confirm-replacement: the key, vault:FOLDER/ENV/NAME.")] = None,
     decision: Annotated[dict[str, Any] | None, Field(
         description="The operator's words in contract DEC-0121's shape: {by: operator, via: relayed-instruction, "
-                    "action: org.select.plan|apply|undo|confirm-replacement, target: the organization (the key for "
+                    "action: org.select.plan|apply|undo|confirm-replacement, target: the organization (ORG:KEY for "
                     "confirm-replacement), instruction: their words verbatim, at: when, source?}. Also read from "
                     "_meta.decision.")] = None,
     ctx: "Context | None" = None,

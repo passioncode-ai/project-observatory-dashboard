@@ -52,6 +52,7 @@ import json
 import pathlib
 import re
 import secrets
+import sys
 from typing import Any
 
 import paths
@@ -286,6 +287,28 @@ def _space_here() -> dict:
 
 # ── who decided (DEC-0121) ─────────────────────────────────────────────────────
 
+def _node_actions():
+    """The engine's `node.actions` (the contract's `actionDecision`), whatever else this process imported as `node`:
+    `tools/node.py` is a module of that name, and a door that put `tools/` first on the path shadows the package.
+    Then the package is loaded under a private name from its own folder, so its relative imports still resolve."""
+    try:
+        from node import actions
+        return actions
+    except ImportError:
+        pass
+    import importlib
+    import importlib.util
+    name = "_observatory_engine_node"
+    if name not in sys.modules:
+        folder = pathlib.Path(__file__).resolve().parent / "node"
+        spec = importlib.util.spec_from_file_location(name, folder / "__init__.py",
+                                                      submodule_search_locations=[str(folder)])
+        package = importlib.util.module_from_spec(spec)
+        sys.modules[name] = package
+        spec.loader.exec_module(package)
+    return importlib.import_module(name + ".actions")
+
+
 def decided(action: str, target: str, decision: Any = None, *, caller: str) -> dict:
     """Who decided a relayed act. No decision from the CLI: the person at their terminal. With one: the operator's
     words, checked as the contract's `actionDecision` checks them (this space's agent is T0), kept verbatim."""
@@ -297,10 +320,15 @@ def decided(action: str, target: str, decision: Any = None, *, caller: str) -> d
                       "as `decision` (by operator, via relayed-instruction, action "
                       f"{ACTIONS[action]}, target {target!r}, the words verbatim, when they said them)",
                       gate=GATES[action], action=ACTIONS[action])
-    from node import actions
+    actions = _node_actions()
     act = {"id": ACTIONS[action], "title": TITLES[action], "tool": "observatory.org.selection", "gate": "relayed"}
     answer = actions.action_decision(action=act, tier="T0", caller=caller, decision=decision, target=target,
                                      now=_now())
+    import credential_shape
+    if answer.get("ok") is True and credential_shape.shaped(decision.get("instruction")):
+        # The words are kept verbatim and shown back: words that carry something shaped like a credential are not.
+        raise Refusal("decision-invalid", "the operator's words carry something shaped like a credential; send their "
+                                          "words without it", gate=GATES[action], action=ACTIONS[action])
     if answer.get("ok") is True and (not isinstance(decision, dict) or decision.get("target") != target):
         # The contract leaves `target` optional; here it is required, so words about one organization (or one key)
         # never decide another's selection.
@@ -448,6 +476,12 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
                 row.pop("label", None)
         if change.get("decidedBy"):
             row["decidedBy"] = change["decidedBy"]
+        row.pop("unread", None)
+        row.pop("notFound", None)
+        if ident not in cands and ident not in known:
+            # Chosen in the draft and gone since (or its source did not read): the same check as a recorded row.
+            source = _unread_source(row["kind"], ident, ctx)
+            row.update({"unread": source} if source else {"notFound": True})
         items[ident] = row
         if row["kind"] == "project":
             (chosen.add if row["decision"] == "include" else chosen.discard)(ident)
@@ -462,6 +496,13 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
             # person nor something found since (ORG-R16).
             row.update(decision="keep", by="project", new=False,
                        why=row["why"] + "; its project is not chosen, so nothing is asked for it")
+    # The form: what the record holds, what somebody decided in the draft, and the keys that follow a project chosen
+    # in the draft. Everything else (found since and undecided, or a decision the rules leave to a person) is listed
+    # beside the form and is neither in its digest nor written to the record, so an applied form reads applied until
+    # a person decides something (ORG-R14, ORG-R16). Before any record the whole proposal is the form.
+    for ident, row in items.items():
+        row["inForm"] = (base is None or ident in base or ident in changes
+                         or (row["kind"] == "key" and row.get("project") in newly))
     layout = (draft or {}).get("layout", (record or {}).get("layout"))
     serves = (draft or {}).get("serves", ((record or {}).get("serves") or {}).get("space"))
     # A space is named only for the separate-space layout; in the others the selection serves this space, and the
@@ -489,12 +530,11 @@ def selection_digest(org: str, sel: dict) -> str:
     """The digest of what is decided (the form the person previews, ORG-R14): the organization, the layout, the
     space it serves, and each item's decision and label. Reasons and counts are not in it: they explain, they do not
     decide."""
-    # An item found since the record that nobody decided yet is listed apart and is not part of the form: the record
-    # does not keep it either (ORG-R16), so the applied form reads applied until a person decides it.
+    # Only the form's rows (`_effective`, `inForm`): what the record holds and what somebody decided. A row listed
+    # beside it (found since, undecided) is not in the record either, so the applied form reads applied.
     return _digest({"organization": org, "layout": sel["layout"], "serves": sel["serves"],
                     "items": sorted([i["id"], i["kind"], i["decision"], i.get("label")]
-                                    for i in sel["items"].values()
-                                    if not (i.get("new") and i.get("by") == "default"))})
+                                    for i in sel["items"].values() if i.get("inForm", True))})
 
 
 def _others_chosen(org: str) -> tuple[dict[str, str], list[dict]]:
@@ -507,6 +547,10 @@ def _others_chosen(org: str) -> tuple[dict[str, str], list[dict]]:
     if not base.is_dir() or base.is_symlink():
         return out, unread
     mine = _folder(org)
+    for link in sorted(p for p in base.iterdir() if p.is_symlink()):
+        unread.append({"source": f"store/org-selection/{link.name}", "code": "record-unreadable",
+                       "reason": "an organization's selection folder is a symbolic link; it is not read",
+                       "effect": "whether another organization already holds a project is not known"})
     for folder in sorted(p for p in base.iterdir() if p.is_dir() and not p.is_symlink() and p != mine):
         revs = (sorted(q for q in (folder / "revisions").glob("[0-9]*.json") if q.stem.isdigit())
                 if (folder / "revisions").is_dir() else [])
@@ -691,7 +735,7 @@ def _plan_answer(org: str, ctx: dict, sel: dict, record: dict | None, draft: dic
     any_items = bool(sel["items"]) or bool(record)
     state = ("empty" if not any_items else "conflict" if conflicts else "partial" if ctx["degraded"] or unknown
              or unread else "complete")
-    undecided = sorted(i["id"] for i in sel["items"].values() if i.get("new") and i.get("by") == "default")
+    undecided = sorted(i["id"] for i in sel["items"].values() if i.get("new") and not i.get("inForm", True))
     q = CMD.format(org=_q(org))
     if record and _unfinished(org, record):
         step, cmd = RESUME_STEP, f"{q} apply --digest {record['selectionDigest']}"
@@ -944,9 +988,9 @@ def _record(org: str, sel: dict, digest: str, prior: dict | None, who: dict, *, 
                 refs[i["id"]] = i["ref"]
     items = []
     for i in _items_out(sel):
-        if i.get("new") and i.get("by") == "default":
-            # Found since the record and not decided by anyone (ORG-R16): left out of the record, so it stays new,
-            # listed and named on the board, until a person decides it.
+        if not i.get("inForm", True):
+            # Not in the form (found since and not decided by anyone, ORG-R16): left out of the record, so it stays
+            # listed (and new, when the rules propose it) until a person decides it.
             continue
         row = {k: i[k] for k in ("id", "kind", "decision", "why", "by") if k in i}
         for k in ("label", "group", "decidedBy", "project", "slot", "class", "provider", "name", "notFound"):
@@ -1323,7 +1367,8 @@ def confirm_replacement(org: str, key: Any, *, decision: Any = None, caller: str
     ident = key if isinstance(key, str) and key.startswith("vault:") else f"vault:{key}" if isinstance(key, str) else ""
     if not _revisions(org_ok):
         raise Refusal("not-in-record", "no selection has been applied for this organization", f"{q} plan")
-    who = decided("confirm-replacement", ident, decision, caller=caller)   # the gate before anything is written
+    # The object is the organization's key: words about the same slot in another organization's record do not count.
+    who = decided("confirm-replacement", f"{org_ok}:{ident}", decision, caller=caller)
     with _locked(org_ok):
         rec = current(org_ok)
         item = next((i for i in (rec or {}).get("items") or [] if i["id"] == ident and i["kind"] == "key"), None)
