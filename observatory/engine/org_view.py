@@ -805,7 +805,7 @@ def keys(org: str, chosen: "list[str] | tuple[str, ...]" = ()) -> dict:
     known = {p["id"] for p in projects}
     for pid in chosen or ():
         if pid in known and (scope.get(pid) or {}).get("side") != "organization":
-            scope[pid] = {"side": "organization", "why": f"you chose the project for {org}"}
+            scope[pid] = {"side": "organization", "why": f"you chose the project for {org}", "byChoice": True}
     slots = _slots(degraded)
     do_keys = organizations.account_keys("digitalocean", _rows(do, "accounts"))
     do_by_uuid = {str(t["team_uuid"]): do_keys.get(t["id"]) or [str(t["team_uuid"])]
@@ -845,7 +845,9 @@ def keys(org: str, chosen: "list[str] | tuple[str, ...]" = ()) -> dict:
     state = "empty" if not rows and not fixed else ("partial" if degraded else "complete")
     return {"schema": KEYS_SCHEMA, "generatedAt": _now(), "organization": org,
             "label": _label(a.orgs.get(org)) or org, "state": state,
-            "projects": [{"id": pid, "side": s["side"], "why": s["why"]} for pid, s in sorted(scope.items())],
+            "projects": [{"id": pid, "side": s["side"], "why": s["why"], **({"byChoice": True} if s.get("byChoice")
+                                                                             else {})}
+                         for pid, s in sorted(scope.items())],
             "keys": rows, "notMovable": fixed, "counts": counts,
             "notChecked": ["values present twice in this space (ORG-R09) and names the organization already holds "
                            "(ORG-R10) need a comparison of values or the organization's context; neither is read here"],

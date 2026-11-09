@@ -376,9 +376,9 @@ class ReviewRoundOne(Base):
     """What the first review found: each case reproduced, then fixed."""
 
     def test_undo_does_not_bring_back_a_project_another_organization_took(self):
-        self.sel.apply("acme", self.ready()["digest"])
-        self.sel.apply("acme", self.sel.plan("acme", {"exclude": ["project:alpha-web"]})["digest"])
-        p = self.sel.plan("partner", {"include": ["project:alpha-web"], "layout": "one-space"})
+        self.sel.apply("acme", self.ready(include=["project:notes"])["digest"])
+        self.sel.apply("acme", self.sel.plan("acme", {"exclude": ["project:notes"]})["digest"])
+        p = self.sel.plan("partner", {"include": ["project:notes"], "layout": "one-space"})
         self.sel.apply("partner", p["digest"])
         with self.assertRaises(self.sel.Refusal) as caught:
             self.sel.undo("acme")
@@ -490,6 +490,110 @@ class ReviewRoundOne(Base):
         self.assertFalse((self.sel._folder("acme") / "draft.json").exists())
 
 
+class ReviewRoundTwo(Base):
+    """What the second review found: each case reproduced, then fixed."""
+
+    def test_another_organizations_project_or_not_ours_is_a_conflict(self):
+        v = self.ready(include=["project:partner-app", "project:clone"])
+        self.assertEqual(v["state"], "conflict")
+        self.assertEqual({c["project"]: c["code"] for c in v["conflicts"]},
+                         {"project:partner-app": "chosen-for-another", "project:clone": "not-ours"})
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.apply("acme", v["digest"])
+        self.assertIn(caught.exception.code, ("chosen-for-another", "not-ours"))
+        self.assertEqual(self.sel._revisions("acme"), [])
+
+    def test_a_project_chosen_then_left_out_by_hand_says_so(self):
+        self.sel.apply("acme", self.ready(include=["project:notes"])["digest"])
+        row = next(i for i in self.sel.current("acme")["items"] if i["id"] == "project:notes")
+        self.assertEqual((row["group"], row["why"]), ("by-hand", "you chose it by hand"))
+        v = self.sel.plan("acme", {"exclude": ["project:notes"]})
+        row = self.items(v)["project:notes"]
+        self.assertEqual((row["decision"], row["group"], row["why"]), ("exclude", "by-hand", "you left it out by hand"))
+
+    def test_a_layout_change_keeps_a_signed_entry_and_undo_refuses_after_it(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        path = self.sel._journal_path("acme", 1)
+        jdoc = json.loads(path.read_text())
+        for item in jdoc["items"]:
+            for st in item["steps"]:
+                if item["id"] == "project:alpha-web" and st["step"] == "entry-signed":
+                    st["state"] = "done"
+        path.write_text(json.dumps(jdoc))
+        self.sel.apply("acme", self.sel.plan("acme", {"layout": "one-space"})["digest"])
+        step = next(st for i in self.sel.journal("acme", 2)["items"] if i["id"] == "project:alpha-web"
+                    for st in i["steps"] if st["step"] == "entry-signed")
+        self.assertEqual(step["state"], "done")
+        old = next(i for i in self.sel.journal("acme", 1)["items"] if i["id"] == "project:alpha-web")
+        self.assertEqual({st["step"]: st["state"] for st in old["steps"]}["export-curated-entry"], "undone",
+                         "a step the new layout no longer has is undone in the old journal")
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.undo("acme")
+        self.assertEqual(caught.exception.code, "entry-signed")
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.apply("acme", self.sel.plan("acme", {"exclude": ["project:alpha-web"]})["digest"])
+        self.assertEqual(caught.exception.code, "entry-signed")
+
+    def test_an_apply_stopped_after_its_revision_is_finished_by_the_same_form(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        v = self.sel.plan("acme", {"exclude": ["project:beta-api"]})
+        draft = (self.sel._folder("acme") / "draft.json").read_text()
+        journal_one = self.sel._journal_path("acme", 1).read_text()
+        self.sel.apply("acme", v["digest"])
+        # Put back what the interruption would have left: the draft, and revision 1's journal not superseded.
+        for path, text in ((self.sel._folder("acme") / "draft.json", draft),
+                           (self.sel._journal_path("acme", 1), journal_one)):
+            path.write_text(text)
+            path.chmod(0o600)
+        p = self.sel.plan("acme")
+        self.assertTrue(p["applied"])
+        self.assertIn("apply --digest", p["command"], "never `nothing to apply` for an unfinished apply")
+        self.assertEqual(self.sel.show("acme")["state"], "waiting")
+        self.assertEqual(self.sel.apply("acme", p["digest"])["outcome"], "unchanged")
+        old = next(i for i in self.sel.journal("acme", 1)["items"] if i["id"] == "project:beta-api")
+        self.assertEqual({st["state"] for st in old["steps"]}, {"undone"})
+        self.assertIn("nothing to apply", self.sel.plan("acme")["nextStep"])
+
+    def test_a_damaged_draft_is_dropped_by_the_command_it_names(self):
+        self.ready()
+        path = self.sel._folder("acme") / "draft.json"
+        path.write_text("{")
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.plan("acme")
+        self.assertIn("plan --reset", caught.exception.command)
+        self.assertFalse(self.sel.plan("acme", {"reset": True})["draft"])
+
+    def test_the_same_words_do_not_apply_two_forms(self):
+        words = self.decision("org.select.apply", "acme")
+        plan = self.decision("org.select.plan", "acme")
+        v = self.sel.plan("acme", {"layout": "one-space"}, caller="agent:mcp", decision=plan)
+        self.sel.apply("acme", v["digest"], caller="agent:mcp", decision=words)
+        v = self.sel.plan("acme", {"exclude": ["project:beta-api"]}, caller="agent:mcp", decision=plan)
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.apply("acme", v["digest"], caller="agent:mcp", decision=words)
+        self.assertEqual(caught.exception.code, "decision-invalid")
+
+    def test_smaller_edges(self):
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.plan("acme", {"serves": "ghp_" + "a" * 36})
+        self.assertEqual(caught.exception.code, "invalid-space", "a space name shaped like a credential")
+        for change in ({"keys": ["x"]}, {"labels": "x"}, {"include": "project:notes"}):
+            with self.assertRaises(self.sel.Refusal) as caught:
+                self.sel.plan("acme", change)
+            self.assertEqual(caught.exception.code, "invalid-change", change)
+        self.sel.apply("acme", self.ready()["digest"])
+        self.registry("projects.json", {"projects": PROJECTS + [
+            {"id": "project:delta", "name": "delta", "owners": ["acme-inc", "your-user"], "local_folders": ["delta"],
+             "organization": None, "organization_source": "conflict", "organization_why": "acme vs person"},
+            {"id": "project:gamma", "name": "gamma", "owners": ["acme-inc"], "local_folders": ["gamma"],
+             "organization": "acme", "organization_source": "rule", "organization_why": "repository owner acme-inc"}]})
+        v = self.sel.plan("acme", {"includeGroup": "proposed"})
+        self.assertEqual(self.items(v)["project:gamma"]["decision"], "exclude", "a group never takes a new item")
+        u = self.sel.undo("acme")
+        self.assertEqual((u["state"], u["outcome"]), ("empty", "undone"))
+        self.assertIn("nothing is selected", u["nextStep"])
+
+
 class WhatTheOrganizationSees(Base):
     """ORG-R03: a reference random per organization and a label only when typed; nothing is handed over."""
 
@@ -565,9 +669,24 @@ class UndoAndConfirm(Base):
         self.assertEqual(caught.exception.code, "entry-signed")
         self.assertIn("unassign", caught.exception.command)
 
+    def replacement_arrived(self, revision=1):
+        """What OBS-191 and OBS-416 will write once they exist: the request answered and consumers switched."""
+        path = self.sel._journal_path("acme", revision)
+        jdoc = json.loads(path.read_text())
+        for item in jdoc["items"]:
+            for st in item["steps"]:
+                if item["id"] == ORG_SLOT and st["step"] in ("credential-request", "switch-consumers"):
+                    st["state"] = "done"
+        path.write_text(json.dumps(jdoc))
+
     def test_confirm_replacement(self):
         v = self.ready()
         self.sel.apply("acme", v["digest"])
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.confirm_replacement("acme", ORG_SLOT)
+        self.assertEqual(caught.exception.code, "replacement-not-received",
+                         "nothing to confirm before the replacement arrived (ORG-R08)")
+        self.replacement_arrived()
         c = self.sel.confirm_replacement("acme", ORG_SLOT)
         self.assertEqual((c["outcome"], c["step"]["waitingOn"]), ("confirmed", "rotation"))
         self.assertEqual(c["step"]["state"], "planned", "confirmed, still not revoked: no rotation door yet")
@@ -735,8 +854,8 @@ class Cli(Base):
         self.assertEqual(code, 0)
         self.assertIn("revision 1", out)
         self.assertIn("fabric-adaptation-plan", out)
-        code, out, _ = self.run_cli("select", "--org", "acme", "confirm-replacement", ORG_SLOT, "--json")
-        self.assertEqual((code, json.loads(out)["outcome"]), (0, "confirmed"))
+        code, _, err = self.run_cli("select", "--org", "acme", "confirm-replacement", ORG_SLOT, "--json")
+        self.assertEqual((code, json.loads(err)["error"]), (1, "replacement-not-received"))
         code, out, _ = self.run_cli("select", "--org", "acme", "undo")
         self.assertEqual(code, 0)
         self.assertIn("undone", out)

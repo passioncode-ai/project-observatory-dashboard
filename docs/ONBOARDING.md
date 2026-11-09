@@ -2379,14 +2379,15 @@ stay personal and are never sent").
 
 `apply` takes the digest the preview showed and refuses any other form
 (`changed-since-preview`), a missing layout (`no-layout`), a separate space
-with no name (`no-serving-space`), a project another organization's record
-already holds (`chosen-for-another`, until contract CT-141 decides a project
-may be in two; `conflict-unchecked` when another organization's record does
+with no name (`no-serving-space`), a project another organization holds by its
+rules or its applied selection (`chosen-for-another`, until contract CT-141
+decides a project may be in two), a project that is Not ours (`not-ours`; `conflict-unchecked` when another organization's record does
 not read, so the check cannot be made), and a change to an item whose
 irreversible step is done (`entry-signed`, `already-revoked`). It writes the next revision, which names its predecessor's
 digest and verifies against its own on every read, and a journal of steps per
 item. Applying the same form again changes nothing and finishes an interrupted
-apply. What apply does today stays within what exists: a project waits on
+apply; until it does, `plan` and `show` say the last apply stopped and give that
+command. What apply does today stays within what exists: a project waits on
 `fabric-adaptation-plan` (Fabric has no door Observatory hands adaptation items
 to yet, so nothing is sent; then the passkey signs the entry in Fabric), a key
 handed over waits on `credential-requests` (OBS-191 parts 2 and 3) and its
@@ -2400,13 +2401,15 @@ first one undone leaves nothing chosen, and the defaults apply again); it is
 refused once a project's entry is signed in Fabric, where a take-back is a new
 estate revision (OBS-419). In the separate-space layout `confirm-replacement
 KEY` records that the organization's replacement works, so the revocation may
-follow once the rotation door exists. From the terminal each change is the
+follow once the rotation door exists; until the replacement has arrived and the
+key's consumers have switched to it, it is refused (`replacement-not-received`),
+which today is always, since those steps wait on OBS-191 and OBS-416. From the terminal each change is the
 person's own act; an agent passes the operator's words with `--decision JSON`
 (contract DEC-0121's shape, its `target` the organization, or the key for a
 confirmation) and calls `observatory_org_selection` with the same answers,
 which refuses a change, apply, undo or confirmation without them
-(`operator-decision-required`) or with words for another action or object
-(`decision-invalid`). A store that cannot be written (a symbolic link, a folder
+(`operator-decision-required`) or with words for another action or object, or
+words that already decided an earlier apply or undo (`decision-invalid`). A store that cannot be written (a symbolic link, a folder
 that is not yours) is refused as `record-unwritable`, and nothing is decided.
 
 Agents read the destination at session start: the Claude Code plugin prints the
