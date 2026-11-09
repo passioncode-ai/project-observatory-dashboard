@@ -1226,6 +1226,23 @@ class Skills(Base):
             self.assertLess(len(json.dumps(out, indent=2)), 80_000, cursor)
         self.assertNotIn("latest", out["skills"]["spaces"][0]["plugins"][0], "a null field is left out")
 
+    def test_a_page_of_long_rows_ends_early_and_a_cursor_without_a_stamp_still_walks(self):
+        long_row = {"name": "n" * 64, "agent": "claude-code", "scope": "user", "version": "1." * 19 + "1",
+                    "plugin": "p" * 129}
+        inventory = {**self.INVENTORY, "findings": [], "degraded": [],
+                     "spaces": [{"space": "this-account", "home": "~", "skills": [long_row] * 400, "plugins": []}]}
+        self.harness({"generated_at": "not-a-time", "inventory": inventory})
+        seen, cursor, pages = 0, None, 0
+        while True:
+            out = self.server.observatory_machine(section="skills", cursor=cursor)["skills"]
+            seen += len(out["spaces"][0]["skills"])
+            pages += 1
+            self.assertLessEqual(len(json.dumps(out["spaces"][0]["skills"])), 40_000 + 400)
+            cursor = out["page"]["nextCursor"]
+            if cursor is None or pages > 50:
+                break
+        self.assertEqual(seen, 400, "every row reached, the walk ended")
+
     def test_an_old_scan_is_named_stale(self):
         self.harness({"generated_at": "2026-01-03T00:00:00Z", "inventory": {**self.INVENTORY, "degraded": []}})
         out = self.server.observatory_machine(section="skills")

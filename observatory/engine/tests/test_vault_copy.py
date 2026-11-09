@@ -524,7 +524,7 @@ class Copy(unittest.TestCase):
         p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", str(self.source_store))
         self.assertEqual(p.returncode, 2)
         self.assertIn("copy refused (same-store)", p.stderr)
-        self.assertIn("nothing was written", p.stderr)
+        self.assertIn("no value, metadata or journal line was written", p.stderr)
 
     def test_the_human_receipt_says_what_happened_without_the_value(self):
         self.put()

@@ -742,7 +742,7 @@ def _skill_rows(folder: Path, agent: str, scope: str, extra: dict, seen: set[str
     rows = []
     label = f"skills:{agent}:{scope}" + (f":{extra.get('project') or extra.get('plugin')}" if extra else "")
     for skill in [f / "SKILL.md" for f in _folders(folder, label, degraded)
-                  if _is_file(f / "SKILL.md", f"skill:{agent}:{scope}:{f.name}", degraded)]:
+                  if _is_file(f / "SKILL.md", f"skill:{agent}:{scope}:{_text(f.name)}", degraded)]:
         real = str(skill.parent.resolve())
         if real in seen:
             continue
@@ -752,7 +752,7 @@ def _skill_rows(folder: Path, agent: str, scope: str, extra: dict, seen: set[str
             with open(skill, encoding="utf-8", errors="replace") as stream:
                 text = stream.read(SKILL_HEAD_MAX)
         except OSError as exc:
-            degraded.append({"source": f"skill:{agent}:{scope}:{skill.parent.name}", "code": "unreadable",
+            degraded.append({"source": f"skill:{agent}:{scope}:{_text(skill.parent.name)}", "code": "unreadable",
                              "reason": f"a skill's SKILL.md could not be read ({type(exc).__name__}); it is not in "
                                        f"the inventory"})
             continue

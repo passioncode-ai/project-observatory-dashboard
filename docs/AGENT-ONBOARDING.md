@@ -364,7 +364,8 @@ space with its version, scope (`user`, `project`, `plugin`; a plugin install `us
 agent (`claude-code`, `codex`), read from the last harness scan; it fetches nothing. It comes 100 rows a
 page (the findings, then the plugins, then the skills): follow `skills.page.nextCursor` with `cursor` before saying
 a skill or a plugin is not installed; `counts` are always whole. An `invalid-cursor` in `degraded` means the scan
-changed under the walk: start again from the first page. `findings` holds a plugin
+changed under the walk (start again from the first page), the cursor was past the end (nothing follows), or it was
+not one the answer gave. `findings` holds a plugin
 behind the newest version its marketplace's local copy publishes (`plugin-behind`, step `claude plugin update
 NAME --scope SCOPE` in the project's folder for a project or local install, which is mine to run unless I said
 otherwise). `open` names what is not reported yet (an organization's

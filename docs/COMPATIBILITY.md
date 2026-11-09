@@ -694,7 +694,8 @@ reads a scan without it as `not-surveyed` until the next scan. `observatory_mach
 (answer `{measuredAt, degraded, skills}`, `skills` holding `spaces`, `page` (`limit`, `cursor`, `nextCursor`, `order`,
 `total`), `counts`, `findings`, `open`, `degraded`) with two new optional arguments for that section, `limit`
 (1 to 100, default 100 rows of one window over the findings, then each space's plugins, then its skills; `total`
-counts those rows; `counts` stay whole; a cursor is `offset@stamp` (the scan's time as digits), and one given for an
+counts those rows; a page also ends once its rows pass 40,000 characters of compact JSON, at least one row a page;
+`counts` stay whole; a cursor is `offset@stamp` (the scan's time as digits), and one given for an
 earlier scan answers the first page of this one with `invalid-cursor`; a bare offset is accepted; a cursor past the
 end answers an empty last page; a skill's `name` is its
 front matter's only when it has a name's shape, else its folder's, at most 64 characters, and a plugin recorded

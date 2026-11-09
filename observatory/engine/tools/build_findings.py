@@ -2974,7 +2974,7 @@ def collect() -> list[dict]:
                            + (f", refreshed {_b.get('marketplaceUpdated')}" if _b.get("marketplaceUpdated") else "")
                            + f"; the {_b.get('scope')} install"
                            + (f" in {_b.get('project')}" if _b.get("project") else "")
-                           + " still runs the older version. Nothing was fetched to say this."),
+                           + " is at the older version. Nothing was fetched to say this."),
                 "action": (f"`{_b.get('action')}`"
                            + (f", run in the {_b.get('project')} project's folder" if _b.get("project") else "")
                            + ", then restart the agent's sessions"),

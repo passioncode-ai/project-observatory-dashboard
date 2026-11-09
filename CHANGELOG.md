@@ -11,7 +11,8 @@ while the major version is 0, a minor release may change behaviour and says so h
   `tools/vault.py copy PROJECT ENV NAME --to-store PATH [--to-slot SLOT] [--replace] [--json]` copies one slot into
   another secret store this account owns (a space being prepared, another workspace's store), reading and writing the value inside
   one process: never printed, never in an argument, a file outside the two stores or a log. The source stays; both
-  stores' movement journals record `copied`, each naming the other store and slot; both stores' locks are held. A
+  stores' movement journals record `copied`, each naming the other store and slot (nothing when the target already
+  held the value, `unchanged`); both stores' locks are held. A
   filled target slot is refused unless `--replace` (the old value is archived there). The receipt (`vault-copy/1`)
   names the slot, both stores and two keyed digests, under the source's estate key when it has one (comparable with
   `full vault-digests`), else under a one-time key. Refusals name their code: `target-other-account` (a store

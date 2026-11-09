@@ -2071,7 +2071,8 @@ a plugin folder missing from the local copy, and a catalogue that sets `metadata
 followed yet, give no `latest`). A plugin from a Git repository or a URL has no `latest` (its manifest is not in the local
 copy); one from a marketplace that is a local folder is compared like any other (Claude Code installs a copy
 of it into its cache, which can fall behind the folder): nothing is fetched. A plugin
-behind that version and not known to be disabled (`enabled` true, or null) is a finding (`plugin-behind`, with `claude plugin update NAME --scope SCOPE` as the step, run
+behind that version, not known to be disabled (`enabled` true, or null) and, for a project or local install,
+of a known project, is a finding (`plugin-behind`, with `claude plugin update NAME --scope SCOPE` as the step, run
 in the project's folder for a project or local install), and the board shows it as `harness.plugin_behind`;
 a disabled install behind is listed (`behind: true`) but loads nothing and is not a finding. A project or
 local install carries `projectKey`, a short digest of the project's path that tells two projects of one
@@ -3481,7 +3482,8 @@ missing, under a parent folder that exists, and an existing one of yours is set 
 goes in.
 The value is read and written inside the one process. Your slot stays. Both stores' movement journals
 record `copied`, each naming the other store and slot (`vault.py movements` shows it), and the copy
-holds both stores' locks. `--to-slot` takes `NAME` or `PROJECT/ENV/NAME` (default: the same slot). A
+holds both stores' locks. `--to-slot` takes `NAME` or `PROJECT/ENV/NAME` (default: the same slot; the target's
+PROJECT is used as typed, not normalised through this workspace's registry). A
 target slot that holds another value is refused (`target-slot-filled`) unless `--replace`, which archives
 the old value there as `rotate` does; one that already holds this value is left alone (`unchanged`). The
 value's expiry and provenance travel with it, and its metadata gains `copied_from` (the source store, slot and

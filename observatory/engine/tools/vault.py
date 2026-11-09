@@ -1242,7 +1242,8 @@ def cmd_copy(a) -> int:
             print(json.dumps({"schema": COPY_SCHEMA, "outcome": "refused", "code": exc.code or "invalid-slot",
                               "reason": str(exc)}, indent=1, ensure_ascii=False))
         else:
-            print(f"vault: copy refused ({exc.code or 'invalid-slot'}): {exc}; nothing was written", file=sys.stderr)
+            print(f"vault: copy refused ({exc.code or 'invalid-slot'}): {exc}; no value, metadata or journal line was "
+                  f"written", file=sys.stderr)
         return 2
     except ValueError:
         reason = "a file the copy reads could not be decoded; nothing was written"

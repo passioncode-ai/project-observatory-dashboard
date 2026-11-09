@@ -87,6 +87,8 @@ def carried(hygiene: dict) -> dict | None:
     return {"checkouts": len(stale), "measured_at": min(stamps) if stamps else None}
 
 
+#: Past this many characters of rows (compact JSON) a page of the skills section ends early.
+PAGE_CHARS = 40_000
 #: The page of an answer that has no skills to page.
 EMPTY_PAGE = {"limit": None, "cursor": "0", "nextCursor": None, "total": 0,
               "order": "findings, then each space's plugins, then its skills"}
@@ -158,7 +160,7 @@ def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
     # A cursor carries the scan it was given for (`offset@stamp`): the tick rewrites the scan every half hour, and a
     # walk that spans a rescan would skip or repeat rows without saying so. A bare offset is taken as it is.
     stamp = re.sub(r"[^0-9]", "", str(doc.get("generated_at") or ""))[:14]
-    given = re.fullmatch(r"([0-9]{1,9})(?:@([0-9]{1,14}))?", str(cursor)) if cursor is not None else None
+    given = re.fullmatch(r"([0-9]{1,9})(?:@([0-9]{0,14}))?", str(cursor)) if cursor is not None else None
     if given and given.group(2) is not None and given.group(2) != stamp:
         degraded.append({"source": "cursor", "code": "invalid-cursor",
                          "reason": "the inventory was scanned again since this cursor was given; the first page of "
@@ -179,6 +181,15 @@ def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
             degraded.append({"source": "cursor", "code": "invalid-cursor",
                              "reason": "the cursor is not one this answer gave; the first page is shown"})
     end = total if limit is None else min(total, start + max(1, int(limit)))
+    if limit is not None:
+        # Bounded by size as well as by count: a page stops once its rows pass PAGE_CHARS characters, so rows whose
+        # every field is at its longest still make a page a host keeps. At least one row, so a walk always moves.
+        used = 0
+        for at in range(start, end):
+            used += len(json.dumps(rows[at][2]))
+            if used > PAGE_CHARS and at > start:
+                end = at
+                break
     window = rows[start:end]
     findings = [r for kind, _, r in window if kind == "finding"]
     spaces = [{**space, "plugins": [r for kind, i, r in window if kind == "plugin" and i == index],
