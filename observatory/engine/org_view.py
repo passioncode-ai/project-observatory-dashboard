@@ -454,7 +454,9 @@ def accounts() -> dict:
         _not_scanned("digitalocean", degraded)
     try:
         if str(paths.ROOT / "tools") not in sys.path:
-            sys.path.insert(0, str(paths.ROOT / "tools"))
+            # Appended, never first: `tools/` holds `node.py` and `runtime_identity.py`, which would shadow the
+            # engine's `node` package and module of the same names for every later import in this process.
+            sys.path.append(str(paths.ROOT / "tools"))
         import digitalocean
         import credential_shape
         for i, c in enumerate(digitalocean.unstashed_contexts(probe=False)):
@@ -753,9 +755,9 @@ def _groups(a, default: str, rows: list[dict], projects: list[dict]) -> list[dic
 
 # ── keys ───────────────────────────────────────────────────────────────────────
 
-def keys(org: str) -> dict:
-    """Each vault slot of the projects `org` holds, classified for it (ORG-R06), and the door admin keys that
-    never move (ORG-R07). Names only: no slot, stash or value file is opened."""
+def organization_checked(org: object) -> "tuple[dict, organizations.Assigner]":
+    """`org` as an organization a key or a selection can go to: a usable name in a readable
+    `config/organizations.json`, and not its default (Personal). The refusals name their command."""
     import credential_shape
     if not isinstance(org, str) or not org.strip() or len(org) > 200 or credential_shape.shaped(org):
         raise Refusal("invalid-organization", f"{credential_shape.echo(org)} is not an organization name",
@@ -776,7 +778,28 @@ def keys(org: str) -> dict:
     if org == a.default:
         raise Refusal("default-organization", f"{org!r} is the default organization (Personal): its keys stay where "
                                               "they are; name the organization they would go to", ACCOUNTS_CMD)
+    return doc, a
+
+
+def keys(org: str, chosen: "list[str] | tuple[str, ...] | None" = None) -> dict:
+    """Each vault slot of the projects `org` holds, classified for it (ORG-R06), and the door admin keys that
+    never move (ORG-R07). Names only: no slot, stash or value file is opened.
+
+    `chosen`: project ids the person chose for `org` in the selection (OBS-417, `org_selection.py`). Each one known
+    to the registry joins the scope as the organization's, by that decision, so its keys are listed and classified
+    as for a project the rules give the organization (ORG-W6 lists the keys of the chosen projects). An id the
+    registry does not know is ignored here; the selection names it. None (`full org keys`, `observatory_org_keys`):
+    the projects the applied selection chose, read from its record."""
+    doc, a = organization_checked(org)
     degraded: list[dict] = []
+    if chosen is None:
+        import org_selection
+        try:
+            chosen = org_selection.recorded_projects(org)
+        except org_selection.Refusal as refusal:
+            chosen = []
+            degraded.append({"source": "store/org-selection", "code": refusal.code, "reason": str(refusal)[:200],
+                             "effect": "projects chosen by hand in the selection are not in scope"})
     pdoc = _registry("projects.json", degraded, "no project is known to be the organization's, so no key is in scope")
     projects = _project_rows(pdoc)
     do, cf, hk = _quiet("digitalocean-account.json"), _quiet("cloudflare-account.json"), _quiet("heroku-apps.json")
@@ -790,6 +813,15 @@ def keys(org: str) -> dict:
             scope[p["id"]] = {"side": "organization", "why": f"the project is {org}'s ({r['source']}: {r['why']})"}
         elif p.get("organization_source") == "conflict" and org in a.hits(p, claims.get(p["id"])):
             scope[p["id"]] = {"side": "conflict", "why": f"the project's rules disagree ({p.get('organization_why')})"}
+    known = {p["id"]: p for p in projects}
+    for pid in chosen or ():
+        row = known.get(pid) or {}
+        other = row.get("organization")
+        if row.get("organization_source") == "external" or other == "external" or (
+                row.get("organization_source") in ("declared", "rule") and other not in (org, a.default)):
+            continue                                   # another organization's or Not ours: never in this scope
+        if pid in known and (scope.get(pid) or {}).get("side") != "organization":
+            scope[pid] = {"side": "organization", "why": f"you chose the project for {org}", "byChoice": True}
     slots = _slots(degraded)
     do_keys = organizations.account_keys("digitalocean", _rows(do, "accounts"))
     do_by_uuid = {str(t["team_uuid"]): do_keys.get(t["id"]) or [str(t["team_uuid"])]
@@ -829,7 +861,9 @@ def keys(org: str) -> dict:
     state = "empty" if not rows and not fixed else ("partial" if degraded else "complete")
     return {"schema": KEYS_SCHEMA, "generatedAt": _now(), "organization": org,
             "label": _label(a.orgs.get(org)) or org, "state": state,
-            "projects": [{"id": pid, "side": s["side"], "why": s["why"]} for pid, s in sorted(scope.items())],
+            "projects": [{"id": pid, "side": s["side"], "why": s["why"], **({"byChoice": True} if s.get("byChoice")
+                                                                             else {})}
+                         for pid, s in sorted(scope.items())],
             "keys": rows, "notMovable": fixed, "counts": counts,
             "notChecked": ["values present twice in this space (ORG-R09) and names the organization already holds "
                            "(ORG-R10) need a comparison of values or the organization's context; neither is read here"],

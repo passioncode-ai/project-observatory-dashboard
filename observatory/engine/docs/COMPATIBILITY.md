@@ -611,6 +611,21 @@ is sent: the node's check-in still sends no `credentialRequests` and reads no de
 put` and `rotate` there leave a stale `provenance` beside a new value, which the newer engine drops at the slot's
 next put or rotation.
 
+## Organizations: the local selection record (OBS-417, the release after 0.35.8)
+
+Additive. Nothing migrates, and nothing is written until a person (or an agent with the operator's words) changes
+or applies a selection: `full org select --org NAME plan|show|apply|undo|confirm-replacement` keeps
+`org-selection/1` in the workspace's `store/org-selection/` (one owner-only folder per organization, named by the
+digest of its name: `draft.json`, `revisions/NNNNNN.json`, `journals/NNNNNN.json`). A revision verifies against its
+own digest and names its predecessor's; one changed by hand or not owner-only is refused (`record-unreadable`), never
+read past. Answers are schema `org-select/1`; the MCP server serves the same as `observatory_org_selection` (29
+`observatory_*` tools), whose change, apply, undo and confirmation need the operator's words (contract DEC-0121).
+The findings board gains `organization.selection_new` (silent without an applied selection), and `full org keys`
+lists the keys of a project chosen by hand in the selection. Nothing is sent: projects wait for Fabric's adaptation
+plan and keys for the request queue and the rotation (OBS-191, OBS-416). Both schemas are this engine's own and may
+gain fields; a field is never renamed without a new schema name. Downgrade: an older engine has no `org select`, no
+tool and no finding, and leaves `store/org-selection/` untouched.
+
 ## Space daemons: replacing a loaded daemon (OBS-475, OBS-395 part 2, space daemons 1.2.0, the release after 0.35.9)
 
 No migration: the registry (`observatory-space-daemons/1`), the daemon plists and the log folders keep their format,

@@ -2413,7 +2413,6 @@
  "{gb} GB free": "свободно {gb} ГБ",
  "memory {used} of {total} GB": "память: {used} из {total} ГБ",
  "memory not measured": "память не измерена",
- "not connected": "не подключено",
  "connected": "подключено",
  "Not set up on this machine yet.": "На этой машине ещё не настроено.",
  "Needs you first": "Требует вас в первую очередь",
@@ -2467,5 +2466,12 @@
  "Project with no organization (rules disagree)": "Проект без организации (правила расходятся)",
  "organizations.json is not read: {reason}": "organizations.json не прочитан: {reason}",
  "organizations.json has entries the engine does not read": "в organizations.json есть записи, которые движок не читает",
- "{project} has no organization: its rules disagree": "у {project} нет организации: правила расходятся"
+ "{project} has no organization: its rules disagree": "у {project} нет организации: правила расходятся",
+ "Found since an organization's selection": "Найдено после выбора для организации",
+ "{n} new items may belong to {organization}": {
+  "few": "{n} новых элемента могут относиться к {organization}",
+  "many": "{n} новых элементов могут относиться к {organization}",
+  "one": "{n} новый элемент может относиться к {organization}",
+  "other": "{n} новых элемента могут относиться к {organization}"
+ }
 }

@@ -63,10 +63,11 @@ stops nothing), writes, boots the old daemon out, waits the same way, bootstraps
 answers 5, 37 or 125, up to BOOTSTRAP_ATTEMPTS); when the new one does not load it puts the previous daemon back
 and loads it, and when the old one does not stop in time it loads nothing and puts the previous file back, saying
 which in `put_back`. Every result of apply, replace and remove carries `steps`, one line per step with its
-outcome (a refusal before anything is read, exit 2, is an error instead). launchd is believed only when it
+outcome (a refusal exit 2 answers, `not-ours` among them, is an error with no steps instead). launchd is believed only when it
 answers: a `launchctl print` that times out or fails is `launchd_unknown` and changes nothing, and a loaded label
 is booted out or counted as loaded by this tool only when launchd names this tool's own plist as its path. An
-apply or replace interrupted while it waits puts the previous file and registry entry back before it exits.
+apply or replace interrupted while it waits (Ctrl-C) puts the previous file and registry entry back before it
+exits; a SIGHUP or SIGTERM does not yet (OBS-484).
 `apply` over its own loaded daemon replaces it the same way when the definition changed, and leaves it alone
 (`unchanged`) when it did not; `replace` reloads it even then.
 

@@ -2408,8 +2408,96 @@ stashes its own (ORG-R07). A value present twice and a name NAME already holds
 need a comparison of values or NAME's context and are not checked (`notChecked`).
 The default organization, an unknown name and a workspace with no organizations
 are refused with the command to run. Agents call `observatory_org_accounts` and
-`observatory_org_keys` for the same answers. Choosing, applying and handing keys
-over (OBS-416, OBS-417) are not built yet.
+`observatory_org_keys` for the same answers. A project chosen by hand in the
+selection below joins the scope of `org keys`, so its keys are listed too.
+
+What goes to an organization is one local record, `org-selection/1` (OBS-417;
+the design's ORG-W5, ORG-W7 and ORG-W8). It is owner-only, kept in this space's
+`store/org-selection/`, never sent and never signed by a device key, and it
+holds names and decisions only, never a key's value:
+
+```bash
+project-observatory full org select --org company            # the plan: what is proposed, the preview, its digest
+project-observatory full org select --org company plan --layout separate-space --serves work-company \
+    --exclude project:beta-api --label project:alpha-web="Alpha website" \
+    --key vault:alpha-web/prod/HAND_PUT=hand-over-keep      # change it item by item
+project-observatory full org select --org company apply --digest sha256:...   # the digest the plan showed
+project-observatory full org select --org company show       # the record, its journal, what was found since
+project-observatory full org select --org company undo       # restore the revision before
+project-observatory full org select --org company confirm-replacement vault:alpha-web/prod/OPENROUTER_API_KEY
+```
+
+The plan starts from the defaults (ORG-R15): the projects the organization's
+rules give it and the accounts a rule names for it are chosen; projects and
+accounts that need a decision (a conflict, an account no rule names) are listed
+and not chosen; a key is handed over, with the personal value revoked once the
+organization's replacement works, only when its project and its issuing
+account agree and its project is chosen. Every other key stays personal. Once a
+selection is applied, the next plan starts from the record, and anything found
+since (a new project or key the rules would propose) is listed as `new` and
+never chosen by itself (ORG-R16); it stays out of the record and out of the
+form's digest until a person decides it or types its label (a label alone
+decides nothing: the item stays new), the applied form still reads applied, the
+plan says how many wait, and the findings board names it as
+`organization.selection_new`. Changes are item by item (`--include`,
+`--exclude`, `--key KEY=hand-over-revoke|hand-over-keep|keep`, `--label
+PROJECT=TEXT`, the name the organization would read, empty by default; a
+label never chooses a project by itself), or a
+whole group as it is listed now (`--include-group proposed|needs-you`; each
+member is recorded one by one, so a later member is not included by it). The
+layout comes first (ORG-R29): `separate-space` (recommended: a new OS account
+or VM, named with `--serves`), `this-space` or `one-space`. The preview names
+what the organization would receive (one item per project: a reference random
+per organization, and a label only where you typed one), the keys asked for,
+the personal values that would be revoked (the one step that cannot be undone),
+the human steps, and the line of what stays personal ("N projects and M keys
+stay personal and are never sent").
+
+`apply` takes the digest the preview showed and refuses any other form
+(`changed-since-preview`), a missing layout (`no-layout`), a separate space
+with no name (`no-serving-space`), a project another organization holds by its
+rules or its applied selection (`chosen-for-another`, until contract CT-141
+decides a project may be in two), a project that is Not ours (`not-ours`; `conflict-unchecked` when another organization's record does
+not read, so the check cannot be made), and a change to an item whose
+irreversible step is done (`entry-signed`, `already-revoked`). It is also refused
+while `registry/projects.json` does not read (`registry-unreadable`) or the
+vault's slots do not list (`vault-unreadable`), while the
+source of a chosen item did not read this time (`source-unreadable`: the choice
+stays, and the plan lists the item under `unread`), or when a chosen item is no
+longer found here although its source read (`items-not-found`), since each would
+change the record without a word. It writes the next revision, which names its predecessor's
+digest and verifies against its own on every read, and a journal of steps per
+item. Applying the same form again changes nothing. An apply or undo that
+stopped after its revision was written is finished by the next apply or undo
+before anything else, and `plan` and `show` say so and give the command that
+finishes it (`apply --digest` with the record's own digest). What apply does today stays within what exists: a project waits on
+`fabric-adaptation-plan` (Fabric has no door Observatory hands adaptation items
+to yet, so nothing is sent; then the passkey signs the entry in Fabric), a key
+handed over waits on `credential-requests` (the request queue exists since
+OBS-191 parts 2 and 3, but apply files no request into it yet) and its
+switch and revocation on `rotation` (OBS-416: no value is read, copied or
+written), and the layout on its own step (a new space, OBS-362; moving personal
+kinds out, OBS-426; contexts on every item, OBS-359). An account recorded is
+`done`, and so is a key kept personal in the separate-space layout; in this
+space or one space a kept key waits to move out or for its context (OBS-426,
+OBS-359). Nothing that has not happened reads `done`. `show`
+counts each kind's items as done, failed, waiting, planned or undone, and names
+what each waits on. `undo` restores the revision before as a new revision (the
+first one undone leaves nothing chosen, and the defaults apply again; undoing
+an undo restores what it removed; a draft not yet applied is dropped with it); it is
+refused once a project's entry is signed in Fabric, where a take-back is a new
+estate revision (OBS-419). In the separate-space layout `confirm-replacement
+KEY` records that the organization's replacement works, so the revocation may
+follow once the rotation door exists; until the replacement has arrived and the
+key's consumers have switched to it, it is refused (`replacement-not-received`),
+which today is always, since apply files no request yet and the rotation is OBS-416. From the terminal each change is the
+person's own act; an agent passes the operator's words with `--decision JSON`
+(contract DEC-0121's shape, its `target` the organization, or
+`ORG:vault:FOLDER/ENV/NAME` for a confirmation; words carrying something shaped like a credential are refused) and calls `observatory_org_selection` with the same answers,
+which refuses a change, apply, undo or confirmation without them
+(`operator-decision-required`) or with words for another action or object, or
+words that already decided an earlier apply or undo (`decision-invalid`). A store that cannot be written (a symbolic link, a folder
+that is not yours) is refused as `record-unwritable`, and nothing is decided.
 
 Agents read the destination at session start: the Claude Code plugin prints the
 project's organization, its Google Analytics account and Figma team, and the
