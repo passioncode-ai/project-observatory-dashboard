@@ -570,7 +570,10 @@ SUITE_SECONDS = {'credential_doors': 600, 'maintenance': 480, 'tick_py': 300, 'c
                  'gate_purity': 300, 'search': 300,
                  # 47-87 s on macos-latest (#416, #419, #420, #428), then past 120 s twice: 121.5 s
                  # (#429, run 41921013085) and 122.2 s (#432, run 41963794187); OBS-335.
-                 'session_reload': 300}
+                 'session_reload': 300,
+                 # 44 cases over the organization views with real door records: 77.8 s on windows-latest
+                 # under the job's --jobs 4 (run 42561065821), past 120 s on the next run (42565089825).
+                 'organizations': 300}
 
 
 def suite_timeout(name: str, timeout: int) -> int:
