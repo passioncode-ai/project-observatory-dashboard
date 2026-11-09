@@ -279,7 +279,7 @@ def _space_here() -> dict:
     import service_identity
     try:
         account = getpass.getuser()
-    except (OSError, KeyError):
+    except (OSError, KeyError, ImportError):          # Windows without user variables: ImportError (3.11, 3.12)
         account = None
     return {"workspace": service_identity.workspace_digest(), "account": account}
 
@@ -375,10 +375,13 @@ def _candidates(org: str, ctx: dict) -> dict[str, dict]:
 
 def _baseline(record: dict | None) -> dict[str, dict] | None:
     """The record's own decisions, which every later plan starts from; None before the first, or after an undo
-    back to nothing (defaults apply again)."""
-    if not record or not record.get("items"):
+    back to nothing (defaults apply again). Any other record, one with a layout and no item among them, is a
+    baseline: what is found after it is new and never chosen by itself (ORG-R16)."""
+    if not record:
         return None
-    return {i["id"]: i for i in record["items"]}
+    if not record.get("items") and record.get("kind") == "undo" and not record.get("layout"):
+        return None
+    return {i["id"]: i for i in record.get("items") or []}
 
 
 def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> dict:
@@ -395,7 +398,7 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
     for ident, c in cands.items():
         row = {k: v for k, v in c.items() if k != "default"}
         follows = (c["kind"] == "key" and c.get("project") in newly
-                   and (ident not in (base or {}) or base[ident].get("by") in ("rule", "default")))
+                   and (ident not in (base or {}) or base[ident].get("by") in ("rule", "default", "project")))
         if base is None or follows:
             # Before any record, or a key nobody chose by hand whose project is chosen now: the default (ORG-R15).
             row.update(decision=c["default"], by="rule" if c["default"] in ("include", "hand-over-revoke") else
@@ -444,9 +447,11 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
         if row["kind"] == "project":
             (chosen.add if row["decision"] == "include" else chosen.discard)(ident)
     for ident, row in items.items():
-        if row["kind"] == "key" and ident not in changes and row.get("by") in ("rule", "default") \
+        if row["kind"] == "key" and ident not in changes and row.get("by") in ("rule", "default", "project") \
                 and row["decision"] != "keep" and row.get("project") is not None and row["project"] not in chosen:
-            row.update(decision="keep", by="default",
+            # `by: project`: it follows its project, a decision already made, so it is neither a default left for a
+            # person nor something found since (ORG-R16).
+            row.update(decision="keep", by="project", new=False,
                        why=row["why"] + "; its project is not chosen, so nothing is asked for it")
     layout = (draft or {}).get("layout", (record or {}).get("layout"))
     serves = (draft or {}).get("serves", ((record or {}).get("serves") or {}).get("space"))
@@ -713,6 +718,7 @@ class _locked:
     def __enter__(self):
         self.stack = contextlib.ExitStack()
         try:
+            private_io.parent(root())                  # the store folder owner-only too, before any organization's
             for path in self.paths:
                 private_io.parent(path.parent)
                 self.stack.enter_context(private_io.lock(path))
@@ -1099,7 +1105,9 @@ def _unfinished(org: str, rec: dict | None) -> bool:
     prior = revs[-2] if len(revs) >= 2 else None
     old = journal(org, prior["revision"], prior["digest"]) if prior else None
     now = {i["id"]: {st["step"] for st in i["steps"]} for i in (jdoc or {}).get("items") or []}
-    return any(st["state"] in ("planned", "waiting") and st["step"] not in now.get(i["id"], set())
+    return any((st["state"] in ("planned", "waiting")
+                or (st["state"] == "done" and st["step"] not in IRREVERSIBLE))
+               and st["step"] not in now.get(i["id"], set())
                for i in (old or {}).get("items") or [] for st in i["steps"])
 
 
@@ -1251,6 +1259,7 @@ def undo(org: str, *, decision: Any = None, caller: str = "cli") -> dict:
         _commit(org_ok, cur, rec)
     answer = _apply_answer(org_ok, rec, "undone", who)
     answer["answer"] = "undo"
+    answer["draftDropped"] = bool(pending)
     answer["restored"] = None if restored is None else {"revision": restored["revision"], "digest": restored["digest"]}
     return answer
 

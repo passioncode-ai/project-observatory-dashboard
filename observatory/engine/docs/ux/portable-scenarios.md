@@ -1469,9 +1469,9 @@ Coverage: the classification of step 1, `full org keys` and `observatory_org_key
 `tests/test_organizations.py` (organization, personal and ambiguous by project and issuer, put by hand, an
 undeclared environment, door admin keys not movable, every value file unreadable and none opened). Not built: values
 present twice and names the organization holds (ORG-R09, ORG-R10, OBS-415), the hand-over (OBS-416, OBS-191,
-OBS-360), the window (OBS-425). The choices of step 2 and the confirmation of step 4 are recorded by `full org select`
-and `observatory_org_selection` (OBS-417, `tests/test_org_selection.py`); each key handed over waits there as
-`credential-requests` and `rotation`. Status: draft; product outcome unobserved.
+OBS-360), the window (OBS-425). The choices of step 2 are recorded by `full org select` and
+`observatory_org_selection` (OBS-417, `tests/test_org_selection.py`); each key handed over waits there as
+`credential-requests` and `rotation`, and the confirmation of step 4 is refused until the replacement has arrived. Status: draft; product outcome unobserved.
 
 ### OSS-107: decide where the organization's work lives on this computer
 

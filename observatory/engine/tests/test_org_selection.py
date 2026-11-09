@@ -831,6 +831,49 @@ class ReviewRoundFive(Base):
             self.assertEqual(m.observatory_org_selection(org="acme", **args)["error"], "invalid-change", args)
 
 
+class ReviewRoundSix(Base):
+    """What the sixth review found: each case reproduced, then fixed."""
+
+    def test_a_key_of_a_project_left_out_is_never_new(self):
+        self.sel.apply("acme", self.sel.plan("acme", {"exclude": ["project:alpha-web"], "layout": "one-space"})
+                       ["digest"])
+        v = self.sel.plan("acme")
+        self.assertEqual((v["new"], v["applied"]), ([], True))
+        import organization_findings
+        importlib.reload(organization_findings)
+        self.assertEqual(organization_findings.selection_findings(self.sel.new_since_all()), [])
+        row = self.items(v)[ORG_SLOT]
+        self.assertEqual((row["decision"], row["by"]), ("keep", "project"))
+        # Its project chosen again: the key takes the default again.
+        self.assertEqual(self.items(self.sel.plan("acme", {"include": ["project:alpha-web"]}))[ORG_SLOT]["decision"],
+                         "hand-over-revoke")
+
+    def test_after_a_record_with_no_items_a_new_project_is_never_chosen(self):
+        self.sel.apply("quiet", self.sel.plan("quiet", {"layout": "one-space"})["digest"])
+        self.registry("projects.json", {"projects": PROJECTS + [
+            {"id": "project:hush", "name": "hush", "owners": ["nobody-here"], "local_folders": ["hush"],
+             "organization": "quiet", "organization_source": "rule", "organization_why": "repository owner"}]})
+        v = self.sel.plan("quiet")
+        row = self.items(v)["project:hush"]
+        self.assertEqual((row["decision"], row["new"]), ("exclude", True))
+        self.assertEqual(self.sel.new_since_all(), [{"organization": "quiet", "new": ["project:hush"]}])
+
+    def test_the_store_folder_is_owner_only_from_the_first_change(self):
+        self.sel.plan("acme", {"layout": "one-space"})
+        self.assertEqual(stat.S_IMODE(self.sel.root().stat().st_mode), 0o700)
+
+    def test_no_user_name_is_not_a_crash(self):
+        import getpass
+        with patch.object(getpass, "getuser", side_effect=ImportError("no pwd")):
+            self.assertIsNone(self.sel.plan("acme")["madeIn"]["account"])
+
+    def test_undo_says_it_dropped_a_draft(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        self.sel.plan("acme", {"exclude": ["project:beta-api"]})
+        u = self.sel.undo("acme")
+        self.assertTrue(u["draftDropped"])
+
+
 class WhatTheOrganizationSees(Base):
     """ORG-R03: a reference random per organization and a label only when typed; nothing is handed over."""
 
