@@ -17,6 +17,15 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-11-09: release 0.35.9](runs/2026-11-09-release-0.35.9/README.md): engine 0.35.9 and `observatory-log`
+0.35.9: organization onboarding part one, `full org accounts` and `full org keys` with the account rules
+`github_owners` and `openrouter_accounts` (OBS-411, OBS-412 part 2, OBS-415, #481) and the local selection record
+`full org select` with `show`, `apply`, `undo` and `confirm-replacement` (OBS-417, #483); credential requests issued
+through the OpenRouter and Cloudflare doors into the requested slot, with provenance and revocation with proof
+(OBS-191 parts 2 and 3, OBS-360, #484).
+
+Next: tag `v0.35.9`, verify and install it on both Macs (receipts in the record).
+
 [2026-11-09: release 0.35.8](runs/2026-11-09-release-0.35.8/README.md): engine 0.35.8 (`observatory-log` stays
 0.35.6): a readable `inventory/agents.md` in the wiki (OBS-317, first half), DigitalOcean onboarding signals in doctor
 and the collector (OBS-421), organizations matched through DigitalOcean and Heroku teams and Cloudflare accounts

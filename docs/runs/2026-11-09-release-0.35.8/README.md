@@ -9,8 +9,9 @@ verify and install it.
 
 - Open: the install on the second Mac, handed to its host agent.
 - Waits: the second Mac's host agent; no watcher of this record runs, the next release session reads its answer.
-- Next task: PR [#481](https://github.com/passioncode-ai/project-observatory-dashboard/pull/481) (OBS-411, OBS-412,
-  OBS-415: read-only organization accounts and keys views, the remaining account rules).
+- Next task: release 0.35.9 ([record](../2026-11-09-release-0.35.9/README.md)); PR #481 merged on 2026-11-09 as
+  `2d1d6a41` and ships there. No answer about the second Mac's install was found by that release session
+  (`observatory_machine` `section=move` read no other machine's facts younger than 48 hours).
 
 ## What it releases
 
