@@ -1225,6 +1225,13 @@ XML comment holding `--` parsed as launchd does, with nothing inside a comment b
 (`tests/test_space_daemons.py` Trusting, Rules, Reading; `tests/test_machine_backup.py` HeadlessSpace
 `test_cutover_parses_and_trusts_as_root_will`).
 
+Since space daemons 1.2.0 (OBS-475, OBS-395 part 2): `remove` answers only once launchd has let the label go (a stop
+that does not finish in its bound is `still_loaded` and keeps the file and the entry), so an `apply` right after it
+loads; `replace --label LABEL` checks the new definition, stops the old daemon, waits, loads the new one and on a
+refusal puts the previous one back and loads it (`put_back`); `apply` over its own loaded daemon replaces a changed one
+the same way and leaves an unchanged one running (`unchanged`); every answer lists its `steps`
+(`tests/test_space_daemons.py` Replacing).
+
 Acceptance: an account with a GUI session moves its jobs exactly as before; the engine never writes a system file and
 only reads root's registry. Coverage: `tests/test_space_daemons.py` (Rules, Reading, Accounts, Applying, CommandLine,
 Pure); `tests/test_machine_backup.py` HeadlessSpace

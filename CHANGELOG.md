@@ -44,6 +44,23 @@ while the major version is 0, a minor release may change behaviour and says so h
   findings board names a project in conflict (`organization.unresolved`) and a rule the engine does not read or a
   file that does not parse (`organization.config_problem`); an unknown rule's message names the known ones.
 
+### Fixed
+
+- **A space's daemon is replaced without going down** (OBS-475, OBS-395 part 2; space daemons 1.2.0,
+  `docs/COMPATIBILITY.md` "Space daemons: replacing a loaded daemon"). `launchctl bootout` returns before the
+  daemon's process has exited, so an `apply` right after `remove` was refused `label_taken` and the space's service
+  stayed unloaded until someone ran it again. `remove` now answers once launchd has let the label go (45 s, or the
+  daemon's own ExitTimeOut and 5 s when that is longer, at most 300 s); a stop that does not finish in time is
+  `still_loaded` (or `bootout_failed`), exit 1, and keeps the daemon file and its registry entry. The new
+  `sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons replace --user ACCOUNT --label LABEL` does
+  the two steps in one: it checks the new definition first (one the rules refuse stops nothing), boots the old daemon
+  out, waits the same way, loads the new one (again while launchd answers 5, 37 or 125), and on a refusal puts the
+  previous daemon back and loads it, saying so in `put_back`. `apply` over its own loaded daemon replaces it the same
+  way when the definition changed and leaves it running (`unchanged`) when it did not. Every answer of `apply`,
+  `replace` and `remove` carries `steps`, one line per step. The root-owned copy changes: an administrator installs
+  it again from this release (the steps are unchanged; `--version` prints `space-daemons 1.2.0` and the file's
+  sha256). A listening port another process still holds (OBS-395 part 1) is not checked yet.
+
 ## 0.35.8 (2026-11-09)
 
 The wiki gains a readable page of the installed agents beside its JSON. Organizations can match provider accounts

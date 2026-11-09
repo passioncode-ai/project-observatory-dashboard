@@ -38,10 +38,16 @@ ROOT_OWNED_PROGRAM = "/bin/sh"
 
 class Launchctl:
     """A fake launchctl: records each call, answers `print system/LABEL` from `loaded`, `print
-    gui/UID/LABEL` from `agents`, and every other verb from `codes` (0 by default)."""
+    gui/UID/LABEL` from `agents`, and every other verb from `codes` (0 by default).
+
+    Like launchd, a bootout returns before the label is gone: `linger[LABEL]` is how many more `print
+    system/LABEL` answer loaded after a bootout (None: it never goes), and a bootstrap of a label still loaded
+    answers 5. `queue[VERB]` lists codes a verb answers first, in order; an entry `(125, True)` answers 125 and
+    loads it (launchctl's own timeout after launchd did the work)."""
 
     def __init__(self, loaded=(), codes=None, agents=()):
         self.calls, self.loaded, self.codes, self.agents = [], set(loaded), dict(codes or {}), set(agents)
+        self.linger, self.queue, self.stopping = {}, {}, {}
         #: path -> ACL entries as `ls -lde` prints them; `stray` is an entry someone else left on every folder.
         self.acl, self.stray = {}, None
         #: the members of admin as dsmemberutil answers; `ds_code` set makes it fail to answer.
@@ -82,13 +88,31 @@ class Launchctl:
         if verb == "print" and argv[2].startswith("gui/"):
             code = 0 if argv[2].rsplit("/", 1)[-1] in self.agents else 113
         elif verb == "print":
-            code = 0 if argv[2][len("system/"):] in self.loaded else 113
+            label = argv[2][len("system/"):]
+            if label in self.stopping:
+                left = self.stopping[label]
+                if left is not None and left <= 0:
+                    del self.stopping[label]
+                    self.loaded.discard(label)
+                elif left is not None:
+                    self.stopping[label] = left - 1
+            code = 0 if label in self.loaded else 113
         else:
-            code = self.codes.get(verb, 0)
-            if code == 0 and verb == "bootstrap":
-                self.loaded.add(Path(argv[3]).stem)
+            queued = self.queue.get(verb) or []
+            entry = queued.pop(0) if queued else self.codes.get(verb, 0)
+            code, loads = entry if isinstance(entry, tuple) else (entry, False)
+            if verb == "bootstrap":
+                label = Path(argv[3]).stem
+                if code == 0 and label in self.loaded:
+                    code = 5
+                if code == 0 or loads:
+                    self.loaded.add(label)
             if code == 0 and verb == "bootout":
-                self.loaded.discard(argv[2][len("system/"):])
+                label = argv[2][len("system/"):]
+                if label in self.linger:
+                    self.stopping[label] = self.linger[label]
+                else:
+                    self.loaded.discard(label)
         return subprocess.CompletedProcess(argv, code, "", "synthetic refusal" if code else "")
 
 
@@ -114,7 +138,7 @@ class Pure(unittest.TestCase):
     def test_it_stays_a_python_39_program_with_no_engine_import(self):
         tree = ast.parse(TOOL.read_text(encoding="utf-8"))
         stdlib = {"argparse", "datetime", "hashlib", "json", "os", "plistlib", "re", "stat", "subprocess", "sys",
-                  "tempfile", "fcntl", "grp", "pwd"}
+                  "tempfile", "time", "fcntl", "grp", "pwd"}
         for node in ast.walk(tree):
             self.assertNotEqual(type(node).__name__, "Match", "no match statement before Python 3.10")
             if isinstance(node, ast.ImportFrom):
@@ -212,11 +236,18 @@ class Base(unittest.TestCase):
         self.sysroot.mkdir()
         self.owner_calls, self.chowns = [], []
         self.launchctl = Launchctl()
+        #: A virtual clock: a wait for launchd sleeps on it, never for real.
+        self.now, self.sleeps = [0.0], []
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        self.now[0] += seconds
 
     def system(self, euid=0, self_check=lambda: [], isolated=True, owner_uid=None):
         return sd.System(root=str(self.sysroot), runner=self.launchctl, euid=euid, set_owner=self.owner_calls.append,
                          self_check=self_check, owner_uid=os.getuid() if owner_uid is None else owner_uid,
-                         isolated=isolated, chown_fd=lambda fd, uid, gid: self.chowns.append((uid, gid)))
+                         isolated=isolated, chown_fd=lambda fd, uid, gid: self.chowns.append((uid, gid)),
+                         sleep=self.sleep, clock=lambda: self.now[0])
 
     def logs(self):
         return self.sysroot / sd.LOGS_DIR / "space"
@@ -925,10 +956,10 @@ class Applying(Base):
         self.define({"Label": "org.example.second", "ProgramArguments": [ROOT_OWNED_PROGRAM]})
         real = sd._install_one
 
-        def boom(system, account, definition, entries, holders=None):
+        def boom(system, account, definition, entries, holders=None, **kw):
             if definition["label"] == LABEL:
                 raise RuntimeError("synthetic")
-            return real(system, account, definition, entries, holders)
+            return real(system, account, definition, entries, holders, **kw)
         with mock.patch.object(sd, "_install_one", boom):
             result = sd.apply(self.system(), self.account)
         by = {r["label"]: r for r in result["results"]}
@@ -991,6 +1022,7 @@ class Applying(Base):
     def test_apply_and_remove_refuse_outside_isolated_mode(self):
         self.define()
         for call in (lambda: sd.apply(self.system(isolated=False), self.account),
+                     lambda: sd.replace(self.system(isolated=False), self.account, LABEL),
                      lambda: sd.remove(self.system(isolated=False), self.account, LABEL)):
             with self.assertRaises(sd.SpaceDaemonsError) as caught:
                 call()
@@ -1108,7 +1140,8 @@ class Applying(Base):
         self.define(RunAtLoad=True)
         self.launchctl.codes["bootstrap"] = 5
         result = sd.apply(self.system(), self.account)
-        self.assertEqual(result["results"][0]["put_back"], "the previous daemon is back")
+        self.assertEqual(result["results"][0]["put_back"], "the previous daemon file is back but did not load "
+                                                           "(exit 5 synthetic refusal): run apply again")
         self.assertEqual(self.daemon().read_bytes(), before)
         self.assertEqual(self.registry()["entries"][0]["writtenSha256"], hashlib.sha256(before).hexdigest())
 
@@ -1146,6 +1179,192 @@ class Applying(Base):
         with self.assertRaisesRegex(sd.SpaceDaemonsError, "move it aside"):
             sd.apply(self.system(), self.account)
         self.assertEqual(path.read_text(), '{"schema": "something-else"}')
+
+
+class Replacing(Base):
+    """1.2.0 (OBS-475, OBS-395 part 2): `bootout` returns before launchd has let the label go, so `remove` waits
+    for it, `replace` puts a new definition in place of the running daemon in one step, and `apply` over its own
+    loaded daemon does the same when the definition changed."""
+
+    def applied(self, **extra):
+        self.define(**extra)
+        result = sd.apply(self.system(), self.account)
+        self.assertTrue(result["ok"], result)
+        return self.daemon().read_bytes()
+
+    def steps(self, receipt):
+        return [(s["step"], s["outcome"]) for s in receipt["steps"]]
+
+    def test_remove_waits_until_launchd_lets_the_label_go_so_apply_right_after_it_loads(self):
+        self.applied()
+        self.launchctl.linger[LABEL] = 3
+        result = sd.remove(self.system(), self.account, LABEL)
+        self.assertEqual(result["outcome"], "removed", result)
+        self.assertNotIn(LABEL, self.launchctl.loaded, "remove answered only once the label was gone")
+        self.assertGreater(result["waited_seconds"], 0)
+        self.assertEqual(self.steps(result), [("bootout", "done"), ("wait", "done"), ("delete", "done")])
+        # The sequence that failed twice on 2026-11-09: apply right after remove is no longer `label_taken`.
+        again = sd.apply(self.system(), self.account)
+        self.assertEqual(again["results"][0]["outcome"], "loaded", again)
+
+    def test_remove_of_a_daemon_that_is_not_loaded_waits_for_nothing(self):
+        self.applied()
+        self.launchctl.loaded.clear()
+        result = sd.remove(self.system(), self.account, LABEL)
+        self.assertEqual((result["outcome"], result["waited_seconds"]), ("removed", 0))
+        self.assertEqual(self.steps(result), [("bootout", "skipped"), ("delete", "done")])
+        self.assertEqual(self.sleeps, [])
+
+    def test_a_stop_that_does_not_finish_in_the_bound_is_a_named_refusal_that_keeps_everything(self):
+        before = self.applied()
+        self.launchctl.linger[LABEL] = None
+        result = sd.remove(self.system(), self.account, LABEL)
+        self.assertFalse(result["ok"])
+        self.assertEqual((result["outcome"], result["problems"][0]["code"]), ("failed", "still_loaded"))
+        self.assertIn("45 s", result["problems"][0]["detail"])
+        self.assertGreaterEqual(self.now[0], sd.BOOTOUT_WAIT_SECONDS)
+        self.assertLess(self.now[0], sd.BOOTOUT_WAIT_SECONDS + 3, "the wait is bounded")
+        self.assertEqual(self.daemon().read_bytes(), before, "the file stays, so remove can run again")
+        self.assertEqual([e["label"] for e in self.registry()["entries"]], [LABEL])
+        self.assertEqual(self.steps(result), [("bootout", "done"), ("wait", "failed")])
+
+    def test_a_refused_bootout_is_named_as_such(self):
+        self.applied()
+        self.launchctl.codes["bootout"] = 9
+        result = sd.remove(self.system(), self.account, LABEL)
+        self.assertEqual(result["problems"][0]["code"], "bootout_failed")
+        self.assertIn("exit 9", result["problems"][0]["detail"])
+        self.assertTrue(self.daemon().is_file())
+
+    def test_the_bound_follows_the_daemons_exit_timeout(self):
+        self.assertEqual(sd.bootout_wait_seconds({}), sd.BOOTOUT_WAIT_SECONDS)
+        self.assertEqual(sd.bootout_wait_seconds(None), sd.BOOTOUT_WAIT_SECONDS)
+        self.assertEqual(sd.bootout_wait_seconds({"ExitTimeOut": 20}), sd.BOOTOUT_WAIT_SECONDS)
+        self.assertEqual(sd.bootout_wait_seconds({"ExitTimeOut": 120}), 125)
+        self.assertEqual(sd.bootout_wait_seconds({"ExitTimeOut": 0}), sd.BOOTOUT_WAIT_MAX_SECONDS, "0 never kills")
+        self.assertEqual(sd.bootout_wait_seconds({"ExitTimeOut": 10 ** 6}), sd.BOOTOUT_WAIT_MAX_SECONDS)
+        self.assertEqual(sd.bootout_wait_seconds({"ExitTimeOut": True}), sd.BOOTOUT_WAIT_SECONDS)
+        self.applied(ExitTimeOut=120)
+        self.launchctl.linger[LABEL] = None
+        result = sd.remove(self.system(), self.account, LABEL)
+        self.assertIn("the bound is 125 s", result["problems"][0]["detail"])
+        self.assertGreaterEqual(self.now[0], 125)
+
+    def test_apply_over_its_own_loaded_daemon_replaces_it_once_launchd_lets_go(self):
+        self.applied()
+        self.launchctl.linger[LABEL] = 3
+        self.define(RunAtLoad=True)
+        result = sd.apply(self.system(), self.account)
+        row = result["results"][0]
+        self.assertEqual(row["outcome"], "loaded", row)
+        self.assertEqual(self.steps(row), [("plan", "done"), ("write", "done"), ("bootout", "done"), ("wait", "done"),
+                                           ("bootstrap", "done")])
+        self.assertEqual(row["steps"][-1]["detail"], "attempt 1", "no bootstrap was sent while the label was held")
+        self.assertTrue(plistlib.loads(self.daemon().read_bytes())["RunAtLoad"])
+        self.assertIn(LABEL, self.launchctl.loaded)
+
+    def test_apply_with_nothing_changed_leaves_the_running_daemon_alone(self):
+        before = self.applied()
+        calls = len(self.launchctl.calls)
+        result = sd.apply(self.system(), self.account)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(result["results"][0]["outcome"], "unchanged")
+        self.assertNotIn("bootout", [c[0] for c in self.launchctl.calls[calls:]])
+        self.assertNotIn("bootstrap", [c[0] for c in self.launchctl.calls[calls:]])
+        self.assertEqual(self.daemon().read_bytes(), before)
+
+    def test_apply_loads_its_own_unchanged_daemon_that_is_not_loaded(self):
+        self.applied()
+        self.launchctl.loaded.clear()
+        row = sd.apply(self.system(), self.account)["results"][0]
+        self.assertEqual(row["outcome"], "loaded")
+        self.assertIn(("bootout", "skipped"), self.steps(row))
+
+    def test_replace_reloads_even_when_nothing_changed(self):
+        self.applied()
+        result = sd.replace(self.system(), self.account, LABEL)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual((result["command"], result["results"][0]["outcome"]), ("replace", "loaded"))
+        self.assertIn(["bootout", f"system/{LABEL}"], self.launchctl.calls)
+
+    def test_replace_of_a_label_never_applied_applies_it(self):
+        self.define()
+        row = sd.replace(self.system(), self.account, LABEL)["results"][0]
+        self.assertEqual(row["outcome"], "loaded")
+        self.assertEqual(self.steps(row), [("plan", "done"), ("write", "done"), ("bootout", "skipped"),
+                                           ("bootstrap", "done")])
+
+    def test_replace_of_a_label_with_no_definition_is_not_found_and_stops_nothing(self):
+        self.applied()
+        result = sd.replace(self.system(), self.account, "org.example.absent")
+        self.assertEqual(result["results"][0]["outcome"], "not-found")
+        self.assertFalse(result["ok"])
+        self.assertIn(LABEL, self.launchctl.loaded)
+
+    def test_replace_puts_the_previous_daemon_back_and_loads_it_when_the_new_one_is_refused(self):
+        before = self.applied()
+        self.define(RunAtLoad=True)
+        self.launchctl.queue["bootstrap"] = [78]
+        result = sd.replace(self.system(), self.account, LABEL)
+        row = result["results"][0]
+        self.assertFalse(result["ok"])
+        self.assertEqual((row["outcome"], row["problems"][0]["code"]), ("failed", "bootstrap_failed"))
+        self.assertEqual(row["put_back"], "the previous daemon is back and loaded")
+        self.assertEqual(self.steps(row)[-2:], [("bootstrap", "failed"), ("put-back", "done")])
+        self.assertEqual(self.daemon().read_bytes(), before)
+        self.assertEqual(self.registry()["entries"][0]["writtenSha256"], hashlib.sha256(before).hexdigest())
+        self.assertIn(LABEL, self.launchctl.loaded)
+        self.assertEqual([c[0] for c in self.launchctl.calls].count("bootstrap"), 3,
+                         "the first apply, the refused one (78 is not retried), the previous one")
+
+    def test_replace_stops_nothing_when_the_rules_refuse_the_new_definition(self):
+        before = self.applied()
+        self.define(UserName="root")
+        calls = len(self.launchctl.calls)
+        row = sd.replace(self.system(), self.account, LABEL)["results"][0]
+        self.assertEqual(row["outcome"], "skipped")
+        self.assertEqual(self.steps(row), [("plan", "refused")])
+        self.assertNotIn("bootout", [c[0] for c in self.launchctl.calls[calls:]])
+        self.assertEqual(self.daemon().read_bytes(), before)
+        self.assertIn(LABEL, self.launchctl.loaded)
+
+    def test_replace_keeps_the_previous_file_when_the_old_daemon_does_not_stop_in_time(self):
+        before = self.applied()
+        self.define(RunAtLoad=True)
+        self.launchctl.linger[LABEL] = None
+        calls = len(self.launchctl.calls)
+        row = sd.replace(self.system(), self.account, LABEL)["results"][0]
+        self.assertEqual((row["outcome"], row["problems"][0]["code"]), ("failed", "still_loaded"))
+        self.assertIn("previous daemon file is back", row["put_back"])
+        self.assertEqual(self.daemon().read_bytes(), before)
+        self.assertEqual(self.registry()["entries"][0]["writtenSha256"], hashlib.sha256(before).hexdigest())
+        self.assertNotIn("bootstrap", [c[0] for c in self.launchctl.calls[calls:]],
+                         "never a bootstrap over a label launchd still holds")
+
+    def test_a_transient_bootstrap_refusal_is_tried_again(self):
+        self.applied()
+        self.define(RunAtLoad=True)
+        self.launchctl.queue["bootstrap"] = [5, 37]
+        row = sd.replace(self.system(), self.account, LABEL)["results"][0]
+        self.assertEqual(row["outcome"], "loaded", row)
+        self.assertEqual(row["steps"][-1]["detail"], "attempt 3")
+        self.assertEqual(self.sleeps[-2:], [1.0, 2.0])
+
+    def test_a_timed_out_bootstrap_that_launchd_carried_out_is_loaded(self):
+        self.applied()
+        self.define(RunAtLoad=True)
+        self.launchctl.queue["bootstrap"] = [(125, True)]
+        row = sd.replace(self.system(), self.account, LABEL)["results"][0]
+        self.assertEqual(row["outcome"], "loaded", row)
+        self.assertEqual(row["steps"][-1]["detail"], "attempt 1", "a retry would only meet already loaded")
+
+    def test_a_launchctl_that_times_out_answers_125(self):
+        def slow(argv, **kw):
+            raise subprocess.TimeoutExpired(argv, kw.get("timeout"))
+        self.assertEqual(sd.System(runner=slow).run(["print", "system/x"]), (125, "TimeoutExpired"))
+        def missing(argv, **kw):
+            raise FileNotFoundError(argv[0])
+        self.assertEqual(sd.System(runner=missing).run(["print", "system/x"])[0], 127)
 
 
 @unittest.skipUnless(POSIX, "accounts are POSIX")
@@ -1192,6 +1411,27 @@ class CommandLine(Base):
                              env=dict(os.environ, **{sd.TEST_SWITCH: "1", sd.TEST_ROOT: str(self.sysroot)}))
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertEqual(json.loads(out.stdout)["trust"]["path"], str(folder / sd.TRUST_NAME))
+
+    def test_replace_needs_a_label_and_root(self):
+        self.define()
+        out = self.run_tool("replace")
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("--label", out.stderr)
+        out = self.run_tool("replace", "--label", LABEL)
+        self.assertEqual((out.returncode, json.loads(out.stdout)["code"]), (2, "not-root"))
+        self.assertIn("replace writes /Library/LaunchDaemons and needs root", json.loads(out.stdout)["error"])
+
+    def test_the_text_answer_names_each_step(self):
+        self.define()
+        system = self.system()
+        result = sd.replace(system, self.account, LABEL)
+        text = sd._render("replace", result)
+        self.assertIn(f"  {LABEL}  loaded", text)
+        self.assertIn("    bootstrap  done: attempt 1", text)
+        self.launchctl.linger[LABEL] = None
+        text = sd._render("remove", sd.remove(system, self.account, LABEL))
+        self.assertIn("still_loaded", text)
+        self.assertIn("    wait  failed: ", text)
 
     def test_help_names_the_isolated_command(self):
         out = subprocess.run([sys.executable, "-I", str(TOOL), "--help"], capture_output=True, text=True, timeout=60)

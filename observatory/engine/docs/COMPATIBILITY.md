@@ -611,6 +611,41 @@ is sent: the node's check-in still sends no `credentialRequests` and reads no de
 put` and `rotate` there leave a stale `provenance` beside a new value, which the newer engine drops at the slot's
 next put or rotation.
 
+## Space daemons: replacing a loaded daemon (OBS-475, OBS-395 part 2, space daemons 1.2.0, the release after 0.35.9)
+
+No migration: the registry (`observatory-space-daemons/1`), the daemon plists and the log folders keep their format,
+and a 1.1.0 copy reads what 1.2.0 writes. The root-owned copy changes (`SPACE_DAEMONS_VERSION` 1.2.0), so an
+administrator installs it again from the release with the same verified steps; `--version` prints the new sha256 for
+information. Until then the 1.1.0 copy keeps working as before, without `replace`.
+
+- `remove` answers only once `launchctl print system/<label>` no longer finds the label: up to 45 s
+  (`BOOTOUT_WAIT_SECONDS`), or the daemon's own `ExitTimeOut` and 5 s when that is longer, at most 300 s
+  (`BOOTOUT_WAIT_MAX_SECONDS`; an `ExitTimeOut` of 0, launchd's "never kill", gets 300 s). A stop that does not finish
+  within the bound answers `outcome` `failed` with the problem `still_loaded` (or `bootout_failed` when launchctl
+  refused the bootout), exit 1, and keeps the daemon file and the registry entry, so `remove` can run again; 1.1.0
+  deleted both and answered `removed` while launchd still held the label. The answer gains `steps` and
+  `waited_seconds`.
+- `replace --user ACCOUNT --label LABEL` is new (root, isolated mode, the root-owned copy, as `apply`): the plan (a
+  definition the rules refuse is `skipped` and stops nothing; a label with no definition is `not-found`), then
+  `write`, `bootout`, `wait` (the same bound), `bootstrap` (again while launchd answers 5, 37 or 125, up to five
+  attempts, as the engine's own jobs since OBS-410; 125 with the label loaded counts as loaded). When the new daemon
+  does not load, the previous file and registry entry go back and the previous daemon is loaded again, and
+  `put_back` says which of these held; when the old daemon does not stop in time, nothing new is loaded and the
+  previous file goes back. It reloads even when nothing changed, and applies a label never applied. Its answer is
+  `apply`'s, with `command` `replace`.
+- `apply` over a daemon of its own that is loaded replaces it the same way when the definition changed (1.1.0 sent
+  the bootstrap while the bootout was still finishing, and then put the old file back), and leaves it running with
+  the new outcome `unchanged` when the daemon it would write is byte for byte the one written; `ok` counts
+  `unchanged` as done. A label loaded that this tool did not write is still refused (`label_taken`).
+- Every result row of `apply` and `replace` gains `steps`, a list of `{step, outcome, detail}` (`plan`, `write`,
+  `bootout`, `wait`, `bootstrap`, `put-back`; outcomes `done`, `skipped`, `refused`, `failed`), and their answer
+  gains `command`. A launchctl call that times out answers exit 125 (it was 127, which still means launchctl did not
+  start). The exit codes of the tool are unchanged.
+
+Not covered yet: a daemon that listens on a port another process still holds (OBS-395 part 1). The engine's
+`waiting-for-root` steps for a changed background job still name `remove` then `apply`, which work with every copy
+and no longer race with 1.2.0.
+
 ## Migration checksums: the same under every Python (OBS-387, 0.35.4)
 
 No migration and no new file. Until 0.35.3 the checksum recorded for each applied migration (`migration_checksums`)
@@ -720,7 +755,7 @@ It writes files outside any workspace:
 | Path | What | Older engines, removal |
 |---|---|---|
 | `~/.local/share/project-observatory/background/LaunchAgents/` | the account's launchd jobs that run as system daemons; written by `cutover`, read by root's `space_daemons.py` | an older engine neither reads nor writes it; deleting a plist deletes only that copy (root's daemon keeps running until `remove`) |
-| `/Library/LaunchDaemons/<label>.plist` | the daemon `apply` wrote: the plist's allowed keys plus `UserName`, `GroupName`, `InitGroups`, HOME, USER, LOGNAME and the two log paths below; root:wheel 0644, written atomically | `sudo ... remove --user ACCOUNT --label LABEL` unloads and deletes it; the engine never writes it |
+| `/Library/LaunchDaemons/<label>.plist` | the daemon `apply` wrote: the plist's allowed keys plus `UserName`, `GroupName`, `InitGroups`, HOME, USER, LOGNAME and the two log paths below; root:wheel 0644, written atomically | `sudo ... remove --user ACCOUNT --label LABEL` unloads it, waits until launchd lets the label go (since 1.2.0) and deletes it; `replace` puts a new definition in its place; the engine never writes it |
 | `/Library/Logs/ProjectObservatory/<user>/` | the daemons' `<label>.out.log` and `<label>.err.log`; the folder root:wheel 0700 under a root:wheel 0755 `ProjectObservatory`, with one inherited ACL entry (`<user> allow list,search,read,readattr,readextattr,readsecurity,file_inherit,directory_inherit`) so the account reads its logs; `apply` refuses, installing nothing, when either folder exists as a link or is not root's. Each log file is created ahead of launchd (`O_CREAT|O_EXCL|O_NOFOLLOW`), owned by the account, mode 0600: the account reads and appends to it but cannot create, rename, link or unlink in the folder, so the file is safe whether launchd opens it as root or as the account and cannot be replaced. An existing one is kept only as a regular file with one link, owned by the account (root's is given to the account), not writable by group or others; otherwise that job is refused (`log-file`) | `remove` leaves the log files and says so; deleting the folder loses them, and the next `apply` makes it again |
 | `/Library/Application Support/ProjectObservatory/space-daemons.json` | the registry of what `apply` wrote, a stable interface (below); root:wheel 0644 in a 0755 folder; the engine only reads it | a file that is not this schema is refused by name, never replaced; deleting it makes the tool refuse to replace or remove the daemons it wrote (they keep running) |
 
