@@ -79,6 +79,17 @@ decide; propose a rule in `config/organizations.json` (`github_owners`, `digital
 admin key under `notMovable` is never handed over. A project whose organization is not decided (a
 conflict) gets no analytics property, design file or cloud resource until I decide.
 
+When I say which projects, keys or accounts go to an organization, use `observatory_org_selection`:
+`plan` (no words needed) shows what is proposed, the preview and its `digest`; show me the preview,
+including the line of what stays personal and any personal value that would be revoked (that step
+cannot be undone). Changing the plan, `apply` with that `digest`, `undo` and `confirm-replacement`
+each need my words as `decision` (by operator, via relayed-instruction, the action
+`org.select.plan`, `org.select.apply`, `org.select.undo` or `org.select.confirm-replacement`, target
+the organization or the key, my words verbatim, when I said them). The record never leaves this
+computer; nothing is sent to the organization or to Fabric yet, and no key moves: a waiting step names
+the door it waits for. My passkey signing in Fabric, the macOS administrator password and the
+administrator's computer token are mine or theirs; name them, never try them.
+
 ## SSH keys
 
 When I ask for an SSH key, read `observatory_ssh_keys` first (my keys, fingerprints, passphrase

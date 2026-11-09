@@ -19,6 +19,18 @@ while the major version is 0, a minor release may change behaviour and says so h
   record (or put by hand), marks which ones a selection would take (only when both agree), and lists the doors'
   admin and provisioning keys as never moved. Names only: no value file is opened. Agents get the same answers from
   the MCP tools `observatory_org_accounts` and `observatory_org_keys`.
+- **The local selection of what goes to an organization** (OBS-417, organization onboarding ORG-W5, ORG-W7 and
+  ORG-W8; `docs/ONBOARDING.md`). `project-observatory full org select --org NAME` shows the plan: the projects, keys
+  and accounts proposed for NAME with why, the layout, a preview of what the organization would receive (a reference
+  random per project, a label only where you typed one), the keys asked for and the personal values revoked once the
+  replacement works, the line of what stays personal, and its digest. `plan` with `--include`, `--exclude`, `--label`, `--key`,
+  `--layout` and `--serves` changes it item by item; `apply --digest D` writes the next revision of `org-selection/1`
+  (owner-only in `store/org-selection/`, never sent, verified against its digest and naming its predecessor's) only
+  in the previewed form, and starts a journal in which projects wait for Fabric's adaptation plan and keys for the
+  request queue and the rotation: nothing is sent and no value is read or copied. `show`, `undo` and
+  `confirm-replacement KEY` complete it. Anything found after a selection is listed, never chosen, and named on the
+  findings board (`organization.selection_new`). Agents get the same from the MCP tool `observatory_org_selection`,
+  whose changes need the operator's words (contract DEC-0121).
 - **The remaining account rules, and one reading of a project's organization** (OBS-412 part 2).
   `config/organizations.json` `match` accepts `github_owners` (the same as `repository_owners`) and
   `openrouter_accounts` (an OpenRouter account by its stash label, which decides the account's organization and a

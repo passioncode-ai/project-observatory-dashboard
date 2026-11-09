@@ -594,6 +594,9 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                signed check-ins, rotation, the activity outbox, share registrations
   org accounts|keys --org NAME every provider account and its organization, and an organization's keys
                                classified (organization, personal, ambiguous); read-only, names only
+  org select --org NAME [plan|show|apply|undo|confirm-replacement KEY]   the local record of the
+                               projects, keys and accounts that go to an organization: owner-only, never
+                               sent; apply takes the previewed --digest; names only
   scan                         the filesystem, GitHub, vault and session scans in one run (scan-fs,
                                scan-gh, scan-vault, scan-sessions)
   remotes                      one `git ls-remote` per checkout: what each remote holds (`local` asks no remote)

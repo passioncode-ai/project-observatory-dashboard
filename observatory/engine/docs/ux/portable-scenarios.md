@@ -1415,8 +1415,15 @@ installed or not signed in (the projects wait, named, and keys and layout steps 
 Acceptance: an unselected project never reaches the server in any form; a repository name reaches it only as a label
 the person typed; the preview and the applied record have the same digest (ORG-R14); undo before Fabric's entry
 revision is signed leaves no trace on the server, and after it a take-back waits for the person's passkey (ORG-R13).
-Coverage: none yet (OBS-232, OBS-417, OBS-425; Fabric TP-04, contract CT-169). Status: draft; product outcome
-unobserved.
+Coverage: the local record of steps 2, 4 and 5 (OBS-417): `full org select --org ID plan, show, apply, undo` and
+`observatory_org_selection` over `tests/test_org_selection.py` (`Defaults`: the proposals and the preview's line of
+what stays personal, reading writes nothing; `Changes`: item by item, a group as listed, labels; `Apply`: only the
+previewed digest, a verified revision naming its predecessor, a journal in which nothing without a door is done, the
+same form again changes nothing and resumes, a project another organization holds refused; `WhatTheOrganizationSees`:
+a random reference and only a typed label, nothing sent; `UndoAndConfirm`; `NewSince`: found later, listed, never
+chosen, a finding; `Gates`: the operator's words for an agent). Not built: the hand-off to Fabric's adaptation plan
+(Fabric TP-04, contract CT-169; the items wait as `fabric-adaptation-plan`), the window (OBS-232, OBS-425). Status:
+draft; product outcome unobserved.
 
 ### OSS-106: choose which keys go, without any personal key leaving
 
@@ -1461,8 +1468,10 @@ is visible until settled.
 Coverage: the classification of step 1, `full org keys` and `observatory_org_keys` (OBS-415): `Views` in
 `tests/test_organizations.py` (organization, personal and ambiguous by project and issuer, put by hand, an
 undeclared environment, door admin keys not movable, every value file unreadable and none opened). Not built: values
-present twice and names the organization holds (ORG-R09, ORG-R10, OBS-415), the choices and the hand-over (OBS-416,
-OBS-417, OBS-191, OBS-360), the window (OBS-425). Status: draft; product outcome unobserved.
+present twice and names the organization holds (ORG-R09, ORG-R10, OBS-415), the hand-over (OBS-416, OBS-191,
+OBS-360), the window (OBS-425). The choices of step 2 and the confirmation of step 4 are recorded by `full org select`
+and `observatory_org_selection` (OBS-417, `tests/test_org_selection.py`); each key handed over waits there as
+`credential-requests` and `rotation`. Status: draft; product outcome unobserved.
 
 ### OSS-107: decide where the organization's work lives on this computer
 
@@ -1505,7 +1514,10 @@ Acceptance: a bound space holds none of the personal kinds ORG-R27 lists (so ORG
 space); the personal space keeps an item until its import is
 confirmed elsewhere; no personal key is ever deleted without a verified copy in a personal space; every OS account or
 VM is its own device.
-Coverage: none yet (OBS-359, OBS-362, OBS-364, OBS-372, OBS-426, OBS-236). Status: draft; product outcome unobserved.
+Coverage: the choice of step 1 only: the selection's `--layout` and `--serves` (OBS-417, `tests/test_org_selection.py`),
+recorded before anything applies and journaled as waiting on its row (`space-create`, `move-out`,
+`context-binding`). Not built: the steps themselves (OBS-359, OBS-362, OBS-364, OBS-372, OBS-426, OBS-236). Status:
+draft; product outcome unobserved.
 
 ### OSS-108: leave, be removed, or take a project back
 
