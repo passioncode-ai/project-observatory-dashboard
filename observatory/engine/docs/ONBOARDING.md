@@ -2366,7 +2366,8 @@ since (a new project or key the rules would propose) is listed as `new` and
 never chosen by itself (ORG-R16); it stays out of the record until a person
 decides it, and the findings board names it as `organization.selection_new`. Changes are item by item (`--include`,
 `--exclude`, `--key KEY=hand-over-revoke|hand-over-keep|keep`, `--label
-PROJECT=TEXT`, the name the organization would read, empty by default), or a
+PROJECT=TEXT`, the name the organization would read, empty by default; a
+label never chooses a project by itself), or a
 whole group as it is listed now (`--include-group proposed|needs-you`; each
 member is recorded one by one, so a later member is not included by it). The
 layout comes first (ORG-R29): `separate-space` (recommended: a new OS account
@@ -2383,7 +2384,10 @@ with no name (`no-serving-space`), a project another organization holds by its
 rules or its applied selection (`chosen-for-another`, until contract CT-141
 decides a project may be in two), a project that is Not ours (`not-ours`; `conflict-unchecked` when another organization's record does
 not read, so the check cannot be made), and a change to an item whose
-irreversible step is done (`entry-signed`, `already-revoked`). It writes the next revision, which names its predecessor's
+irreversible step is done (`entry-signed`, `already-revoked`). It is also refused
+while `registry/projects.json` does not read (`registry-unreadable`) or a chosen
+item is no longer found here (`items-not-found`), since either would change the
+record without a word. It writes the next revision, which names its predecessor's
 digest and verifies against its own on every read, and a journal of steps per
 item. Applying the same form again changes nothing. An apply or undo that
 stopped after its revision was written is finished by the next apply or undo

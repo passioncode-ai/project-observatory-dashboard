@@ -696,6 +696,85 @@ class ReviewRoundThree(Base):
         self.assertEqual((code, json.loads(err.getvalue())["error"]), (1, "invalid-change"))
 
 
+class ReviewRoundFour(Base):
+    """What the fourth review found: each case reproduced, then fixed."""
+
+    def test_nothing_is_applied_from_an_unreadable_registry_or_a_lost_item(self):
+        v = self.ready()
+        import paths
+        (paths.REGISTRY / "projects.json").write_text("{")
+        broken = self.sel.plan("acme")
+        self.assertEqual(broken["state"], "partial")
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.apply("acme", broken["digest"])
+        self.assertEqual(caught.exception.code, "registry-unreadable")
+        self.registry("projects.json", {"projects": PROJECTS})
+        self.sel.apply("acme", v["digest"])
+        self.registry("projects.json", {"projects": [p for p in PROJECTS if p["id"] != "project:alpha-web"]})
+        lost = self.sel.plan("acme", {"labels": {"project:beta-api": "Billing"}})
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.apply("acme", lost["digest"])
+        self.assertEqual(caught.exception.code, "items-not-found")
+        self.assertIn("--exclude project:alpha-web", caught.exception.command)
+
+    def test_an_applied_layout_with_no_items_reads_applied(self):
+        v = self.sel.plan("quiet", {"layout": "this-space"})
+        self.sel.apply("quiet", v["digest"])
+        again = self.sel.plan("quiet")
+        self.assertEqual((again["layout"], again["applied"]), ("this-space", True))
+
+    def test_a_label_never_chooses_a_project(self):
+        v = self.sel.plan("acme", {"labels": {"project:shared-tool": "Shared"}})
+        row = self.items(v)["project:shared-tool"]
+        self.assertEqual((row["decision"], row["label"]), ("exclude", "Shared"))
+        self.sel.apply("acme", self.ready()["digest"])
+        self.registry("projects.json", {"projects": PROJECTS + [
+            {"id": "project:gamma", "name": "gamma", "owners": ["acme-inc"], "local_folders": ["gamma"],
+             "organization": "acme", "organization_source": "rule", "organization_why": "repository owner acme-inc"}]})
+        v = self.sel.plan("acme", {"labels": {"project:gamma": "Gamma"}})
+        self.sel.apply("acme", v["digest"])
+        row = next(i for i in self.sel.current("acme")["items"] if i["id"] == "project:gamma")
+        self.assertEqual((row["decision"], row["label"], row["by"]), ("exclude", "Gamma", "hand"),
+                         "typing a label on an item found since decides it, so it is recorded")
+        self.assertTrue(self.sel.plan("acme")["applied"])
+
+    def test_an_undo_reads_applied_beside_an_item_found_since(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        self.sel.apply("acme", self.sel.plan("acme", {"exclude": ["project:beta-api"]})["digest"])
+        self.registry("projects.json", {"projects": PROJECTS + [
+            {"id": "project:gamma", "name": "gamma", "owners": ["acme-inc"], "local_folders": ["gamma"],
+             "organization": "acme", "organization_source": "rule", "organization_why": "repository owner acme-inc"}]})
+        self.sel.undo("acme")
+        self.assertTrue(self.sel.plan("acme")["applied"])
+
+    def test_the_gate_comes_before_any_write(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        v = self.sel.plan("acme", {"exclude": ["project:beta-api"]})
+        journal_one = self.sel._journal_path("acme", 1).read_text()
+        self.sel.apply("acme", v["digest"])
+        self.sel._journal_path("acme", 1).write_text(journal_one)      # as an interruption would leave it
+        for fn in (lambda: self.sel.apply("acme", v["digest"], caller="agent:mcp"),
+                   lambda: self.sel.undo("acme", caller="agent:mcp")):
+            with self.assertRaises(self.sel.Refusal) as caught:
+                fn()
+            self.assertEqual(caught.exception.code, "operator-decision-required")
+        self.assertEqual(self.sel._journal_path("acme", 1).read_text(), journal_one, "nothing was resumed")
+
+    def test_a_damaged_draft_leaves_the_record_readable(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        (self.sel._folder("acme") / "draft.json").write_text("{")
+        shown = self.sel.show("acme")
+        self.assertEqual(shown["record"]["revision"], 1)
+        self.assertTrue([d for d in shown["degraded"] if "plan --reset" in d["effect"]])
+
+    def test_reset_is_true_or_absent(self):
+        self.ready()
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.plan("acme", {"reset": "no"})
+        self.assertEqual(caught.exception.code, "invalid-change")
+        self.assertTrue(self.sel.plan("acme")["draft"])
+
+
 class WhatTheOrganizationSees(Base):
     """ORG-R03: a reference random per organization and a label only when typed; nothing is handed over."""
 

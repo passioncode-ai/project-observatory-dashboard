@@ -811,8 +811,13 @@ def keys(org: str, chosen: "list[str] | tuple[str, ...] | None" = None) -> dict:
             scope[p["id"]] = {"side": "organization", "why": f"the project is {org}'s ({r['source']}: {r['why']})"}
         elif p.get("organization_source") == "conflict" and org in a.hits(p, claims.get(p["id"])):
             scope[p["id"]] = {"side": "conflict", "why": f"the project's rules disagree ({p.get('organization_why')})"}
-    known = {p["id"] for p in projects}
+    known = {p["id"]: p for p in projects}
     for pid in chosen or ():
+        row = known.get(pid) or {}
+        other = row.get("organization")
+        if row.get("organization_source") == "external" or other == "external" or (
+                row.get("organization_source") in ("declared", "rule") and other not in (org, a.default)):
+            continue                                   # another organization's or Not ours: never in this scope
         if pid in known and (scope.get(pid) or {}).get("side") != "organization":
             scope[pid] = {"side": "organization", "why": f"you chose the project for {org}", "byChoice": True}
     slots = _slots(degraded)

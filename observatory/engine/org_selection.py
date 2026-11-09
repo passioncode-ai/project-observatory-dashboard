@@ -441,11 +441,11 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
             (chosen.add if row["decision"] == "include" else chosen.discard)(ident)
     for ident, row in items.items():
         if row["kind"] == "key" and ident not in changes and row.get("by") in ("rule", "default") \
-                and row["decision"] != "keep" and row.get("project") not in chosen:
+                and row["decision"] != "keep" and row.get("project") is not None and row["project"] not in chosen:
             row.update(decision="keep", by="default",
                        why=row["why"] + "; its project is not chosen, so nothing is asked for it")
-    layout = (draft or {}).get("layout", (record or {}).get("layout") if base is not None else None)
-    serves = (draft or {}).get("serves", (record or {}).get("serves", {}).get("space") if base is not None else None)
+    layout = (draft or {}).get("layout", (record or {}).get("layout"))
+    serves = (draft or {}).get("serves", ((record or {}).get("serves") or {}).get("space"))
     # A space is named only for the separate-space layout; in the others the selection serves this space, and the
     # digest must not carry a name the record does not keep (ORG-R14: the applied form is the previewed one).
     if layout != "separate-space":
@@ -596,6 +596,8 @@ def plan(org: str, changes: dict | None = None, *, decision: Any = None, caller:
     to clear}), `keys` ({key id: choice}), `layout`, `serves`, `reset`."""
     org_ok = _org_checked(org)
     changes = {k: v for k, v in (changes or {}).items() if v not in (None, [], {}, False)}
+    if "reset" in changes and changes["reset"] is not True:
+        raise Refusal("invalid-change", "`reset` is true or absent")
     folder = _folder(org_ok)
     # Reading the plan writes nothing, not even a lock; a change takes the organization's lock.
     with (_locked(org_ok) if changes else contextlib.nullcontext()):
@@ -669,6 +671,7 @@ def _plan_answer(org: str, ctx: dict, sel: dict, record: dict | None, draft: dic
             "current": None if not record else {"revision": record["revision"], "digest": record["digest"],
                                                 "selectionDigest": record["selectionDigest"]},
             "items": _items_out(sel), "new": sorted(i["id"] for i in sel["items"].values() if i.get("new")),
+            "newSince": (record or {}).get("decidedAt"),
             "conflicts": conflicts, "unknown": sorted(unknown), "preview": _preview(org, ctx, sel),
             "nextStep": step, "command": cmd, "gates": GATES, "degraded": ctx["degraded"]}
 
@@ -807,8 +810,11 @@ def _change(org: str, draft: dict | None, record: dict | None, changes: dict, wh
         if kind_of(ident) != "project":
             raise Refusal("unknown-item", f"{_echo(ident)} is not a project; only a project carries a label")
         row = draft["items"].get(ident) or sel["items"].get(ident) or {}
-        # A label changes what the organization reads, not who chose the project: its decision and `by` stay.
-        put(ident, row.get("decision", "include"), by=row.get("by", "hand"), label=_label_ok(text) if text else "")
+        # A label changes what the organization reads, never whether the project goes (ORG-R02): its decision and
+        # `by` stay, and a project nobody chose stays out. On an item found since the record, typing a label is
+        # deciding it, so it is recorded as the person's.
+        by = "hand" if row.get("new") or not row else row.get("by", "hand")
+        put(ident, row.get("decision", "exclude"), by=by, label=_label_ok(text) if text else "")
     draft["updatedAt"] = _now()
     # Each change is its own draft, named at random: a revision removes the draft it consumed by this name, never
     # one changed since (two changes can fall in one second).
@@ -984,11 +990,12 @@ def apply(org: str, digest: Any, *, decision: Any = None, caller: str = "cli") -
                                        "applied", f"{q} plan")
     with _locked(org_ok, every=True):
         record = current(org_ok)
+        # The gate first: nothing is written, not even a resume, for a call that is not the person's.
+        who = decided("apply", org_ok, decision, caller=caller)
         if record and _unfinished(org_ok, record):
             # ORG-R12: finish what the last apply or undo left before anything else. Its own form is all it takes.
             _resume(org_ok, record)
             if digest == record["selectionDigest"]:
-                who = decided("apply", org_ok, decision, caller=caller)
                 return _apply_answer(org_ok, record, "resumed", who)
         draft = _draft(org_ok)
         ctx = _context(org_ok, _chosen_projects(draft, record))
@@ -999,9 +1006,9 @@ def apply(org: str, digest: Any, *, decision: Any = None, caller: str = "cli") -
                                                    "a project or key found since): show the operator the plan again",
                           f"{q} plan")
         if record and record.get("selectionDigest") == now_digest:
-            who = decided("apply", org_ok, decision, caller=caller)
             _resume(org_ok, record)
             return _apply_answer(org_ok, record, "unchanged", who)
+        _complete(org_ok, ctx, sel)
         if sel["layout"] is None:
             raise Refusal("no-layout", "choose where the organization's work lives before anything is applied "
                                        "(ORG-R29)", f"{q} plan --layout {RECOMMENDED_LAYOUT} --serves SPACE")
@@ -1013,11 +1020,27 @@ def apply(org: str, digest: Any, *, decision: Any = None, caller: str = "cli") -
             raise Refusal(foreign[0]["code"], f"{foreign[0]['project']} is {foreign[0]['why']}",
                           f"{q} plan --exclude {foreign[0]['project']}")
         _irreversible(org_ok, record, sel)
-        who = decided("apply", org_ok, decision, caller=caller)
         _unused(org_ok, "apply", who)
         rec = _record(org_ok, sel, now_digest, record, who, consumed=(draft or {}).get("id"))
         _commit(org_ok, record, rec)
     return _apply_answer(org_ok, rec, "applied", who)
+
+
+def _complete(org: str, ctx: dict, sel: dict) -> None:
+    """Nothing is applied from a partial picture of what is chosen: the registry of projects must read (a project's
+    identity, and which keys are its, come from it), and every chosen item must still be known here. A degraded
+    provider read does not stop an apply; these two do, because they would change what the record says silently."""
+    q = CMD.format(org=_q(org))
+    if any(d.get("source") == "registry/projects.json" for d in ctx["degraded"]):
+        raise Refusal("registry-unreadable", "registry/projects.json does not read, so which projects and keys are "
+                                             "chosen is not known; nothing is applied until it reads",
+                      "project-observatory full doctor")
+    gone = sorted(i["id"] for i in sel["items"].values() if i.get("notFound")
+                  and i["decision"] not in ("exclude", "keep"))
+    if gone:
+        raise Refusal("items-not-found", f"{gone[0]} is chosen and no longer found here (the registry or the vault "
+                                         f"changed); leave it out, or restore it, then preview again",
+                      f"{q} plan --exclude {gone[0]}")
 
 
 def _commit(org: str, prior: dict | None, rec: dict) -> None:
@@ -1170,6 +1193,7 @@ def undo(org: str, *, decision: Any = None, caller: str = "cli") -> dict:
         revs = history(org_ok)
         if not revs:
             raise Refusal("nothing-to-undo", "no selection has been applied for this organization", f"{q} plan")
+        who = decided("undo", org_ok, decision, caller=caller)     # the gate before anything is written
         if _unfinished(org_ok, revs[-1]):
             _resume(org_ok, revs[-1])                  # ORG-R12: the last apply or undo finishes first
         cur = revs[-1]
@@ -1181,7 +1205,6 @@ def undo(org: str, *, decision: Any = None, caller: str = "cli") -> dict:
                                           "its entry in Fabric); taking it back is a new estate revision your "
                                           "passkey signs (OBS-419)", "project-observatory full org unassign PROJECT "
                                                                      f"--org {_q(org_ok)}")
-        who = decided("undo", org_ok, decision, caller=caller)
         if cur.get("kind") == "undo":
             # Undoing an undo restores what the undo removed: the revision it undid.
             restored = next((r for r in revs if r["digest"] == cur.get("undoes")), None)
@@ -1203,6 +1226,12 @@ def undo(org: str, *, decision: Any = None, caller: str = "cli") -> dict:
         foreign = _elsewhere(org_ok, ctx, sel["items"].values()) if ctx else []
         if foreign:
             raise Refusal(foreign[0]["code"], f"{foreign[0]['project']} is {foreign[0]['why']}", f"{q} show")
+        if ctx is not None and restored is not None and restored["items"]:
+            # The restored form as a plan would read it now (items found since listed apart), so the plan reads it
+            # applied afterwards: apply and undo define the digest the same way.
+            pseudo = {"items": restored["items"], "layout": restored.get("layout"), "serves": restored.get("serves")}
+            sel = _effective(org_ok, ctx, None, pseudo)
+            _complete(org_ok, ctx, sel)
         _irreversible(org_ok, cur, sel)
         _unused(org_ok, "undo", who)
         try:
@@ -1230,6 +1259,7 @@ def confirm_replacement(org: str, key: Any, *, decision: Any = None, caller: str
         raise Refusal("not-in-record", "no selection has been applied for this organization", f"{q} plan")
     with _locked(org_ok):
         rec = current(org_ok)
+        who = decided("confirm-replacement", ident, decision, caller=caller)   # the gate before anything is written
         item = next((i for i in (rec or {}).get("items") or [] if i["id"] == ident and i["kind"] == "key"), None)
         if item is None:
             raise Refusal("not-in-record", "that key is not in the applied selection", f"{q} show")
@@ -1252,7 +1282,6 @@ def confirm_replacement(org: str, key: Any, *, decision: Any = None, caller: str
                                                       "or its consumers have not switched to it (the request queue "
                                                       "and the rotation are OBS-191 and OBS-416, not built yet); "
                                                       "nothing to confirm", f"{q} show")
-        who = decided("confirm-replacement", ident, decision, caller=caller)
         step = next(s for s in entry["steps"] if s["step"] == "revoke-personal")
         outcome = "already-confirmed" if step.get("confirmedAt") else "confirmed"
         if outcome == "confirmed":
@@ -1274,15 +1303,21 @@ def show(org: str) -> dict:
     degraded: list[dict] = []
     try:
         revs = history(org_ok)
-        draft = _draft(org_ok)
     except Refusal as refusal:
         return {"schema": VIEW_SCHEMA, "answer": "show", "organization": org_ok, "state": "error",
-                "error": refusal.code, "message": str(refusal), "command": refusal.command or f"{q} plan --reset",
+                "error": refusal.code, "message": str(refusal), "command": refusal.command or f"{q} show",
                 "degraded": []}
+    try:
+        draft = _draft(org_ok)
+    except Refusal as refusal:
+        # A damaged draft is only the draft: the applied record stays readable beside it.
+        draft = None
+        degraded.append({"source": "store/org-selection draft", "code": refusal.code, "reason": str(refusal)[:200],
+                         "effect": "the draft is ignored; drop it with " + (refusal.command or f"{q} plan --reset")})
     if not revs:
         return {"schema": VIEW_SCHEMA, "answer": "show", "organization": org_ok, "state": "empty", "record": None,
                 "draft": draft is not None, "history": [], "nextStep": "no selection is applied for this organization",
-                "command": f"{q} plan", "degraded": []}
+                "command": f"{q} plan", "degraded": degraded}
     rec = revs[-1]
     try:
         jdoc = journal(org_ok, rec["revision"], rec["digest"])
@@ -1296,7 +1331,7 @@ def show(org: str) -> dict:
         ctx = _context(org_ok, hand)
         sel = _effective(org_ok, ctx, None, rec)
         new = sorted(i["id"] for i in sel["items"].values() if i.get("new"))
-        degraded = ctx["degraded"]
+        degraded = degraded + [d for d in ctx["degraded"] if d not in degraded]
     except Refusal as refusal:
         degraded.append({"source": "config/organizations.json", "code": refusal.code, "reason": str(refusal),
                          "effect": "what is new since the record is not listed"})
@@ -1365,7 +1400,7 @@ def text(view: dict) -> str:
             for i in rows:
                 mark = "[x]" if i["decision"] not in ("exclude", "keep") else "[ ]"
                 extra = f" -> {i['decision']}" if kind == "key" else ""
-                tag = " (new since the record)" if i.get("new") else ""
+                tag = f" (new since {view.get('newSince') or 'the record'})" if i.get("new") else ""
                 label = f", label for the organization: {i['label']!r}" if i.get("label") else ""
                 lines.append(f"  {mark} {i['id']}{extra}{tag}{label}: {i['why']}")
         for c in view["conflicts"]:
