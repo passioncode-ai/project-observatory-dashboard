@@ -860,7 +860,10 @@ def _echo(value: Any) -> str:
 
 def _label_ok(text: Any) -> str:
     import credential_shape
-    if not isinstance(text, str) or len(text) > LABEL_MAX or any(ord(c) < 32 or ord(c) == 127 for c in text) \
+    import unicodedata
+    # One line of visible text: no control, format (bidirectional overrides among them) or line/paragraph separator.
+    if not isinstance(text, str) or len(text) > LABEL_MAX \
+            or any(unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") for c in text) \
             or credential_shape.shaped(text):
         raise Refusal("invalid-label", f"a label is one line of at most {LABEL_MAX} characters the organization will "
                                        "read, never shaped like a credential")
@@ -944,7 +947,7 @@ def _change(org: str, draft: dict | None, record: dict | None, changes: dict, wh
         row = draft["items"].get(ident) or sel["items"].get(ident) or {}
         # A label changes what the organization reads, never whether the project goes (ORG-R02): its decision and
         # `by` stay, a project nobody chose stays out, and an item found since stays new until a person decides it.
-        put(ident, row.get("decision", "exclude"), by=row.get("by", "hand") if row else "hand",
+        put(ident, row.get("decision", "exclude"), by=row.get("by", "default") if row else "default",
             label=_label_ok(text) if text else "")
     draft["updatedAt"] = _now()
     # Each change is its own draft, named at random: a revision removes the draft it consumed by this name, never
@@ -1405,7 +1408,9 @@ def confirm_replacement(org: str, key: Any, *, decision: Any = None, caller: str
     revocation itself is OBS-416's rotation door, not built: the step then waits on `rotation`."""
     org_ok = _org_checked(org, configured=False)
     q = CMD.format(org=_q(org_ok))
-    ident = key if isinstance(key, str) and key.startswith("vault:") else f"vault:{key}" if isinstance(key, str) else ""
+    if not isinstance(key, str) or not key.strip():
+        raise Refusal("not-in-record", "confirm-replacement names the key: vault:FOLDER/ENV/NAME", f"{q} show")
+    ident = key if key.startswith("vault:") else f"vault:{key}"
     if not _revisions(org_ok):
         raise Refusal("not-in-record", "no selection has been applied for this organization", f"{q} plan")
     # The object is the organization's key: words about the same slot in another organization's record do not count.
@@ -1457,8 +1462,8 @@ def show(org: str) -> dict:
         revs = history(org_ok)
     except Refusal as refusal:
         return {"schema": VIEW_SCHEMA, "answer": "show", "organization": org_ok, "state": "error",
-                "error": refusal.code, "message": str(refusal), "command": refusal.command or f"{q} show",
-                "degraded": []}
+                "error": refusal.code, "message": str(refusal), "nextStep": "the selection's record does not read: "
+                + str(refusal), "command": refusal.command or "project-observatory full doctor", "degraded": []}
     try:
         draft = _draft(org_ok)
     except Refusal as refusal:
@@ -1475,8 +1480,8 @@ def show(org: str) -> dict:
         jdoc = journal(org_ok, rec["revision"], rec["digest"])
     except Refusal as refusal:
         return {"schema": VIEW_SCHEMA, "answer": "show", "organization": org_ok, "state": "error",
-                "error": refusal.code, "message": str(refusal), "command": f"{q} apply --digest "
-                                                                           f"{rec['selectionDigest']}", "degraded": []}
+                "error": refusal.code, "message": str(refusal), "nextStep": "the journal of the applied revision "
+                "does not read: " + str(refusal), "command": "project-observatory full doctor", "degraded": []}
     new: list[str] = []
     try:
         hand = [i["id"] for i in rec["items"] if i["kind"] == "project" and i["decision"] == "include"]
@@ -1566,7 +1571,7 @@ def text(view: dict) -> str:
         for h in p["humanSteps"]:
             lines.append(f"your step: {h['what']}")
         lines.append(f"digest: {view['digest']}")
-        lines.append(f"next: {view['nextStep']}\n  {view['command']}")
+        lines.append(f"next: {view.get('nextStep', '')}\n  {view.get('command', '')}")
     elif a == "show":
         lines = [f"Selection for {view['organization']} ({view['state']})"]
         if view.get("record"):
@@ -1581,7 +1586,7 @@ def text(view: dict) -> str:
             lines.append(f"  new since the record (not chosen): {n}")
         if view.get("error"):
             lines.append(f"  {view['error']}: {view['message']}")
-        lines.append(f"next: {view['nextStep']}\n  {view['command']}")
+        lines.append(f"next: {view.get('nextStep', '')}\n  {view.get('command', '')}")
     else:
         lines = [f"{a}: {view.get('outcome')} ({view.get('state')})"]
         if view.get("revision"):
@@ -1590,7 +1595,7 @@ def text(view: dict) -> str:
             lines.append(f"  {kind}: " + ", ".join(f"{n} {s}" for s, n in row.items() if n))
         for w in view.get("waitingOn") or []:
             lines.append(f"  waiting ({w.get('items', 1)}): {w['on']}: {w.get('what', '')} [{w.get('owner', '')}]")
-        lines.append(f"next: {view['nextStep']}\n  {view['command']}")
+        lines.append(f"next: {view.get('nextStep', '')}\n  {view.get('command', '')}")
     for d in view.get("degraded") or []:
         lines.append(f"not read: {d.get('source')}: {d.get('reason')}")
     return "\n".join(lines)

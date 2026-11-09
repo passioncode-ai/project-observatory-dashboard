@@ -1114,6 +1114,40 @@ class ReviewRoundTen(Base):
             sys.modules.update(saved)
 
 
+class ReviewRoundEleven(Base):
+    """What the eleventh review found: each case reproduced, then fixed."""
+
+    def test_show_of_a_damaged_record_in_text_names_it_and_fails(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        path = self.sel._revisions("acme")[0]
+        path.write_text(path.read_text().replace('"separate-space"', '"one-space"', 1))
+        code, out, _ = Cli.run_cli(self, "select", "--org", "acme", "show")
+        self.assertEqual(code, 1)
+        self.assertIn("does not read", out)
+        self.assertIn("full doctor", out)
+
+    def test_a_label_on_a_project_the_plan_does_not_list_decides_nothing(self):
+        v = self.sel.plan("acme", {"labels": {"project:notes": "Notes"}, "layout": "one-space"})
+        row = self.items(v)["project:notes"]
+        self.assertEqual((row["decision"], row["by"]), ("exclude", "default"))
+        self.sel.apply("acme", v["digest"])
+        moved = [dict(p, organization="acme", organization_source="rule", organization_why="repository owner acme-inc")
+                 if p["id"] == "project:notes" else p for p in PROJECTS]
+        self.registry("projects.json", {"projects": moved})
+        self.assertIn("project:notes", self.sel.plan("acme")["new"], "still found since: nobody decided it")
+
+    def test_a_label_is_one_line_of_visible_text(self):
+        for bad in ("a\u2028b", "a\u202eb", "a\x85b"):
+            with self.assertRaises(self.sel.Refusal, msg=repr(bad)) as caught:
+                self.sel.plan("acme", {"labels": {"project:alpha-web": bad}})
+            self.assertEqual(caught.exception.code, "invalid-label")
+
+    def test_confirm_without_a_key_is_the_same_refusal_everywhere(self):
+        m = McpTool.server(self)
+        self.assertEqual(m.observatory_org_selection(org="acme", action="confirm-replacement")["error"],
+                         "not-in-record")
+
+
 class WhatTheOrganizationSees(Base):
     """ORG-R03: a reference random per organization and a label only when typed; nothing is handed over."""
 

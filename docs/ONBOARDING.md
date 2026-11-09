@@ -2364,8 +2364,9 @@ account agree and its project is chosen. Every other key stays personal. Once a
 selection is applied, the next plan starts from the record, and anything found
 since (a new project or key the rules would propose) is listed as `new` and
 never chosen by itself (ORG-R16); it stays out of the record and out of the
-form's digest until a person decides it (the applied form still reads applied,
-and the plan says how many wait), and the findings board names it as
+form's digest until a person decides it or types its label (a label alone
+decides nothing: the item stays new), the applied form still reads applied, the
+plan says how many wait, and the findings board names it as
 `organization.selection_new`. Changes are item by item (`--include`,
 `--exclude`, `--key KEY=hand-over-revoke|hand-over-keep|keep`, `--label
 PROJECT=TEXT`, the name the organization would read, empty by default; a

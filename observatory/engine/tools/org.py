@@ -320,7 +320,7 @@ def select(args) -> int:
         print(json.dumps(view, indent=1, sort_keys=True, ensure_ascii=False))
     else:
         print(S.text(view))
-    return 0
+    return 1 if view.get("state") == "error" else 0          # a damaged record is never a success to a script
 
 
 def main(argv: list[str] | None = None) -> int:
