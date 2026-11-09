@@ -694,7 +694,8 @@ the section carries `page`. The section adds `stale` (source
 `harness.json`) to its `degraded` for a scan older than 24 hours. No path is recorded. An older reader ignores the key; the machine view
 reads a scan without it as `not-surveyed` until the next scan. `observatory_machine` takes `section: "skills"`
 (answer `{measuredAt, degraded, skills}`, `skills` holding `spaces`, `page` (`limit`, `cursor`, `nextCursor`, `order`,
-`total`), `counts`, `findings`, `open`, `degraded`) with two new optional arguments for that section, `limit`
+`total`), `counts`, `findings`, `open`; `full machine --skills` prints the same section with its own `degraded` and
+every row) with two new optional arguments for that section, `limit`
 (1 to 100, default 100 rows of one window over the findings, then each space's plugins, then its skills; `total`
 counts those rows; a page also ends once its rows pass 40,000 characters of JSON as `json.dumps` writes them, at least one row a page;
 `counts` stay whole; a cursor is `offset@stamp` (the scan's time as digits), and one given for an

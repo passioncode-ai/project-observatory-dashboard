@@ -1256,9 +1256,10 @@ class Skills(Base):
             self.assertEqual(workspace.machine_command("machine", ["--skills"]), 0)
         printed = json.loads(out.getvalue())
         self.assertEqual(printed["counts"], {"skills": 1, "plugins": 1, "findings": 1})
-        with self.assertRaises(SystemExit):
-            with contextlib.redirect_stderr(io.StringIO()):
-                workspace.machine_command("machine", ["--skills", "--disk"])
+        for other in (["--disk"], ["--root", str(self.base)]):
+            with self.assertRaises(SystemExit):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    workspace.machine_command("machine", ["--skills", *other])
 
 
 if __name__ == "__main__":

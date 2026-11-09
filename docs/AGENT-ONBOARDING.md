@@ -361,8 +361,8 @@ Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` in the engine.
 
 `observatory_machine(section="skills")` (or `full machine --skills`) lists every skill and plugin of this
 space with its version, scope (`user`, `project`, `plugin`; a plugin install `user`, `project` or `local`) and
-agent (`claude-code`, `codex`), read from the last harness scan; it fetches nothing. It comes 100 rows a
-page (the findings, then the plugins, then the skills): follow `skills.page.nextCursor` with `cursor` before saying
+agent (`claude-code`, `codex`), read from the last harness scan; it fetches nothing. Over MCP it comes 100
+rows a page (the findings, then the plugins, then the skills; the CLI prints every row): follow `skills.page.nextCursor` with `cursor` before saying
 a skill or a plugin is not installed; `counts` are always whole. An `invalid-cursor` in `degraded` means the scan
 changed under the walk (start again from the first page), the cursor was past the end (nothing follows), or it was
 not one the answer gave. `findings` holds a plugin

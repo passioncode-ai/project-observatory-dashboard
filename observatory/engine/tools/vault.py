@@ -883,8 +883,9 @@ def _target_store(text: str) -> pathlib.Path:
     # through the link, and left in, `<store>/projects/..` is a second spelling of a store.
     if any(part in (".", "..") for part in re.split(r"[\\/]+", expanded)):
         raise CopyRefused("name the target store by its plain absolute path, without `.` or `..`", "target-not-plain")
-    if raw.is_symlink():
-        raise CopyRefused("the target store is a symbolic link; name the folder it points at", "target-link")
+    if raw.is_symlink() or getattr(raw, "is_junction", lambda: False)():
+        raise CopyRefused("the target store is a link (a symbolic link or a junction); name the folder it points at",
+                          "target-link")
     if not raw.parent.is_dir():
         raise CopyRefused(f"the target store's parent folder {credential_shape.echo(str(raw.parent))} does not exist; "
                           f"create the space's folder first (the store itself is created when missing)",
@@ -918,7 +919,10 @@ def _refuse_a_work_tree(folder: pathlib.Path, store: pathlib.Path) -> None:
     being published, the reason `inject` refuses a `.env` that is not ignored. Asked of git; where git cannot run
     there is no working tree it could publish from, and a git that does not answer in time is a refusal."""
     try:
-        inside = safe_git.run(["rev-parse", "--is-inside-work-tree"], cwd=folder, timeout=60)
+        # Searched up to the root, across file systems, whatever the caller's environment narrows: a ceiling or a
+        # mount boundary must not hide the working tree a value would be written into.
+        inside = safe_git.run(["rev-parse", "--is-inside-work-tree"], cwd=folder, timeout=60,
+                              extra_env={"GIT_CEILING_DIRECTORIES": "", "GIT_DISCOVERY_ACROSS_FILESYSTEM": "1"})
     except subprocess.TimeoutExpired:
         raise CopyRefused("git did not answer in time, so whether the target sits in a Git working tree is unknown; "
                           "try again", "target-in-repository") from None
@@ -951,8 +955,10 @@ def _writable_by_this_account(store: pathlib.Path) -> None:
             info = folder.lstat()
         except FileNotFoundError:
             continue
-        if stat.S_ISLNK(info.st_mode):
-            raise CopyRefused(f"{shown_path(folder)} is a symbolic link; name the folder it points at", "target-link")
+        # A Windows junction is a reparse point `lstat` does not report as a link (FILE_ATTRIBUTE_REPARSE_POINT).
+        if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise CopyRefused(f"{shown_path(folder)} is a link (a symbolic link or a junction); name the folder it "
+                              f"points at", "target-link")
         # POSIX: the folder's uid against this process's effective uid. Windows keeps no uid: the folder's owner
         # SID must be this account (or SYSTEM or Administrators, `osprivacy.owned_by_me`), or the owner-only list set
         # below would lock that account out of its own store.
@@ -1125,7 +1131,9 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
             return exc
         if isinstance(exc, VaultBoundaryError):
             return CopyRefused(f"the target store refused it: {exc}", "target-unsafe")
-        return CopyRefused("a file in the target store is not UTF-8 text", "target-unsafe")
+        if isinstance(exc, UnicodeDecodeError):
+            return CopyRefused("a file in the target store is not UTF-8 text", "target-unsafe")
+        return CopyRefused("a file in the target store could not be read as the vault reads its files", "target-unsafe")
 
     try:
         checked(source_value())

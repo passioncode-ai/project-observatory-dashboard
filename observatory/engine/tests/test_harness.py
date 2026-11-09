@@ -462,6 +462,21 @@ class Harness(unittest.TestCase):
                          "harness.plugin_behind"} <= types, types)
         behind = next(f for f in found if f["type"] == "harness.plugin_behind")
         self.assertEqual(behind["subject"], "harness:plugin-behind:claude-code:tool@family:user::1.0.0:1.1.0")
+        # A project install names its project and the short digest that tells two projects of one name apart.
+        sys.path.insert(0, str(ROOT / "tools"))
+        doc = json.loads((self.out / "harness.json").read_text())
+        finding = {**doc["inventory"]["findings"][0], "scope": "local", "project": "alpha-web",
+                   "projectKey": "0123abcd"}
+        doc["inventory"]["findings"] = [finding]
+        (self.out / "harness.json").write_text(json.dumps(doc))
+        p = subprocess.run([PY, "-c", code], cwd=ROOT, env={**os.environ, "OBSERVATORY_SCRATCH": str(self.out),
+                                                            "OBSERVATORY_HOME": str(self.ws), "OBSERVATORY_SYSTEM_SETUP": "0"},
+                           capture_output=True, text=True, timeout=900)
+        self.assertEqual(p.returncode, 0, p.stderr[-1500:])
+        local = next(f for f in json.loads(p.stdout) if f["type"] == "harness.plugin_behind")
+        self.assertEqual(local["subject"],
+                         "harness:plugin-behind:claude-code:tool@family:local:alpha-web.0123abcd:1.0.0:1.1.0")
+        self.assertIn("run in the alpha-web project's folder", local["action"])
         self.assertEqual(behind["title_id"], "plugin {plugin} is at {installed}, its marketplace publishes {latest}")
         self.assertIn("`claude plugin update tool@family --scope user`", behind["action"])
         self.assertNotIn(json.dumps(str(self.home))[1:-1], json.dumps(behind), "no path in the finding")

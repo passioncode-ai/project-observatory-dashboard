@@ -3500,7 +3500,7 @@ set them to). Its codes: `invalid-slot` (the source slot's names), `source-empty
 `source-unreadable` (the slot, its metadata, the estate key or the leak register cannot be read as private
 files, or the slot does not hold one single-line value),
 `source-has-open-leak` (rotate and settle first), `target-not-absolute`, `target-not-plain` (`.` or `..`
-in the path), `target-link` (the store or its `projects/` is a link), `target-parent-missing`,
+in the path), `target-link` (the store or its `projects/` is a link, a Windows junction included), `target-parent-missing`,
 `target-not-folder`, `target-is-vault-folder` (name the store that holds the vault),
 `target-in-repository` (the store, or the folder below `projects/` the slot goes into, would sit in a Git
 working tree, or git did not answer in time; asked of git, so it is not checked where git cannot run),
