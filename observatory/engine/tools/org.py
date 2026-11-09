@@ -118,7 +118,10 @@ class _Parser(argparse.ArgumentParser):
                 if said != repr(part) and not re.fullmatch(r"--?[A-Za-z][A-Za-z0-9-]*", part):
                     hidden[part] = said                # neither an identifier nor an option's name: never repeated
         for part in sorted(hidden, key=len, reverse=True):
-            message = message.replace(repr(part), hidden[part]).replace(part, hidden[part])
+            # Quoted as argparse quotes it, or bare where it stands as its own word (never inside another word,
+            # so a typed `-` leaves `--layout` and `separate-space` as they are).
+            message = message.replace(repr(part), hidden[part])
+            message = re.sub(r"(?<![\w-])" + re.escape(part) + r"(?![\w-])", lambda _m, h=hidden[part]: h, message)
         super().error(credential_shape.redact(message))
 
     def parse_known_args(self, args=None, namespace=None):

@@ -364,6 +364,9 @@ def decided(action: str, target: str, decision: Any = None, *, caller: str) -> d
     import credential_shape
     kept = [decision.get("instruction"), decision.get("target"),
             *(((decision.get("source") or {}).values()) if isinstance(decision.get("source"), dict) else [])]
+    # A selection's own digest (`sha256:` and 64 hex, as the plan's command quotes it) is not a credential: the
+    # operator may repeat that command in their words.
+    kept = [re.sub(r"\bsha256:[0-9a-f]{64}\b", "sha256:digest", v) if isinstance(v, str) else v for v in kept]
     if answer.get("ok") is True and any(credential_shape.shaped(v, uuids=False) for v in kept if isinstance(v, str)):
         # The words, the object and where they were said are kept verbatim and shown back: none may carry something
         # shaped like a credential (a session's id, a UUID, is not one).

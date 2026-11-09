@@ -1506,6 +1506,30 @@ class ReviewRoundNineteen(Base):
         self.assertEqual(len(self.sel._revisions("acme")), 2, "nothing was undone")
 
 
+class ReviewRoundTwenty(Base):
+    """What the twentieth review found: each case reproduced, then fixed."""
+
+    def test_the_operator_may_quote_the_plans_own_command(self):
+        v = self.ready()
+        words = self.decision("org.select.apply", "acme",
+                              instruction=f"apply it: full org select --org acme apply --digest {v['digest']}")
+        done = self.sel.apply("acme", v["digest"], decision=words, caller="agent:mcp")
+        self.assertEqual(done["revision"], 1)
+        planted = self.decision("org.select.apply", "acme", instruction="apply it, key sk-or-v1-" + "e" * 64)
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.undo("acme", decision=dict(planted, action="org.select.undo"), caller="agent:mcp")
+        self.assertEqual(caught.exception.code, "decision-invalid")
+
+    def test_a_typed_dash_leaves_the_message_readable(self):
+        import org as org_cli
+        importlib.reload(org_cli)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+            org_cli.main(["select", "--org", "acme", "plan", "--layout", "bad", "-"])
+        self.assertIn("--layout", err.getvalue())
+        self.assertIn("separate-space", err.getvalue())
+
+
 class WhatTheOrganizationSees(Base):
     """ORG-R03: a reference random per organization and a label only when typed; nothing is handed over."""
 
