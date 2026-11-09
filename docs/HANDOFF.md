@@ -23,7 +23,8 @@ and the collector (OBS-421), organizations matched through DigitalOcean and Hero
 (OBS-412 part 1), the organization certificate rotated before its `expiring` notice (OBS-423), the tick's install
 reloaded without racing launchd (OBS-424).
 
-Next: tag `v0.35.8`, verify and install it on both Macs (receipts in the record).
+Released 2026-11-09 (tag `v0.35.8` on `af0a513f`, every job of the release run green on its first attempt), verified
+and installed on the release manager's machine; receipts in the record. Next: the second Mac's install.
 
 [2026-11-08: release 0.35.7](runs/2026-11-08-release-0.35.7/README.md): engine 0.35.7 (`observatory-log` stays
 0.35.6): `full restore --secret-store-verify-into DIR` verifies a backup's carried secret store in a disposable
