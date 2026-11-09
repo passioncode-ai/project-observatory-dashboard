@@ -1104,5 +1104,76 @@ class Command(Base):
         self.assertEqual(page, str(paths.DASHBOARD_DIR / "machine.html"))
         self.assertNotIn("projects-dashboard.html", out.getvalue())
 
+
+class Skills(Base):
+    """The `skills` section (OBS-477): read from the harness scan's inventory, never scanned on request, and an
+    unread inventory named in `degraded` rather than shown as nothing installed."""
+
+    INVENTORY = {"spaces": [{"space": "this-account", "home": "~",
+                             "skills": [{"name": "notes", "agent": "claude-code", "scope": "user", "version": "1.0.0"}],
+                             "plugins": [{"name": "tool@family", "agent": "claude-code", "scope": "user",
+                                          "project": None, "version": "1.0.0", "enabled": True,
+                                          "marketplace": "family", "latest": "1.1.0",
+                                          "latestFrom": "marketplace-catalogue", "marketplaceUpdated": None,
+                                          "behind": True}]}],
+                 "findings": [{"code": "plugin-behind", "severity": "info", "plugin": "tool@family",
+                               "agent": "claude-code", "scope": "user", "project": None, "installed": "1.0.0",
+                               "latest": "1.1.0", "marketplaceUpdated": None,
+                               "action": "claude plugin update tool@family"}],
+                 "open": [{"finding": "organization-plugin-in-personal-space", "waitsOn": "OBS-359", "reason": "r"}],
+                 "degraded": [{"source": "codex:config.toml", "code": "unreadable", "reason": "r"}]}
+
+    def setUp(self):
+        super().setUp()
+        sys.path.insert(0, str(ROOT / "mcp"))
+        import server
+        self.server = importlib.reload(server)
+
+    def harness(self, doc) -> None:
+        (self.home / "store/raw").mkdir(parents=True, exist_ok=True)
+        (self.home / "store/raw/harness.json").write_text(json.dumps(doc) if not isinstance(doc, str) else doc)
+
+    def test_without_a_scan_the_section_says_how_to_fill_it(self):
+        out = self.server.observatory_machine(section="skills")
+        self.assertEqual(out["skills"]["spaces"], [])
+        [d] = out["degraded"]
+        self.assertEqual((d["source"], d["code"]), ("harness.json", "not-surveyed"))
+        self.assertIn("full scan-harness", d["reason"])
+        self.assertIn("configure integrations harness true", d["reason"])
+        self.assertEqual(out["skills"]["open"][0]["waitsOn"], "OBS-359")
+
+    def test_a_scan_before_the_inventory_is_named(self):
+        self.harness({"generated_at": "2026-01-01T00:00:00Z", "skills": []})
+        out = self.server.observatory_machine(section="skills")
+        self.assertEqual(out["measuredAt"], "2026-01-01T00:00:00Z")
+        self.assertIn("predates the skills inventory", out["degraded"][0]["reason"])
+
+    def test_an_unreadable_scan_is_named(self):
+        self.harness("{")
+        out = self.server.observatory_machine(section="skills")
+        self.assertEqual(out["degraded"][0]["code"], "unreadable")
+
+    def test_the_inventory_with_its_findings_counts_and_degraded(self):
+        self.harness({"generated_at": "2026-01-03T00:00:00Z", "inventory": self.INVENTORY})
+        out = self.server.observatory_machine(section="skills")
+        skills = out["skills"]
+        self.assertEqual(skills["counts"], {"skills": 1, "plugins": 1, "findings": 1})
+        self.assertEqual(skills["findings"][0]["code"], "plugin-behind")
+        self.assertEqual(out["degraded"], self.INVENTORY["degraded"])
+        self.assertEqual(out["measuredAt"], "2026-01-03T00:00:00Z")
+        self.assertIn("skills", self.server.observatory_machine()["sections"])
+
+    def test_full_machine_skills_prints_the_same_section(self):
+        self.harness({"generated_at": "2026-01-03T00:00:00Z", "inventory": self.INVENTORY})
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(workspace.machine_command("machine", ["--skills"]), 0)
+        printed = json.loads(out.getvalue())
+        self.assertEqual(printed["counts"], {"skills": 1, "plugins": 1, "findings": 1})
+        with self.assertRaises(SystemExit):
+            with contextlib.redirect_stderr(io.StringIO()):
+                workspace.machine_command("machine", ["--skills", "--disk"])
+
+
 if __name__ == "__main__":
     unittest.main()

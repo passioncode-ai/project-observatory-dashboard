@@ -206,6 +206,8 @@ BOUNDARY += ('node_ceremony',)
 BOUNDARY += ('ssh_keys',)
 # Vault slots across the operator's machines by keyed digests (OBS-194, step 1).
 BOUNDARY += ('vault_digests',)
+# OBS-476: one slot copied into another store on this machine; the value stays in one process.
+BOUNDARY += ('vault_copy',)
 # access-bindings/1: who may do what with agent memory, from the transport (PB-137 N-007).
 BOUNDARY += ('access_binding',)
 # OBS-260: the secret prompt's server half: agent bindings, the node's request queue, the job, no value anywhere.

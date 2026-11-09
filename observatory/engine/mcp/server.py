@@ -738,11 +738,14 @@ def observatory_machine(
                                             description="A process id to explain: its origin, ancestry, and "
                                                         "witr's service/port detail when witr is installed. "
                                                         "The answer is then that explanation alone.")] = None,
-    section: Annotated[Literal["overview", "memory", "processes", "disk", "git", "cleanup", "guard", "coverage", "move"],
+    section: Annotated[Literal["overview", "memory", "processes", "disk", "git", "cleanup", "guard", "coverage", "move",
+                               "skills"],
                        Field(description="overview = totals and the top few of each (default); "
                                          "a named section = that section in full, except coverage which always stays bounded; "
                                          "move = the checklist of a move between machines, as "
-                                         "`full machine-move status --json` gives it.")] = "overview",
+                                         "`full machine-move status --json` gives it; skills = every skill and plugin "
+                                         "each agent loads, with version, scope and findings, as `full machine --skills` "
+                                         "gives it.")] = "overview",
 ) -> dict[str, Any]:
     """The machine this estate runs on: processes grouped by ORIGIN (agent
     session, launchd job, simulator, app, detached), memory and swap, free disk
@@ -771,7 +774,18 @@ def observatory_machine(
     from this machine and the other machine's facts in the data folder's peers folder:
     the same function `full machine-move status` runs. It writes nothing and makes no
     machine id; every step it names is a CLI verb a person or an agent runs.
+
+    `section="skills"` answers every skill and plugin of this space (OBS-477): name, version,
+    scope (user, project or plugin; a plugin's install scope user, project or local) and the
+    agent that loads it (claude-code, codex), whether a plugin is enabled, the newest version
+    its marketplace's LOCAL copy publishes, and findings (`plugin-behind`). Read from the last
+    harness scan, never fetched; `open` names the finding that waits (an organization's plugin
+    in a person's own space, OBS-359), `degraded` every record that could not be read.
     """
+    if section == "skills" and explainPid is None:
+        import machine_view
+        skills = machine_view.skills_section()
+        return {"measuredAt": skills["measuredAt"], "degraded": skills["degraded"], "skills": skills}
     if section == "move" and explainPid is None:
         # The agent's path to the checklist (decision D13): the CLI's own function and peers.
         import machine_backup
@@ -797,7 +811,7 @@ def observatory_machine(
         return {**base, section: full.get(section)}
     out = {**base, "memory": full.get("memory"), "witr": full.get("witr", False),
            "coverage": full.get("coverage"),
-           "sections": ["memory", "processes", "disk", "git", "cleanup", "guard", "coverage"]}
+           "sections": ["memory", "processes", "disk", "git", "cleanup", "guard", "coverage", "skills"]}
     if full.get("processes"):
         procs = full["processes"]
         out["processes"] = {**{key: procs.get(key) for key in

@@ -129,6 +129,18 @@ keyed digests under the estate key and never a value: never open a vault file or
 that should differ with `full vault-digests mark PROJECT ENV NAME --why "..."` only when I say so. The
 estate key moves only as a file (`key export FILE`, then `key import FILE` on the other machine); never print it.
 
+## A key into another store on this machine
+
+To give another space on this machine (a second account's store, or a space being prepared) one of my keys,
+run `python "$(project-observatory full-path)/tools/vault.py" copy PROJECT ENV NAME --to-store PATH --json`
+(`--to-slot NAME` or `PROJECT/ENV/NAME` for another slot there). Never copy a key with `cat`, a pipe, a
+named pipe or `use_secret.py run`: `copy` reads and writes the value inside one process, keeps my slot,
+records `copied` in both stores' movement journals, and answers a receipt (`vault-copy/1`) with keyed
+digests that must read `match: true`. A target slot that holds another value is refused
+(`target-slot-filled`); pass `--replace` only when I say so. Every refusal has a `code` and writes nothing;
+`target-other-account` means the store belongs to another OS account and this account cannot write it for
+that account: say so, do not work around it. A copy to another machine is not this command (OBS-194).
+
 ## Waking, stopping and restarting my apps
 
 Never launch, quit or kill an app or background job I enrolled (no `open -a`, `osascript`,
@@ -342,6 +354,16 @@ the moved entry (`retired_entry`); `registration_changes` stays null. A failed o
 interrupted move is `failed` with an unknown effect. Reasons omit Git output and exception bodies.
 Inspect `git worktree list --porcelain` in the owning repository before retrying.
 Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` in the engine.
+
+### Skills and plugins on this machine
+
+`observatory_machine(section="skills")` (or `full machine --skills`) lists every skill and plugin of this
+space with its version, scope (`user`, `project`, `plugin`; a plugin install `user`, `project` or `local`) and
+agent (`claude-code`, `codex`), read from the last harness scan; it fetches nothing. `findings` holds a plugin
+behind the newest version its marketplace's local copy publishes (`plugin-behind`, step `claude plugin update
+NAME`, which is mine to run unless I said otherwise). `open` names what is not reported yet (an organization's
+plugin in a person's own space waits on OBS-359): do not infer it yourself. Read `degraded` before saying
+nothing is installed: an unread scan or record is named there with the command that fills it.
 
 ### Open files absent from directory scans
 

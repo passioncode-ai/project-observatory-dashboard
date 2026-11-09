@@ -86,6 +86,44 @@ def carried(hygiene: dict) -> dict | None:
     return {"checkouts": len(stale), "measured_at": min(stamps) if stamps else None}
 
 
+#: What the skills section always answers, so a reader can tell an empty inventory from an unread one.
+SKILLS_OPEN = [{"finding": "organization-plugin-in-personal-space", "waitsOn": "OBS-359",
+                "reason": "which space is a person's own needs the space's context binding (OBS-359); until then an "
+                          "organization's plugin enabled here is not reported"}]
+
+
+def skills_section() -> dict:
+    """The `skills` section (OBS-477): every skill and plugin each agent of this space loads or has installed, with
+    its version, scope and agent, and the findings the records support (a plugin behind the newest version its
+    marketplace's local copy publishes). Read from the harness scan's `inventory` (collectors/scan_harness.py), which
+    the tick refreshes when `integrations.harness` is on and `full scan-harness` refreshes on request; nothing is
+    scanned here. A scan that is missing, unreadable or older than the inventory is named in `degraded` with the
+    command that fills it, and the lists are then empty, never a claim that nothing is installed."""
+    doc, problem = _load("harness.json", "scan-harness")
+    if problem:
+        if problem["code"] == "not-surveyed":
+            problem = {**problem, "reason": "not surveyed yet: turn on the harness scan "
+                                            "(`project-observatory full configure integrations harness true` and "
+                                            "`project-observatory full configure sources harness_root ~`), then run "
+                                            "`project-observatory full scan-harness`"}
+        return {"measuredAt": None, "spaces": [], "counts": {"skills": 0, "plugins": 0, "findings": 0},
+                "findings": [], "open": SKILLS_OPEN, "degraded": [problem]}
+    inventory = doc.get("inventory") if isinstance(doc, dict) else None
+    if not isinstance(inventory, dict):
+        return {"measuredAt": doc.get("generated_at") if isinstance(doc, dict) else None, "spaces": [],
+                "counts": {"skills": 0, "plugins": 0, "findings": 0}, "findings": [], "open": SKILLS_OPEN,
+                "degraded": [{"source": "harness.json", "code": "not-surveyed",
+                              "reason": "the last harness scan predates the skills inventory; run "
+                                        "`project-observatory full scan-harness`"}]}
+    spaces = [s for s in inventory.get("spaces") or [] if isinstance(s, dict)]
+    findings = [f for f in inventory.get("findings") or [] if isinstance(f, dict)]
+    return {"measuredAt": doc.get("generated_at"), "spaces": spaces,
+            "counts": {"skills": sum(len(s.get("skills") or []) for s in spaces),
+                       "plugins": sum(len(s.get("plugins") or []) for s in spaces), "findings": len(findings)},
+            "findings": findings, "open": inventory.get("open") or SKILLS_OPEN,
+            "degraded": [d for d in inventory.get("degraded") or [] if isinstance(d, dict)]}
+
+
 def summary(explain_pid: int | None = None) -> dict:
     degraded = []
     machine, d1 = _load("machine.json", "machine")

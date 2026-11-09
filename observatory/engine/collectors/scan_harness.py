@@ -21,6 +21,11 @@ For the same summary it lists each project's own skills (`project_skills`: name,
 project's folder as `~/<path>`, kept here so the summary can judge an organization's work folders, never sent) and Codex's skills
 (`codex_skills`: name, source and digest).
 
+For the machine view's `skills` section (OBS-477) it keeps an `inventory`: every skill and plugin of this space with
+its version, its scope (user, project, plugin; a plugin's install scope user, project or local) and the agent that
+loads it (Claude Code, Codex), the newest version a plugin's marketplace publishes as its local copy records it, and
+the findings those records support (`inventory`). Unreadable records are named in its own `degraded`.
+
 The first sight of a skill records its digest in `store/state/harness-pins.json`; a later change is reported
 until `full harness --accept KEY` (tools/harness.py) records the new digest.
 """
@@ -582,6 +587,263 @@ def codex_skills(home: Path, roots: list[Path]) -> tuple[dict, list[dict], list[
     return {"skills": len(rows), "listing_chars": sum(rows)}, hits, skill_rows
 
 
+# --- the skills and plugins inventory (OBS-477) ---------------------------------------------------------------
+
+#: The largest JSON or TOML document the inventory reads; a bigger one is not the agent's own record and is
+#: reported as unreadable rather than read.
+INVENTORY_DOC_MAX = 4 * 1024 * 1024
+#: The catalogue ids of the two agents whose records the inventory reads (contract DEC-0093).
+CLAUDE_CODE, CODEX = "claude-code", "codex"
+#: The space the inventory reads: the home folder `sources.harness_root` names, shown as `~`. The machine view
+#: reads one space today; another account's space is not readable from this one.
+THIS_SPACE = "this-account"
+
+
+def _inventory_doc(path: Path, source: str, degraded: list[dict], kind: str = "json") -> dict | None:
+    """A JSON (or TOML) object, None when the file is absent (nothing installed, nothing to say), and None with an
+    entry in `degraded` when it is there and cannot be read, is too large, does not parse or is not an object: an
+    unreadable record is never read as an empty one. The source is named by a label, never by its path."""
+    try:
+        if not path.exists():
+            return None
+        if not path.is_file() or path.stat().st_size > INVENTORY_DOC_MAX:
+            raise ValueError("not a regular file of a readable size")
+        text = path.read_text(encoding="utf-8")
+        if kind == "toml":
+            import tomllib
+            doc = tomllib.loads(text)
+        else:
+            doc = json.loads(text)
+        if not isinstance(doc, dict):
+            raise ValueError("not an object")
+        return doc
+    except (OSError, ValueError, UnicodeDecodeError) as exc:
+        degraded.append({"source": source, "code": "unreadable",
+                         "reason": f"{source} is there but could not be read ({type(exc).__name__}); what it "
+                                   f"records is not in the inventory"})
+        return None
+
+
+def _settings_doc(path: Path, source: str, degraded: list[dict]) -> dict | None:
+    """A settings file: {} when it is absent (it enables nothing), None when it is there and unreadable (what it
+    enables is unknown, and `degraded` says so)."""
+    doc = _inventory_doc(path, source, degraded)
+    if doc is None and not path.exists():
+        return {}
+    return doc
+
+
+def skill_version(text: str) -> str | None:
+    """A skill's version from its SKILL.md front matter: `version:` at the top level, else under `metadata:`.
+    Only a release-shaped version (`STRICT_VERSION`) is kept; anything else is no version."""
+    if not text.startswith("---"):
+        return None
+    end = text.find("\n---", 3)
+    block = text[3:end] if end > 0 else ""
+    for pattern in (r"^version:\s*['\"]?([^'\"\s#]+)", r"^[ \t]+version:\s*['\"]?([^'\"\s#]+)"):
+        m = re.search(pattern, block, re.M)
+        if m and STRICT_VERSION.fullmatch(m.group(1)):
+            return m.group(1)
+    return None
+
+
+def _plain_version(value) -> str | None:
+    return value if isinstance(value, str) and STRICT_VERSION.fullmatch(value) else None
+
+
+def version_key(version: str | None) -> tuple[int, ...] | None:
+    """The dotted numbers of a version, for comparing; None when it has none. A prerelease word is ignored, so
+    `1.2.0-rc.1` and `1.2.0` compare equal and neither is reported behind the other."""
+    m = re.match(r"([0-9]+(?:\.[0-9]+){0,3})", version or "")
+    if not m:
+        return None
+    parts = [int(p) for p in m.group(1).split(".")]
+    return tuple(parts + [0] * (4 - len(parts)))
+
+
+def _skill_rows(folder: Path, agent: str, scope: str, extra: dict, seen: set[str]) -> list[dict]:
+    rows = []
+    for skill in sorted(folder.glob("*/SKILL.md")):
+        real = str(skill.parent.resolve())
+        if real in seen:
+            continue
+        seen.add(real)
+        try:
+            text = skill.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        meta = front_matter(text)
+        rows.append({"name": meta.get("name") or skill.parent.name, "agent": agent, "scope": scope,
+                     "version": skill_version(text), **extra})
+    return rows
+
+
+def _marketplace_latest(name: str, market: dict, degraded: list[dict], cache: dict) -> tuple[str | None, str | None]:
+    """The newest version of plugin `name` that the marketplace's local copy says it publishes, and where that was
+    read: its catalogue entry's `version`, else the plugin manifest the entry's relative `source` points at inside
+    the marketplace's own folder. Nothing is fetched: a marketplace Claude Code has not refreshed says what it said
+    at its last refresh (`marketplaceUpdated` on the row). A source outside the folder, or of another kind (a Git
+    URL), is not followed and answers (None, None)."""
+    where = market.get("installLocation")
+    label = market.get("_name")
+    if not isinstance(where, str) or not where or not Path(where).is_absolute():
+        return None, None
+    root = Path(where)
+    if label not in cache:
+        cache[label] = _inventory_doc(root / ".claude-plugin" / "marketplace.json",
+                                      f"claude:marketplace:{label}", degraded) or {}
+    catalogue = cache[label]
+    entries = catalogue.get("plugins") if isinstance(catalogue.get("plugins"), list) else []
+    entry = next((e for e in entries if isinstance(e, dict) and e.get("name") == name), None)
+    if entry is None:
+        return None, None
+    version = _plain_version(entry.get("version"))
+    if version:
+        return version, "marketplace-catalogue"
+    source = entry.get("source")
+    if not isinstance(source, str) or not source.strip() or "://" in source:
+        return None, None
+    try:
+        folder = (root / source).resolve()
+        folder.relative_to(root.resolve())
+    except (OSError, ValueError):
+        return None, None
+    manifest = _inventory_doc(folder / ".claude-plugin" / "plugin.json", f"claude:marketplace:{label}:{name}",
+                              degraded)
+    version = _plain_version((manifest or {}).get("version"))
+    return (version, "plugin-manifest") if version else (None, None)
+
+
+def _claude_plugins(claude: Path, degraded: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Every plugin Claude Code recorded as installed (`plugins/installed_plugins.json`), one row per install
+    record: its scope (`user`, `project` or `local`, as Claude Code names it), the project's folder NAME for a
+    project or local install (never its path), the version recorded, whether the settings of that scope enable it
+    (`enabledPlugins`: the user's settings, the project's `.claude/settings.json`, or its `settings.local.json`),
+    and the newest version its marketplace's local copy publishes. Returns (plugin rows, skill rows of the
+    enabled plugins)."""
+    installed_doc = _inventory_doc(claude / "plugins" / "installed_plugins.json", "claude:installed_plugins.json",
+                                   degraded)
+    installed = (installed_doc or {}).get("plugins")
+    if not isinstance(installed, dict):
+        return [], []
+    markets = _inventory_doc(claude / "plugins" / "known_marketplaces.json", "claude:known_marketplaces.json",
+                             degraded) or {}
+    user_settings = _settings_doc(claude / "settings.json", "claude:settings.json", degraded)
+    settings_cache: dict[tuple[str, str], dict | None] = {}
+    catalogue_cache: dict = {}
+
+    def enabled_in(settings: dict | None, key: str) -> bool | None:
+        if settings is None:
+            return None
+        table = settings.get("enabledPlugins")
+        return isinstance(table, dict) and table.get(key) is True
+
+    rows, skills, seen = [], [], set()
+    for key in sorted(installed):
+        records = installed[key]
+        for record in (records if isinstance(records, list) else [records]):
+            if not isinstance(record, dict):
+                continue
+            market = key.split("@", 1)[1] if "@" in key else ""
+            scope = record.get("scope") if record.get("scope") in ("user", "project", "local") else "user"
+            project, settings = None, user_settings
+            if scope != "user":
+                where = record.get("projectPath")
+                folder = Path(where) if isinstance(where, str) and where and Path(where).is_absolute() else None
+                project = folder.name if folder else None
+                if folder is None:
+                    settings = None
+                else:
+                    name = "settings.json" if scope == "project" else "settings.local.json"
+                    cache_key = (str(folder), name)
+                    if cache_key not in settings_cache:
+                        settings_cache[cache_key] = _settings_doc(folder / ".claude" / name,
+                                                                  f"claude:{scope}-settings:{project}", degraded)
+                    settings = settings_cache[cache_key]
+            info = markets.get(market) if isinstance(markets.get(market), dict) else None
+            latest, latest_from = _marketplace_latest(key.split("@", 1)[0], {**info, "_name": market},
+                                                      degraded, catalogue_cache) if info else (None, None)
+            version = _plain_version(record.get("version"))
+            have, newest = version_key(version), version_key(latest)
+            row = {"name": key, "agent": CLAUDE_CODE, "scope": scope, "project": project, "version": version,
+                   "enabled": enabled_in(settings, key), "marketplace": market or None, "latest": latest,
+                   "latestFrom": latest_from,
+                   "marketplaceUpdated": info.get("lastUpdated") if info and isinstance(info.get("lastUpdated"), str)
+                   else None,
+                   "behind": (have < newest) if have and newest else None}
+            rows.append(row)
+            path = Path(record.get("installPath") or "")
+            if row["enabled"] and path.is_absolute() and path.is_dir():
+                skills += _skill_rows(path / "skills", CLAUDE_CODE, "plugin", {"plugin": key}, seen)
+    return rows, skills
+
+
+def _codex_plugins(home: Path, degraded: list[dict]) -> list[dict]:
+    """The plugins Codex keeps in its cache (`~/.codex/plugins/cache/<marketplace>/<plugin>/<version>/`): the
+    newest version folder present, and whether `config.toml` enables it (`[plugins."<plugin>@<marketplace>"]`
+    `enabled`); None when the config does not say. Codex keeps no local copy of a marketplace's catalogue the
+    inventory can read, so its newest published version is not known (`latest` null)."""
+    cache = home / ".codex" / "plugins" / "cache"
+    if not cache.is_dir():
+        return []
+    config = _inventory_doc(home / ".codex" / "config.toml", "codex:config.toml", degraded, kind="toml")
+    table = (config or {}).get("plugins") if isinstance((config or {}).get("plugins"), dict) else {}
+    rows = []
+    for market in sorted(p for p in cache.iterdir() if p.is_dir() and not p.name.startswith(".")):
+        for plugin in sorted(p for p in market.iterdir() if p.is_dir() and not p.name.startswith(".")):
+            versions = [v.name for v in plugin.iterdir() if v.is_dir() and STRICT_VERSION.fullmatch(v.name)]
+            version = max(versions, key=lambda v: version_key(v) or ()) if versions else None
+            key = f"{plugin.name}@{market.name}"
+            entry = table.get(key) if isinstance(table.get(key), dict) else None
+            enabled = entry.get("enabled") if entry and isinstance(entry.get("enabled"), bool) else None
+            rows.append({"name": key, "agent": CODEX, "scope": "user", "project": None, "version": version,
+                         "enabled": None if config is None else enabled, "marketplace": market.name, "latest": None,
+                         "latestFrom": None, "marketplaceUpdated": None, "behind": None})
+    return rows
+
+
+def inventory(home: Path, roots: list[Path]) -> dict:
+    """Every skill and plugin the agents of this space load or have installed, with its version, scope and agent
+    (OBS-477), and the findings the records support. Names, versions, scopes and project folder names only: no
+    path, no file content, no setting value. Read-only, and no network: a plugin is `behind` only when its
+    marketplace's local copy names a newer version than the one installed.
+
+    Skills: Claude Code's user skills (`~/.claude/skills`), each project's own (`<project>/.claude/skills`, under
+    the configured projects folders) and the skills of every enabled plugin; Codex's (`~/.codex/skills` and the
+    shared `~/.agents/skills`). Plugins: `_claude_plugins` and `_codex_plugins`.
+
+    One finding is not computed yet: an organization's plugin enabled in a person's own space. Which space is a
+    person's own needs the space's context binding (OBS-359); the answer says so in `open`."""
+    claude = home / ".claude"
+    degraded: list[dict] = []
+    seen: set[str] = set()
+    skills = _skill_rows(claude / "skills", CLAUDE_CODE, "user", {}, seen)
+    for root in roots:
+        if root.is_dir():
+            for folder in sorted(root.glob("*/.claude/skills")):
+                skills += _skill_rows(folder, CLAUDE_CODE, "project", {"project": folder.parent.parent.name}, seen)
+    plugins, plugin_skills = _claude_plugins(claude, degraded)
+    skills += plugin_skills
+    codex_seen: set[str] = set()
+    for folder in (home / ".codex" / "skills", home / ".agents" / "skills"):
+        skills += _skill_rows(folder, CODEX, "user", {}, codex_seen)
+    plugins += _codex_plugins(home, degraded)
+    findings = []
+    for p in plugins:
+        if p["behind"]:
+            findings.append({"code": "plugin-behind", "severity": "info", "plugin": p["name"], "agent": p["agent"],
+                             "scope": p["scope"], "project": p["project"], "installed": p["version"],
+                             "latest": p["latest"], "marketplaceUpdated": p["marketplaceUpdated"],
+                             "action": f"claude plugin update {p['name']}"
+                                       + (f" (in {p['project']}, for its {p['scope']} install)" if p["project"] else "")})
+    return {"spaces": [{"space": THIS_SPACE, "home": "~", "skills": skills, "plugins": plugins}],
+            "findings": findings,
+            "open": [{"finding": "organization-plugin-in-personal-space", "waitsOn": "OBS-359",
+                      "reason": "which space is a person's own needs the space's context binding (OBS-359); until "
+                                "then an organization's plugin enabled here is not reported"}],
+            "degraded": degraded}
+
+
 #: Where agent tools keep provider credentials of their own (OBS-74), and how each file is read. A tool's own login
 #: session (Codex's auth.json, Claude Code's OAuth) is not listed: it is the tool's to keep and refresh.
 TOOL_CONFIGS = (
@@ -860,6 +1122,8 @@ def scan(home: Path, pins_file: Path, own_owners: set[str] | None = None) -> dic
         "hook_security": hooks_found,
         "plugins": enabled_plugins(claude),
         "coding_agents": coding_agents(home, degraded),
+        # OBS-477: the skills section of `observatory_machine` reads this (machine_view.skills_section).
+        "inventory": inventory(home, roots),
         "usage": {"days": USAGE_DAYS, "transcripts": transcripts,
                   "unused_offered": sum(1 for s in skills if s["model_invocable"] and not s["uses_30d"])},
         "degraded": degraded,

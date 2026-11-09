@@ -431,6 +431,17 @@ class Harness(unittest.TestCase):
         self.assertFalse(marker.exists())
 
     def test_the_findings_say_it(self):
+        # A plugin behind its marketplace (OBS-477): installed at 1.0.0, the marketplace's local copy says 1.1.0.
+        market = self.home / ".claude/plugins/marketplaces/family"
+        (market / ".claude-plugin").mkdir(parents=True)
+        (market / ".claude-plugin/marketplace.json").write_text(json.dumps(
+            {"name": "family", "plugins": [{"name": "tool", "version": "1.1.0", "source": "./tool"}]}))
+        installed = json.loads((self.home / ".claude/plugins/installed_plugins.json").read_text())
+        installed["plugins"]["tool@family"][0].update(version="1.0.0", scope="user")
+        (self.home / ".claude/plugins/installed_plugins.json").write_text(json.dumps(installed))
+        (self.home / ".claude/plugins/known_marketplaces.json").write_text(json.dumps(
+            {"family": {"source": {"source": "github", "repo": "passioncode-ai/family"},
+                        "installLocation": str(market), "lastUpdated": "2026-01-02T00:00:00Z"}}))
         self.scan(budget=200)
         (self.home / ".claude/skills/tidy-notes/scripts/run.sh").write_text("#!/bin/sh\ngit log\n")
         self.scan(budget=200)   # tidy-notes now differs from its first digest: harness.skill_changed
@@ -446,7 +457,13 @@ class Harness(unittest.TestCase):
         found = json.loads(p.stdout)
         types = {f["type"] for f in found}
         self.assertTrue({"harness.listing_overflow", "harness.instruction_long", "harness.mcp_deferral_off",
-                         "harness.skill_risk", "harness.skill_changed", "harness.hook_risk"} <= types, types)
+                         "harness.skill_risk", "harness.skill_changed", "harness.hook_risk",
+                         "harness.plugin_behind"} <= types, types)
+        behind = next(f for f in found if f["type"] == "harness.plugin_behind")
+        self.assertEqual(behind["subject"], "harness:plugin-behind:claude-code:tool@family:user::1.0.0:1.1.0")
+        self.assertEqual(behind["title_id"], "plugin {plugin} is at {installed}, its marketplace publishes {latest}")
+        self.assertIn("claude plugin update tool@family", behind["action"])
+        self.assertNotIn(str(self.home), json.dumps(behind), "no path in the finding")
         self.assertNotIn("SECRETVALUE", json.dumps(found))
         risk = {f["subject"].rsplit(":", 1)[0]: f["severity"] for f in found if f["type"] == "harness.skill_risk"}
         digests = {s["name"]: s["digest"][:12] for s in json.loads((self.out / "harness.json").read_text())["skills"]}
@@ -456,6 +473,149 @@ class Harness(unittest.TestCase):
         self.assertEqual(risk["harness:skill:stealer:credential-egress"], "critical")
         self.assertEqual(risk["harness:skill:installer:download-exec"], "info")
         self.assertEqual(next(f for f in found if f["type"] == "harness.instruction_long")["severity"], "warning")
+
+
+def write_json(path: Path, doc) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc) if not isinstance(doc, str) else doc, encoding="utf-8")
+
+
+def versioned_skill(base: Path, name: str, front: str) -> None:
+    folder = base / name
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "SKILL.md").write_text(f"---\nname: {name}\ndescription: d\n{front}---\n\nbody\n", encoding="utf-8")
+
+
+class Inventory(unittest.TestCase):
+    """The skills and plugins inventory of one space (OBS-477): versions, scopes, agents, the plugin behind its
+    marketplace's local copy, unreadable records named, and no path anywhere in the answer."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.base = Path(tmp.name).resolve()
+        self.home = self.base / "home"
+        self.projects = self.base / "projects"
+        claude = self.home / ".claude"
+        versioned_skill(claude / "skills", "notes", "version: 1.4.0\n")
+        versioned_skill(claude / "skills", "unversioned", "")
+        versioned_skill(claude / "skills", "oddly", "version: by-hand\n")
+        versioned_skill(self.projects / "alpha-web" / ".claude" / "skills", "deploy", "metadata:\n  version: \"0.2.1\"\n")
+        versioned_skill(self.home / ".codex" / "skills", "review", "version: 2.0.0\n")
+        versioned_skill(self.home / ".agents" / "skills", "shared", "")
+        # Plugins: one user install behind its marketplace's catalogue, one project install level with the plugin
+        # manifest its catalogue entry points at, one local install with no settings file, one disabled.
+        market = self.base / "markets" / "family"
+        write_json(market / ".claude-plugin" / "marketplace.json", {"name": "family", "plugins": [
+            {"name": "tool", "version": "1.2.0", "source": "./tool"},
+            {"name": "kit", "source": "./plugins/kit"},
+            {"name": "escape", "source": "../../outside"},
+            {"name": "far", "source": {"source": "github", "repo": "example-org/far"}}]})
+        write_json(market / "plugins" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "2.0.0"})
+        write_json(self.base / "outside" / ".claude-plugin" / "plugin.json", {"name": "escape", "version": "9.0.0"})
+        installs = self.base / "cache"
+        tool = installs / "tool" / "1.0.0"
+        versioned_skill(tool / "skills", "tool-skill", "")
+        idle = installs / "idle" / "3.0.0"
+        versioned_skill(idle / "skills", "idle-skill", "")
+        alpha = self.projects / "alpha-web"
+        write_json(claude / "plugins" / "installed_plugins.json", {"version": 2, "plugins": {
+            "tool@family": [{"scope": "user", "installPath": str(tool), "version": "1.0.0"}],
+            "kit@family": [{"scope": "project", "projectPath": str(alpha), "installPath": str(installs / "kit"),
+                            "version": "2.0.0"}],
+            "escape@family": [{"scope": "local", "projectPath": str(alpha), "installPath": str(installs / "e"),
+                               "version": "1.0.0"}],
+            "far@family": [{"scope": "user", "installPath": str(installs / "far"), "version": "1.0.0"}],
+            "idle@family": [{"scope": "user", "installPath": str(idle), "version": "3.0.0"}]}})
+        write_json(claude / "plugins" / "known_marketplaces.json", {"family": {
+            "source": {"source": "github", "repo": "example-org/family"}, "installLocation": str(market),
+            "lastUpdated": "2026-01-02T00:00:00Z"}})
+        write_json(claude / "settings.json", {"enabledPlugins": {"tool@family": True, "far@family": True,
+                                                                 "idle@family": False}})
+        write_json(alpha / ".claude" / "settings.json", {"enabledPlugins": {"kit@family": True}})
+        # Codex: two cached versions of one plugin, enabled in config.toml.
+        for version in ("0.1.0", "0.10.0", "0.2.0"):
+            (self.home / ".codex" / "plugins" / "cache" / "family" / "helper" / version).mkdir(parents=True)
+        write_json(self.home / ".codex" / "config.toml", '[plugins."helper@family"]\nenabled = true\n')
+        sys.path.insert(0, str(ROOT / "collectors"))
+        import scan_harness
+        self.mod = scan_harness
+
+    def inventory(self) -> dict:
+        return self.mod.inventory(self.home, [self.projects])
+
+    def test_every_skill_with_its_version_scope_and_agent(self):
+        inv = self.inventory()
+        [space] = inv["spaces"]
+        self.assertEqual((space["space"], space["home"]), ("this-account", "~"))
+        rows = {(s["agent"], s["scope"], s["name"]): s for s in space["skills"]}
+        self.assertEqual(rows[("claude-code", "user", "notes")]["version"], "1.4.0")
+        self.assertIsNone(rows[("claude-code", "user", "unversioned")]["version"])
+        self.assertIsNone(rows[("claude-code", "user", "oddly")]["version"], "only a release-shaped version is kept")
+        self.assertEqual(rows[("claude-code", "project", "deploy")]["version"], "0.2.1")
+        self.assertEqual(rows[("claude-code", "project", "deploy")]["project"], "alpha-web")
+        self.assertEqual(rows[("claude-code", "plugin", "tool-skill")]["plugin"], "tool@family")
+        self.assertNotIn(("claude-code", "plugin", "idle-skill"), rows, "a disabled plugin's skills do not load")
+        self.assertEqual(rows[("codex", "user", "review")]["version"], "2.0.0")
+        self.assertIn(("codex", "user", "shared"), rows)
+
+    def test_every_plugin_install_with_scope_enabled_and_latest(self):
+        plugins = {(p["agent"], p["name"], p["scope"]): p for p in self.inventory()["spaces"][0]["plugins"]}
+        tool = plugins[("claude-code", "tool@family", "user")]
+        self.assertEqual((tool["version"], tool["latest"], tool["latestFrom"], tool["behind"], tool["enabled"]),
+                         ("1.0.0", "1.2.0", "marketplace-catalogue", True, True))
+        self.assertEqual(tool["marketplaceUpdated"], "2026-01-02T00:00:00Z")
+        kit = plugins[("claude-code", "kit@family", "project")]
+        self.assertEqual((kit["project"], kit["enabled"], kit["latest"], kit["latestFrom"], kit["behind"]),
+                         ("alpha-web", True, "2.0.0", "plugin-manifest", False))
+        escape = plugins[("claude-code", "escape@family", "local")]
+        self.assertEqual((escape["enabled"], escape["latest"], escape["behind"]), (False, None, None),
+                         "a source outside the marketplace's folder is never followed")
+        far = plugins[("claude-code", "far@family", "user")]
+        self.assertEqual((far["latest"], far["behind"]), (None, None), "a Git source is not fetched")
+        self.assertIs(plugins[("claude-code", "idle@family", "user")]["enabled"], False)
+        helper = plugins[("codex", "helper@family", "user")]
+        self.assertEqual((helper["version"], helper["enabled"], helper["latest"]), ("0.10.0", True, None))
+
+    def test_the_behind_plugin_is_the_one_finding_and_the_open_one_is_named(self):
+        inv = self.inventory()
+        self.assertEqual([(f["code"], f["plugin"], f["installed"], f["latest"]) for f in inv["findings"]],
+                         [("plugin-behind", "tool@family", "1.0.0", "1.2.0")])
+        self.assertEqual(inv["findings"][0]["action"], "claude plugin update tool@family")
+        self.assertEqual([(o["finding"], o["waitsOn"]) for o in inv["open"]],
+                         [("organization-plugin-in-personal-space", "OBS-359")])
+        self.assertEqual(inv["degraded"], [])
+
+    def test_no_path_reaches_the_answer(self):
+        text = json.dumps(self.inventory())
+        self.assertNotIn(str(self.base), text)
+        self.assertNotIn(str(self.home), text)
+
+    def test_an_unreadable_record_is_named_never_read_as_empty(self):
+        claude = self.home / ".claude"
+        write_json(claude / "plugins" / "known_marketplaces.json", "{not json")
+        write_json(self.projects / "alpha-web" / ".claude" / "settings.json", "[1, 2]")
+        write_json(self.home / ".codex" / "config.toml", "[plugins\n")
+        inv = self.inventory()
+        sources = {(d["source"], d["code"]) for d in inv["degraded"]}
+        self.assertEqual(sources, {("claude:known_marketplaces.json", "unreadable"),
+                                   ("claude:project-settings:alpha-web", "unreadable"),
+                                   ("codex:config.toml", "unreadable")})
+        plugins = {(p["agent"], p["name"]): p for p in inv["spaces"][0]["plugins"]}
+        self.assertIsNone(plugins[("claude-code", "kit@family")]["enabled"], "unknown, not disabled")
+        self.assertIsNone(plugins[("codex", "helper@family")]["enabled"])
+        self.assertIsNone(plugins[("claude-code", "tool@family")]["latest"])
+        self.assertNotIn(str(self.base), json.dumps(inv["degraded"]))
+
+    def test_an_unreadable_install_record_lists_no_plugin_and_says_so(self):
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", "{")
+        inv = self.inventory()
+        self.assertEqual([p for p in inv["spaces"][0]["plugins"] if p["agent"] == "claude-code"], [])
+        self.assertIn(("claude:installed_plugins.json", "unreadable"),
+                      {(d["source"], d["code"]) for d in inv["degraded"]})
+
+    def test_the_scan_keeps_it(self):
+        self.assertIn('"inventory": inventory(home, roots)', (ROOT / "collectors" / "scan_harness.py").read_text())
 
 
 if __name__ == "__main__":

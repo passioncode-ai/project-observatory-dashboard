@@ -626,6 +626,36 @@ plan and keys for the request queue and the rotation (OBS-191, OBS-416). Both sc
 gain fields; a field is never renamed without a new schema name. Downgrade: an older engine has no `org select`, no
 tool and no finding, and leaves `store/org-selection/` untouched.
 
+## Vault: a slot copied into another store; machine view: the skills section (OBS-476, OBS-477, the release after 0.35.9)
+
+Additive; nothing migrates. `tools/vault.py copy PROJECT ENV NAME --to-store PATH [--to-slot SLOT] [--replace]
+[--json]` is a new subcommand (OBS-476): `PATH` is a store, the folder that holds a `projects/` vault, created 0700
+when missing. Its receipt is `vault-copy/1` (`outcome` `copied`, `replaced` or `unchanged`; `from` and `to` with
+`store` in display form and `slot`; `to.storeCreated`, `to.archived`; `carried`; `digest` with `algorithm`
+`HMAC-SHA-256`, `key` `estate` or `one-time`, `keyId`, `from`, `to`, `match`); a refusal is
+`{"schema": "vault-copy/1", "outcome": "refused", "code", "reason"}` with `--json`, exit 2, nothing written. Both
+stores' `movements.jsonl` gain a `copied` row (`to_store`, `to_slot` in the source's; `from_store`, `from_slot`,
+`archived` after a replace in the target's; `outcome`, `digest_key`, `key_id`, `digest` in both), which an older
+`vault.py movements` prints as any other row. A copied slot's metadata gains `copied_from` (`store`, `slot`, `at`)
+and carries the source's `expires_at`, `expiry_reason`, `expiry_recorded`, `expiry_by` and `provenance`. Module
+interface: `vault.copy_slot`, `vault.CopyRefused` (a `VaultBoundaryError` with `code`); `vault._mutation_lock`,
+`vault._private_dirs`, `vault._atomic_write`, `vault._append_private` take an optional store and `vault.journal` an
+optional `_store`, each defaulting to this machine's vault, so every existing call behaves as before.
+
+The harness scan (`store/raw/harness.json`) gains `inventory` (OBS-477): `spaces` (one, `this-account`, home `~`)
+with `skills` (`name`, `agent` `claude-code` or `codex`, `scope` `user`, `project` or `plugin`, `version`, and
+`project` or `plugin`) and `plugins` (`name`, `agent`, `scope` `user`, `project` or `local`, `project`, `version`,
+`enabled` true, false or null, `marketplace`, `latest`, `latestFrom` `marketplace-catalogue` or `plugin-manifest`,
+`marketplaceUpdated`, `behind`), `findings` (`plugin-behind`), `open` and its own `degraded` (`source`
+`claude:installed_plugins.json`, `claude:settings.json`, `claude:known_marketplaces.json`,
+`claude:marketplace:<name>`, `claude:project-settings:<project>`, `claude:local-settings:<project>`,
+`codex:config.toml`, code `unreadable`). No path is recorded. An older reader ignores the key; the machine view
+reads a scan without it as `not-surveyed` until the next scan. `observatory_machine` takes `section: "skills"`
+(answer `{measuredAt, degraded, skills}`, `skills` holding `spaces`, `counts`, `findings`, `open`, `degraded`), and
+its overview's `sections` lists `skills`; the tool's other answers are unchanged. `full machine --skills` prints the
+same section and cannot be combined with another mode. The board gains the finding type `harness.plugin_behind`
+(severity info; subject `harness:plugin-behind:<agent>:<plugin>:<scope>:<project>:<installed>:<latest>`).
+
 ## Migration checksums: the same under every Python (OBS-387, 0.35.4)
 
 No migration and no new file. Until 0.35.3 the checksum recorded for each applied migration (`migration_checksums`)

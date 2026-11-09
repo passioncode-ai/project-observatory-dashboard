@@ -812,6 +812,9 @@ def machine_parser(name: str) -> argparse.ArgumentParser:
         mode.add_argument("--coverage", action="store_true", help="summarize saved checkout/cache coverage without rescanning")
         mode.add_argument("--cache-coverage", action="store_true", help="inspect declared cache roots and available tools without walking or cleaning")
         mode.add_argument("--open-unlinked", action="store_true", help="observe open deleted files on macOS/Linux; logical sizes, unknown reclaimability, no cleanup")
+        mode.add_argument("--skills", action="store_true",
+                          help="every skill and plugin each agent loads (version, scope, agent) and the findings, "
+                               "from the last harness scan; scans nothing (`full scan-harness` refreshes it)")
         ap.add_argument("--root", action="append", type=Path, help="explicit checkout search root; repeat for each root")
         ap.add_argument("--explain", type=int, metavar="PID", help="why one process runs, and print nothing else")
         return ap
@@ -1110,6 +1113,11 @@ def machine_command(name: str, argv: list[str]) -> int:
             if a.root or a.explain is not None: machine_parser(name).error("--open-unlinked cannot be combined with --root or --explain")
             import open_unlinked
             print(json.dumps(open_unlinked.collect(), indent=1))
+            return 0
+        if a.skills:
+            if a.root or a.explain is not None: machine_parser(name).error("--skills cannot be combined with --root or --explain")
+            import machine_view
+            print(json.dumps(machine_view.skills_section(), indent=1, ensure_ascii=False))
             return 0
         if a.coverage:
             if a.root or a.explain is not None: machine_parser(name).error("--coverage cannot be combined with --root or --explain")
