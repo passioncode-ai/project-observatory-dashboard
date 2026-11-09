@@ -855,8 +855,9 @@ def _target_store(text: str) -> pathlib.Path:
     if raw.is_symlink():
         raise CopyRefused("the target store is a symbolic link; name the folder it points at", "target-link")
     if not raw.parent.is_dir():
-        raise CopyRefused(f"the target store's parent folder {raw.parent} does not exist; create the space's folder "
-                          f"first (the store itself is created when missing)", "target-parent-missing")
+        raise CopyRefused(f"the target store's parent folder {credential_shape.echo(str(raw.parent))} does not exist; "
+                          f"create the space's folder first (the store itself is created when missing)",
+                          "target-parent-missing")
     store = raw.parent.resolve() / raw.name
     if store.exists() and not store.is_dir():
         raise CopyRefused("the target store is not a folder", "target-not-folder")
@@ -926,8 +927,11 @@ def _holds(outer: pathlib.Path, inner: pathlib.Path) -> bool:
 
 def _parse_to_slot(text: str | None, project: str, env: str, name: str) -> tuple[str, str, str]:
     """`--to-slot`: NAME (same project and env) or PROJECT/ENV/NAME; the source slot when absent."""
-    if not text:
+    if text is None:
         return project, env, name
+    if not text:
+        raise CopyRefused("--to-slot is empty; name a slot, or leave the flag out for the same slot",
+                          "target-slot-invalid")
     parts = text.split("/")
     if len(parts) == 1:
         return project, env, parts[0]
@@ -988,13 +992,17 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
         if _holds(outer, inner):
             raise CopyRefused(f"the stores are nested ({shown_path(outer.resolve())} holds "
                               f"{shown_path(inner.resolve())}); copy between two separate stores", "nested-stores")
-    _writable_by_this_account(store)
     if not src.is_file():
         raise CopyRefused(f"nothing at {src_label} to copy; `vault.py list {project}` shows the slots", "source-empty")
     if _unsettled_for(src_label):
         raise CopyRefused(f"{src_label} has an open leak; copying it spreads a value that may be revoked. Rotate it, "
                           f"settle the leak (`vault.py settle {project} {env} {name} ...`), then copy",
                           "source-has-open-leak")
+    try:
+        _writable_by_this_account(store)
+    except OSError as exc:
+        raise CopyRefused(f"the file system refused before anything was written ({type(exc).__name__})",
+                          "filesystem-refused") from None
     t_label = f"{t_project}/{t_env}/{t_name}"
     t_slot = target_vault / t_project / t_env / t_name
     source_store = shown_path(STORE.parent.resolve())
@@ -1035,26 +1043,37 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
 
     try:
         checked(source_value())
+        key, key_id = _copy_digest_key()
     except (VaultBoundaryError, ValueError) as exc:
         raise target_side(exc) from None
-    key, key_id = _copy_digest_key()
+    except OSError as exc:
+        raise CopyRefused(f"the file system refused before anything was written ({type(exc).__name__})",
+                          "filesystem-refused") from None
 
     def keyed(text: str) -> str:
         return hmac.new(bytes.fromhex(key), text.encode("utf-8"), hashlib.sha256).hexdigest()
 
     # What this call creates in the target store is removed again when a refusal comes after it (the slots changed
     # while the copy waited for the locks, or a target file failed the vault's checks): the store folder and the
-    # vault folder when they are empty, and the lock file only inside a vault folder this call made (no other writer
-    # can be holding that one; a lock file left in an existing vault is harmless and is kept, never unlinked under
-    # a writer that may have opened it).
-    created = not store.exists()
-    vault_created = not target_vault.exists()
+    # vault folder when they are empty, and the lock file only from a vault folder this call made that holds nothing
+    # else. A lock file left in an existing vault is harmless and is kept.
+    created = vault_created = False
     outcome = archived = digest = None
     written = False
     try:
-        if created:
+        # Made by this call only when its own mkdir succeeds: another copy may make the same store a moment
+        # earlier, and what that copy made is never removed by this one.
+        try:
             store.mkdir(mode=0o700)
+            created = True
             osprivacy.private_folder(store)
+        except FileExistsError:
+            pass
+        try:
+            target_vault.mkdir(mode=0o700)
+            vault_created = True
+        except FileExistsError:
+            pass
         _private_dirs(target_vault, target_vault)
         # One order for the two locks, by the folders' identity, so two copies in opposite directions never wait on
         # each other however each spells the stores.
@@ -1110,8 +1129,13 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
             if isinstance(exc, OSError):
                 raise
             raise OSError("the target store refused a write midway") from None
+        # The lock file goes only from a vault folder this call made and that holds nothing else: once another
+        # writer has put anything there it may hold that lock, and a lock file removed under a holder lets a third
+        # writer in beside it.
         if vault_created:
-            (target_vault / ".vault.lock").unlink(missing_ok=True)
+            with contextlib.suppress(OSError):
+                if sorted(os.listdir(target_vault)) == [".vault.lock"]:
+                    (target_vault / ".vault.lock").unlink()
         for folder, made in ((target_vault, vault_created), (store, created)):
             if made:
                 with contextlib.suppress(OSError):
@@ -1136,6 +1160,14 @@ def cmd_copy(a) -> int:
                               "reason": str(exc)}, indent=1, ensure_ascii=False))
         else:
             print(f"vault: copy refused ({exc.code or 'invalid-slot'}): {exc}; nothing was written", file=sys.stderr)
+        return 2
+    except ValueError:
+        reason = "a file the copy reads could not be decoded; nothing was written"
+        if a.json:
+            print(json.dumps({"schema": COPY_SCHEMA, "outcome": "refused", "code": "filesystem-refused",
+                              "reason": reason}, indent=1, ensure_ascii=False))
+        else:
+            print(f"vault: copy refused (filesystem-refused): {reason}", file=sys.stderr)
         return 2
     except OSError as exc:
         reason = (f"a read or a write failed ({type(exc).__name__}); the target slot and the two journals may have "

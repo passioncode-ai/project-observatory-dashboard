@@ -691,12 +691,18 @@ def _folders(folder: Path, source: str, degraded: list[dict]) -> list[Path]:
         return []
 
 
-def _is_file(path: Path) -> bool:
-    """`Path.is_file()`, False also where a folder on the way cannot be searched (Python 3.11 and 3.12 raise there);
-    the folder that could not be listed is named by `_folders`, and an unreadable SKILL.md by `_skill_rows`."""
+def _is_file(path: Path, source: str, degraded: list[dict]) -> bool:
+    """Whether a regular file is at `path`: False when nothing is, and False with an `unreadable` entry in
+    `degraded` when the folder holding it cannot be searched (`Path.is_file()` raises there on Python 3.11 and 3.12
+    and answers False on 3.13), so a skill in such a folder is named, never dropped in silence."""
     try:
-        return path.is_file()
-    except OSError:
+        return stat.S_ISREG(os.stat(path).st_mode)
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+    except OSError as exc:
+        degraded.append({"source": source, "code": "unreadable",
+                         "reason": f"a skill's folder could not be searched ({type(exc).__name__}); it is not in "
+                                   f"the inventory"})
         return False
 
 
@@ -704,7 +710,8 @@ def _skill_rows(folder: Path, agent: str, scope: str, extra: dict, seen: set[str
                 degraded: list[dict]) -> list[dict]:
     rows = []
     label = f"skills:{agent}:{scope}" + (f":{extra.get('project') or extra.get('plugin')}" if extra else "")
-    for skill in [f / "SKILL.md" for f in _folders(folder, label, degraded) if _is_file(f / "SKILL.md")]:
+    for skill in [f / "SKILL.md" for f in _folders(folder, label, degraded)
+                  if _is_file(f / "SKILL.md", f"skill:{agent}:{scope}:{f.name}", degraded)]:
         real = str(skill.parent.resolve())
         if real in seen:
             continue
@@ -755,11 +762,16 @@ def _marketplace_latest(name: str, market: dict, degraded: list[dict], cache: di
         folder.relative_to(root.resolve())
     except (OSError, ValueError):
         return None, None
-    manifest = _inventory_doc(folder / ".claude-plugin" / "plugin.json", f"claude:marketplace:{label}:{name}",
-                              degraded)
-    version = _plain_version((manifest or {}).get("version"))
-    if version:
-        return version, "plugin-manifest"
+    path = folder / ".claude-plugin" / "plugin.json"
+    before = len(degraded)
+    manifest = _inventory_doc(path, f"claude:marketplace:{label}:{name}", degraded)
+    if len(degraded) > before:
+        # A manifest that is there but cannot be read may name the version Claude Code would install: the entry's
+        # version is not taken in its place, or a gap would be reported that no update closes.
+        return None, None
+    if manifest is not None and "version" in manifest:
+        version = _plain_version(manifest.get("version"))
+        return (version, "plugin-manifest") if version else (None, None)
     version = _plain_version(entry.get("version"))
     return (version, "marketplace-catalogue") if version else (None, None)
 
@@ -804,8 +816,14 @@ def _claude_plugins(claude: Path, degraded: list[dict]) -> tuple[list[dict], lis
     rows, skills, seen = [], [], set()
     for key in sorted(installed):
         records = installed[key]
+        named_bad = False
         for record in (records if isinstance(records, list) else [records]):
             if not isinstance(record, dict):
+                if not named_bad:
+                    named_bad = True
+                    degraded.append({"source": f"claude:installed_plugins.json:{key}", "code": "unrecognised-shape",
+                                     "reason": "an install record of this plugin is not an object; it is not in "
+                                               "the inventory"})
                 continue
             market = key.split("@", 1)[1] if "@" in key else ""
             # The scope as Claude Code records it; one this inventory does not know (a managed install) keeps its
@@ -878,16 +896,19 @@ def _codex_plugins(home: Path, degraded: list[dict], skills: list[dict], seen: s
         plugins = [p for p in _folders(market, f"codex:plugins-cache:{market.name}", degraded)
                    if not p.name.startswith(".")]
         for plugin in plugins:
-            versions = [v.name for v in _folders(plugin, f"codex:plugins-cache:{market.name}:{plugin.name}", degraded)
-                        if STRICT_VERSION.fullmatch(v.name)]
-            # The newest by its numbers; on a tie a release before its prerelease, then by name, so the pick does not
-            # depend on the order the folder lists them in.
+            entries = [f.name for f in _folders(plugin, f"codex:plugins-cache:{market.name}:{plugin.name}", degraded)
+                       if not f.name.startswith(".")]
+            versions = [v for v in entries if STRICT_VERSION.fullmatch(v)]
             version = max(versions, key=lambda v: (version_key(v) or (), "-" not in v, v)) if versions else None
+            # A single folder named otherwise (a local build, a commit) is still the installed copy: its skills are
+            # read from it, and its version stays unknown.
+            only = entries
+            loaded = version or (only[0] if len(only) == 1 else None)
             key = f"{plugin.name}@{market.name}"
             entry = table.get(key) if isinstance(table.get(key), dict) else None
             enabled = entry.get("enabled") if entry and isinstance(entry.get("enabled"), bool) else None
-            if enabled and version:
-                skills.extend(_skill_rows(plugin / version / "skills", CODEX, "plugin", {"plugin": key}, seen,
+            if enabled and loaded:
+                skills.extend(_skill_rows(plugin / loaded / "skills", CODEX, "plugin", {"plugin": key}, seen,
                                           degraded))
             rows.append({"name": key, "agent": CODEX, "scope": "user", "project": None, "projectKey": None,
                          "version": version,
@@ -912,7 +933,7 @@ def inventory(home: Path, roots: list[Path]) -> dict:
     degraded: list[dict] = []
     seen: set[str] = set()
     skills = _skill_rows(claude / "skills", CLAUDE_CODE, "user", {}, seen, degraded)
-    for root in roots:
+    for root in dict.fromkeys(r.resolve() for r in roots):
         for project in _folders(root, "projects-folder", degraded):
             # Listed whatever it holds: a project without `.claude/skills` lists nothing, one whose folder cannot
             # be searched is named in `degraded`.

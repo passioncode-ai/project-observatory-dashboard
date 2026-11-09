@@ -6,6 +6,7 @@ nothing heavy itself. `explain` is the one live call: why a single process runs.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -137,7 +138,7 @@ def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
     total = sum(len(s.get("skills") or []) for s in spaces)
     start = 0
     if cursor is not None:
-        if str(cursor).isdigit() and int(cursor) <= total:
+        if re.fullmatch(r"[0-9]{1,9}", str(cursor)) and int(cursor) <= total:
             start = int(cursor)
         else:
             degraded.append({"source": "cursor", "code": "invalid-cursor",

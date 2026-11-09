@@ -2065,10 +2065,10 @@ scope enable it (`enabledPlugins` of the user's settings, or the project's `.cla
 never a finding), and the
 newest version its marketplace publishes as the marketplace's local copy records it (`latest`, with
 `marketplaceUpdated`), in Claude Code's own order: the plugin's `.claude-plugin/plugin.json` inside the
-marketplace's folder, else its catalogue entry's `version`. A plugin from a Git repository or a URL has no
-`latest` (its manifest is not in the local copy), nor does one from a marketplace that is a local folder
-(served in place): nothing is fetched. An enabled plugin behind
-that version is a finding (`plugin-behind`, with `claude plugin update NAME --scope SCOPE` as the step, run
+marketplace's folder, else its catalogue entry's `version` (a manifest that cannot be read, or names no release,
+gives no `latest`). A plugin from a Git repository or a URL has no `latest` (its manifest is not in the local
+copy), nor does one from a marketplace that is a local folder (served in place): nothing is fetched. A plugin
+behind that version and not known to be disabled (`enabled` true, or null) is a finding (`plugin-behind`, with `claude plugin update NAME --scope SCOPE` as the step, run
 in the project's folder for a project or local install), and the board shows it as `harness.plugin_behind`;
 a disabled install behind is listed (`behind: true`) but loads nothing and is not a finding. A project or
 local install carries `projectKey`, a short digest of the project's path that tells two projects of one

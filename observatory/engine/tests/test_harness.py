@@ -723,6 +723,48 @@ class Inventory(unittest.TestCase):
         tool = next(p for p in self.inventory()["spaces"][0]["plugins"] if p["name"] == "tool@family")
         self.assertIsNone(tool["enabled"])
 
+    def test_a_manifest_that_cannot_be_read_or_names_no_release_gives_no_latest(self):
+        manifest = self.base / "markets" / "family" / "tool" / ".claude-plugin" / "plugin.json"
+        write_json(manifest, '{"name": "tool", "version": "1.0.0",}')
+        inv = self.inventory()
+        tool = next(p for p in inv["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertEqual((tool["latest"], tool["behind"]), (None, None), "the entry's 1.2.0 is not taken instead")
+        self.assertEqual(inv["findings"], [])
+        self.assertIn(("claude:marketplace:family:tool", "unreadable"), {(d["source"], d["code"]) for d in inv["degraded"]})
+        write_json(manifest, {"name": "tool", "version": "nightly"})
+        tool = next(p for p in self.inventory()["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertEqual((tool["latest"], tool["behind"]), (None, None))
+
+    def test_a_skill_folder_that_cannot_be_searched_is_named(self):
+        from unittest.mock import patch
+        real = os.stat
+        blocked = str(self.home / ".claude" / "skills" / "notes" / "SKILL.md")
+
+        def stat(path, *args, **kwargs):
+            if str(path) == blocked:
+                raise PermissionError(13, "Permission denied")
+            return real(path, *args, **kwargs)
+        with patch.object(self.mod.os, "stat", side_effect=stat):
+            inv = self.inventory()
+        self.assertNotIn("notes", {s["name"] for s in inv["spaces"][0]["skills"]})
+        self.assertIn(("skill:claude-code:user:notes", "unreadable"), {(d["source"], d["code"]) for d in inv["degraded"]})
+
+    def test_a_malformed_install_record_is_named_and_a_codex_build_folder_is_read(self):
+        installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
+        installed["plugins"]["tool@family"].append("not-a-record")
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
+        cache = self.home / ".codex" / "plugins" / "cache" / "family"
+        versioned_skill(cache / "local" / "build-7f3a" / "skills", "local-skill", "")
+        write_json(self.home / ".codex" / "config.toml",
+                   '[plugins."helper@family"]\nenabled = true\n[plugins."local@family"]\nenabled = true\n')
+        inv = self.inventory()
+        self.assertIn(("claude:installed_plugins.json:tool@family", "unrecognised-shape"),
+                      {(d["source"], d["code"]) for d in inv["degraded"]})
+        local = next(p for p in inv["spaces"][0]["plugins"] if p["name"] == "local@family")
+        self.assertIsNone(local["version"])
+        self.assertIn(("codex", "plugin", "local-skill"),
+                      {(s["agent"], s["scope"], s["name"]) for s in inv["spaces"][0]["skills"]})
+
     def test_an_unknown_scope_behind_is_no_finding(self):
         installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
         installed["plugins"]["tool@family"][0]["scope"] = "managed"

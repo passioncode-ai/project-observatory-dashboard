@@ -388,6 +388,47 @@ class Copy(unittest.TestCase):
         self.assertEqual(json.loads(p.stdout)["code"], "target-in-repository")
         self.assertFalse((repo / "secrets").exists())
 
+    def test_an_empty_to_slot_is_refused(self):
+        self.put()
+        code, refused = self.copy("--to-slot", "")
+        self.assertEqual((code, refused["code"]), (2, "target-slot-invalid"))
+
+    def run_patched(self, patch: str) -> subprocess.CompletedProcess:
+        code = ("import sys, contextlib; sys.path.insert(0, %r); import vault\n" % str(TOOLS) + patch +
+                "try:\n"
+                "    vault.copy_slot('alpha-web', 'prod', 'API_TOKEN', %r)\n"
+                "    print('copied')\n"
+                "except vault.CopyRefused as exc:\n"
+                "    print(exc.code)\n" % str(self.target))
+        p = subprocess.run([sys.executable, "-c", code], env=self.env, capture_output=True, text=True, timeout=60)
+        self.outputs.append(p.stdout + p.stderr)
+        return p
+
+    def test_a_file_system_refusal_before_the_first_write_is_a_refusal(self):
+        self.put()
+        p = self.run_patched("def refuse():\n    raise PermissionError(13, 'denied')\n"
+                             "vault._copy_digest_key = refuse\n")
+        self.assertEqual(p.stdout.strip(), "filesystem-refused", p.stderr)
+        self.assertFalse(self.target.exists())
+
+    def test_another_copy_filling_the_new_vault_first_keeps_its_lock_file(self):
+        """Two copies into a fresh store: the other one writes the slot while this one waits for the locks. This one
+        is refused, and the lock file of the vault that now holds a slot is not removed."""
+        self.put()
+        p = self.run_patched(
+            "real = vault._mutation_lock\n"
+            "@contextlib.contextmanager\n"
+            "def racing(store=None):\n"
+            "    with real(store):\n"
+            "        slot = vault.pathlib.Path(%r) / 'projects/alpha-web/prod/API_TOKEN'\n"
+            "        if not slot.exists():\n"
+            "            vault._atomic_write(slot, 'synthetic-copy-other-value', root=slot.parents[3])\n"
+            "        yield\n"
+            "vault._mutation_lock = racing\n" % str(self.target))
+        self.assertEqual(p.stdout.strip(), "target-slot-filled", p.stderr)
+        self.assertTrue((self.target / "projects" / ".vault.lock").exists())
+        self.assertTrue((self.target / "projects/alpha-web/prod/API_TOKEN").is_file())
+
     def test_a_human_refusal_names_its_code(self):
         self.put()
         p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", str(self.source_store))

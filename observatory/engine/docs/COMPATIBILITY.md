@@ -675,11 +675,12 @@ another source, or from a marketplace that is a local folder, has none. The sect
 reads a scan without it as `not-surveyed` until the next scan. `observatory_machine` takes `section: "skills"`
 (answer `{measuredAt, degraded, skills}`, `skills` holding `spaces`, `page` (`limit`, `cursor`, `nextCursor`,
 `total`), `counts`, `findings`, `open`, `degraded`) with two new optional arguments for that section, `limit`
-(1 to 1000, default 200 skills) and `cursor` (an invalid one answers the first page and `degraded` code
+(1 to 300, default 200 skills) and `cursor` (an invalid one answers the first page and `degraded` code
 `invalid-cursor`), and
 its overview's `sections` lists `skills`; the tool's other answers are unchanged. `full machine --skills` prints the
 same section and cannot be combined with another mode. The board gains the finding type `harness.plugin_behind`
-(severity info; subject `harness:plugin-behind:<agent>:<plugin>:<scope>:<project>:<installed>:<latest>`).
+(severity info; subject `harness:plugin-behind:<agent>:<plugin>:<scope>:<project>[.<projectKey>]:<installed>:<latest>`,
+`<project>` empty for a user install).
 
 ## Migration checksums: the same under every Python (OBS-387, 0.35.4)
 

@@ -746,7 +746,7 @@ def observatory_machine(
                                          "`full machine-move status --json` gives it; skills = every skill and plugin "
                                          "each agent loads, with version, scope and findings, as `full machine --skills` "
                                          "gives it.")] = "overview",
-    limit: Annotated[int | None, Field(ge=1, le=1000, description="skills only: skills per page (default 200); "
+    limit: Annotated[int | None, Field(ge=1, le=300, description="skills only: skills per page (default 200, at most 300); "
                                                                   "plugins, findings and counts are always whole")] = None,
     cursor: Annotated[str | None, Field(description="skills only: the `skills.page.nextCursor` of the previous "
                                                     "answer")] = None,
