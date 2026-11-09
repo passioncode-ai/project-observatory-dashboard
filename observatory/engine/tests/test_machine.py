@@ -1141,7 +1141,7 @@ class Skills(Base):
         self.assertIn("full scan-harness", d["reason"])
         self.assertIn("configure integrations harness true", d["reason"])
         self.assertEqual(out["skills"]["open"][0]["waitsOn"], "OBS-359")
-        self.assertEqual(out["skills"]["page"], {"limit": None, "cursor": "0", "nextCursor": None, "total": 0})
+        self.assertEqual(out["skills"]["page"]["total"], 0)
 
     def test_odd_rows_in_the_scan_do_not_break_the_section(self):
         self.harness({"generated_at": self.now(), "inventory": {"spaces": [{"space": "this-account",
@@ -1179,12 +1179,14 @@ class Skills(Base):
         inventory = {**self.INVENTORY, "spaces": [{**self.INVENTORY["spaces"][0], "skills": rows}]}
         self.harness({"generated_at": self.now(), "inventory": inventory})
         first = self.server.observatory_machine(section="skills")["skills"]
-        self.assertEqual(len(first["spaces"][0]["skills"]), 100)
-        self.assertEqual((first["page"]["total"], first["page"]["nextCursor"]), (450, "100"))
-        self.assertEqual(first["counts"]["skills"], 450)
-        self.assertEqual(len(first["spaces"][0]["plugins"]), 1, "plugins stay whole")
-        last = self.server.observatory_machine(section="skills", cursor="400")["skills"]
+        # One window: the finding, the plugin, then 98 skills.
+        self.assertEqual((len(first["findings"]), len(first["spaces"][0]["plugins"]), len(first["spaces"][0]["skills"])),
+                         (1, 1, 98))
+        self.assertEqual((first["page"]["total"], first["page"]["nextCursor"]), (452, "100"))
+        self.assertEqual(first["counts"], {"skills": 450, "plugins": 1, "findings": 1})
+        last = self.server.observatory_machine(section="skills", cursor="402")["skills"]
         self.assertEqual([r["name"] for r in last["spaces"][0]["skills"]][:1], ["s400"])
+        self.assertEqual((last["findings"], last["spaces"][0]["plugins"]), ([], []))
         self.assertIsNone(last["page"]["nextCursor"])
         for cursor in ("nope", "\u00b2", "9" * 5000):
             bad = self.server.observatory_machine(section="skills", cursor=cursor)
@@ -1199,14 +1201,21 @@ class Skills(Base):
                   "marketplaceUpdated": "2026-01-02T03:04:05.678Z", "behind": None}
         skill = {"name": "a-skill-with-a-long-name", "agent": "claude-code", "scope": "plugin", "version": None,
                  "plugin": "some-plugin-name@some-marketplace"}
-        inventory = {**self.INVENTORY, "spaces": [{"space": "this-account", "home": "~", "skills": [skill] * 1300,
-                                                   "plugins": [plugin] * 130}]}
+        finding = {**self.INVENTORY["findings"][0], "project": "a-project-folder", "projectKey": "0123abcd",
+                   "marketplaceUpdated": "2026-01-02T03:04:05.678Z",
+                   "action": "claude plugin update some-plugin-name@some-marketplace --scope local"}
+        inventory = {**self.INVENTORY, "findings": [finding] * 400,
+                     "spaces": [{"space": "this-account", "home": "~", "skills": [skill] * 1300,
+                                 "plugins": [plugin] * 400}]}
         self.harness({"generated_at": self.now(), "inventory": inventory})
-        out = self.server.observatory_machine(section="skills", limit=100)
-        self.assertEqual(len(out["skills"]["spaces"][0]["skills"]), 100)
-        self.assertNotIn("degraded", out["skills"], "said once, at the top")
+        for cursor in ("0", "350", "500"):   # findings only, findings and plugins, plugins and skills
+            out = self.server.observatory_machine(section="skills", limit=100, cursor=cursor)
+            rows = (len(out["skills"]["findings"]) + len(out["skills"]["spaces"][0]["plugins"])
+                    + len(out["skills"]["spaces"][0]["skills"]))
+            self.assertEqual(rows, 100)
+            self.assertNotIn("degraded", out["skills"], "said once, at the top")
+            self.assertLess(len(json.dumps(out, indent=2)), 80_000, cursor)
         self.assertNotIn("latest", out["skills"]["spaces"][0]["plugins"][0], "a null field is left out")
-        self.assertLess(len(json.dumps(out, indent=2)), 80_000)
 
     def test_an_old_scan_is_named_stale(self):
         self.harness({"generated_at": "2026-01-03T00:00:00Z", "inventory": {**self.INVENTORY, "degraded": []}})

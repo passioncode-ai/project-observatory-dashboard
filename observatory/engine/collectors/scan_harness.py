@@ -766,7 +766,13 @@ def _marketplace_latest(name: str, market: dict, degraded: list[dict], cache: di
         folder.relative_to(root.resolve())
     except (OSError, ValueError, RuntimeError):   # RuntimeError: a link loop, on Python 3.11 and 3.12
         return None, None
-    if not folder.is_dir():
+    try:
+        present = folder.is_dir()
+    except OSError:   # a folder that cannot be searched raises here on Python 3.11 and 3.12
+        degraded.append({"source": f"claude:marketplace:{label}:{name}", "code": "unreadable",
+                         "reason": "the plugin's folder in the marketplace's local copy could not be searched"})
+        return None, None
+    if not present:
         # The plugin's folder is not in the local copy: whatever manifest Claude Code installs from is unknown.
         return None, None
     path = folder / ".claude-plugin" / "plugin.json"
@@ -973,7 +979,9 @@ def inventory(home: Path, roots: list[Path]) -> dict:
     findings = []
     for p in plugins:
         # A disabled install loads nothing, so a gap there harms nothing until it is enabled again.
-        if p["behind"] and p["enabled"] is not False and p["scope"] in ("user", "project", "local"):
+        # A project or local install whose project is not known has no folder to run the update in: no finding.
+        actionable = p["scope"] == "user" or (p["scope"] in ("project", "local") and p["project"])
+        if p["behind"] and p["enabled"] is not False and actionable:
             findings.append({"code": "plugin-behind", "severity": "info", "plugin": p["name"], "agent": p["agent"],
                              "scope": p["scope"], "project": p["project"], "projectKey": p.get("projectKey"),
                              "installed": p["version"],

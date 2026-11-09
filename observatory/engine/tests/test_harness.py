@@ -806,6 +806,15 @@ class Inventory(unittest.TestCase):
         self.assertEqual(plugins["single@family"]["version"], "1")
         self.assertIn(("codex:plugins-cache:family:twin", "ambiguous"), {(d["source"], d["code"]) for d in inv["degraded"]})
 
+    def test_a_project_install_of_no_known_project_is_no_finding(self):
+        installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
+        installed["plugins"]["tool@family"][0].update(scope="project", projectPath="relative/path")
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
+        inv = self.inventory()
+        tool = next(p for p in inv["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertEqual((tool["project"], tool["behind"]), (None, True))
+        self.assertEqual(inv["findings"], [])
+
     def test_an_unknown_scope_behind_is_no_finding(self):
         installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
         installed["plugins"]["tool@family"][0]["scope"] = "managed"

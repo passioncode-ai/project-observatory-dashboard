@@ -361,8 +361,9 @@ Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` in the engine.
 
 `observatory_machine(section="skills")` (or `full machine --skills`) lists every skill and plugin of this
 space with its version, scope (`user`, `project`, `plugin`; a plugin install `user`, `project` or `local`) and
-agent (`claude-code`, `codex`), read from the last harness scan; it fetches nothing. Skills come 100 a page:
-follow `skills.page.nextCursor` with `cursor` before saying a skill is not installed. `findings` holds a plugin
+agent (`claude-code`, `codex`), read from the last harness scan; it fetches nothing. It comes 100 rows a
+page (the findings, then the plugins, then the skills): follow `skills.page.nextCursor` with `cursor` before saying
+a skill or a plugin is not installed; `counts` are always whole. `findings` holds a plugin
 behind the newest version its marketplace's local copy publishes (`plugin-behind`, step `claude plugin update
 NAME --scope SCOPE` in the project's folder for a project or local install, which is mine to run unless I said
 otherwise). `open` names what is not reported yet (an organization's

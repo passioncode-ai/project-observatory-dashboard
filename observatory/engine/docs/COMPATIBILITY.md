@@ -658,8 +658,9 @@ interface: `vault.copy_slot`, `vault.CopyRefused` (a `VaultBoundaryError` with `
 `vault._private_dirs`, `vault._atomic_write`, `vault._append_private` take an optional store and `vault.journal` an
 optional `_store`, each defaulting to this machine's vault, so every existing call behaves as before. One change
 for every writer: `vault._mutation_lock` now checks, once it holds the lock, that the lock file is still the file
-at the lock's path (device and inode) and locks the new one when it is not, so a lock file removed while a writer
-waited never lets two writers in. A store another OS account owns is refused (`target-other-account`); OBS-489
+at the lock's path (device and file id, both read from open descriptors) and locks the new one when it is not, so a
+lock file removed while a writer waited never lets two writers in; a lock file that changes 20 times in a row is a
+refusal, never a wait without end. A store another OS account owns is refused (`target-other-account`); OBS-489
 holds that case. An estate key in the source store that cannot be read is `source-unreadable`. The source store
 is named as its vault folder's parent when the vault folder is `projects/`, else as the vault folder.
 
@@ -686,9 +687,10 @@ Codex's `config.toml` whose `plugins` is not a table adds `codex:config.toml` `u
 the section carries `page`. The section adds `stale` (source
 `harness.json`) to its `degraded` for a scan older than 24 hours. No path is recorded. An older reader ignores the key; the machine view
 reads a scan without it as `not-surveyed` until the next scan. `observatory_machine` takes `section: "skills"`
-(answer `{measuredAt, degraded, skills}`, `skills` holding `spaces`, `page` (`limit`, `cursor`, `nextCursor`,
+(answer `{measuredAt, degraded, skills}`, `skills` holding `spaces`, `page` (`limit`, `cursor`, `nextCursor`, `order`,
 `total`), `counts`, `findings`, `open`, `degraded`) with two new optional arguments for that section, `limit`
-(1 to 100, default 100 skills; the MCP answer's rows leave out their null fields and its `degraded` is at the top
+(1 to 100, default 100 rows of one window over the findings, then each space's plugins, then its skills; `total`
+counts those rows; `counts` stay whole; the MCP answer's rows leave out their null fields and its `degraded` is at the top
 only, not repeated under `skills`) and `cursor` (an invalid one answers the first page and `degraded` code
 `invalid-cursor`), and
 its overview's `sections` lists `skills`; the tool's other answers are unchanged. `full machine --skills` prints the

@@ -2082,8 +2082,9 @@ or has another shape (`installed_plugins.json`, a settings file, a marketplace c
 `SKILL.md`, Codex's plugin cache or `config.toml`) is named in `degraded`, never read as empty (`unreadable`, or `unrecognised-shape` for a record of another shape; `harness_root`
 `not-found` when the home folder the scan reads is not a folder); no
 scan yet, one older than the inventory, or one older than 24 hours (`stale`) is named there with the command
-that fills it. Agents read the same answer with `observatory_machine(section="skills")`, 100 skills a page
-(`limit` up to 100, and `cursor` from `skills.page.nextCursor`; plugins, findings and counts always whole;
+that fills it. Agents read the same answer with `observatory_machine(section="skills")`, 100 rows a page, the
+findings first, then each space's plugins, then its skills (`limit` up to 100, and `cursor` from
+`skills.page.nextCursor`; `counts` always whole;
 rows there leave out their null fields, and `degraded` comes once, at the top).
 
 ### The disk guard

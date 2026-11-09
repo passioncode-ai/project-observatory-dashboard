@@ -489,6 +489,28 @@ class Copy(unittest.TestCase):
         self.assertIn("held-at-unlink [2]", p.stdout, "both locks held when the lock file went")
         self.assertFalse(self.target.exists())
 
+    def test_an_estate_key_of_another_shape_is_source_unreadable(self):
+        self.put()
+        key = self.vault / ".estate-digest-key"
+        key.write_text("not-a-key\n")
+        if os.name != "nt":
+            key.chmod(0o600)
+        code, refused = self.copy()
+        self.assertEqual((code, refused["code"]), (2, "source-unreadable"))
+        self.assertFalse(self.target.exists())
+
+    def test_a_lock_file_that_keeps_changing_is_refused_not_waited_on_forever(self):
+        self.put()
+        code = ("import sys; sys.path.insert(0, %r); import vault\n"
+                "vault._same_file = lambda fd, path: False\n"
+                "try:\n"
+                "    with vault._mutation_lock():\n"
+                "        print('held')\n"
+                "except vault.VaultBoundaryError as exc:\n"
+                "    print('refused')\n" % str(TOOLS))
+        p = subprocess.run([sys.executable, "-c", code], env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(p.stdout.strip(), "refused", p.stderr)
+
     def test_a_human_refusal_names_its_code(self):
         self.put()
         p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", str(self.source_store))

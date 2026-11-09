@@ -746,8 +746,9 @@ def observatory_machine(
                                          "`full machine-move status --json` gives it; skills = every skill and plugin "
                                          "each agent loads, with version, scope and findings, as `full machine --skills` "
                                          "gives it.")] = "overview",
-    limit: Annotated[int | None, Field(ge=1, le=100, description="skills only: skills per page (at most and by default 100); "
-                                                                  "plugins, findings and counts are always whole")] = None,
+    limit: Annotated[int | None, Field(ge=1, le=100, description="skills only: rows per page, findings, then plugins, "
+                                                                  "then skills (at most and by default 100); counts "
+                                                                  "are always whole")] = None,
     cursor: Annotated[str | None, Field(description="skills only: the `skills.page.nextCursor` of the previous "
                                                     "answer")] = None,
 ) -> dict[str, Any]:
@@ -781,7 +782,7 @@ def observatory_machine(
 
     `section="skills"`: every skill and plugin here with version, scope and agent, a plugin's
     enabled state and its marketplace's newest LOCAL version, findings (`plugin-behind`), `open`
-    (OBS-359) and `degraded`; from the last harness scan; 100 skills a page (`cursor`).
+    (OBS-359) and `degraded`; from the last harness scan; 100 rows a page (`cursor`).
     """
     if section == "skills" and explainPid is None:
         import machine_view

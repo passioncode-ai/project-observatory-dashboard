@@ -189,6 +189,23 @@ def _atomic_write(path: pathlib.Path, data: str, mode: int = 0o600, root: pathli
         pathlib.Path(temporary).unlink(missing_ok=True)
 
 
+#: How many times the writer lock is taken again when its file was replaced meanwhile, before it gives up.
+LOCK_RELOCKS = 20
+
+
+def _same_file(fd: int, path: pathlib.Path) -> bool:
+    """Whether the open file `fd` is the file at `path` now: both read by `fstat` of an open descriptor, so the device
+    and the file id come from one system call on every platform. False when nothing is at `path`."""
+    try:
+        other = osprivacy.open(path, os.O_RDONLY | osprivacy.NONBLOCK | osprivacy.NOFOLLOW)
+    except FileNotFoundError:
+        return False
+    try:
+        return os.path.samestat(os.fstat(fd), os.fstat(other))
+    finally:
+        os.close(other)
+
+
 @contextlib.contextmanager
 def _mutation_lock(store: pathlib.Path | None = None):
     """The store's one writer lock (`.vault.lock`), this machine's vault by default; `copy` takes the target
@@ -200,25 +217,22 @@ def _mutation_lock(store: pathlib.Path | None = None):
     # The lock held must still be the file at the lock's path: a lock file removed while this process waited (a
     # copy that undid a vault it had made, OBS-476) would otherwise be held here while the next writer locks a new
     # file of the same name and runs beside this one. On a mismatch the new file is locked instead.
-    while True:
+    for _attempt in range(LOCK_RELOCKS):
         fd = osprivacy.open(lock, os.O_CREAT | os.O_RDWR | osprivacy.NONBLOCK | osprivacy.NOFOLLOW, 0o600)
         try:
             if not stat.S_ISREG(os.fstat(fd).st_mode):
                 raise VaultBoundaryError("Vault lock must be a regular file")
             os.fchmod(fd, 0o600)
             oslocks.flock(fd, oslocks.LOCK_EX)
-            held = os.fstat(fd)
-            try:
-                here = os.stat(lock, follow_symlinks=False)
-                same = (held.st_dev, held.st_ino) == (here.st_dev, here.st_ino)
-            except FileNotFoundError:
-                same = False
+            same = _same_file(fd, lock)
         except BaseException:
             os.close(fd)
             raise
         if same:
             break
         os.close(fd)
+    else:
+        raise VaultBoundaryError("the vault's lock file kept changing while it was being locked")
     try:
         for journal_path in (store / MOVES.name, store / LEAKS.name):
             _no_symlinks(journal_path)
@@ -970,8 +984,10 @@ def _copy_digest_key() -> tuple[str, str | None]:
     _no_symlinks(path)
     if path.is_file():
         text = _read_private(path).strip()
-        if vault_digests.KEY_SHAPE.fullmatch(text):
-            return text, vault_digests.key_id(text)
+        if not vault_digests.KEY_SHAPE.fullmatch(text):
+            # `full vault-digests` refuses this file too: a key of another shape is a broken key, not no key.
+            raise VaultBoundaryError("the estate key file is not 64 lowercase hexadecimal characters")
+        return text, vault_digests.key_id(text)
     return _secrets.token_hex(32), None
 
 
