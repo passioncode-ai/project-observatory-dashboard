@@ -7,10 +7,10 @@ verify and install it.
 
 ## State now
 
-- Open: tag `v0.35.8` once the release check of this PR is green; verify the published files (`SHA256SUMS`, its
-  signature, the wheel's attestation); install on the release manager's machine and in every space of the second Mac.
-- Waits: the hosted checks of this PR, read by the release manager's session; no scheduled watcher of this record.
-- Next task: tag, verify and install 0.35.8, then fill the Receipts below.
+- Open: the install on the second Mac, handed to its host agent.
+- Waits: the second Mac's host agent; no watcher of this record runs, the next release session reads its answer.
+- Next task: PR [#481](https://github.com/passioncode-ai/project-observatory-dashboard/pull/481) (OBS-411, OBS-412,
+  OBS-415: read-only organization accounts and keys views, the remaining account rules).
 
 ## What it releases
 
@@ -74,4 +74,17 @@ Merged to `main` since `v0.35.7`: PR #478 (`5668f63f`, documentation: the organi
 
 ## Receipts
 
-- Pending: the tag, the release run, the verification and the installs.
+- Release PR #480 merged as `af0a513f` on 2026-11-09T02:37:47Z. Its `observatory-release-check` run on `af0a513f`
+  ([42551995792](https://github.com/passioncode-ai/project-observatory-dashboard/actions/runs/42551995792)) succeeded.
+- Tag `v0.35.8` (tag object `c0d389f5`) on `af0a513f`. Release run
+  [42555968513](https://github.com/passioncode-ai/project-observatory-dashboard/actions/runs/42555968513): every job
+  (guard, manifest, wheel, windows x64 and arm64, linux x64 and arm64, macos, feed, publish) succeeded on the first
+  attempt. The release published 19 files on 2026-11-09T04:10:49Z.
+- Verified by the release manager: `SHA256SUMS` (17 entries) OK, `gpg` `VALIDSIG 63B30DC324BD697487AA31944FAFB8AEC803B6A7`,
+  `gh attestation verify` of the wheel exited 0.
+- Installed on the release manager's machine with `full update --version 0.35.8 --apply` (exit 0). The server came
+  back by itself on 0.35.8: `serverd.out` shows 0.35.8 and the well-known answered 200.
+- The workspace's organization configuration then took `digitalocean_teams` rules (OBS-412 part 1) and validated with
+  no problems: three of its four DigitalOcean teams are assigned to an organization by rule, one is left for a decision.
+- Dependabot PRs #392 (`1ffc266e`) and #389 (`4b751775`) merged at 04:03Z, after the tag: they are not in 0.35.8.
+- The second Mac's install is open (State now).
