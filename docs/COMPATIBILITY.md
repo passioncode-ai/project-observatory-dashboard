@@ -633,9 +633,11 @@ Additive; nothing migrates. `tools/vault.py copy PROJECT ENV NAME --to-store PAT
 when missing. Its receipt is `vault-copy/1` (`outcome` `copied`, `replaced` or `unchanged`; `from` and `to` with
 `store` in display form and `slot`; `to.storeCreated`, `to.archived`; `carried`; `digest` with `algorithm`
 `HMAC-SHA-256`, `key` `estate` or `one-time`, `keyId`, `from`, `to`, `match`); a refusal is
-`{"schema": "vault-copy/1", "outcome": "refused", "code", "reason"}` with `--json`, exit 2, nothing written. Both
+`{"schema": "vault-copy/1", "outcome": "refused", "code", "reason"}` with `--json`, exit 2, the target left as it
+was; a failed read or write is `outcome: failed`, code `filesystem-failed`, exit 1, as is a digest mismatch. Both
 stores' `movements.jsonl` gain a `copied` row (`to_store`, `to_slot` in the source's; `from_store`, `from_slot`,
-`archived` after a replace in the target's; `outcome`, `digest_key`, `key_id`, `digest` in both), which an older
+`archived` after a replace in the target's; `outcome` and `digest_key` in both, and `key_id` and `digest` only
+under the estate key), which an older
 `vault.py movements` prints as any other row. A copied slot's metadata gains `copied_from` (`store`, `slot`, `at`)
 and carries the source's `expires_at`, `expiry_reason`, `expiry_recorded`, `expiry_by` and `provenance`. Module
 interface: `vault.copy_slot`, `vault.CopyRefused` (a `VaultBoundaryError` with `code`); `vault._mutation_lock`,
@@ -648,8 +650,11 @@ with `skills` (`name`, `agent` `claude-code` or `codex`, `scope` `user`, `projec
 `enabled` true, false or null, `marketplace`, `latest`, `latestFrom` `marketplace-catalogue` or `plugin-manifest`,
 `marketplaceUpdated`, `behind`), `findings` (`plugin-behind`), `open` and its own `degraded` (`source`
 `claude:installed_plugins.json`, `claude:settings.json`, `claude:known_marketplaces.json`,
-`claude:marketplace:<name>`, `claude:project-settings:<project>`, `claude:local-settings:<project>`,
-`codex:config.toml`, code `unreadable`). No path is recorded. An older reader ignores the key; the machine view
+`claude:marketplace:<name>`, `claude:marketplace:<name>:<plugin>`, `claude:project-settings:<project>`,
+`claude:local-settings:<project>`, `skill:<agent>:<scope>:<folder>`, `codex:config.toml`, `codex:plugins-cache`,
+`codex:plugins-cache:<marketplace>`, code `unreadable`; `claude:installed_plugins.json` also `unrecognised-shape`;
+`inventory`, code `failed`, when the inventory itself failed and the rest of the scan was kept). No path is
+recorded. An older reader ignores the key; the machine view
 reads a scan without it as `not-surveyed` until the next scan. `observatory_machine` takes `section: "skills"`
 (answer `{measuredAt, degraded, skills}`, `skills` holding `spaces`, `counts`, `findings`, `open`, `degraded`), and
 its overview's `sections` lists `skills`; the tool's other answers are unchanged. `full machine --skills` prints the

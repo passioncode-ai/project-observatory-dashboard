@@ -16,7 +16,7 @@ while the major version is 0, a minor release may change behaviour and says so h
   names the slot, both stores and two keyed digests, under the source's estate key when it has one (comparable with
   `full vault-digests`), else under a one-time key. Refusals name their code: `target-other-account` (a store
   another account owns), `target-not-writable`, `target-slot-filled`, `source-has-open-leak`, `same-store`,
-  `nested-stores`, and the path checks. Across machines this stays OBS-194.
+  `nested-stores`, and the path checks; a refusal leaves the target as it was. Across machines this stays OBS-194.
 - **Skills and plugins in the machine view** (OBS-477; `docs/ONBOARDING.md`, scenario OSS-112).
   `observatory_machine(section="skills")` and `full machine --skills` list every skill and plugin of this space with
   its version, scope (user, project, plugin; a plugin install user, project or local) and agent (Claude Code,

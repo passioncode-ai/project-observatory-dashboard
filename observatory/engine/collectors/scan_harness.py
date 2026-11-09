@@ -604,7 +604,7 @@ def _inventory_doc(path: Path, source: str, degraded: list[dict], kind: str = "j
     entry in `degraded` when it is there and cannot be read, is too large, does not parse or is not an object: an
     unreadable record is never read as an empty one. The source is named by a label, never by its path."""
     try:
-        if not path.exists():
+        if not _present(path):
             return None
         if not path.is_file() or path.stat().st_size > INVENTORY_DOC_MAX:
             raise ValueError("not a regular file of a readable size")
@@ -617,18 +617,30 @@ def _inventory_doc(path: Path, source: str, degraded: list[dict], kind: str = "j
         if not isinstance(doc, dict):
             raise ValueError("not an object")
         return doc
-    except (OSError, ValueError, UnicodeDecodeError) as exc:
+    except (OSError, ValueError, UnicodeDecodeError, RecursionError) as exc:
         degraded.append({"source": source, "code": "unreadable",
                          "reason": f"{source} is there but could not be read ({type(exc).__name__}); what it "
                                    f"records is not in the inventory"})
         return None
 
 
+def _present(path: Path) -> bool:
+    """Whether something is at `path`: False only when nothing is (or a folder on the way is missing). A folder that
+    cannot be searched raises, so a settings file in it is reported unreadable, never taken as absent (from Python
+    3.13 `Path.exists()` answers False there)."""
+    try:
+        os.stat(path)
+        return True
+    except (FileNotFoundError, NotADirectoryError):
+        return False
+
+
 def _settings_doc(path: Path, source: str, degraded: list[dict]) -> dict | None:
     """A settings file: {} when it is absent (it enables nothing), None when it is there and unreadable (what it
     enables is unknown, and `degraded` says so)."""
+    before = len(degraded)
     doc = _inventory_doc(path, source, degraded)
-    if doc is None and not path.exists():
+    if doc is None and len(degraded) == before:
         return {}
     return doc
 
@@ -654,14 +666,17 @@ def _plain_version(value) -> str | None:
 def version_key(version: str | None) -> tuple[int, ...] | None:
     """The dotted numbers of a version, for comparing; None when it has none. A prerelease word is ignored, so
     `1.2.0-rc.1` and `1.2.0` compare equal and neither is reported behind the other."""
-    m = re.match(r"([0-9]+(?:\.[0-9]+){0,3})", version or "")
+    # At least one dot: Claude Code records a commit's short sha as the version of a plugin with none, and a sha
+    # made only of digits must not compare as a version.
+    m = re.match(r"([0-9]+(?:\.[0-9]+){1,3})(?![0-9A-Za-z])", version or "")
     if not m:
         return None
     parts = [int(p) for p in m.group(1).split(".")]
     return tuple(parts + [0] * (4 - len(parts)))
 
 
-def _skill_rows(folder: Path, agent: str, scope: str, extra: dict, seen: set[str]) -> list[dict]:
+def _skill_rows(folder: Path, agent: str, scope: str, extra: dict, seen: set[str],
+                degraded: list[dict]) -> list[dict]:
     rows = []
     for skill in sorted(folder.glob("*/SKILL.md")):
         real = str(skill.parent.resolve())
@@ -670,7 +685,10 @@ def _skill_rows(folder: Path, agent: str, scope: str, extra: dict, seen: set[str
         seen.add(real)
         try:
             text = skill.read_text(encoding="utf-8", errors="replace")
-        except OSError:
+        except OSError as exc:
+            degraded.append({"source": f"skill:{agent}:{scope}:{skill.parent.name}", "code": "unreadable",
+                             "reason": f"a skill's SKILL.md could not be read ({type(exc).__name__}); it is not in "
+                                       f"the inventory"})
             continue
         meta = front_matter(text)
         rows.append({"name": meta.get("name") or skill.parent.name, "agent": agent, "scope": scope,
@@ -725,6 +743,10 @@ def _claude_plugins(claude: Path, degraded: list[dict]) -> tuple[list[dict], lis
                                    degraded)
     installed = (installed_doc or {}).get("plugins")
     if not isinstance(installed, dict):
+        if installed_doc is not None:
+            degraded.append({"source": "claude:installed_plugins.json", "code": "unrecognised-shape",
+                             "reason": "installed_plugins.json parses but holds no `plugins` object; its installs "
+                                       "are not in the inventory"})
         return [], []
     markets = _inventory_doc(claude / "plugins" / "known_marketplaces.json", "claude:known_marketplaces.json",
                              degraded) or {}
@@ -735,8 +757,10 @@ def _claude_plugins(claude: Path, degraded: list[dict]) -> tuple[list[dict], lis
     def enabled_in(settings: dict | None, key: str) -> bool | None:
         if settings is None:
             return None
-        table = settings.get("enabledPlugins")
-        return isinstance(table, dict) and table.get(key) is True
+        table = settings.get("enabledPlugins", {})
+        if not isinstance(table, dict):
+            return None
+        return table.get(key) is True
 
     rows, skills, seen = [], [], set()
     for key in sorted(installed):
@@ -772,9 +796,10 @@ def _claude_plugins(claude: Path, degraded: list[dict]) -> tuple[list[dict], lis
                    else None,
                    "behind": (have < newest) if have and newest else None}
             rows.append(row)
-            path = Path(record.get("installPath") or "")
-            if row["enabled"] and path.is_absolute() and path.is_dir():
-                skills += _skill_rows(path / "skills", CLAUDE_CODE, "plugin", {"plugin": key}, seen)
+            where = record.get("installPath")
+            path = Path(where) if isinstance(where, str) and where else None
+            if row["enabled"] and path is not None and path.is_absolute() and path.is_dir():
+                skills += _skill_rows(path / "skills", CLAUDE_CODE, "plugin", {"plugin": key}, seen, degraded)
     return rows, skills
 
 
@@ -789,10 +814,28 @@ def _codex_plugins(home: Path, degraded: list[dict]) -> list[dict]:
     config = _inventory_doc(home / ".codex" / "config.toml", "codex:config.toml", degraded, kind="toml")
     table = (config or {}).get("plugins") if isinstance((config or {}).get("plugins"), dict) else {}
     rows = []
-    for market in sorted(p for p in cache.iterdir() if p.is_dir() and not p.name.startswith(".")):
-        for plugin in sorted(p for p in market.iterdir() if p.is_dir() and not p.name.startswith(".")):
-            versions = [v.name for v in plugin.iterdir() if v.is_dir() and STRICT_VERSION.fullmatch(v.name)]
-            version = max(versions, key=lambda v: version_key(v) or ()) if versions else None
+    try:
+        markets = sorted(p for p in cache.iterdir() if p.is_dir() and not p.name.startswith("."))
+    except OSError as exc:
+        degraded.append({"source": "codex:plugins-cache", "code": "unreadable",
+                         "reason": f"Codex's plugin cache could not be listed ({type(exc).__name__}); its plugins "
+                                   f"are not in the inventory"})
+        return []
+    for market in markets:
+        try:
+            plugins = sorted(p for p in market.iterdir() if p.is_dir() and not p.name.startswith("."))
+        except OSError:
+            degraded.append({"source": f"codex:plugins-cache:{market.name}", "code": "unreadable",
+                             "reason": "a marketplace folder of Codex's plugin cache could not be listed"})
+            continue
+        for plugin in plugins:
+            try:
+                versions = [v.name for v in plugin.iterdir() if v.is_dir() and STRICT_VERSION.fullmatch(v.name)]
+            except OSError:
+                versions = []
+            # The newest by its numbers; on a tie a release before its prerelease, then by name, so the pick does not
+            # depend on the order the folder lists them in.
+            version = max(versions, key=lambda v: (version_key(v) or (), "-" not in v, v)) if versions else None
             key = f"{plugin.name}@{market.name}"
             entry = table.get(key) if isinstance(table.get(key), dict) else None
             enabled = entry.get("enabled") if entry and isinstance(entry.get("enabled"), bool) else None
@@ -817,31 +860,46 @@ def inventory(home: Path, roots: list[Path]) -> dict:
     claude = home / ".claude"
     degraded: list[dict] = []
     seen: set[str] = set()
-    skills = _skill_rows(claude / "skills", CLAUDE_CODE, "user", {}, seen)
+    skills = _skill_rows(claude / "skills", CLAUDE_CODE, "user", {}, seen, degraded)
     for root in roots:
         if root.is_dir():
             for folder in sorted(root.glob("*/.claude/skills")):
-                skills += _skill_rows(folder, CLAUDE_CODE, "project", {"project": folder.parent.parent.name}, seen)
+                skills += _skill_rows(folder, CLAUDE_CODE, "project", {"project": folder.parent.parent.name}, seen,
+                                      degraded)
     plugins, plugin_skills = _claude_plugins(claude, degraded)
     skills += plugin_skills
     codex_seen: set[str] = set()
     for folder in (home / ".codex" / "skills", home / ".agents" / "skills"):
-        skills += _skill_rows(folder, CODEX, "user", {}, codex_seen)
+        skills += _skill_rows(folder, CODEX, "user", {}, codex_seen, degraded)
     plugins += _codex_plugins(home, degraded)
     findings = []
     for p in plugins:
-        if p["behind"]:
+        # A disabled install loads nothing, so a gap there harms nothing until it is enabled again.
+        if p["behind"] and p["enabled"] is not False:
             findings.append({"code": "plugin-behind", "severity": "info", "plugin": p["name"], "agent": p["agent"],
                              "scope": p["scope"], "project": p["project"], "installed": p["version"],
                              "latest": p["latest"], "marketplaceUpdated": p["marketplaceUpdated"],
-                             "action": f"claude plugin update {p['name']}"
-                                       + (f" (in {p['project']}, for its {p['scope']} install)" if p["project"] else "")})
+                             # The command a person or an agent runs: a project or local install is updated with
+                             # its own scope, from that project's folder (`project`).
+                             "action": f"claude plugin update {p['name']} --scope {p['scope']}"})
     return {"spaces": [{"space": THIS_SPACE, "home": "~", "skills": skills, "plugins": plugins}],
             "findings": findings,
             "open": [{"finding": "organization-plugin-in-personal-space", "waitsOn": "OBS-359",
                       "reason": "which space is a person's own needs the space's context binding (OBS-359); until "
                                 "then an organization's plugin enabled here is not reported"}],
             "degraded": degraded}
+
+
+def _inventory_or_failure(home: Path, roots: list[Path]) -> dict:
+    """`inventory`, or, when it fails on something unforeseen, an empty one that says so: the rest of the harness
+    scan (budget, rules, hooks) is never lost to it."""
+    try:
+        return inventory(home, roots)
+    except Exception as exc:  # noqa: BLE001: one section's failure must not drop the scan's other sections
+        return {"spaces": [], "findings": [], "open": [],
+                "degraded": [{"source": "inventory", "code": "failed",
+                              "reason": f"the skills inventory failed ({type(exc).__name__}); the rest of the "
+                                        f"harness scan is complete"}]}
 
 
 #: Where agent tools keep provider credentials of their own (OBS-74), and how each file is read. A tool's own login
@@ -1123,7 +1181,7 @@ def scan(home: Path, pins_file: Path, own_owners: set[str] | None = None) -> dic
         "plugins": enabled_plugins(claude),
         "coding_agents": coding_agents(home, degraded),
         # OBS-477: the skills section of `observatory_machine` reads this (machine_view.skills_section).
-        "inventory": inventory(home, roots),
+        "inventory": _inventory_or_failure(home, roots),
         "usage": {"days": USAGE_DAYS, "transcripts": transcripts,
                   "unused_offered": sum(1 for s in skills if s["model_invocable"] and not s["uses_30d"])},
         "degraded": degraded,

@@ -2059,14 +2059,17 @@ scans nothing itself (OBS-477). Each skill has its name, version (from its `SKIL
 when it is release-shaped), scope (`user`, `project` with the project's folder name, or `plugin` with the
 plugin's `name@marketplace`) and the agent that loads it (`claude-code`, `codex`). Each plugin install has
 its version, its scope as the agent records it (`user`, `project` or `local`), whether the settings of that
-scope enable it (`null` when they could not be read), and the newest version its marketplace publishes as
-the marketplace's local copy records it (`latest`, with `marketplaceUpdated`): nothing is fetched. A plugin
-behind that version is a finding (`plugin-behind`, with `claude plugin update NAME` as the step), and the
-board shows it as `harness.plugin_behind`. Codex plugins are read from its plugin cache; their newest
+scope enable it (`enabledPlugins` of the user's settings, or the project's `.claude/settings.json` or
+`settings.local.json` for a project or local install; an override in another scope's settings is not read;
+`null` when they could not be read), and the newest version its marketplace publishes as the marketplace's
+local copy records it (`latest`, with `marketplaceUpdated`): nothing is fetched. An enabled plugin behind
+that version is a finding (`plugin-behind`, with `claude plugin update NAME --scope SCOPE` as the step, run
+in the project's folder for a project or local install), and the board shows it as `harness.plugin_behind`;
+a disabled install behind is listed (`behind: true`) but loads nothing and is not a finding. Codex plugins are read from its plugin cache; their newest
 version is not known (`latest` null). One finding waits and says so under `open`: an organization's plugin
 enabled in a person's own space needs the space's context binding (OBS-359). A record that cannot be read
-(`installed_plugins.json`, a settings file, a marketplace catalogue, Codex's `config.toml`) is named in
-`degraded`, never read as empty; no scan yet, or one older than the inventory, is named there with the
+or has another shape (`installed_plugins.json`, a settings file, a marketplace catalogue, a skill's
+`SKILL.md`, Codex's plugin cache or `config.toml`) is named in `degraded`, never read as empty; no scan yet, or one older than the inventory, is named there with the
 command that fills it. Agents read the same answer with `observatory_machine(section="skills")`.
 
 ### The disk guard
@@ -3467,14 +3470,19 @@ value's expiry and provenance travel with it, under `copied_from`; a header bind
 
 The receipt names the slot, both stores and two keyed digests (HMAC-SHA-256): of what was read here and
 of what the target holds after the write. They are made under your store's estate key when it has one,
-so they compare with `full vault-digests`, else under a key made for this copy and forgotten. A refusal
-writes nothing and names its code: `source-empty`, `source-has-open-leak` (rotate and settle first),
-`target-not-absolute`, `target-link`, `target-parent-missing`, `target-not-folder`,
-`target-is-vault-folder` (name the store that holds the vault), `same-store`, `nested-stores`,
+so they compare with `full vault-digests` (the journal keeps that digest too), else under a key made for
+this copy and forgotten (the journal then keeps none). A refusal names its code and leaves the target as
+it found it (a store, vault folder or lock file the copy had made is removed again): `invalid-slot` (the
+source slot's names), `source-empty`, `source-unreadable` (the slot does not hold one single-line value),
+`source-has-open-leak` (rotate and settle first), `target-not-absolute`, `target-link` (the store or its
+`projects/` is a link), `target-parent-missing`, `target-not-folder`, `target-is-vault-folder` (name the
+store that holds the vault), `same-store` (another spelling of this store included), `nested-stores`,
 `target-other-account` (a store another account owns: a value written from here would be unreadable
-there), `target-not-writable`, `target-slot-invalid`; `--json` prints it as
-`{"schema": "vault-copy/1", "outcome": "refused", "code", "reason"}` and exits 2. A copy to another
-machine is OBS-194's sealed envelope, not this command.
+there), `target-not-writable`, `target-slot-invalid`, `target-slot-filled`. With `--json` it prints
+`{"schema": "vault-copy/1", "outcome": "refused", "code", "reason"}`; either way it exits 2. A read or a
+write that fails midway exits 1 with `outcome: failed`, code `filesystem-failed`: read both journals and the
+target slot before copying again. Exit 1 also when the two digests differ. A copy to another machine is
+OBS-194's sealed envelope, not this command.
 
 ## Anonymous usage and error data
 

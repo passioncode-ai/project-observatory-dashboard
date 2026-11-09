@@ -137,7 +137,8 @@ run `python "$(project-observatory full-path)/tools/vault.py" copy PROJECT ENV N
 named pipe or `use_secret.py run`: `copy` reads and writes the value inside one process, keeps my slot,
 records `copied` in both stores' movement journals, and answers a receipt (`vault-copy/1`) with keyed
 digests that must read `match: true`. A target slot that holds another value is refused
-(`target-slot-filled`); pass `--replace` only when I say so. Every refusal has a `code` and writes nothing;
+(`target-slot-filled`); pass `--replace` only when I say so. Every refusal has a `code`, exits 2 and leaves the
+target as it was; `outcome: failed` (exit 1) means a write may be partial: read both journals before retrying;
 `target-other-account` means the store belongs to another OS account and this account cannot write it for
 that account: say so, do not work around it. A copy to another machine is not this command (OBS-194).
 
@@ -361,7 +362,8 @@ Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` in the engine.
 space with its version, scope (`user`, `project`, `plugin`; a plugin install `user`, `project` or `local`) and
 agent (`claude-code`, `codex`), read from the last harness scan; it fetches nothing. `findings` holds a plugin
 behind the newest version its marketplace's local copy publishes (`plugin-behind`, step `claude plugin update
-NAME`, which is mine to run unless I said otherwise). `open` names what is not reported yet (an organization's
+NAME --scope SCOPE` in the project's folder for a project or local install, which is mine to run unless I said
+otherwise). `open` names what is not reported yet (an organization's
 plugin in a person's own space waits on OBS-359): do not infer it yourself. Read `degraded` before saying
 nothing is installed: an unread scan or record is named there with the command that fills it.
 

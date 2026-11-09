@@ -462,7 +462,7 @@ class Harness(unittest.TestCase):
         behind = next(f for f in found if f["type"] == "harness.plugin_behind")
         self.assertEqual(behind["subject"], "harness:plugin-behind:claude-code:tool@family:user::1.0.0:1.1.0")
         self.assertEqual(behind["title_id"], "plugin {plugin} is at {installed}, its marketplace publishes {latest}")
-        self.assertIn("claude plugin update tool@family", behind["action"])
+        self.assertIn("`claude plugin update tool@family --scope user`", behind["action"])
         self.assertNotIn(str(self.home), json.dumps(behind), "no path in the finding")
         self.assertNotIn("SECRETVALUE", json.dumps(found))
         risk = {f["subject"].rsplit(":", 1)[0]: f["severity"] for f in found if f["type"] == "harness.skill_risk"}
@@ -581,7 +581,7 @@ class Inventory(unittest.TestCase):
         inv = self.inventory()
         self.assertEqual([(f["code"], f["plugin"], f["installed"], f["latest"]) for f in inv["findings"]],
                          [("plugin-behind", "tool@family", "1.0.0", "1.2.0")])
-        self.assertEqual(inv["findings"][0]["action"], "claude plugin update tool@family")
+        self.assertEqual(inv["findings"][0]["action"], "claude plugin update tool@family --scope user")
         self.assertEqual([(o["finding"], o["waitsOn"]) for o in inv["open"]],
                          [("organization-plugin-in-personal-space", "OBS-359")])
         self.assertEqual(inv["degraded"], [])
@@ -614,8 +614,66 @@ class Inventory(unittest.TestCase):
         self.assertIn(("claude:installed_plugins.json", "unreadable"),
                       {(d["source"], d["code"]) for d in inv["degraded"]})
 
-    def test_the_scan_keeps_it(self):
-        self.assertIn('"inventory": inventory(home, roots)', (ROOT / "collectors" / "scan_harness.py").read_text())
+    def test_the_scan_keeps_it_and_survives_its_failure(self):
+        self.assertIn('"inventory": _inventory_or_failure(home, roots)',
+                      (ROOT / "collectors" / "scan_harness.py").read_text())
+        from unittest.mock import patch
+        with patch.object(self.mod, "inventory", side_effect=RuntimeError("boom")):
+            out = self.mod._inventory_or_failure(self.home, [self.projects])
+        self.assertEqual((out["spaces"], out["degraded"][0]["source"], out["degraded"][0]["code"]),
+                         ([], "inventory", "failed"))
+
+    def test_a_disabled_install_behind_is_listed_but_not_a_finding_and_a_project_one_names_its_scope(self):
+        installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
+        installed["plugins"]["idle@family"][0]["version"] = "1.0.0"
+        installed["plugins"]["tool@family"] = [{"scope": "local", "projectPath": str(self.projects / "alpha-web"),
+                                                "installPath": str(self.base / "cache" / "tool" / "1.0.0"),
+                                                "version": "1.0.0"}]
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
+        catalogue = self.base / "markets" / "family" / ".claude-plugin" / "marketplace.json"
+        doc = json.loads(catalogue.read_text())
+        doc["plugins"].append({"name": "idle", "version": "3.1.0", "source": "./idle"})
+        write_json(catalogue, doc)
+        write_json(self.projects / "alpha-web" / ".claude" / "settings.local.json",
+                   {"enabledPlugins": {"tool@family": True}})
+        inv = self.inventory()
+        idle = next(p for p in inv["spaces"][0]["plugins"] if p["name"] == "idle@family")
+        self.assertEqual((idle["enabled"], idle["behind"]), (False, True))
+        self.assertEqual([(f["plugin"], f["scope"], f["project"], f["action"]) for f in inv["findings"]],
+                         [("tool@family", "local", "alpha-web", "claude plugin update tool@family --scope local")])
+
+    def test_a_version_needs_its_dots_and_a_tie_picks_the_release(self):
+        self.assertIsNone(self.mod.version_key("123456789012"), "a sha of digits is no version")
+        self.assertEqual(self.mod.version_key("1.2"), (1, 2, 0, 0))
+        self.assertEqual(self.mod.version_key("1.2.0-rc.1"), self.mod.version_key("1.2.0"))
+        folder = self.home / ".codex" / "plugins" / "cache" / "family" / "helper"
+        (folder / "0.10.0-rc.1").mkdir()
+        (folder / "0.10.0").rename(folder / "0.10.0-keep")
+        (folder / "0.10.0-keep").rename(folder / "0.10.0")
+        helper = next(p for p in self.inventory()["spaces"][0]["plugins"] if p["agent"] == "codex")
+        self.assertEqual(helper["version"], "0.10.0")
+
+    def test_a_record_of_an_unknown_shape_is_named(self):
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", {"version": 2, "plugins": []})
+        write_json(self.home / ".claude" / "settings.json", {"enabledPlugins": ["tool@family"]})
+        inv = self.inventory()
+        self.assertIn(("claude:installed_plugins.json", "unrecognised-shape"),
+                      {(d["source"], d["code"]) for d in inv["degraded"]})
+
+    def test_enabled_is_unknown_when_the_setting_has_another_shape(self):
+        write_json(self.home / ".claude" / "settings.json", {"enabledPlugins": ["tool@family"]})
+        tool = next(p for p in self.inventory()["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertIsNone(tool["enabled"])
+
+    def test_odd_shapes_in_the_records_do_not_break_it(self):
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", {"plugins": {
+            "tool@family": [{"scope": "user", "installPath": 7, "version": 1}, "not-a-record"],
+            "bare": {"scope": "galaxy", "version": "1.0.0"}}})
+        write_json(self.home / ".claude" / "plugins" / "known_marketplaces.json", {"family": "not-an-object"})
+        plugins = {(p["name"], p["scope"]): p for p in self.inventory()["spaces"][0]["plugins"]
+                   if p["agent"] == "claude-code"}
+        self.assertEqual(plugins[("tool@family", "user")]["version"], None)
+        self.assertEqual(plugins[("bare", "user")]["marketplace"], None, "an unknown scope reads as user")
 
 
 if __name__ == "__main__":

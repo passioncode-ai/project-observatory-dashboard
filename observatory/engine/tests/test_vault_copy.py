@@ -95,6 +95,7 @@ class Copy(unittest.TestCase):
         self.assertEqual((theirs[0]["from_store"], theirs[0]["from_slot"]),
                          (str(self.source_store), "alpha-web/prod/API_TOKEN"))
         self.assertNotIn("moved", {r["event"] for r in self.journal(self.vault / "movements.jsonl")})
+        self.assertNotIn("digest", mine[0], "a one-time digest means nothing after the copy and is not journalled")
         meta = json.loads((self.target / "projects/alpha-web/prod/API_TOKEN.meta.json").read_text())
         self.assertEqual(meta["copied_from"]["slot"], "alpha-web/prod/API_TOKEN")
 
@@ -146,6 +147,8 @@ class Copy(unittest.TestCase):
         manifest = json.loads((self.base / "state/vault-digests/local.json").read_text())
         mine = next(v for k, v in manifest["slots"].items() if k == "alpha-web/prod/API_TOKEN")
         self.assertEqual(receipt["digest"]["from"], mine["digest"], "comparable with full vault-digests")
+        row = [r for r in self.journal(self.vault / "movements.jsonl") if r["event"] == "copied"][-1]
+        self.assertEqual((row["digest"], row["key_id"]), (mine["digest"], receipt["digest"]["keyId"]))
         self.assertTrue((self.target / "projects/beta-api/stage/SERVICE_TOKEN").is_file())
 
     def test_expiry_and_provenance_travel_the_binding_does_not(self):
@@ -175,6 +178,8 @@ class Copy(unittest.TestCase):
         self.assertEqual(json.loads(p.stdout)["code"], "same-store")
         p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", str(self.vault), "--json")
         self.assertEqual(json.loads(p.stdout)["code"], "target-is-vault-folder")
+        p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", str(self.vault) + "/..", "--json")
+        self.assertEqual(json.loads(p.stdout)["code"], "same-store", "another spelling of this store")
         p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store",
                            str(self.base / "absent" / "secrets"), "--json")
         self.assertEqual(json.loads(p.stdout)["code"], "target-parent-missing")
@@ -186,12 +191,67 @@ class Copy(unittest.TestCase):
         self.assertEqual(json.loads(p.stdout)["code"], "target-slot-invalid")
         p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", str(self.target),
                            "--to-slot", "lowercase", "--json")
-        self.assertEqual(json.loads(p.stdout)["outcome"], "refused")
+        self.assertEqual(json.loads(p.stdout)["code"], "target-slot-invalid")
         (self.base / "file-store").write_text("not a folder")
         p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", str(self.base / "file-store"),
                            "--json")
         self.assertEqual(json.loads(p.stdout)["code"], "target-not-folder")
         self.assertFalse(self.target.exists(), "nothing written by a refusal")
+
+    def test_a_refusal_that_reads_the_value_leaves_no_trace(self):
+        self.put()
+        # A two-line value cannot be put through the vault; it is written into the slot file directly.
+        slot = self.vault / "alpha-web/prod/API_TOKEN"
+        slot.write_text(VALUE_A + "\n" + VALUE_B + "\n")
+        code, refused = self.copy()
+        self.assertEqual((code, refused["code"]), (2, "source-unreadable"))
+        self.assertFalse(self.target.exists(), "a refusal leaves no store, vault folder or lock file behind")
+
+    def test_a_refusal_under_the_locks_undoes_what_it_created(self):
+        """The slot changes while the copy waits for the locks: the second check refuses, and what this call made
+        in the target store (its folder, vault folder and lock file) is removed again."""
+        self.put()
+        code = ("import sys; sys.path.insert(0, %r); import vault\n"
+                "real = vault._mutation_lock\n"
+                "import contextlib\n"
+                "@contextlib.contextmanager\n"
+                "def racing(store=None):\n"
+                "    with real(store):\n"
+                "        (vault.STORE / 'alpha-web/prod/API_TOKEN').unlink(missing_ok=True)\n"
+                "        yield\n"
+                "vault._mutation_lock = racing\n"
+                "try:\n"
+                "    vault.copy_slot('alpha-web', 'prod', 'API_TOKEN', %r)\n"
+                "except vault.CopyRefused as exc:\n"
+                "    print(exc.code)\n" % (str(TOOLS), str(self.target)))
+        p = subprocess.run([sys.executable, "-c", code], env=self.env, capture_output=True, text=True, timeout=60)
+        self.outputs.append(p.stdout + p.stderr)
+        self.assertEqual(p.stdout.strip(), "source-empty", p.stderr)
+        self.assertFalse(self.target.exists())
+
+    @unittest.skipUnless(hasattr(os, "symlink") and os.name != "nt", "a link stands for the vault folder")
+    def test_a_linked_vault_folder_in_the_target_is_refused(self):
+        self.put()
+        elsewhere = self.base / "elsewhere"
+        elsewhere.mkdir()
+        self.target.mkdir()
+        os.symlink(elsewhere, self.target / "projects")
+        code, refused = self.copy()
+        self.assertEqual((code, refused["code"]), (2, "target-link"))
+        self.assertEqual(list(elsewhere.iterdir()), [])
+
+    def test_another_spelling_by_case_is_the_same_store_where_the_volume_ignores_case(self):
+        self.put()
+        upper = self.source_store.parent / self.source_store.name.upper()
+        if not upper.exists():
+            self.skipTest("this volume tells upper from lower case")
+        code, refused = self.copy_to(str(upper))
+        self.assertEqual((code, refused["code"]), (2, "same-store"))
+
+    def copy_to(self, store: str) -> tuple[int, dict]:
+        p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", store, "--to-slot", "OTHER_TOKEN",
+                           "--json")
+        return p.returncode, json.loads(p.stdout)
 
     @unittest.skipUnless(hasattr(os, "symlink") and os.name != "nt", "a link stands for the store")
     def test_a_linked_store_is_refused(self):
@@ -229,6 +289,13 @@ class Copy(unittest.TestCase):
         self.outputs.append(p.stdout + p.stderr)
         self.assertEqual(p.stdout.strip(), "target-other-account", p.stderr)
         self.assertFalse((self.target / "projects").exists())
+
+    def test_a_human_refusal_names_its_code(self):
+        self.put()
+        p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", str(self.source_store))
+        self.assertEqual(p.returncode, 2)
+        self.assertIn("copy refused (same-store)", p.stderr)
+        self.assertIn("nothing was written", p.stderr)
 
     def test_the_human_receipt_says_what_happened_without_the_value(self):
         self.put()

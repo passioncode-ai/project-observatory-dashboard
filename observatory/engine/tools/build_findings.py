@@ -2973,7 +2973,9 @@ def collect() -> list[dict]:
                            + f"; the {_b.get('scope')} install"
                            + (f" in {_b.get('project')}" if _b.get("project") else "")
                            + " still runs the older version. Nothing was fetched to say this."),
-                "action": f"`{_b.get('action')}`, then restart the agent's sessions",
+                "action": (f"`{_b.get('action')}`"
+                           + (f", run in the {_b.get('project')} project's folder" if _b.get("project") else "")
+                           + ", then restart the agent's sessions"),
                 "evidence": ["store/raw/harness.json#inventory"]})
 
     # THE MCP SERVERS THE AGENTS ARE TOLD TO REACH. The gateway
