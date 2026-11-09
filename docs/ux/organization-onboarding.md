@@ -363,7 +363,8 @@ words), **human** (a person's body is needed; the agent prepares everything and 
 | join with a computer token | `full org join --org ID` (the token on stdin) | `observatory_org_join` | relayed; the token itself is made by an administrator (human) | OBS-414 |
 | admission and notice state | `full org status --org ID` (`admission`, `notice`) | `observatory_org_status` | none; the pin and the acknowledgement are human, in Fabric and the hub | OBS-414 |
 | classify keys | `full org keys --org ID` | `observatory_org_keys` | none | OBS-415 |
-| choose, preview, apply, undo | `full org select --org ID plan, show, apply, undo` | `observatory_org_selection` | relayed; the passkey signing the projects' estate revision in Fabric is human | OBS-417 |
+| preview, show | `full org select --org ID plan` (no change), `show` | `observatory_org_selection` | none | OBS-417 |
+| choose, apply, undo | `full org select --org ID plan` (a change), `apply`, `undo` | `observatory_org_selection` | relayed; the passkey signing the projects' estate revision in Fabric is human | OBS-417 |
 | hand a key over, revoke the personal value | part of apply; `full org select --org ID confirm-replacement KEY` | `observatory_org_selection` | relayed (the person's confirmation that the replacement works, in the separate-space layout) | OBS-416 |
 | move personal keys out of a space becoming the organization's | part of apply | `observatory_org_selection` | relayed | OBS-426 |
 | take a project back, leave | `full org unassign PROJECT --org ID`, `full org leave --org ID --plan` then `--apply` | `observatory_org_leave` | relayed; the passkey signing the removal or the unpin in Fabric is human; an administrator's release statement is another person's step | OBS-419 |

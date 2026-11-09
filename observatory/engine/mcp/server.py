@@ -122,12 +122,12 @@ server = InteropServer(
         "(embedding-policy/1, lexical); `degraded` says so.\n"
         "WRITE: `observatory_record`, `_lesson` and `_propose` append PROPOSALS below "
         "confidence 1; only the operator or independent corroboration promotes one; "
-        "`_org_selection` needs the operator's `decision`.\n"
+        "`_org_selection` changes need the operator's `decision`.\n"
         "SECRETS: `observatory_credentials` names keys and CANNOT return a value; run its command, "
         "open no file. Missing key: `observatory_secret_request`, no chat.\n"
         "DEGRADED: every read carries `degraded` (empty: full coverage; else it "
         "names gaps); treat a read without one as a bug (writes/job handles have none). "
-        "Refusals are typed `error` answers; isError means malformed input, unknown tool "
+        "Refusals are typed `error` answers; isError: malformed input, unknown tool "
         "or invalid output.\n"
         "WORKFLOW: `observatory_checkpoint_write` after each step (keep `leaseId`); "
         "`observatory_handoff_create`/`_accept` moves it; `observatory_workflow_list` finds it.\n"
@@ -667,6 +667,8 @@ def observatory_org_selection(
     stray = [name for name, value, takes in (("changes", changes, "plan"), ("digest", digest, "apply"),
                                              ("key", key, "confirm-replacement"))
              if value is not None and action != takes]
+    if action == "show" and decision is not None:
+        stray.append("decision")                       # a read takes no words, as the CLI refuses them on show
     if stray:
         # The same refusal as the CLI's: an argument the action does not take is never dropped without a word.
         return S.Refusal("invalid-change", f"`{stray[0]}` belongs to another action, not to {action}").answer()

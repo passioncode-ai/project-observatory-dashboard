@@ -410,7 +410,9 @@ class ReviewRoundOne(Base):
         self.assertEqual(len(self.sel._revisions("acme")), 2, "nothing written")
 
     def test_a_space_named_outside_the_separate_layout_does_not_change_the_form(self):
-        v = self.sel.plan("acme", {"layout": "this-space", "serves": "somewhere"})
+        with self.assertRaises(self.sel.Refusal):
+            self.sel.plan("acme", {"layout": "this-space", "serves": "somewhere"})
+        v = self.sel.plan("acme", {"layout": "this-space"})
         self.assertIsNone(v["serves"])
         self.sel.apply("acme", v["digest"])
         again = self.sel.plan("acme")
@@ -1146,6 +1148,59 @@ class ReviewRoundEleven(Base):
         m = McpTool.server(self)
         self.assertEqual(m.observatory_org_selection(org="acme", action="confirm-replacement")["error"],
                          "not-in-record")
+
+
+class ReviewRoundTwelve(Base):
+    """What the twelfth review found: each case reproduced, then fixed."""
+
+    def test_a_provider_document_that_does_not_read_leaves_its_accounts_unread(self):
+        self.registry("cloudflare-account.json", {"accounts": [
+            {"id": "cloudflare:account:cf-acme", "account_id": "cf-acme", "name": "Acme CF"}], "resources": []})
+        orgs = json.loads(json.dumps(ORGS))
+        orgs["organizations"]["acme"]["match"]["cloudflare_accounts"] = ["cf-acme"]
+        (self.home / "config" / "organizations.json").write_text(json.dumps(orgs))
+        self.sel.apply("acme", self.ready()["digest"])
+        import paths
+        (paths.REGISTRY / "cloudflare-account.json").write_text("{")
+        v = self.sel.plan("acme", {"labels": {"project:beta-api": "Billing"}})
+        self.assertIn("cloudflare:account:cf-acme", v["unread"])
+        self.assertNotIn("cloudflare:account:cf-acme", v["unknown"])
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.apply("acme", v["digest"])
+        self.assertEqual(caught.exception.code, "source-unreadable")
+
+    def test_who_decided_an_item_is_carried_and_a_label_is_not_a_decision(self):
+        words = self.decision("org.select.plan", "acme")
+        self.sel.plan("acme", {"include": ["project:notes"], "layout": "one-space"}, caller="agent:mcp",
+                      decision=words)
+        self.sel.apply("acme", self.sel.plan("acme")["digest"])
+        self.sel.apply("acme", self.sel.plan("acme", {"labels": {"project:alpha-web": "Alpha"}})["digest"])
+        rows = {i["id"]: i for i in self.sel.current("acme")["items"]}
+        self.assertEqual(rows["project:notes"]["decidedBy"]["instruction"], words["instruction"])
+        self.assertEqual(rows["project:alpha-web"]["by"], "rule")
+        self.assertNotIn("decidedBy", rows["project:alpha-web"])
+        self.assertEqual(rows["project:alpha-web"]["labelledBy"], {"by": "person", "via": "cli"})
+
+    def test_text_names_unread_and_missing_rows(self):
+        self.sel.apply("acme", self.ready(include=["project:notes"])["digest"])
+        self.registry("projects.json", {"projects": [p for p in PROJECTS if p["id"] != "project:notes"]})
+        code, out, _ = Cli.run_cli(self, "select", "--org", "acme", "plan")
+        self.assertIn("project:notes", out)
+        self.assertIn("(no longer found here)", out)
+
+    def test_show_takes_no_words_anywhere(self):
+        code, _, err = Cli.run_cli(self, "select", "--org", "acme", "show", "--decision", "{}", "--json")
+        self.assertEqual((code, json.loads(err)["error"]), (1, "invalid-change"))
+        m = McpTool.server(self)
+        self.assertEqual(m.observatory_org_selection(org="acme", action="show", decision={})["error"],
+                         "invalid-change")
+
+    def test_falsy_and_misplaced_values_are_refused_not_dropped(self):
+        for change, code in (({"include": 0}, "invalid-change"), ({"layout": 0}, "invalid-layout"),
+                             ({"layout": "one-space", "serves": "work"}, "invalid-change")):
+            with self.assertRaises(self.sel.Refusal, msg=str(change)) as caught:
+                self.sel.plan("acme", change)
+            self.assertEqual(caught.exception.code, code, change)
 
 
 class WhatTheOrganizationSees(Base):

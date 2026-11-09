@@ -382,6 +382,12 @@ def _context(org: str, chosen: list[str]) -> dict:
         slot = f"{folder}/{env}/{name}"
         slots.append(slot)
         owner[slot] = resolve(folder)
+    # The provider documents the views read quietly (absent is normal for a provider never connected): one that
+    # exists and does not read is named here, so an account it would list reads unread, never gone.
+    for name in PROVIDER_DOCS.values():
+        found: list[dict] = []
+        org_view._registry(name, found, "its accounts are not listed here")
+        degraded.extend(d for d in found if d.get("code") != "missing")
     seen = {(d.get("source"), d.get("code"), d.get("reason")) for d in degraded}
     for d in kv["degraded"] + av["degraded"]:
         key = (d.get("source"), d.get("code"), d.get("reason"))
@@ -457,10 +463,9 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
             again = (base[ident].get("by") == "default" and base[ident]["decision"] in ("exclude", "keep")
                      and c["group"] == "proposed" and c["kind"] in ("project", "key"))
             row.update(decision=base[ident]["decision"], by=base[ident].get("by", "record"), new=again)
-            if base[ident].get("label"):
-                row["label"] = base[ident]["label"]
-            if base[ident].get("ref"):
-                row["ref"] = base[ident]["ref"]
+            for k in ("label", "ref", "decidedBy", "labelledBy"):
+                if base[ident].get(k):
+                    row[k] = base[ident][k]
         else:
             # ORG-R16: found since the record. Only what the organization's rules propose (a project or a key) is
             # `new`, listed and never chosen; anything else that appeared waits for a person as needs-you always does.
@@ -474,7 +479,8 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
             # In the record and no longer a candidate: kept with its decision. Not known here: `unread` when the
             # source that would list it did not read this time (the item may well exist), `notFound` only when its
             # source read and does not list it (a project gone from the registry, a slot deleted, an account gone).
-            row = {**prior, "new": False}
+            row = {k: v for k, v in prior.items() if k not in ("notFound", "unread")}
+            row["new"] = False
             if ident not in known:
                 source = _unread_source(prior.get("kind"), ident, ctx)
                 row.update({"unread": source} if source else {"notFound": True})
@@ -482,12 +488,13 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
     # A key follows its project when nobody chose it by hand: a project not chosen hands no key over by default.
     chosen = {i for i, r in items.items() if r["kind"] == "project" and r["decision"] == "include"}
     for ident, change in changes.items():
-        row = items.get(ident) or {"id": ident, "kind": change["kind"], "group": "by-hand",
-                                   "why": "you added it by hand", "new": False}
         decided_now = change.get("by", "hand") in ("hand", "group")
+        row = items.get(ident) or {"id": ident, "kind": change["kind"], "group": "by-hand", "new": False,
+                                   "why": "you added it by hand" if decided_now else
+                                   "not proposed for this organization; only its label is set"}
         row.update(decision=change["decision"], by=change.get("by", "hand"),
                    new=row.get("new", False) and not decided_now)
-        if row.get("group") == "by-hand" or ident not in cands:
+        if decided_now and (row.get("group") == "by-hand" or ident not in cands):
             # Chosen or left out by hand, not proposed by a rule: the record says so, not an older reason.
             row.update(group="by-hand", why="you chose it by hand" if change["decision"] not in ("exclude", "keep")
                        else "you left it out by hand")
@@ -497,7 +504,7 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
             else:
                 row.pop("label", None)
         if change.get("decidedBy"):
-            row["decidedBy"] = change["decidedBy"]
+            row["decidedBy" if decided_now else "labelledBy"] = change["decidedBy"]
         row.pop("unread", None)
         row.pop("notFound", None)
         if ident not in cands and ident not in known:
@@ -534,6 +541,11 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
     return {"items": items, "layout": layout, "serves": serves}
 
 
+#: The registry document each provider's accounts are listed from (beside its door's records and ledger).
+PROVIDER_DOCS = {"digitalocean": "digitalocean-account.json", "cloudflare": "cloudflare-account.json",
+                 "heroku": "heroku-apps.json"}
+
+
 def _unread_source(kind: Any, ident: str, ctx: dict) -> str | None:
     """The source that did not read and would have listed this item, or None when every such source read."""
     for d in ctx["degraded"]:
@@ -543,7 +555,8 @@ def _unread_source(kind: Any, ident: str, ctx: dict) -> str | None:
         if kind == "key" and src == "vault":
             return src
         provider = ident.split(":", 1)[0]
-        if kind == "account" and (src.split(":", 1)[0] == provider or src == f"registry/{provider}-account.json"
+        if kind == "account" and (src.split(":", 1)[0] == provider
+                                  or src == f"registry/{PROVIDER_DOCS.get(provider, provider + '-account.json')}"
                                   or (provider in ("github", "bitbucket", "gitlab")
                                       and src in ("github", "registry/projects.json", "registry/repositories.json"))):
             return src
@@ -714,7 +727,8 @@ def plan(org: str, changes: dict | None = None, *, decision: Any = None, caller:
     `needs-you`: every member listed now, each recorded one by one, ORG-R02), `labels` ({project id: text, or ""
     to clear}), `keys` ({key id: choice}), `layout`, `serves`, `reset`."""
     org_ok = _org_checked(org)
-    changes = {k: v for k, v in (changes or {}).items() if v not in (None, [], {}, False)}
+    changes = {k: v for k, v in (changes or {}).items()
+               if v is not None and v is not False and not (isinstance(v, (list, dict)) and not v)}
     if "reset" in changes and changes["reset"] is not True:
         raise Refusal("invalid-change", "`reset` is true or absent")
     folder = _folder(org_ok)
@@ -879,6 +893,9 @@ def _change(org: str, draft: dict | None, record: dict | None, changes: dict, wh
     for name, kind in (("include", list), ("exclude", list), ("labels", dict), ("keys", dict)):
         if name in changes and not isinstance(changes[name], kind):
             raise Refusal("invalid-change", f"`{name}` is a {'list of item ids' if kind is list else 'mapping'}")
+    if "serves" in changes and changes.get("layout", (draft or {}).get("layout")) not in (None, "separate-space"):
+        raise Refusal("invalid-change", "a space is named only for the separate-space layout; in the others the "
+                                        "selection serves this space")
     draft = copy.deepcopy(draft) if draft else {"schema": DRAFT_SCHEMA, "organization": org, "items": {}}
     if "layout" in changes:
         if changes["layout"] not in LAYOUTS:
@@ -1034,7 +1051,7 @@ def _record(org: str, sel: dict, digest: str, prior: dict | None, who: dict, *, 
             # listed (and new, when the rules propose it) until a person decides it.
             continue
         row = {k: i[k] for k in ("id", "kind", "decision", "why", "by") if k in i}
-        for k in ("label", "group", "decidedBy", "project", "slot", "class", "provider", "name", "notFound"):
+        for k in ("label", "group", "decidedBy", "labelledBy", "project", "slot", "class", "provider", "name"):
             if i.get(k) is not None:
                 row[k] = i[k]
         if row["kind"] == "project" and row["decision"] == "include":
@@ -1560,6 +1577,10 @@ def text(view: dict) -> str:
                 extra = f" -> {i['decision']}" if kind == "key" else ""
                 tag = (f" (new: not in the record of {view['newSince']})" if view.get("newSince") else " (new)") \
                     if i.get("new") else ""
+                if i.get("notFound"):
+                    tag += " (no longer found here)"
+                if i.get("unread"):
+                    tag += f" (its source did not read: {i['unread']})"
                 label = f", label for the organization: {i['label']!r}" if i.get("label") else ""
                 lines.append(f"  {mark} {i['id']}{extra}{tag}{label}: {i['why']}")
         for c in view["conflicts"]:

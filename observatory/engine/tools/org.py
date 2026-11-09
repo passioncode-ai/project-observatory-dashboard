@@ -270,6 +270,21 @@ def select(args) -> int:
             print(f"refused: {refusal}" + (f"\n  {refusal.command}" if refusal.command else ""), file=sys.stderr)
         return 1
     try:
+        plan_only = {"--include": args.include, "--exclude": args.exclude, "--include-group": args.include_group,
+                     "--exclude-group": args.exclude_group, "--label": args.label, "--key": args.keys,
+                     "--layout": args.layout, "--serves": args.serves, "--reset": args.reset}
+        stray = [flag for flag, value in plan_only.items() if value] if args.action != "plan" else []
+        if args.digest and args.action != "apply":
+            stray.append("--digest")
+        if args.key and args.action != "confirm-replacement":
+            stray.append("KEY")
+        if args.action == "show" and (args.decision is not None or args.decision_file):
+            stray.append("--decision")
+        if stray:
+            # A flag the action does not take would be dropped without a word: refused instead.
+            owner = {"--digest": "apply", "KEY": "confirm-replacement",
+                     "--decision": "a change, apply, undo or confirm-replacement"}.get(stray[0], "plan")
+            raise S.Refusal("invalid-change", f"{stray[0]} belongs to {owner}, not to {args.action}")
         decision = None
         if args.decision is not None or args.decision_file:
             try:
@@ -281,20 +296,6 @@ def select(args) -> int:
                 # `null`, a list or a string is not a decision: never read as "no decision", which is the person's own.
                 raise S.Refusal("decision-invalid", "the decision is not one JSON object in contract DEC-0121's shape")
         caller = "cli" if decision is None else "agent:cli"
-        plan_only = {"--include": args.include, "--exclude": args.exclude, "--include-group": args.include_group,
-                     "--exclude-group": args.exclude_group, "--label": args.label, "--key": args.keys,
-                     "--layout": args.layout, "--serves": args.serves, "--reset": args.reset}
-        stray = [flag for flag, value in plan_only.items() if value] if args.action != "plan" else []
-        if args.digest and args.action != "apply":
-            stray.append("--digest")
-        if args.key and args.action != "confirm-replacement":
-            stray.append("KEY")
-        if stray:
-            # A flag the action does not take would be dropped without a word: refused instead.
-            raise S.Refusal("invalid-change", f"{stray[0]} belongs to "
-                                              + ("plan" if stray[0].startswith("--") and stray[0] != "--digest"
-                                                 else "apply" if stray[0] == "--digest" else "confirm-replacement")
-                                              + f", not to {args.action}")
         if args.action == "plan":
             try:
                 changes = {"include": args.include, "exclude": args.exclude, "includeGroup": args.include_group,
