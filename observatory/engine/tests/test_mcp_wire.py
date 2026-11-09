@@ -543,6 +543,10 @@ async def run_refusals() -> None:
                         ("observatory_recall", {"cursor": value}),
                         ("observatory_record", {"owner": value, "statement": "x"}),
                         ("observatory_assistant_conversation", {"id": value}),
+                        ("observatory_org_selection", {"org": value, "action": "show"}),
+                        ("observatory_org_selection", {"org": "example-team", "action": "confirm-replacement",
+                                                       "key": value}),
+                        ("observatory_org_keys", {"org": value}),
                         ("estate.survey", {"limit": 1, "cursor": value}),
                         ("project.timeline", {"projectId": SYNTHETIC_PROJECT, "since": value})):
                     res = await session.call_tool(tool, args)

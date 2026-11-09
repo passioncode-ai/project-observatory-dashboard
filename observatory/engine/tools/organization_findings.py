@@ -87,7 +87,7 @@ def selection_findings(rows: list[dict]) -> list[dict]:
         keys = len(new) - projects                         # ORG-R16 names projects and keys; accounts are never new
         out.append({
             "type": "organization.selection_new", "subject": f"organization:{org}", "severity": "info",
-            **titled("{n} new items may belong to {organization}", n=len(new), organization=org),
+            **titled("{n} new items may belong to {organization}", n=len(new), organization=row.get("label") or org),
             "detail": (f"Found since {org}'s selection was applied, and proposed by its rules: {projects} project(s) "
                        f"and {keys} key(s): " + ", ".join(sorted(new)[:12])
                        + (f", and {len(new) - 12} more" if len(new) > 12 else "")

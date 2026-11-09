@@ -262,7 +262,9 @@ def journal(org: str, revision: int, digest: str | None = None) -> dict | None:
     return doc
 
 
-def _draft(org: str) -> dict | None:
+def _draft(org: str, *, consumed_ok: bool = False) -> dict | None:
+    """The person's pending changes, or None. A draft a revision already consumed (its name is that revision's
+    `consumedDraft`, left behind by an interruption) is no draft."""
     try:
         doc = _read(_folder(org) / "draft.json")
     except Refusal as refusal:
@@ -277,6 +279,10 @@ def _draft(org: str) -> dict | None:
                             or not isinstance(doc.get("serves", ""), (str, type(None)))):
         raise Refusal("record-unreadable", f"the draft is not {DRAFT_SCHEMA}; drop it and start again",
                       f"{CMD.format(org=_q(org))} plan --reset")
+    if doc is not None and not consumed_ok and doc.get("id"):
+        revs = _revisions(org)
+        if revs and (_read(revs[-1]) or {}).get("consumedDraft") == doc["id"]:
+            return None                                # consumed by the last revision; only its removal was lost
     return doc
 
 
@@ -335,7 +341,7 @@ def decided(action: str, target: str, decision: Any = None, *, caller: str) -> d
         raise Refusal("operator-decision-required",
                       f"{TITLES[action].lower()} is the person's decision: ask them, then call again with their words "
                       "as `decision` (by operator, via relayed-instruction, action "
-                      f"{ACTIONS[action]}, target {target!r}, the words verbatim, when they said them)",
+                      f"{ACTIONS[action]}, target {_echo(target)}, the words verbatim, when they said them)",
                       gate=GATES[action], action=ACTIONS[action])
     actions = _node_actions()
     act = {"id": ACTIONS[action], "title": TITLES[action], "tool": "observatory.org.selection", "gate": "relayed"}
@@ -794,6 +800,12 @@ def _plan_answer(org: str, ctx: dict, sel: dict, record: dict | None, draft: dic
                      "applied until both read", "project-observatory full doctor")
     elif conflicts:
         step, cmd = "clear the projects another organization already holds", f"{q} plan --exclude PROJECT"
+    elif unknown:
+        step, cmd = (f"{len(unknown)} chosen item(s) no longer found here: leave each out, or restore it, then "
+                     "preview again", f"{q} plan --exclude {unknown[0]}")
+    elif unread:
+        step, cmd = (f"{len(unread)} chosen item(s) whose source did not read: nothing is applied until it reads",
+                     "project-observatory full doctor")
     elif not any_items:
         step, cmd = ("no project, key or account here is proposed for this organization; add one by hand or a rule",
                      f"{q} plan --include PROJECT")
@@ -830,11 +842,16 @@ def _org_checked(org: Any, *, configured: bool = True) -> str:
     if not isinstance(org, str) or not org.strip() or len(org) > 200 or credential_shape.shaped(org):
         raise Refusal("invalid-organization", f"{credential_shape.echo(org)} is not an organization name",
                       "project-observatory full org accounts")
-    if configured:
+    if configured or not org_view.ORG_NAME.fullmatch(org):
+        # A name only (show, undo, confirm) is taken when it is shaped like an organization's name; any other is
+        # taken only when config/organizations.json names it, and is never echoed back otherwise.
         try:
             org_view.organization_checked(org)
         except org_view.Refusal as refusal:
-            raise Refusal(refusal.code, str(refusal), refusal.command) from None
+            if configured:
+                raise Refusal(refusal.code, str(refusal), refusal.command) from None
+            raise Refusal("invalid-organization", f"{credential_shape.echo(org)} is not an organization name",
+                          "project-observatory full org accounts") from None
     return org
 
 
@@ -889,11 +906,13 @@ def _change(org: str, draft: dict | None, record: dict | None, changes: dict, wh
     known = {"include", "exclude", "includeGroup", "excludeGroup", "labels", "keys", "layout", "serves"}
     extra = sorted(set(changes) - known)
     if extra:
-        raise Refusal("invalid-change", f"unknown change {extra[0]!r}; the changes are: " + ", ".join(sorted(known)))
+        raise Refusal("invalid-change", f"unknown change {_echo(extra[0])}; the changes are: "
+                                        + ", ".join(sorted(known)))
     for name, kind in (("include", list), ("exclude", list), ("labels", dict), ("keys", dict)):
         if name in changes and not isinstance(changes[name], kind):
             raise Refusal("invalid-change", f"`{name}` is a {'list of item ids' if kind is list else 'mapping'}")
-    if "serves" in changes and changes.get("layout", (draft or {}).get("layout")) not in (None, "separate-space"):
+    if "serves" in changes and changes.get("layout", (draft or {}).get("layout") or (record or {}).get("layout")) \
+            not in (None, "separate-space"):
         raise Refusal("invalid-change", "a space is named only for the separate-space layout; in the others the "
                                         "selection serves this space")
     draft = copy.deepcopy(draft) if draft else {"schema": DRAFT_SCHEMA, "organization": org, "items": {}}
@@ -998,6 +1017,9 @@ def _steps(item: dict, layout: str) -> list[dict]:
                           "waitingOn": "replacement-confirmation" if layout == "separate-space" else "rotation"})
         return steps
     if item["kind"] == "key":
+        if layout == "this-space":
+            # The space becomes the organization's: a personal key stays personal by moving out first (OBS-426).
+            return [{"step": "stays-personal", "state": "waiting", "waitingOn": "move-out"}]
         return [{"step": "stays-personal", "state": "done"}]
     if item["kind"] == "account" and item["decision"] == "include":
         return [{"step": "recorded", "state": "done"}]
@@ -1219,7 +1241,7 @@ def _commit(org: str, prior: dict | None, rec: dict) -> None:
 def _drop_consumed(org: str, rec: dict) -> None:
     """Remove the draft this revision consumed, and only that one."""
     try:
-        draft = _draft(org)
+        draft = _draft(org, consumed_ok=True)
     except Refusal:
         return                                         # a damaged draft is the person's to drop (`plan --reset`)
     if draft is not None and rec.get("consumedDraft") and draft.get("id") == rec["consumedDraft"]:
@@ -1249,6 +1271,12 @@ def _unfinished(org: str, rec: dict | None) -> bool:
     jdoc = journal(org, rec["revision"], rec["digest"])
     if jdoc is None and (rec["items"] or rec.get("layout")):
         return True
+    try:
+        left = _draft(org, consumed_ok=True)
+    except Refusal:
+        left = None
+    if left is not None and rec.get("consumedDraft") and left.get("id") == rec["consumedDraft"]:
+        return True                                    # the draft the revision consumed is still there
     revs = history(org)
     prior = revs[-2] if len(revs) >= 2 else None
     old = journal(org, prior["revision"], prior["digest"]) if prior else None
@@ -1425,8 +1453,10 @@ def confirm_replacement(org: str, key: Any, *, decision: Any = None, caller: str
     revocation itself is OBS-416's rotation door, not built: the step then waits on `rotation`."""
     org_ok = _org_checked(org, configured=False)
     q = CMD.format(org=_q(org_ok))
-    if not isinstance(key, str) or not key.strip():
-        raise Refusal("not-in-record", "confirm-replacement names the key: vault:FOLDER/ENV/NAME", f"{q} show")
+    import credential_shape
+    if not isinstance(key, str) or not key.strip() or credential_shape.shaped(key):
+        raise Refusal("not-in-record", "confirm-replacement names the key by its slot: vault:FOLDER/ENV/NAME, never "
+                                       "a value", f"{q} show")
     ident = key if key.startswith("vault:") else f"vault:{key}"
     if not _revisions(org_ok):
         raise Refusal("not-in-record", "no selection has been applied for this organization", f"{q} plan")
@@ -1447,7 +1477,10 @@ def confirm_replacement(org: str, key: Any, *, decision: Any = None, caller: str
         if journal(org_ok, rec["revision"], rec["digest"]) is None:
             _resume(org_ok, rec)                       # an interrupted apply first, with what it carries
         jdoc = journal(org_ok, rec["revision"], rec["digest"])
-        entry = next(i for i in jdoc["items"] if i["id"] == ident)
+        entry = next((i for i in jdoc["items"] if i["id"] == ident), None)
+        if entry is None or not any(st.get("step") == "revoke-personal" for st in entry.get("steps") or []):
+            raise Refusal("record-unreadable", "the journal of the applied revision has no revocation step for this key "
+                                               "(it was changed by hand)", "project-observatory full doctor")
         before = {st["step"]: st["state"] for st in entry["steps"]}
         if before.get("credential-request") != "done" or before.get("switch-consumers") != "done":
             # ORG-R08: a replacement that has not arrived, or consumers not switched to it, cannot be confirmed to
@@ -1533,6 +1566,16 @@ def show(org: str) -> dict:
             "new": new, "draft": draft is not None, "nextStep": step, "command": command, "degraded": degraded}
 
 
+def _org_label(org: str) -> str:
+    """The organization's label as config/organizations.json gives it, else its name."""
+    try:
+        import org_view
+        _doc, assigner = org_view.organization_checked(org)
+        return org_view._label(assigner.orgs.get(org)) or org
+    except Exception:  # noqa: BLE001 - a label is cosmetic: the name always reads
+        return org
+
+
 def new_since_all() -> list[dict]:
     """Every organization with an applied selection and what was found since it (ORG-R16), for the findings board.
     An organization that cannot be read is skipped: the board names nothing it did not read."""
@@ -1553,7 +1596,7 @@ def new_since_all() -> list[dict]:
         except Exception:  # noqa: BLE001 - one organization that cannot be read never costs the others their row
             continue
         if view.get("new"):
-            out.append({"organization": org, "new": view["new"]})
+            out.append({"organization": org, "new": view["new"], "label": _org_label(org)})
     return out
 
 

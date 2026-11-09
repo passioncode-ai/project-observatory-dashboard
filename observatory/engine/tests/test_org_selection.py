@@ -859,7 +859,7 @@ class ReviewRoundSix(Base):
         v = self.sel.plan("quiet")
         row = self.items(v)["project:hush"]
         self.assertEqual((row["decision"], row["new"]), ("exclude", True))
-        self.assertEqual(self.sel.new_since_all(), [{"organization": "quiet", "new": ["project:hush"]}])
+        self.assertEqual(self.sel.new_since_all(), [{"organization": "quiet", "new": ["project:hush"], "label": "Quiet"}])
 
     def test_the_store_folder_is_owner_only_from_the_first_change(self):
         self.sel.plan("acme", {"layout": "one-space"})
@@ -1201,6 +1201,56 @@ class ReviewRoundTwelve(Base):
             with self.assertRaises(self.sel.Refusal, msg=str(change)) as caught:
                 self.sel.plan("acme", change)
             self.assertEqual(caught.exception.code, code, change)
+
+
+class ReviewRoundThirteen(Base):
+    """What the thirteenth review found: each case reproduced, then fixed."""
+
+    def test_a_refusal_never_repeats_a_value(self):
+        planted = "sk-or-v1-" + "c" * 64
+        m = McpTool.server(self)
+        for args in ({"action": "confirm-replacement", "key": planted}, {"action": "plan", "changes": {planted: 1}}):
+            answer = m.observatory_org_selection(org="acme", **args)
+            self.assertIn("error", answer)
+            self.assertNotIn(planted, json.dumps(answer), args)
+
+    def test_serves_is_refused_against_the_records_layout(self):
+        self.sel.apply("acme", self.sel.plan("acme", {"layout": "this-space"})["digest"])
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.plan("acme", {"serves": "work"})
+        self.assertEqual(caught.exception.code, "invalid-change")
+
+    def test_an_undo_that_lost_its_draft_removal_drops_it_after(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        self.sel.plan("acme", {"exclude": ["project:beta-api"]})
+        draft = (self.sel._folder("acme") / "draft.json").read_text()
+        self.sel.undo("acme")
+        (self.sel._folder("acme") / "draft.json").write_text(draft)
+        (self.sel._folder("acme") / "draft.json").chmod(0o600)
+        v = self.sel.plan("acme")
+        self.assertFalse(v["draft"], "the draft the undo consumed is no draft")
+        self.assertEqual(self.sel.show("acme")["state"], "waiting")
+        self.sel.apply("acme", self.sel.show("acme")["command"].rsplit(" ", 1)[1])
+        self.assertFalse((self.sel._folder("acme") / "draft.json").exists())
+
+    def test_a_chosen_item_gone_after_apply_is_named_by_the_plan(self):
+        self.sel.apply("acme", self.ready(include=["project:notes"])["digest"])
+        self.registry("projects.json", {"projects": [p for p in PROJECTS if p["id"] != "project:notes"]})
+        v = self.sel.plan("acme")
+        self.assertIn("no longer found here", v["nextStep"])
+        self.assertIn("--exclude project:notes", v["command"])
+
+    def test_in_this_space_a_kept_key_waits_to_move_out(self):
+        a = self.sel.apply("acme", self.sel.plan("acme", {"layout": "this-space"})["digest"])
+        step = next(st for i in self.sel.journal("acme", 1)["items"] if i["id"] == HAND_SLOT for st in i["steps"])
+        self.assertEqual((step["state"], step["waitingOn"]), ("waiting", "move-out"))
+
+    def test_the_finding_names_the_organizations_label(self):
+        import organization_findings
+        importlib.reload(organization_findings)
+        rows = organization_findings.selection_findings([{"organization": "acme", "label": "Acme",
+                                                          "new": ["project:gamma"]}])
+        self.assertIn("Acme", rows[0]["title"])
 
 
 class WhatTheOrganizationSees(Base):
