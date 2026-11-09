@@ -232,7 +232,8 @@ class Changes(Base):
         self.assertEqual([h["step"] for h in v["preview"]["humanSteps"]],
                          ["passkey-entry", "admin-password", "computer-token"])
         draft = self.sel._folder("acme") / "draft.json"
-        self.assertEqual(stat.S_IMODE(draft.stat().st_mode), 0o600, "owner-only")
+        if os.name != "nt":   # Windows keeps no POSIX mode bits; its owner-only rule is the ACL
+            self.assertEqual(stat.S_IMODE(draft.stat().st_mode), 0o600, "owner-only")
         self.assertIn("--digest " + v["digest"], v["command"])
 
     def test_a_group_records_each_member_listed_now(self):
@@ -332,7 +333,8 @@ class Apply(Base):
         self.assertFalse((self.sel._folder("acme") / "draft.json").exists(), "the draft is consumed")
         for path in self.files():
             if path.name != ".lock":
-                self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600, path.name)
+                if os.name != "nt":   # Windows keeps no POSIX mode bits
+                    self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600, path.name)
                 self.assertNotIn(STAND_IN_VALUE, path.read_text(), "names only, never a value")
         self.assertNotIn(STAND_IN_VALUE, json.dumps(a))
 
@@ -863,7 +865,8 @@ class ReviewRoundSix(Base):
 
     def test_the_store_folder_is_owner_only_from_the_first_change(self):
         self.sel.plan("acme", {"layout": "one-space"})
-        self.assertEqual(stat.S_IMODE(self.sel.root().stat().st_mode), 0o700)
+        if os.name != "nt":   # Windows keeps no POSIX mode bits
+            self.assertEqual(stat.S_IMODE(self.sel.root().stat().st_mode), 0o700)
 
     def test_no_user_name_is_not_a_crash(self):
         import getpass
