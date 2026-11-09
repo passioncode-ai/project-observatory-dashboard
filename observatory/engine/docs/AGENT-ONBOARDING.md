@@ -70,14 +70,14 @@ looking for the value elsewhere.
 
 When I ask whose an account, a project or a key is, read `observatory_org_accounts` (every provider
 account this space reaches, each under one organization with the source of that answer, or under
-`needsDecision` with its reason and the command that connects it) and `observatory_org_keys` with
-`org` (each key of that organization's projects as `organization`, `personal` or `ambiguous`, with
-why). Both are read-only and carry names only: never open a vault slot or a door's stash to check
-one. An `ambiguous` key or a `needsDecision` account is mine to decide; propose a rule in
-`config/organizations.json` (`github_owners`, `digitalocean_teams`, `cloudflare_accounts`,
-`heroku_teams`, `openrouter_accounts`) and say what it would change. A door's admin key under
-`notMovable` is never handed over. A project whose organization is not decided (a conflict) gets no
-analytics property, design file or cloud resource until I decide.
+`needsDecision` with its reason, and the command that connects it when it is not connected) and
+`observatory_org_keys` with `org` (each key of that organization's projects as `organization`,
+`personal` or `ambiguous`, with why). Both are read-only and carry names only: never open a vault
+slot or a door's stash to check one. An `ambiguous` key or a `needsDecision` account is mine to
+decide; propose a rule in `config/organizations.json` (`github_owners`, `digitalocean_teams`,
+`cloudflare_accounts`, `heroku_teams`, `openrouter_accounts`) and say what it would change. A door's
+admin key under `notMovable` is never handed over. A project whose organization is not decided (a
+conflict) gets no analytics property, design file or cloud resource until I decide.
 
 ## SSH keys
 

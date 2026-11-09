@@ -940,8 +940,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "e4cff2cf3aa5714c289090daa2d1d0a4047d24c09410802a5cae8e856f85221d",
-      "bytes": 35031,
+      "export_sha256": "1230f08a0c1056dcf7f2f5d7351d3c4fcd665460a81fecc1536ec7e425eaf3f1",
+      "bytes": 35057,
       "upstream_modified": true
     },
     {
@@ -961,8 +961,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "7dcc0d85ecb063c0d63bb02d8dd6631e3596715b57f4e59eaf26008eb7062d70",
-      "bytes": 295098,
+      "export_sha256": "b7952ec24c4589f980e0502b8c1f17a61b9a193d1866de26cff6bcd2503cae46",
+      "bytes": 295208,
       "upstream_modified": true
     },
     {
@@ -3201,8 +3201,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "9cb8f638cc00df429d9b718c8a240371fe58a83671b176e3ab23a62c9c4fc85c",
-      "bytes": 123648,
+      "export_sha256": "96a5136231f948b6433beed07671efce97e27365ba4973dc85f57636b145af7a",
+      "bytes": 123740,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -3530,15 +3530,15 @@
       "path": "org_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c0c642c72eee092848cfdf98da656ea7b7dc2b0794eaea4885fd0837d85b7dfa",
-      "bytes": 53595
+      "export_sha256": "855512cdbd176505dcb1a52f3694f470ff529c2b65dbaaff1ec3511a375fcde3",
+      "bytes": 56162
     },
     {
       "path": "organizations.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8803f2b12472f20a7df471946c8bc5e306ea447e6d0b4088126c9719bf655f22",
-      "bytes": 25847
+      "export_sha256": "9de11b4f6938af6141b6366a33c4bf330035314282e25000651e7f784e9678e7",
+      "bytes": 27221
     },
     {
       "path": "oslocks.py",
@@ -5729,8 +5729,8 @@
       "path": "tests/test_organizations.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "40fc2c896e17047e8bf2f5206774d9dca93368ae638af5a8639400f698a695cf",
-      "bytes": 58635
+      "export_sha256": "f9da87d3cc8a0ab8b506a39b5e9b088f08857306d2788c40e7e1e4d4f457ded2",
+      "bytes": 61587
     },
     {
       "path": "tests/test_oslocks.py",
@@ -7213,15 +7213,15 @@
       "path": "tools/org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c9f6ecd355d41590033ea497c312bf2ceb5959e56b6b93cab63859b49d5340f6",
-      "bytes": 15034
+      "export_sha256": "7651034708183de2f576e9358d1fca300f757c9a3de32c69f427859670012753",
+      "bytes": 15076
     },
     {
       "path": "tools/organization_findings.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5de0db8cd543b0e91069f65e049f48c7573fb28c4179f01c608ac39dd662b4ab",
-      "bytes": 4237
+      "export_sha256": "c0da9245a619308076a52cf70de7156bc840e412738aee8d25b07ffd7627eb62",
+      "bytes": 4307
     },
     {
       "path": "tools/project_into_vault.py",

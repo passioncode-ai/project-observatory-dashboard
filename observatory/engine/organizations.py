@@ -116,9 +116,18 @@ def validate(doc: dict) -> list[str]:
     if orgs and len(defaults) != 1:
         out.append(f"exactly one organization must be `default`; found {len(defaults)}")
     for name, org in orgs.items():
+        if name == "external":
+            out.append("external: the name is reserved for Not ours (a project whose owners are all outside the "
+                       "estate); name the organization otherwise")
         if not isinstance(org, dict):
             out.append(f"{name}: must be an object")
             continue
+        if org.get("figma") is not None and not isinstance(org.get("figma"), dict):
+            out.append(f"{name}: figma must be an object (team, project)")
+        if org.get("ga4_legacy_accounts") is not None and not isinstance(org.get("ga4_legacy_accounts"), dict):
+            out.append(f"{name}: ga4_legacy_accounts must be an object (account -> its properties)")
+        if org.get("label") is not None and not isinstance(org.get("label"), str):
+            out.append(f"{name}: label must be a string")
         acct = org.get("ga4_account")
         if acct is not None and not (isinstance(acct, str) and acct.startswith("accounts/")):
             out.append(f"{name}: ga4_account must look like accounts/<number>")
@@ -131,7 +140,7 @@ def validate(doc: dict) -> list[str]:
                 out.append(f"{name}: match.{key} is not a known list rule; the known rules are "
                            + ", ".join(MATCH_RULES))
             elif not isinstance(match[key], list) or not all(isinstance(v, str) for v in match[key]):
-                out.append(f"{name}: match.{key} is not a known list rule: it must be a list of strings")
+                out.append(f"{name}: match.{key} must be a list of strings")
     declared = doc.get("projects") or {}
     if not isinstance(declared, dict):
         return out + ["projects must be an object keyed by project id"]
@@ -149,7 +158,11 @@ def _estate_owners() -> set[str]:
         doc = json.loads(paths.config_file("ownership.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return set()
-    return {o.lower() for o in (doc.get("organizations") or []) + (doc.get("work_organizations") or [])}
+    if not isinstance(doc, dict):
+        return set()
+    # A hand-edited file may hold a string where a list belongs: only listed strings are owners.
+    return {o.lower() for key in ("organizations", "work_organizations")
+            for o in (doc.get(key) if isinstance(doc.get(key), list) else []) if isinstance(o, str)}
 
 
 def product_index() -> dict[str, set[str]]:
@@ -159,9 +172,12 @@ def product_index() -> dict[str, set[str]]:
     except (OSError, ValueError):
         return {}
     out: dict[str, set[str]] = {}
-    for prod_id, prod in (doc.get("products") or {}).items():
-        for member in (prod.get("members") or {}):
-            out.setdefault(member, set()).add(prod_id)
+    products = doc.get("products") if isinstance(doc, dict) else None
+    for prod_id, prod in (products.items() if isinstance(products, dict) else ()):
+        members = prod.get("members") if isinstance(prod, dict) else None
+        for member in (members if isinstance(members, (dict, list)) else ()):
+            if isinstance(member, str):
+                out.setdefault(member, set()).add(prod_id)
     return out
 
 
@@ -299,12 +315,13 @@ class Assigner:
     def destinations(self, organization: str | None) -> dict:
         """Where this organization's accounts are: what an agent creating one needs."""
         org = (self.orgs.get(organization) if isinstance(organization, str) else None) or {}
+        org = org if isinstance(org, dict) else {}
         out = {}
-        if org.get("label"):
+        if isinstance(org.get("label"), str) and org["label"]:
             out["label"] = org["label"]
         if org.get("ga4_account"):
             out["ga4Account"] = org["ga4_account"]
-        figma = org.get("figma") or {}
+        figma = org.get("figma") if isinstance(org.get("figma"), dict) else {}
         if figma.get("team"):
             out["figmaTeam"] = figma["team"]
         if figma.get("project"):
@@ -388,14 +405,15 @@ def project_accounts(digitalocean: dict | None = None, cloudflare: dict | None =
                                      ("cloudflare", cloudflare, "account_id")):
         rows = [a for a in (doc or {}).get("accounts") or [] if isinstance(a, dict)]
         accounts, keys = {a.get("id"): a for a in rows}, account_keys(provider, rows)
-        for r in sorted((doc or {}).get("resources") or [], key=lambda r: str(r.get("id"))):
+        for r in sorted((r for r in (doc or {}).get("resources") or [] if isinstance(r, dict)),
+                        key=lambda r: str(r.get("id"))):
             acct = accounts.get(r.get("account_ref"))
             if not (r.get("project") and r.get("link_rule") and acct):
                 continue
             add(r["project"], {"provider": provider, "keys": keys.get(acct.get("id")) or [],
                                "label": acct.get("name") or acct.get(key_field),
                                "via": f"{r.get('kind')} {r.get('name')}"})
-    for a in sorted(heroku_apps or [], key=lambda a: str(a.get("id"))):
+    for a in sorted((a for a in heroku_apps or [] if isinstance(a, dict)), key=lambda a: str(a.get("id"))):
         if a.get("project") and a.get("link_rule") and a.get("team") and a.get("team") != "personal":
             add(a["project"], {"provider": "heroku", "keys": [str(a["team"])], "label": a["team"],
                                "via": f"app {a.get('name')}"})

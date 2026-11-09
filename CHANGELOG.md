@@ -12,7 +12,7 @@ while the major version is 0, a minor release may change behaviour and says so h
   reaches (repository owners, DigitalOcean teams and the `doctl` contexts with no stashed token, Cloudflare accounts,
   Heroku teams and user, OpenRouter accounts), each under exactly one organization with its source (`rule`,
   `default`, `external` for Not ours) or under "needs a decision" (`conflict`, `none` for a provider account no
-  rule names, or seen and not connected) with the reason and the command to run,
+  rule names, or seen and not connected) with the reason and, for an account not connected, the door's command,
   what each holds, and what was not read (`degraded`, `state` `empty`, `partial` or `complete`).
   `project-observatory full org keys --org NAME [--json]` classifies each vault slot of NAME's projects as
   `organization`, `personal` or `ambiguous` from the project's organization and the issuing account in the door's

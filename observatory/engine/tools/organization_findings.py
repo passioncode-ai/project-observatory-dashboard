@@ -38,7 +38,8 @@ def findings(projects: list[dict], orgs_doc: dict | None, unreadable: str | None
         out.append({
             "type": "organization.config_problem", "subject": "estate:organizations", "severity": "warning",
             **titled("organizations.json is not read: {reason}", reason=unreadable),
-            "detail": ("config/organizations.json exists and does not parse, so the next rebuild reads no "
+            "detail": ("config/organizations.json exists and is not read (it does not parse, or is not one JSON "
+                       "object), so the next rebuild reads no "
                        "organization at all and every project loses its organization field."),
             "action": "fix the file (it must be one JSON object), then rebuild; "
                       f"`{ACCOUNTS_CMD}` shows what it then reads",

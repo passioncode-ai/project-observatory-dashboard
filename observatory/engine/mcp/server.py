@@ -561,18 +561,18 @@ def observatory_org_accounts() -> dict[str, Any]:
     (repository owners, DigitalOcean teams and the `doctl` contexts with no stashed token, Cloudflare accounts,
     Heroku teams and the Heroku user, OpenRouter accounts), each under exactly one organization (the default
     Personal, another of `config/organizations.json`, or Not ours) with `source` (`rule`: a `match` rule names it;
-    `default`: a repository owner of yours no rule names, whose projects take the default organization, or every
-    account when no organizations are configured; `external`: a repository owner outside `config/ownership.json`),
-    or listed in `needsDecision` with the reason and the command to run: `conflict` (two organizations claim it),
-    `none` (a provider account no rule names, which decides no project until a rule does), or seen and not
-    connected. Each account says what it holds (projects, resources, keys its door issued). `problems` names a rule the
-    engine does not read; `degraded` names each source not read, and `state` is `empty` (no account found; `degraded`
-    says what was not read), `partial` or `complete`.
+    `default`: a repository owner of yours no rule names, whose projects take the default organization, the Heroku
+    user, which no rule kind names, or every account when no organizations are configured; `external`: a
+    repository owner outside `config/ownership.json`), or listed in `needsDecision` with the reason: `conflict`
+    (two organizations claim it), `none` (a provider account no rule names, which decides no project until a rule
+    in `config/organizations.json` does), or seen and not connected (with the door's command that connects it).
+    Each account says what it holds (projects, resources, keys its door issued). `problems` names what the
+    engine does not read; `degraded` names each source not read, and `state` is `empty` (no account found;
+    `degraded` says what was not read), `partial` or `complete`.
 
     Read-only: nothing is written, sent or decided, and no key's value is returned, printed or kept (a `doctl`
     context is compared with the stashed tokens in memory by the DigitalOcean door, as `digitalocean.py teams`
-    does). The same answer as
-    `project-observatory full org accounts --json` (schema `org-accounts/1`). Saying which organization an account
+    does). The same answer as `project-observatory full org accounts --json` (schema `org-accounts/1`). Saying which organization an account
     belongs to is a rule in `organizations.json` (`match.github_owners`, `digitalocean_teams`,
     `cloudflare_accounts`, `heroku_teams`, `openrouter_accounts`)."""
     import org_view

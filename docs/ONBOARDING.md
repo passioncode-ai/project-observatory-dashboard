@@ -2305,11 +2305,12 @@ accounts (stashed, or named by the door's ledger). Each sits under exactly one
 organization with its `source`: `rule` (a `match` rule names it), `default` (a
 repository owner of yours no rule names: its projects take the default
 organization), or `external` (a repository owner outside `ownership.json`: Not
-ours); or under `needsDecision`, with the reason and the command to run, when it
-reads `conflict` (two organizations claim it), `none` (a provider account no rule
-names, as its registry row says: it decides no project until a rule does), or it
-is seen and not connected (a `doctl` context, an account only a door's record
-names). Each says what it holds
+ours); or under `needsDecision`, with the reason (and, for an account not
+connected, the door's command that connects it), when it reads `conflict` (two
+organizations claim it), `none` (a provider account no rule names, as its
+registry row says: it decides no project until a rule does), or it is seen and
+not connected (a `doctl` context, an account only a door's record names). The
+Heroku user, which no rule kind names, reads `default`. Each says what it holds
 (projects, resources, keys its door issued). Without `organizations.json` every
 account of yours reads Personal (`implicit`), and a repository owner outside
 `ownership.json` still reads Not ours. `state` is `empty` (no account was found;

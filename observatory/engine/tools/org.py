@@ -55,9 +55,10 @@
         every provider account this space reaches (repository owners, DigitalOcean teams and the `doctl` contexts
         with no stashed token, Cloudflare accounts, Heroku teams and user, OpenRouter accounts), each under exactly
         one organization (the default Personal, another configured one, or Not ours) with the source of that
-        answer (`rule`, `default`, `external`), or under "needs a decision" with the command to run (`conflict`:
-        two organizations claim it; `none`: a provider account no rule names; or seen and not connected); what holds each, and what
-        could not be read (`degraded`). Read-only (OBS-411; schema `org-accounts/1`)
+        answer (`rule`, `default`, `external`), or under "needs a decision" with the reason (`conflict`: two
+        organizations claim it; `none`: a provider account no rule names; or seen and not connected, with the
+        door's command that connects it); what holds each, and what could not be read (`degraded`). Read-only
+        (OBS-411; schema `org-accounts/1`)
     project-observatory full org keys --org NAME [--json]
         each vault slot of the projects organization NAME holds, and each one issued from its accounts, classified
         `organization`, `personal` or `ambiguous` with why (the project's organization, the issuing account from

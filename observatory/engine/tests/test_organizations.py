@@ -279,7 +279,7 @@ class ProviderAccounts(Base):
         bad["organizations"]["company"]["match"]["heroku_teams"] = "company-heroku"
         problems = " | ".join(self.orgs.validate(bad))
         self.assertIn("match.aws_accounts is not a known list rule", problems)
-        self.assertIn("match.heroku_teams is not a known list rule", problems)
+        self.assertIn("match.heroku_teams must be a list of strings", problems)
 
     def test_an_account_row_says_whose_it_is_and_a_shared_one_is_nobodys(self):
         a = self.orgs.Assigner()
@@ -880,6 +880,44 @@ class Views(Base):
         k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
         self.assertEqual((k["co-web/prod/CF_TOKEN"]["putBy"], k["co-web/prod/CF_TOKEN"]["class"]), ("hand", "ambiguous"),
                          "a value put by hand after the door's delivery is no longer the door's")
+
+    def test_round_four_edges(self):
+        """Review round 4: a value put by hand after any door's delivery, hand-edited configuration files, a
+        reserved name, and the projects a group holds without organizations.json."""
+        self.private("projects/movements.jsonl", "".join(json.dumps(r) + "\n" for r in (
+            {"event": "put", "secret": "co-web/prod/OPENROUTER_API_KEY", "tool": "vault.py"},
+            {"event": "issue", "secret": "openrouter/company-or/co-web-llm", "tool": "openrouter.py",
+             "to": "vault:co-web/prod/OPENROUTER_API_KEY"},
+            {"event": "issue", "secret": "co-web/prod/EXAMPLE_HEROKU_TOKEN", "tool": "heroku.py"},
+            {"event": "put", "secret": "co-web/prod/EXAMPLE_HEROKU_TOKEN", "tool": "secret_prompt"},
+            {"event": "put", "secret": "co-web/prod/OPENROUTER_API_KEY", "tool": "vault.py"})))
+        k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
+        for slot in ("co-web/prod/OPENROUTER_API_KEY", "co-web/prod/EXAMPLE_HEROKU_TOKEN"):
+            self.assertEqual((k[slot]["putBy"], k[slot]["selected"]), ("hand", False), slot)
+        self.private("projects/movements.jsonl", json.dumps(
+            {"event": "put", "secret": "co-web/prod/OPENROUTER_API_KEY", "tool": "vault.py"}) + "\n")
+        k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
+        self.assertEqual(k["co-web/prod/OPENROUTER_API_KEY"]["putBy"], "door",
+                         "a journal with no row of the door keeps the door's own record")
+        self.write("ownership.json", {"organizations": "company-org", "work_organizations": None})
+        self.write("products.json", {"products": ["not", "an", "object"]})
+        orgs = json.loads(self.home.joinpath("config", "organizations.json").read_text())
+        orgs["organizations"]["company"]["figma"] = "x"
+        orgs["organizations"]["external"] = {"label": "Clash"}
+        self.write("organizations.json", orgs)
+        problems = self.orgs.validate(orgs)
+        self.assertTrue(any("figma must be an object" in p for p in problems))
+        self.assertTrue(any(p.startswith("external: the name is reserved") for p in problems))
+        v = self.view.accounts()
+        self.assertEqual([g["name"] for g in v["organizations"]].count("external"), 1)
+        self.assertEqual(self.view.keys("company")["schema"], "org-keys/1")
+        self.assertEqual(self.orgs.Assigner().destinations("company").get("figmaTeam"), None)
+        self.write("organizations.json", {"organizations": {}, "projects": {}})
+        self.write("ownership.json", {"organizations": ["company-org", "person-org"]})
+        groups = {g["name"]: g for g in self.view.accounts()["organizations"]}
+        self.assertIn("project:co-web", groups["personal"]["projects"],
+                      "without organizations.json a group holds its accounts' projects")
+        self.assertEqual(groups["external"]["projects"], ["project:clone"])
 
     def test_keys_refusals_name_their_command(self):
         for org, code in (("person", "default-organization"), ("nobody", "unknown-organization"),

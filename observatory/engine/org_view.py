@@ -129,8 +129,14 @@ def _labels(folder: pathlib.Path, degraded: list, source: str) -> list[str]:
         return []
     if not folder.is_dir():
         return []
-    return sorted(p.name for p in folder.iterdir()
-                  if p.is_file() and not p.name.startswith(".") and not p.name.endswith((".meta.json", ".tmp")))
+    try:
+        return sorted(p.name for p in folder.iterdir()
+                      if p.is_file() and not p.name.startswith(".") and not p.name.endswith((".meta.json", ".tmp")))
+    except OSError as exc:
+        degraded.append({"source": source, "code": "unreadable",
+                         "reason": f"{folder.name} cannot be listed ({type(exc).__name__})",
+                         "effect": "its accounts are missing from this answer"})
+        return []
 
 
 def _stash_meta(door: str, label: str, degraded: list) -> dict:
@@ -196,9 +202,18 @@ def _slots(degraded: list) -> list[tuple[str, str, str]]:
                          "effect": "no key is listed, which is not evidence there is none"})
         return []
     out = []
-    for project in sorted(p for p in root.iterdir() if p.is_dir() and not p.is_symlink()):
-        for env in sorted(e for e in project.iterdir() if e.is_dir() and not e.is_symlink()):
-            for slot in sorted(env.iterdir()):
+
+    def listed(folder: pathlib.Path) -> list[pathlib.Path]:
+        try:
+            return sorted(folder.iterdir())
+        except OSError as exc:
+            degraded.append({"source": "vault", "code": "unreadable",
+                             "reason": f"a vault folder cannot be listed ({type(exc).__name__})",
+                             "effect": "the slots under it are missing from this answer"})
+            return []
+    for project in (p for p in listed(root) if p.is_dir() and not p.is_symlink()):
+        for env in (e for e in listed(project) if e.is_dir() and not e.is_symlink()):
+            for slot in listed(env):
                 if (slot.is_file() and not slot.name.startswith(".") and ".retired-" not in slot.name
                         and not slot.name.endswith((".meta.json", ".tmp"))):
                     out.append((project.name, env.name, slot.name))
@@ -255,14 +270,8 @@ def issuers(degraded: list, cloudflare_accounts: dict[str, str] | None = None,
     names = cloudflare_accounts or {}
     unresolved: set[str] = set()
     recorded = set(out)
-    for row in _movements(degraded):
-        if row.get("tool") == "vault.py" and row.get("event") in ("put", "rotate"):
-            # A value put after the door delivered it is somebody else's: the door's row no longer says who
-            # issued it. The door's own delivery is journalled before its row, so it never undoes that row.
-            one = str(row.get("secret") or "")
-            if out.get(one, {}).get("provider") == "cloudflare":
-                del out[one]
-            continue
+    moves = _movements(degraded)
+    for row in moves:
         if row.get("tool") != "cloudflare.py" or row.get("event") not in ("issue", "rotate"):
             continue
         slot = str(row.get("secret") or "")
@@ -282,6 +291,26 @@ def issuers(degraded: list, cloudflare_accounts: dict[str, str] | None = None,
                     out[one] = who
         elif slot not in recorded:
             out[slot] = who
+    # A VALUE PUT BY HAND AFTER THE DOOR DELIVERED IT is somebody else's, whichever door it was: every door
+    # journals its own issue or rotate row after its delivery (the vault's own `put` line comes first), so a put
+    # or rotate by anything but a door (`vault.py`, the secret prompt) later than the door's last row for a slot
+    # means the door no longer says who issued it.
+    door_at: dict[str, int] = {}
+    hand_at: dict[str, int] = {}
+    for i, row in enumerate(moves):
+        tool, event, secret = row.get("tool"), row.get("event"), str(row.get("secret") or "")
+        if event in ("put", "rotate") and tool not in DOOR_TOOLS:
+            hand_at[secret] = i                                  # `vault.py`, or the secret prompt a person typed into
+        elif tool in DOOR_TOOLS and event in ("issue", "rotate"):
+            to = str(row.get("to") or "")
+            target = to[len("vault:"):] if tool == "openrouter.py" and to.startswith("vault:") else secret
+            hit = ([one for one in slots or [] if one.startswith(target[:-1])] if target.endswith("_*")
+                   else [target])
+            for one in hit:
+                door_at[one] = i
+    for one in list(out):
+        if one in door_at and hand_at.get(one, -1) > door_at[one]:
+            del out[one]
     for acct in sorted(unresolved):
         degraded.append({"source": "cloudflare:journal", "code": "unresolved",
                          "reason": f"the movements journal names a Cloudflare account {acct!r} that no Cloudflare "
@@ -294,8 +323,8 @@ def cloudflare_names(cf: dict | None, degraded: list) -> dict[str, str]:
     """Cloudflare account name (lower case) -> its id, from the scan's account rows and every admin
     stash's record: the movements journal names an account by name, and a rule names it by id."""
     out: dict[str, str] = {}
-    for t in (cf or {}).get("accounts") or []:
-        if isinstance(t, dict) and t.get("account_id") and t.get("name"):
+    for t in _rows(cf, "accounts"):
+        if t.get("account_id") and t.get("name"):
             out.setdefault(str(t["name"]).lower(), str(t["account_id"]))
     for label in _labels(_secret_store() / DOORS["cloudflare"], degraded, "cloudflare:stash"):
         for a_ in _stash_accounts(_stash_meta("cloudflare", label, degraded)):
@@ -349,7 +378,7 @@ def accounts() -> dict:
 
     # Repository owners: every owner a project's repositories name, and what the GitHub scan reaches.
     pdoc = _registry("projects.json", degraded, "no project is counted under any account")
-    projects = [p for p in (pdoc or {}).get("projects") or [] if isinstance(p, dict) and p.get("id")]
+    projects = _project_rows(pdoc)
     rdoc = _registry("repositories.json", degraded, "a repository owner's host is not known; GitHub is assumed")
     hosts: dict[str, set[str]] = {}
     names: dict[str, str] = {}
@@ -392,14 +421,14 @@ def accounts() -> dict:
 
     # DigitalOcean: teams the collector measured, teams whose token the door stashed, contexts it did not.
     do = _quiet("digitalocean-account.json")
-    do_keys = organizations.account_keys("digitalocean", (do or {}).get("accounts") or [])
-    for t in (do or {}).get("accounts") or []:
-        if not isinstance(t, dict) or not t.get("id"):
+    do_keys = organizations.account_keys("digitalocean", _rows(do, "accounts"))
+    for t in _rows(do, "accounts"):
+        if not isinstance(t.get("id"), str):
             continue
         acc.add(t.get("id"), "digitalocean", "team", t.get("name") or t.get("label") or "?",
                       do_keys.get(t.get("id")) or [], "digitalocean", connected=True,
                       via="registry/digitalocean-account.json", measured=(do or {}).get("scanned_on"))
-    for r in (do or {}).get("resources") or []:
+    for r in _rows(do, "resources"):
         if r.get("account_ref") in acc.rows:
             acc.rows[r["account_ref"]]["resources"] += 1
             if r.get("project"):
@@ -425,7 +454,7 @@ def accounts() -> dict:
             ident = f"digitalocean:doctl:{shown}" if shown == c["context"] else f"digitalocean:doctl:#{i + 1}"
             row = acc.add(ident, "digitalocean", "doctl-context", shown, [],
                           "digitalocean", connected=False, via="doctl config")
-            row["decision"] = {"reason": "seen through doctl, no token stashed for its team (team unknown offline)",
+            row["decision"] = {"reason": "seen through doctl: its token is not a stashed one, so its team is unknown offline",
                                "command": None if shown != c["context"] else
                                f"python \"$(project-observatory full-path)/tools/digitalocean.py\" stash --from-doctl "
                                f"{_quote(c['context'])}"}
@@ -438,13 +467,13 @@ def accounts() -> dict:
     cf = _quiet("cloudflare-account.json")
     _passed_on("cloudflare", cf, degraded)
     cf_names = cloudflare_names(cf, degraded)
-    for t in (cf or {}).get("accounts") or []:
-        if not isinstance(t, dict) or not t.get("id"):
+    for t in _rows(cf, "accounts"):
+        if not isinstance(t.get("id"), str):
             continue
         acc.add(t.get("id"), "cloudflare", "account", t.get("name") or t.get("label") or "?",
                 [str(t["account_id"])] if t.get("account_id") else [], "cloudflare", connected=True,
                 via="registry/cloudflare-account.json", measured=(cf or {}).get("scanned_on"))
-    for r in (cf or {}).get("resources") or []:
+    for r in _rows(cf, "resources"):
         if r.get("account_ref") in acc.rows:
             acc.rows[r["account_ref"]]["resources"] += 1
             if r.get("project"):
@@ -461,9 +490,7 @@ def accounts() -> dict:
     hk = _quiet("heroku-apps.json")
     _passed_on("heroku", hk, degraded)
     hteams = {str(t) for t in (hk or {}).get("teams") or [] if isinstance(t, str)}
-    for app in (hk or {}).get("apps") or []:
-        if not isinstance(app, dict):
-            continue
+    for app in _rows(hk, "apps"):
         team = app.get("team")
         ident = f"heroku:team:{team}" if team and team != "personal" else "heroku:user"
         row = acc.add(ident, "heroku", "team" if ident != "heroku:user" else "user",
@@ -507,7 +534,7 @@ def accounts() -> dict:
     # whose own token is stashed is already listed above. The Heroku user is the one exception, reached through
     # the Heroku admin token whenever one is stashed.
     do_by_uuid = {str(t["team_uuid"]): do_keys.get(t.get("id")) or [str(t["team_uuid"])]
-                  for t in (do or {}).get("accounts") or [] if isinstance(t, dict) and t.get("team_uuid")}
+                  for t in _rows(do, "accounts") if t.get("team_uuid")}
     for slot, who in sorted(issuers(degraded, cf_names, slots, do_by_uuid).items()):
         if who["provider"] == "openrouter" or slot not in slot_set:
             continue                                            # counted from the ledger above; or no slot now
@@ -544,12 +571,37 @@ def accounts() -> dict:
             "problems": problems, "degraded": degraded}
 
 
+#: The doors whose journal rows name the slot they delivered to.
+DOOR_TOOLS = ("openrouter.py", "heroku.py", "digitalocean.py", "cloudflare.py")
 #: How each door stashes the token that connects an account.
 STASH = {
     "digitalocean": 'python "$(project-observatory full-path)/tools/digitalocean.py" stash < token-file',
     "cloudflare": 'python "$(project-observatory full-path)/tools/cloudflare.py" stash < token-file',
     "heroku": 'heroku auth:token | python "$(project-observatory full-path)/tools/heroku.py" stash',
 }
+
+
+class _NoDestinations:
+    """For `organizations.reading` where only the state is wanted: no organization's destinations are read,
+    so a hand-edited `figma` or `label` cannot fail a view that never shows them."""
+
+    @staticmethod
+    def destinations(_organization):
+        return {}
+
+
+_NO_DESTINATIONS = _NoDestinations()
+
+
+def _project_rows(doc: dict | None) -> list[dict]:
+    """The registry's project rows that can be read: an object with a string id."""
+    return [p for p in (doc or {}).get("projects") or [] if isinstance(p, dict) and isinstance(p.get("id"), str)]
+
+
+def _rows(doc: dict | None, key: str) -> list[dict]:
+    """A registry document's list of objects; anything else in it is skipped, never fails the view."""
+    value = (doc or {}).get(key) if isinstance(doc, dict) else None
+    return [x for x in value if isinstance(x, dict)] if isinstance(value, list) else []
 
 
 def _quiet(name: str) -> dict | None:
@@ -648,7 +700,7 @@ def _decide(row: dict, a: "organizations.Assigner", default: str | None, estate:
         out.update(organization=None, source="none", why=why)
         row.setdefault("decision", {"reason": why + ": say which organization it belongs to with a rule in "
                                                     "config/organizations.json; until then it decides no project",
-                                    "command": ACCOUNTS_CMD})
+                                    "command": None})
     out["decision"] = row.get("decision")
     return out
 
@@ -656,12 +708,17 @@ def _decide(row: dict, a: "organizations.Assigner", default: str | None, estate:
 def _groups(a, default: str, rows: list[dict], projects: list[dict]) -> list[dict]:
     """Organizations in display order: the default first, then the others by name, then Not ours. An account
     that needs a decision is listed under `needsDecision`, not in a group, so it appears exactly once."""
-    names = ([default] if default else []) + sorted(n for n in (a.orgs if a.active else {}) if n != default) + [NOT_OURS]
+    names = ([default] if default else []) + sorted(n for n in (a.orgs if a.active else {})
+                                                    if n not in (default, NOT_OURS)) + [NOT_OURS]
     out = []
     for name in names:
         org = (a.orgs.get(name) or {}) if a.active else {}
+        if not isinstance(org, dict):
+            org = {}
         members = [r["id"] for r in rows if r["organization"] == name and not r.get("decision")]
-        held = sorted(p["id"] for p in projects if p.get("organization") == name)
+        # Without organizations.json the registry carries no organization: a group holds its accounts' projects.
+        held = (sorted(p["id"] for p in projects if p.get("organization") == name) if a.active else
+                sorted({pid for r in rows if r["id"] in members for pid in r["holds"]["projects"]}))
         if name == NOT_OURS and not members and not held:
             continue
         out.append({"name": name,
@@ -700,26 +757,22 @@ def keys(org: str) -> dict:
                                               "they are; name the organization they would go to", ACCOUNTS_CMD)
     degraded: list[dict] = []
     pdoc = _registry("projects.json", degraded, "no project is known to be the organization's, so no key is in scope")
-    projects = [p for p in (pdoc or {}).get("projects") or [] if isinstance(p, dict) and p.get("id")]
-    do = _registry("digitalocean-account.json", [], "")
-    cf = _quiet("cloudflare-account.json")
-    _passed_on("cloudflare", cf, degraded)
-    hk = _quiet("heroku-apps.json")
-    _passed_on("heroku", hk, degraded)
-    claims = organizations.project_accounts(do, cf, (hk or {}).get("apps") or [])
+    projects = _project_rows(pdoc)
+    do, cf, hk = _quiet("digitalocean-account.json"), _quiet("cloudflare-account.json"), _quiet("heroku-apps.json")
+    claims = organizations.project_accounts(do, cf, [x for x in (hk or {}).get("apps") or [] if isinstance(x, dict)])
     for provider, doc_ in (("digitalocean", do), ("cloudflare", cf), ("heroku", hk)):
         _passed_on(provider, doc_, degraded)
     scope: dict[str, dict] = {}
     for p in projects:
-        r = organizations.reading(p, a)
+        r = organizations.reading(p, _NO_DESTINATIONS)
         if r["state"] == "decided" and r["organization"] == org:
             scope[p["id"]] = {"side": "organization", "why": f"the project is {org}'s ({r['source']}: {r['why']})"}
         elif p.get("organization_source") == "conflict" and org in a.hits(p, claims.get(p["id"])):
             scope[p["id"]] = {"side": "conflict", "why": f"the project's rules disagree ({p.get('organization_why')})"}
     slots = _slots(degraded)
-    do_keys = organizations.account_keys("digitalocean", (do or {}).get("accounts") or [])
+    do_keys = organizations.account_keys("digitalocean", _rows(do, "accounts"))
     do_by_uuid = {str(t["team_uuid"]): do_keys.get(t.get("id")) or [str(t["team_uuid"])]
-                  for t in (do or {}).get("accounts") or [] if isinstance(t, dict) and t.get("team_uuid")}
+                  for t in _rows(do, "accounts") if t.get("team_uuid")}
     who = issuers(degraded, cloudflare_names(cf, degraded), ["/".join(x) for x in slots], do_by_uuid)
     resolve = _vault_resolver(projects)
     rows = []
@@ -747,8 +800,7 @@ def keys(org: str) -> dict:
             row["selected"] = False
         rows.append(row)
     heroku_teams = sorted({str(t) for t in (hk or {}).get("teams") or [] if isinstance(t, str)}
-                          | {str(x.get("team")) for x in (hk or {}).get("apps") or []
-                             if isinstance(x, dict) and x.get("team")} - {"personal"})
+                          | {str(x.get("team")) for x in _rows(hk, "apps") if x.get("team")} - {"personal"})
     fixed = _not_movable(org, a, degraded, do_by_uuid, heroku_teams)
     degraded = _once(degraded)
     counts = {c: sum(1 for r in rows if r["class"] == c) for c in ("organization", "personal", "ambiguous")}
@@ -799,7 +851,8 @@ def _not_movable(org: str, a, degraded: list, do_by_uuid: dict[str, list[str]] |
     """ORG-R07: the admin and provisioning keys a door keeps. Never handed over: the organization's space
     stashes its own, then a personal copy for an account of the organization is revoked. Each key is read
     against every account it reaches, named as `accounts()` names them: a DigitalOcean team by what a rule may
-    name it by (`do_by_uuid`), the Heroku admin token by the user and the teams the Heroku scan saw through it."""
+    name it by (`do_by_uuid`), the Heroku admin token by the user and the teams the Heroku scan saw (the scan reads
+    with the CLI's own login, `collectors/scan_heroku.py`; the admin token is taken to reach the same teams)."""
     out = []
     for provider, folder in DOORS.items():
         for label in _labels(_secret_store() / folder, degraded, f"{provider}:stash"):
