@@ -3,7 +3,12 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.35.8 (2026-11-09)
+
+The wiki gains a readable page of the installed agents beside its JSON. Organizations can match provider accounts
+(DigitalOcean and Heroku teams, Cloudflare accounts), and doctor says when DigitalOcean team tokens are stashed but
+the integration is off. An organization certificate is rotated before anyone is told it is expiring, and installing
+the tick reloads it without racing launchd.
 
 ### Added
 
