@@ -954,8 +954,8 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "4a89d5f50e3502a0bb4c0b9bc5d332f277d9006d51f124e5e34d528e342c091e",
-      "bytes": 121368,
+      "export_sha256": "937dcfb391bd81f695fba13dddb4198800f4b573a2e9130ae6a621af6b94e59d",
+      "bytes": 121509,
       "upstream_modified": true
     },
     {
@@ -6297,8 +6297,8 @@
       "path": "tests/test_space_daemons.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "483983c857a995207d085753ed753146b1ff3c1d0dbf9199e13a86fecf271f25",
-      "bytes": 88686
+      "export_sha256": "50cd6bf5e38b71fe9a5451fb0655a1eacba91f40df46efefcdca5ec0a5d8ca58",
+      "bytes": 89698
     },
     {
       "path": "tests/test_spend.py",
@@ -7491,8 +7491,8 @@
       "path": "tools/space_daemons.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6f8657210c11de5f2bb322343c68fa2dbd7e37cc94f173eef20cddc3204c68a8",
-      "bytes": 94078
+      "export_sha256": "c2c851b5f453299ca4307b4fdffb1c8960d5d1595ffe6999e9b332379eef80f0",
+      "bytes": 95044
     },
     {
       "path": "tools/spend.py",

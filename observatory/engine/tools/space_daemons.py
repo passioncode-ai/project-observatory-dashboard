@@ -63,10 +63,12 @@ stops nothing), writes, boots the old daemon out, waits the same way, bootstraps
 answers 5, 37 or 125, up to BOOTSTRAP_ATTEMPTS); when the new one does not load it puts the previous daemon back
 and loads it, and when the old one does not stop in time it loads nothing and puts the previous file back, saying
 which in `put_back`. Every result of apply, replace and remove carries `steps`, one line per step with its
-outcome (a refusal before anything is read, exit 2, is an error instead). launchd is believed only when it answers:
-a `launchctl print` that times out or fails is `launchd_unknown` and changes nothing, and a loaded label is booted out
-or counted as loaded by this tool only when launchd names this tool's own plist as its path. `apply` over its own loaded daemon replaces it the same way when the definition changed, and leaves it
-alone (`unchanged`) when it did not; `replace` reloads it even then.
+outcome (a refusal before anything is read, exit 2, is an error instead). launchd is believed only when it
+answers: a `launchctl print` that times out or fails is `launchd_unknown` and changes nothing, and a loaded label
+is booted out or counted as loaded by this tool only when launchd names this tool's own plist as its path. An
+apply or replace interrupted while it waits puts the previous file and registry entry back before it exits.
+`apply` over its own loaded daemon replaces it the same way when the definition changed, and leaves it alone
+(`unchanged`) when it did not; `replace` reloads it even then.
 
 TRUSTED OWNERS (1.1.0). A program path normally belongs to root or the account. Where Homebrew's prefix is
 owned by the host's admin account and group-writable by `admin`, the administrator lists those in the
@@ -1468,8 +1470,9 @@ def _install_one(system, account, definition, entries, holders=None, force=False
         else:
             state, where = system.state(label)
             if state == "loaded" and where == target:
-                note = ("the previous daemon file is back, and system/%s is loaded from it though the bootstrap "
-                        "failed: `replace` loads the file again" % label)
+                note = ("the previous daemon file is back, but system/%s was loaded from that path by this run's "
+                        "bootstrap though it answered a failure, so it may run the definition this run wrote: "
+                        "`replace` loads the previous file again" % label)
             elif state != "gone":
                 note = ("the previous daemon file is back; system/%s is %s and was left alone: `status --user %s` "
                         "says what runs" % (label, _described(state, where), account.name))
@@ -1482,6 +1485,20 @@ def _install_one(system, account, definition, entries, holders=None, force=False
         result.update(outcome="failed", problems=[problem], put_back=note)
         return result
 
+    try:
+        return _swap(system, account, label, target, previous, loaded, steps, result, restore_files, put_back,
+                     entries, others, new_entry)
+    except BaseException:
+        # Interrupted (Ctrl-C during a wait of up to 300 s) or failed: the files go back to what launchd last
+        # loaded, so the next apply never reads the new definition as already running.
+        if result.get("outcome") != "loaded":
+            restore_files()
+        raise
+
+
+def _swap(system, account, label, target, previous, loaded, steps, result, restore_files, put_back, entries, others,
+          new_entry):
+    """The second half of `_install_one`, once the new file is written: stop the old daemon, wait, load the new one."""
     if loaded:
         seconds = bootout_wait_seconds(_plist_doc(target) if previous is None else plistlib.loads(previous))
         gone, code, tail, waited = system.stop(label, seconds)

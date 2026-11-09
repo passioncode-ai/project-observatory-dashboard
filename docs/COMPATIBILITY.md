@@ -633,11 +633,12 @@ information. Until then the 1.1.0 copy keeps working as before, without `replace
 - `replace --user ACCOUNT --label LABEL` is new (root, isolated mode, the root-owned copy, as `apply`): the plan (a
   definition the rules refuse is `skipped` and stops nothing; a label with no definition is `not-found`), then
   `write`, `bootout`, `wait` (the same bound), `bootstrap` (again while launchd answers 5, 37 or 125, up to five
-  attempts, as the engine's own jobs since OBS-410; 125 with the label loaded counts as loaded). When the new daemon
+  attempts, as the engine's own jobs since OBS-410; 125 counts as loaded when launchd names this tool's plist as the label's path). When the new daemon
   does not load, the previous file and registry entry go back and the previous daemon is loaded again, and
   `put_back` says which of these held (a label with no previous daemon is left with no file, no entry and, if the
   refused bootstrap loaded it after all, booted out); when the old daemon does not stop in time, nothing new is
-  loaded and the previous file goes back. It reloads even when nothing changed, and applies a label never applied. Its answer is
+  loaded and the previous file goes back. Interrupted while it waits (Ctrl-C), it puts the previous file and registry entry back before it exits. It
+  reloads even when nothing changed, and applies a label never applied. Its answer is
   `apply`'s, with `command` `replace`.
 - `apply` over a daemon of its own that is loaded replaces it the same way when the definition changed (1.1.0 sent
   the bootstrap while the bootout was still finishing, and then put the old file back), and leaves it running with

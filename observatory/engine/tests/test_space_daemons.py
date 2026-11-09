@@ -1306,6 +1306,26 @@ class Replacing(Base):
         self.assertNotIn("bootout", [c[0] for c in self.launchctl.calls[calls:]])
         self.assertTrue(self.daemon().is_file())
 
+    def test_an_interrupted_replace_puts_the_previous_file_back_so_apply_does_not_read_it_as_running(self):
+        before = self.applied()
+        self.define(RunAtLoad=True)
+        self.launchctl.linger[LABEL] = None
+        system = self.system()
+
+        def interrupted(seconds):
+            raise KeyboardInterrupt
+        system.sleep = interrupted
+        with self.assertRaises(KeyboardInterrupt):
+            sd.replace(system, self.account, LABEL)
+        self.assertEqual(self.daemon().read_bytes(), before)
+        self.assertEqual(self.registry()["entries"][0]["writtenSha256"], hashlib.sha256(before).hexdigest())
+        self.launchctl.linger.pop(LABEL)
+        self.launchctl.stopping.clear()
+        self.launchctl.loaded.discard(LABEL)
+        row = sd.apply(self.system(), self.account)["results"][0]
+        self.assertEqual(row["outcome"], "loaded", "the new definition was never taken as already running")
+        self.assertTrue(plistlib.loads(self.daemon().read_bytes())["RunAtLoad"])
+
     def test_a_label_loaded_with_no_path_is_never_booted_out(self):
         self.applied()
         del self.launchctl.paths[LABEL]
