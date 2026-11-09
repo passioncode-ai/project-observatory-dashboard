@@ -110,8 +110,9 @@ def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
 
     `limit` pages every row (a machine can hold over a thousand skills and a plugin row per project install; the MCP
     tool answers 100 rows at a time): one window over the findings, then each space's plugins, then its skills;
-    `cursor` is the offset `page.nextCursor` gave; `counts` are always whole. A cursor that is not one this function
-    gave is answered with `degraded` code `invalid-cursor` and the first page."""
+    `cursor` is what `page.nextCursor` gave (`offset@stamp`); `counts` are always whole. `degraded` code
+    `invalid-cursor` answers a cursor of an earlier scan or a malformed one (with the first page) and one past the end
+    (with an empty last page)."""
     doc, problem = _load("harness.json", "scan-harness")
     if problem:
         if problem["code"] == "not-surveyed":

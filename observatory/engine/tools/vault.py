@@ -895,21 +895,49 @@ def _target_store(text: str) -> pathlib.Path:
     if any((store / name).exists() for name in VAULT_MARKERS):
         raise CopyRefused(f"{shown_path(store)} is a vault folder itself (it holds the journal); name the store "
                           f"that holds it, {shown_path(store.parent)}", "target-is-vault-folder")
-    # A store inside a Git working tree is one `git add -A` away from publishing its values, the reason `inject`
-    # refuses a `.env` that is not ignored.
-    probe = store if store.is_dir() else store.parent
+    _refuse_a_work_tree(store if store.is_dir() else store.parent, store)
+    # The home folder, or a folder holding it, is no store: every project folder below it would sit inside it.
     try:
-        inside = safe_git.run(["rev-parse", "--is-inside-work-tree"], cwd=probe, timeout=60)
-    except subprocess.TimeoutExpired:
-        # A git that does not answer cannot say the store is outside a working tree: refused, the safe side.
-        raise CopyRefused("git did not answer in time, so whether the target store sits in a Git working tree is "
-                          "unknown; try again", "target-in-repository") from None
-    except (OSError, subprocess.SubprocessError):
-        inside = None   # no git to ask: no working tree that git could publish from
-    if inside is not None and inside.returncode == 0 and (inside.stdout or "").strip() == "true":
-        raise CopyRefused(f"{shown_path(store)} is inside a Git working tree; keep a secret store outside any "
-                          f"repository", "target-in-repository")
+        home = pathlib.Path.home().resolve()
+    except (RuntimeError, OSError):
+        home = None
+    if home is not None and (store == home or store in home.parents):
+        raise CopyRefused(f"{shown_path(store)} is the home folder or holds it; name a store folder of its own",
+                          "target-too-broad")
+    vault_dir = store / "projects"
+    # An existing `projects/` that is not a vault (a folder of code checkouts) is never written into.
+    if vault_dir.is_dir() and not any((vault_dir / name).exists() for name in VAULT_MARKERS) \
+            and any(vault_dir.iterdir()):
+        raise CopyRefused(f"{shown_path(vault_dir)} holds files but is not a vault (no movement journal, leak register "
+                          f"or lock); name a store whose projects/ is a vault, or a new one", "target-not-a-vault")
     return store
+
+
+def _refuse_a_work_tree(folder: pathlib.Path, store: pathlib.Path) -> None:
+    """Refuse when `folder` sits inside a Git working tree: a value written there is one `git add -A` away from
+    being published, the reason `inject` refuses a `.env` that is not ignored. Asked of git; where git cannot run
+    there is no working tree it could publish from, and a git that does not answer in time is a refusal."""
+    try:
+        inside = safe_git.run(["rev-parse", "--is-inside-work-tree"], cwd=folder, timeout=60)
+    except subprocess.TimeoutExpired:
+        raise CopyRefused("git did not answer in time, so whether the target sits in a Git working tree is unknown; "
+                          "try again", "target-in-repository") from None
+    except (OSError, subprocess.SubprocessError):
+        return
+    if inside.returncode == 0 and (inside.stdout or "").strip() == "true":
+        raise CopyRefused(f"the target in {shown_path(store)} is inside a Git working tree; keep a secret store outside "
+                          f"any repository", "target-in-repository")
+
+
+def _deepest_existing(path: pathlib.Path, root: pathlib.Path) -> pathlib.Path:
+    """The deepest folder of `path`'s chain, down from `root`, that exists now."""
+    for candidate in (path, *path.parents):
+        if candidate == root or root in candidate.parents:
+            if candidate.is_dir():
+                return candidate
+        else:
+            break
+    return root
 
 
 def _writable_by_this_account(store: pathlib.Path) -> None:
@@ -1101,6 +1129,9 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
 
     try:
         checked(source_value())
+        if target_vault.is_dir():
+            # A Git working tree below `projects/` (a project folder that is a checkout) is refused like one around it.
+            _refuse_a_work_tree(_deepest_existing(t_slot.parent, target_vault), store)
     except (VaultBoundaryError, ValueError) as exc:
         raise target_side(exc) from None
     except OSError as exc:
@@ -1151,6 +1182,7 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
                 leak_check()
                 value = source_value()
                 outcome = checked(value)
+                _refuse_a_work_tree(_deepest_existing(t_slot.parent, target_vault), store)
                 digest_from = keyed(value)
                 if outcome != "unchanged":
                     try:
@@ -1159,7 +1191,8 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
                         raise CopyRefused(f"{src_label}'s metadata cannot be read ({exc})", "source-unreadable") from None
                     except ValueError:
                         raise CopyRefused(f"{src_label}'s metadata is not UTF-8 text", "source-unreadable") from None
-                    meta = _read_meta(t_slot)
+                    # A metadata file left without its slot describes no value: a new value starts from nothing.
+                    meta = _read_meta(t_slot) if outcome == "replaced" else {}
                     written = True
                     if outcome == "replaced":
                         old = _read_private(t_slot).strip()

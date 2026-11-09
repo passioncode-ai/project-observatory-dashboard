@@ -19,6 +19,10 @@ TOOLS = ROOT / "tools"
 sys.path.insert(0, str(ROOT / "tests"))
 import tmp  # noqa: E402,F401  the sandbox defaults for a suite run by hand
 
+
+def pathlib_home() -> Path:
+    return Path.home().resolve()
+
 VALUE_A = "synthetic-copy-value-alpha-0001"
 VALUE_B = "synthetic-copy-value-bravo-0002"
 
@@ -457,6 +461,7 @@ class Copy(unittest.TestCase):
     def test_a_directory_at_the_target_slot_is_target_unsafe(self):
         self.put()
         (self.target / "projects/alpha-web/prod/API_TOKEN").mkdir(parents=True)
+        (self.target / "projects/.vault.lock").write_text("")   # a vault, so the folder is judged as its slot
         code, refused = self.copy()
         self.assertEqual((code, refused["code"]), (2, "target-unsafe"))
 
@@ -518,6 +523,39 @@ class Copy(unittest.TestCase):
         self.put()
         code, receipt = self.copy("--to-slot", "OTHER_TOKEN")
         self.assertEqual((code, receipt["to"]["slot"]), (0, "alpha-web/prod/OTHER_TOKEN"))
+
+    def test_a_repository_below_projects_the_home_folder_and_a_projects_folder_of_code_are_refused(self):
+        self.put()
+        sys.path.insert(0, str(ROOT / "tests"))
+        from git_env import git_env
+        vault_dir = self.target / "projects"
+        (vault_dir / "alpha-web").mkdir(parents=True)
+        (vault_dir / ".vault.lock").write_text("")
+        subprocess.run(["git", "init", "-q", str(vault_dir / "alpha-web")], check=True, env=git_env(),
+                       capture_output=True)
+        code, refused = self.copy()
+        self.assertEqual((code, refused["code"]), (2, "target-in-repository"))
+        self.assertFalse((vault_dir / "alpha-web" / "prod").exists())
+        code_store = self.base / "code"
+        (code_store / "projects" / "some-checkout").mkdir(parents=True)
+        p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", str(code_store), "--json")
+        self.assertEqual(json.loads(p.stdout)["code"], "target-not-a-vault")
+        p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", str(pathlib_home()), "--json")
+        self.assertIn(json.loads(p.stdout)["code"], ("target-too-broad", "target-other-account", "same-store",
+                                                     "nested-stores", "target-in-repository"))
+
+    def test_a_metadata_file_left_without_its_slot_is_not_inherited(self):
+        self.put()
+        slot_meta = self.target / "projects/alpha-web/prod/API_TOKEN.meta.json"
+        slot_meta.parent.mkdir(parents=True)
+        (self.target / "projects/.vault.lock").write_text("")
+        slot_meta.write_text(json.dumps({"header_for": "https://old.example.com", "rotations": 7}))
+        if os.name != "nt":
+            slot_meta.chmod(0o600)
+        self.assertEqual(self.copy()[0], 0)
+        meta = json.loads(slot_meta.read_text())
+        self.assertNotIn("header_for", meta)
+        self.assertNotIn("rotations", meta)
 
     def test_a_human_refusal_names_its_code(self):
         self.put()

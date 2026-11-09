@@ -3487,7 +3487,7 @@ PROJECT is used as typed, not normalised through this workspace's registry). A
 target slot that holds another value is refused (`target-slot-filled`) unless `--replace`, which archives
 the old value there as `rotate` does; one that already holds this value is left alone (`unchanged`). The
 value's expiry and provenance travel with it, and its metadata gains `copied_from` (the source store, slot and
-time); a header binding does not.
+time); a header binding does not, and a metadata file left in the target without its slot is not inherited.
 
 The receipt names the slot, both stores and two keyed digests (HMAC-SHA-256): of what was read here and
 of what the target holds after the write. They are made under your store's estate key when it has one,
@@ -3502,8 +3502,10 @@ files, or the slot does not hold one single-line value),
 `source-has-open-leak` (rotate and settle first), `target-not-absolute`, `target-not-plain` (`.` or `..`
 in the path), `target-link` (the store or its `projects/` is a link), `target-parent-missing`,
 `target-not-folder`, `target-is-vault-folder` (name the store that holds the vault),
-`target-in-repository` (the store would sit in a Git working tree, or git did not answer in time; asked of
-git, so it is not checked where git cannot run), `same-store` (another spelling of this
+`target-in-repository` (the store, or the folder below `projects/` the slot goes into, would sit in a Git
+working tree, or git did not answer in time; asked of git, so it is not checked where git cannot run),
+`target-too-broad` (the home folder, or a folder holding it), `target-not-a-vault` (an existing `projects/`
+that holds files but no movement journal, leak register or lock: a folder of code, not a vault), `same-store` (another spelling of this
 store included), `nested-stores` (one store inside the other, your store or its vault folder included),
 `target-other-account` (a store another
 account owns: a value written from here would be unreadable there, so another OS account's store is not

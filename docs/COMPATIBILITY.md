@@ -640,7 +640,8 @@ was (a lock file the copy made in an existing vault is kept); a failed read or w
 `filesystem-failed`, exit 1; a digest mismatch prints the receipt with `digest.match: false` and exits 1. The codes:
 `invalid-slot` (the source's names), `source-empty`, `source-unreadable`, `source-has-open-leak`,
 `target-not-absolute`, `target-not-plain`, `target-link`, `target-parent-missing`, `target-not-folder`,
-`target-is-vault-folder`, `target-in-repository`, `same-store`, `nested-stores`, `target-other-account` (the folder's uid against the
+`target-is-vault-folder`, `target-in-repository` (also for a working tree below `projects/`), `target-too-broad`,
+`target-not-a-vault`, `same-store`, `nested-stores`, `target-other-account` (the folder's uid against the
 effective uid on POSIX; on Windows its owner SID must be this account, SYSTEM or Administrators, so an
 administrator's copy does not rewrite another person's store to owner-only, a store an elevated process created
 counting as this account's), `target-not-writable`, `target-unsafe`, `target-slot-invalid`, `target-slot-filled`,
@@ -680,7 +681,8 @@ confirms, OBS-491), `version`,
 `unreadable`; `claude:installed_plugins.json`, `claude:installed_plugins.json:<plugin>`, `claude:settings.json`, a
 settings label above,
 `claude:known_marketplaces.json:<name>` and `claude:marketplace:<name>`, code `unrecognised-shape`;
-`codex:plugins-cache:<marketplace>:<plugin>`, code `ambiguous` (several unnamed folders, so the loaded copy is not
+`codex:plugins-cache:<marketplace>`, code `unrecognised-shape` too; `codex:plugins-cache:<marketplace>:<plugin>`, code
+`ambiguous` (several unnamed folders, so the loaded copy is not
 known); `inventory`,
 code `failed`, when the inventory itself failed and the rest of the scan was kept). A plugin's `scope` is the word
 Claude Code recorded (`user`, `project`, `local`, or another such as `managed`, whose `enabled` is null). `latest`
@@ -694,7 +696,7 @@ reads a scan without it as `not-surveyed` until the next scan. `observatory_mach
 (answer `{measuredAt, degraded, skills}`, `skills` holding `spaces`, `page` (`limit`, `cursor`, `nextCursor`, `order`,
 `total`), `counts`, `findings`, `open`, `degraded`) with two new optional arguments for that section, `limit`
 (1 to 100, default 100 rows of one window over the findings, then each space's plugins, then its skills; `total`
-counts those rows; a page also ends once its rows pass 40,000 characters of compact JSON, at least one row a page;
+counts those rows; a page also ends once its rows pass 40,000 characters of JSON as `json.dumps` writes them, at least one row a page;
 `counts` stay whole; a cursor is `offset@stamp` (the scan's time as digits), and one given for an
 earlier scan answers the first page of this one with `invalid-cursor`; a bare offset is accepted; a cursor past the
 end answers an empty last page; a skill's `name` is its
