@@ -691,11 +691,20 @@ def _folders(folder: Path, source: str, degraded: list[dict]) -> list[Path]:
         return []
 
 
+def _is_file(path: Path) -> bool:
+    """`Path.is_file()`, False also where a folder on the way cannot be searched (Python 3.11 and 3.12 raise there);
+    the folder that could not be listed is named by `_folders`, and an unreadable SKILL.md by `_skill_rows`."""
+    try:
+        return path.is_file()
+    except OSError:
+        return False
+
+
 def _skill_rows(folder: Path, agent: str, scope: str, extra: dict, seen: set[str],
                 degraded: list[dict]) -> list[dict]:
     rows = []
     label = f"skills:{agent}:{scope}" + (f":{extra.get('project') or extra.get('plugin')}" if extra else "")
-    for skill in [f / "SKILL.md" for f in _folders(folder, label, degraded) if (f / "SKILL.md").is_file()]:
+    for skill in [f / "SKILL.md" for f in _folders(folder, label, degraded) if _is_file(f / "SKILL.md")]:
         real = str(skill.parent.resolve())
         if real in seen:
             continue
@@ -803,13 +812,16 @@ def _claude_plugins(claude: Path, degraded: list[dict]) -> tuple[list[dict], lis
             # word and an unknown enabled state rather than being read against the user's settings.
             recorded = record.get("scope", "user")
             scope = recorded if isinstance(recorded, str) and re.fullmatch(r"[a-z][a-z-]{0,31}", recorded) else "other"
-            project, settings, label = None, user_settings, "claude:settings.json"
+            project, project_key, settings, label = None, None, user_settings, "claude:settings.json"
             if scope not in ("user", "project", "local"):
                 settings = None
             elif scope != "user":
                 where = record.get("projectPath")
                 folder = Path(where) if isinstance(where, str) and where and Path(where).is_absolute() else None
                 project = folder.name if folder and folder.name else None
+                # Two projects may share a folder name in two places; a short digest of the path tells their
+                # installs apart (a board subject, an ack) without the path itself.
+                project_key = hashlib.sha256(str(folder).encode("utf-8")).hexdigest()[:8] if project else None
                 if project is None:
                     settings = None
                 else:
@@ -830,9 +842,12 @@ def _claude_plugins(claude: Path, degraded: list[dict]) -> tuple[list[dict], lis
             # A marketplace that is a local folder serves its plugins in place, whatever their version says, so
             # nothing installed from it is behind.
             in_place = bool(info) and isinstance(info.get("source"), dict) and info["source"].get("source") == "directory"
+            if in_place:
+                latest = latest_from = None
             version = _plain_version(record.get("version"))
-            have, newest = version_key(version), (None if in_place else version_key(latest))
-            row = {"name": key, "agent": CLAUDE_CODE, "scope": scope, "project": project, "version": version,
+            have, newest = version_key(version), version_key(latest)
+            row = {"name": key, "agent": CLAUDE_CODE, "scope": scope, "project": project, "projectKey": project_key,
+                   "version": version,
                    "enabled": enabled_in(settings, key, label), "marketplace": market or None, "latest": latest,
                    "latestFrom": latest_from,
                    "marketplaceUpdated": info.get("lastUpdated") if info and isinstance(info.get("lastUpdated"), str)
@@ -841,16 +856,17 @@ def _claude_plugins(claude: Path, degraded: list[dict]) -> tuple[list[dict], lis
             rows.append(row)
             where = record.get("installPath")
             path = Path(where) if isinstance(where, str) and where else None
-            if row["enabled"] and path is not None and path.is_absolute() and path.is_dir():
+            if row["enabled"] and path is not None and path.is_absolute():
                 skills += _skill_rows(path / "skills", CLAUDE_CODE, "plugin", {"plugin": key}, seen, degraded)
     return rows, skills
 
 
-def _codex_plugins(home: Path, degraded: list[dict]) -> list[dict]:
+def _codex_plugins(home: Path, degraded: list[dict], skills: list[dict], seen: set[str]) -> list[dict]:
     """The plugins Codex keeps in its cache (`~/.codex/plugins/cache/<marketplace>/<plugin>/<version>/`): the
     newest version folder present, and whether `config.toml` enables it (`[plugins."<plugin>@<marketplace>"]`
     `enabled`); None when the config does not say. Codex keeps no local copy of a marketplace's catalogue the
-    inventory can read, so its newest published version is not known (`latest` null)."""
+    inventory can read, so its newest published version is not known (`latest` null). The skills of an enabled
+    plugin's version folder are added to `skills`, scope `plugin`."""
     cache = home / ".codex" / "plugins" / "cache"
     markets = [m for m in _folders(cache, "codex:plugins-cache", degraded) if not m.name.startswith(".")]
     if not markets:
@@ -870,7 +886,11 @@ def _codex_plugins(home: Path, degraded: list[dict]) -> list[dict]:
             key = f"{plugin.name}@{market.name}"
             entry = table.get(key) if isinstance(table.get(key), dict) else None
             enabled = entry.get("enabled") if entry and isinstance(entry.get("enabled"), bool) else None
-            rows.append({"name": key, "agent": CODEX, "scope": "user", "project": None, "version": version,
+            if enabled and version:
+                skills.extend(_skill_rows(plugin / version / "skills", CODEX, "plugin", {"plugin": key}, seen,
+                                          degraded))
+            rows.append({"name": key, "agent": CODEX, "scope": "user", "project": None, "projectKey": None,
+                         "version": version,
                          "enabled": None if config is None else enabled, "marketplace": market.name, "latest": None,
                          "latestFrom": None, "marketplaceUpdated": None, "behind": None})
     return rows
@@ -894,21 +914,23 @@ def inventory(home: Path, roots: list[Path]) -> dict:
     skills = _skill_rows(claude / "skills", CLAUDE_CODE, "user", {}, seen, degraded)
     for root in roots:
         for project in _folders(root, "projects-folder", degraded):
-            if (project / ".claude" / "skills").is_dir():
-                skills += _skill_rows(project / ".claude" / "skills", CLAUDE_CODE, "project",
-                                      {"project": project.name}, seen, degraded)
+            # Listed whatever it holds: a project without `.claude/skills` lists nothing, one whose folder cannot
+            # be searched is named in `degraded`.
+            skills += _skill_rows(project / ".claude" / "skills", CLAUDE_CODE, "project",
+                                  {"project": project.name}, seen, degraded)
     plugins, plugin_skills = _claude_plugins(claude, degraded)
     skills += plugin_skills
     codex_seen: set[str] = set()
     for folder in (home / ".codex" / "skills", home / ".agents" / "skills"):
         skills += _skill_rows(folder, CODEX, "user", {}, codex_seen, degraded)
-    plugins += _codex_plugins(home, degraded)
+    plugins += _codex_plugins(home, degraded, skills, codex_seen)
     findings = []
     for p in plugins:
         # A disabled install loads nothing, so a gap there harms nothing until it is enabled again.
-        if p["behind"] and p["enabled"] is not False:
+        if p["behind"] and p["enabled"] is not False and p["scope"] in ("user", "project", "local"):
             findings.append({"code": "plugin-behind", "severity": "info", "plugin": p["name"], "agent": p["agent"],
-                             "scope": p["scope"], "project": p["project"], "installed": p["version"],
+                             "scope": p["scope"], "project": p["project"], "projectKey": p.get("projectKey"),
+                             "installed": p["version"],
                              "latest": p["latest"], "marketplaceUpdated": p["marketplaceUpdated"],
                              # The command a person or an agent runs: a project or local install is updated with
                              # its own scope, from that project's folder (`project`).

@@ -1166,6 +1166,21 @@ class Skills(Base):
     def now() -> str:
         return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    def test_the_skills_come_a_page_at_a_time(self):
+        rows = [{"name": f"s{i:03}", "agent": "claude-code", "scope": "user", "version": None} for i in range(450)]
+        inventory = {**self.INVENTORY, "spaces": [{**self.INVENTORY["spaces"][0], "skills": rows}]}
+        self.harness({"generated_at": self.now(), "inventory": inventory})
+        first = self.server.observatory_machine(section="skills")["skills"]
+        self.assertEqual(len(first["spaces"][0]["skills"]), 200)
+        self.assertEqual((first["page"]["total"], first["page"]["nextCursor"]), (450, "200"))
+        self.assertEqual(first["counts"]["skills"], 450)
+        self.assertEqual(len(first["spaces"][0]["plugins"]), 1, "plugins stay whole")
+        last = self.server.observatory_machine(section="skills", cursor="400")["skills"]
+        self.assertEqual([r["name"] for r in last["spaces"][0]["skills"]][:1], ["s400"])
+        self.assertIsNone(last["page"]["nextCursor"])
+        bad = self.server.observatory_machine(section="skills", cursor="nope")
+        self.assertIn("invalid-cursor", {d["code"] for d in bad["degraded"]})
+
     def test_an_old_scan_is_named_stale(self):
         self.harness({"generated_at": "2026-01-03T00:00:00Z", "inventory": {**self.INVENTORY, "degraded": []}})
         out = self.server.observatory_machine(section="skills")

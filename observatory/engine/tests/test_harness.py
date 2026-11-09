@@ -641,6 +641,8 @@ class Inventory(unittest.TestCase):
         self.assertEqual((idle["enabled"], idle["behind"]), (False, True))
         self.assertEqual([(f["plugin"], f["scope"], f["project"], f["action"]) for f in inv["findings"]],
                          [("tool@family", "local", "alpha-web", "claude plugin update tool@family --scope local")])
+        self.assertRegex(inv["findings"][0]["projectKey"], r"^[0-9a-f]{8}$")
+        self.assertNotIn(str(self.projects), json.dumps(inv))
 
     def test_a_version_needs_its_dots_and_a_tie_picks_the_release(self):
         self.assertIsNone(self.mod.version_key("123456789012"), "a sha of digits is no version")
@@ -690,7 +692,8 @@ class Inventory(unittest.TestCase):
         write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
         inv = self.inventory()
         plugins = {p["name"]: p for p in inv["spaces"][0]["plugins"] if p["agent"] == "claude-code"}
-        self.assertIsNone(plugins["tool@family"]["behind"])
+        self.assertEqual((plugins["tool@family"]["latest"], plugins["tool@family"]["latestFrom"],
+                          plugins["tool@family"]["behind"]), (None, None, None), "served in place: no latest")
         self.assertEqual(inv["findings"], [])
         self.assertEqual((plugins["kit@family"]["project"], plugins["kit@family"]["enabled"]), (None, None))
 
@@ -719,6 +722,21 @@ class Inventory(unittest.TestCase):
         write_json(self.home / ".claude" / "settings.json", {"enabledPlugins": ["tool@family"]})
         tool = next(p for p in self.inventory()["spaces"][0]["plugins"] if p["name"] == "tool@family")
         self.assertIsNone(tool["enabled"])
+
+    def test_an_unknown_scope_behind_is_no_finding(self):
+        installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
+        installed["plugins"]["tool@family"][0]["scope"] = "managed"
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
+        inv = self.inventory()
+        tool = next(p for p in inv["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertEqual((tool["scope"], tool["enabled"], tool["behind"]), ("managed", None, True))
+        self.assertEqual(inv["findings"], [])
+
+    def test_an_enabled_codex_plugin_lists_its_skills(self):
+        versioned_skill(self.home / ".codex" / "plugins" / "cache" / "family" / "helper" / "0.10.0" / "skills",
+                        "helper-skill", "")
+        rows = {(s["agent"], s["scope"], s["name"]): s for s in self.inventory()["spaces"][0]["skills"]}
+        self.assertEqual(rows[("codex", "plugin", "helper-skill")]["plugin"], "helper@family")
 
     def test_odd_shapes_in_the_records_do_not_break_it(self):
         write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", {"plugins": {

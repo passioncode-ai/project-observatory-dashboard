@@ -2061,7 +2061,8 @@ plugin's `name@marketplace`) and the agent that loads it (`claude-code`, `codex`
 its version, its scope as the agent records it (`user`, `project` or `local`), whether the settings of that
 scope enable it (`enabledPlugins` of the user's settings, or the project's `.claude/settings.json` or
 `settings.local.json` for a project or local install; an override in another scope's settings is not read;
-`null` when they could not be read, and for a scope the inventory does not know, such as `managed`), and the
+`null` when they could not be read, and for a scope the inventory does not know, such as `managed`, which is
+never a finding), and the
 newest version its marketplace publishes as the marketplace's local copy records it (`latest`, with
 `marketplaceUpdated`), in Claude Code's own order: the plugin's `.claude-plugin/plugin.json` inside the
 marketplace's folder, else its catalogue entry's `version`. A plugin from a Git repository or a URL has no
@@ -2069,13 +2070,16 @@ marketplace's folder, else its catalogue entry's `version`. A plugin from a Git 
 (served in place): nothing is fetched. An enabled plugin behind
 that version is a finding (`plugin-behind`, with `claude plugin update NAME --scope SCOPE` as the step, run
 in the project's folder for a project or local install), and the board shows it as `harness.plugin_behind`;
-a disabled install behind is listed (`behind: true`) but loads nothing and is not a finding. Codex plugins are read from its plugin cache; their newest
+a disabled install behind is listed (`behind: true`) but loads nothing and is not a finding. A project or
+local install carries `projectKey`, a short digest of the project's path that tells two projects of one
+folder name apart without the path. An enabled Codex plugin's skills are listed with scope `plugin`. Codex plugins are read from its plugin cache; their newest
 version is not known (`latest` null). One finding waits and says so under `open`: an organization's plugin
 enabled in a person's own space needs the space's context binding (OBS-359). A record that cannot be read
 or has another shape (`installed_plugins.json`, a settings file, a marketplace catalogue, a skill's
 `SKILL.md`, Codex's plugin cache or `config.toml`) is named in `degraded`, never read as empty (`unreadable`, or `unrecognised-shape` for a record of another shape); no
 scan yet, one older than the inventory, or one older than 24 hours (`stale`) is named there with the command
-that fills it. Agents read the same answer with `observatory_machine(section="skills")`.
+that fills it. Agents read the same answer with `observatory_machine(section="skills")`, 200 skills a page
+(`limit`, and `cursor` from `skills.page.nextCursor`; plugins, findings and counts always whole).
 
 ### The disk guard
 
@@ -3480,15 +3484,18 @@ of what the target holds after the write. They are made under your store's estat
 so they compare with `full vault-digests` (the journal keeps that digest too), else under a key made for
 this copy and forgotten (the journal then keeps none). A refusal writes no value, metadata or journal line
 and removes the store and vault folders the copy had made (an existing vault keeps a lock file the copy
-made in it, which is harmless). Its codes: `invalid-slot` (the source slot's names), `source-empty`,
+made in it, which is harmless, and an existing store and vault folder of yours stay at the 0700 the copy
+set them to). Its codes: `invalid-slot` (the source slot's names), `source-empty`,
 `source-unreadable` (the slot or its metadata cannot be read as a private single-line value),
 `source-has-open-leak` (rotate and settle first), `target-not-absolute`, `target-not-plain` (`.` or `..`
 in the path), `target-link` (the store or its `projects/` is a link), `target-parent-missing`,
-`target-not-folder`, `target-is-vault-folder` (name the store that holds the vault), `same-store`
-(another spelling of this store included), `nested-stores`, `target-other-account` (a store another
+`target-not-folder`, `target-is-vault-folder` (name the store that holds the vault),
+`target-in-repository` (the store would sit in a Git working tree), `same-store` (another spelling of this
+store included), `nested-stores` (one store inside the other, your store or its vault folder included), `target-other-account` (a store another
 account owns: a value written from here would be unreadable there; not checked on Windows), `target-not-writable`,
 `target-unsafe` (a file or folder in the target fails the vault's own checks: a link below `projects/`, a
-slot or metadata file that is not owner-only or does not parse), `target-slot-invalid`, `target-slot-filled`.
+slot or metadata file that is not owner-only, does not parse or is not UTF-8), `target-slot-invalid`,
+`target-slot-filled`, `filesystem-refused` (the file system refused before anything was written).
 With `--json` it prints `{"schema": "vault-copy/1", "outcome": "refused", "code", "reason"}`; either way it
 exits 2. A read or a write that fails midway exits 1 with `outcome: failed`, code `filesystem-failed`: read
 both journals and the target slot before copying again. Two digests that differ print the receipt with

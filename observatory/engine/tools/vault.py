@@ -863,6 +863,16 @@ def _target_store(text: str) -> pathlib.Path:
     if any((store / name).exists() for name in VAULT_MARKERS):
         raise CopyRefused(f"{shown_path(store)} is a vault folder itself (it holds the journal); name the store "
                           f"that holds it, {shown_path(store.parent)}", "target-is-vault-folder")
+    # A store inside a Git working tree is one `git add -A` away from publishing its values, the reason `inject`
+    # refuses a `.env` that is not ignored.
+    probe = store if store.is_dir() else store.parent
+    try:
+        inside = safe_git.run(["rev-parse", "--is-inside-work-tree"], cwd=probe, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        inside = None   # no git to ask: no working tree that git could publish from
+    if inside is not None and inside.returncode == 0 and (inside.stdout or "").strip() == "true":
+        raise CopyRefused(f"{shown_path(store)} is inside a Git working tree; keep a secret store outside any "
+                          f"repository", "target-in-repository")
     return store
 
 
@@ -972,7 +982,9 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
     target_vault = store / "projects"
     if _holds(target_vault, STORE) and _holds(STORE, target_vault):
         raise CopyRefused("the target store is this store; a slot is copied into another one", "same-store")
-    for outer, inner in ((store, STORE), (STORE, store)):
+    # The source's store is its vault folder's parent when the vault is a store's `projects/`, as by default.
+    source_side = (STORE, STORE.parent) if STORE.name == "projects" else (STORE,)
+    for outer, inner in [(store, STORE)] + [(side, store) for side in source_side]:
         if _holds(outer, inner):
             raise CopyRefused(f"the stores are nested ({shown_path(outer.resolve())} holds "
                               f"{shown_path(inner.resolve())}); copy between two separate stores", "nested-stores")
@@ -991,8 +1003,11 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
         """The source slot's one value; any boundary the vault's reader refuses is `source-unreadable`."""
         try:
             return _read_private(src).strip()
-        except (VaultBoundaryError, ValueError) as exc:
+        except VaultBoundaryError as exc:
             raise CopyRefused(f"{src_label} cannot be read as a private slot ({exc})", "source-unreadable") from None
+        except ValueError:
+            # Never the decoder's message: it quotes a byte of the value and its position.
+            raise CopyRefused(f"{src_label} does not hold UTF-8 text", "source-unreadable") from None
 
     def checked(value: str) -> str:
         """The refusals that depend on the two values, run before anything is written and again under the locks."""
@@ -1008,16 +1023,19 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
             return "replaced"
         return "copied"
 
-    def target_side(exc: VaultBoundaryError) -> CopyRefused:
+    def target_side(exc: Exception) -> CopyRefused:
         """A refusal of the vault's own boundaries on the target side (a link below `projects/`, a slot or metadata
-        file that is not owner-only or does not parse) under one code, never the source's `invalid-slot`."""
+        file that is not owner-only, does not parse or is not UTF-8) under one code, never the source's
+        `invalid-slot`. A decoder's message is never repeated: it quotes a byte of what it read."""
         if isinstance(exc, CopyRefused):
             return exc
-        return CopyRefused(f"the target store refused it: {exc}", "target-unsafe")
+        if isinstance(exc, VaultBoundaryError):
+            return CopyRefused(f"the target store refused it: {exc}", "target-unsafe")
+        return CopyRefused("a file in the target store is not UTF-8 text", "target-unsafe")
 
     try:
         checked(source_value())
-    except VaultBoundaryError as exc:
+    except (VaultBoundaryError, ValueError) as exc:
         raise target_side(exc) from None
     key, key_id = _copy_digest_key()
 
@@ -1052,6 +1070,8 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
                     source_meta = _read_meta(src)
                 except VaultBoundaryError as exc:
                     raise CopyRefused(f"{src_label}'s metadata cannot be read ({exc})", "source-unreadable") from None
+                except ValueError:
+                    raise CopyRefused(f"{src_label}'s metadata is not UTF-8 text", "source-unreadable") from None
                 meta = _read_meta(t_slot)
                 written = True
                 if outcome == "replaced":
@@ -1083,17 +1103,22 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
                 journal("copied", src_label, to_store=shown_path(store), to_slot=t_label, **common)
                 journal("copied", t_label, _store=target_vault, from_store=source_store,
                         from_slot=src_label, **({"archived": archived} if archived else {}), **common)
-    except VaultBoundaryError as exc:
+    except (VaultBoundaryError, OSError, ValueError) as exc:
         if written:
             # Past the first write a refusal is a failure: something may be in the target, and it is reported by
             # `cmd_copy` as `failed`, never undone blind.
-            raise OSError(f"the target store refused a write midway: {exc}") from None
+            if isinstance(exc, OSError):
+                raise
+            raise OSError("the target store refused a write midway") from None
         if vault_created:
             (target_vault / ".vault.lock").unlink(missing_ok=True)
         for folder, made in ((target_vault, vault_created), (store, created)):
             if made:
                 with contextlib.suppress(OSError):
                     folder.rmdir()
+        if isinstance(exc, OSError):
+            raise CopyRefused(f"the file system refused before anything was written ({type(exc).__name__})",
+                              "filesystem-refused") from None
         raise target_side(exc) from None
     return {"schema": COPY_SCHEMA, "outcome": outcome, "at": now(),
             "from": {"store": source_store, "slot": src_label, "kept": True},
@@ -1470,12 +1495,15 @@ def main(argv: list[str]) -> int:
     target.add_argument("--clear", action="store_true", help="remove the binding")
     sub.add_parser("backup")
     a = ap.parse_args(argv[1:])
+    # `copy --json` keeps stdout for its one JSON answer: what is said before it goes to stderr, and a refusal of
+    # the source's names is a JSON refusal too.
+    copy_json = a.cmd == "copy" and getattr(a, "json", False)
     try:
         if getattr(a, "project", None):
             a.project, said = project_folder(a.project, getattr(a, "env", None),
                                              getattr(a, "name", None), verb=a.cmd)
             if said:
-                print(f"project: {said}")
+                print(f"project: {said}", file=sys.stderr if copy_json else sys.stdout)
             if a.project.startswith("project:"):
                 raise VaultBoundaryError(
                     f"{credential_shape.echo(a.project)} is not a project in the registry; "
@@ -1487,6 +1515,10 @@ def main(argv: list[str]) -> int:
                 "list": cmd_list, "inject": cmd_inject, "backup": cmd_backup, "remove": cmd_remove,
                 "bind": cmd_bind, "copy": cmd_copy}[a.cmd](a)
     except VaultBoundaryError as exc:
+        if copy_json:
+            print(json.dumps({"schema": COPY_SCHEMA, "outcome": "refused", "code": exc.code or "invalid-slot",
+                              "reason": str(exc)}, indent=1, ensure_ascii=False))
+            return 2
         print(f"vault: {exc}", file=sys.stderr)
         return 2
     except (OSError, ValueError):

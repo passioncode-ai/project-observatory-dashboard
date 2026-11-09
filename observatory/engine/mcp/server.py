@@ -746,6 +746,10 @@ def observatory_machine(
                                          "`full machine-move status --json` gives it; skills = every skill and plugin "
                                          "each agent loads, with version, scope and findings, as `full machine --skills` "
                                          "gives it.")] = "overview",
+    limit: Annotated[int | None, Field(ge=1, le=1000, description="skills only: skills per page (default 200); "
+                                                                  "plugins, findings and counts are always whole")] = None,
+    cursor: Annotated[str | None, Field(description="skills only: the `skills.page.nextCursor` of the previous "
+                                                    "answer")] = None,
 ) -> dict[str, Any]:
     """The machine this estate runs on: processes grouped by ORIGIN (agent
     session, launchd job, simulator, app, detached), memory and swap, free disk
@@ -780,11 +784,12 @@ def observatory_machine(
     agent that loads it (claude-code, codex), whether a plugin is enabled, the newest version
     its marketplace's LOCAL copy publishes, and findings (`plugin-behind`). Read from the last
     harness scan, never fetched; `open` names the finding that waits (an organization's plugin
-    in a person's own space, OBS-359), `degraded` every record that could not be read.
+    in a person's own space, OBS-359), `degraded` every record that could not be read. The skills
+    come 200 at a time (`limit`, `cursor` from `skills.page.nextCursor`).
     """
     if section == "skills" and explainPid is None:
         import machine_view
-        skills = machine_view.skills_section()
+        skills = machine_view.skills_section(limit=limit or SKILLS_PAGE, cursor=cursor)
         return {"measuredAt": skills["measuredAt"], "degraded": skills["degraded"], "skills": skills}
     if section == "move" and explainPid is None:
         # The agent's path to the checklist (decision D13): the CLI's own function and peers.
@@ -874,6 +879,9 @@ def observatory_ssh_keys(
 
 
 MACHINE_TOP = 10
+#: Skills per page of `observatory_machine(section="skills")`: a machine measured holding 1,269 skills made an
+#: unpaged answer of 151,536 characters, past what a host keeps of one tool result.
+SKILLS_PAGE = 200
 
 
 # Publish the additive bounded coverage contract on the actual tool, not only prose.

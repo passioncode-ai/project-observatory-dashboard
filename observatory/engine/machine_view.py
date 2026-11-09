@@ -94,13 +94,17 @@ SKILLS_OPEN = [{"finding": "organization-plugin-in-personal-space", "waitsOn": "
                           "organization's plugin enabled here is not reported"}]
 
 
-def skills_section() -> dict:
+def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
     """The `skills` section (OBS-477): every skill and plugin each agent of this space loads or has installed, with
     its version, scope and agent, and the findings the records support (a plugin behind the newest version its
     marketplace's local copy publishes). Read from the harness scan's `inventory` (collectors/scan_harness.py), which
     the tick refreshes when `integrations.harness` is on and `full scan-harness` refreshes on request; nothing is
     scanned here. A scan that is missing, unreadable or older than the inventory is named in `degraded` with the
-    command that fills it, and the lists are then empty, never a claim that nothing is installed."""
+    command that fills it, and the lists are then empty, never a claim that nothing is installed.
+
+    `limit` pages the skills (a machine can hold over a thousand; the MCP tool answers 200 at a time): `cursor` is
+    the offset `page.nextCursor` gave, across the spaces in order; plugins, findings and counts are always whole. A
+    cursor that is not one this function gave is answered with `degraded` code `invalid-cursor` and the first page."""
     doc, problem = _load("harness.json", "scan-harness")
     if problem:
         if problem["code"] == "not-surveyed":
@@ -130,8 +134,26 @@ def skills_section() -> dict:
         degraded.append({"source": "harness.json", "code": "stale",
                          "reason": f"the harness scan is older than {SKILLS_STALE_HOURS} hours or carries no time; "
                                    f"run `project-observatory full scan-harness`"})
-    return {"measuredAt": doc.get("generated_at"), "spaces": spaces,
-            "counts": {"skills": sum(len(s.get("skills") or []) for s in spaces),
+    total = sum(len(s.get("skills") or []) for s in spaces)
+    start = 0
+    if cursor is not None:
+        if str(cursor).isdigit() and int(cursor) <= total:
+            start = int(cursor)
+        else:
+            degraded.append({"source": "cursor", "code": "invalid-cursor",
+                             "reason": "the cursor is not one this answer gave; the first page is shown"})
+    end = total if limit is None else min(total, start + max(1, int(limit)))
+    if limit is not None or start:
+        paged, offset = [], 0
+        for space in spaces:
+            rows = space.get("skills") or []
+            window = rows[max(0, start - offset):max(0, end - offset)]
+            offset += len(rows)
+            paged.append({**space, "skills": window})
+        spaces = paged
+    page = {"limit": limit, "cursor": str(start), "nextCursor": str(end) if end < total else None, "total": total}
+    return {"measuredAt": doc.get("generated_at"), "spaces": spaces, "page": page,
+            "counts": {"skills": total,
                        "plugins": sum(len(s.get("plugins") or []) for s in spaces), "findings": len(findings)},
             "findings": findings, "open": inventory.get("open") or SKILLS_OPEN, "degraded": degraded}
 

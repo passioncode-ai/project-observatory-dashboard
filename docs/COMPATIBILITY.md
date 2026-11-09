@@ -640,9 +640,12 @@ was (a lock file the copy made in an existing vault is kept); a failed read or w
 `filesystem-failed`, exit 1; a digest mismatch prints the receipt with `digest.match: false` and exits 1. The codes:
 `invalid-slot` (the source's names), `source-empty`, `source-unreadable`, `source-has-open-leak`,
 `target-not-absolute`, `target-not-plain`, `target-link`, `target-parent-missing`, `target-not-folder`,
-`target-is-vault-folder`, `same-store`, `nested-stores`, `target-other-account` (POSIX only: Windows has no account
+`target-is-vault-folder`, `target-in-repository`, `same-store`, `nested-stores`, `target-other-account` (POSIX only: Windows has no account
 id to compare, so a store another account owns there fails later as `target-not-writable`, `target-unsafe` or
-`filesystem-failed`), `target-not-writable`, `target-unsafe`, `target-slot-invalid`, `target-slot-filled`. Both
+`filesystem-failed`), `target-not-writable`, `target-unsafe`, `target-slot-invalid`, `target-slot-filled`,
+`filesystem-refused`; with `--json` a refusal of the source's names is JSON too, and the `project:` sentence goes to
+stderr. A refused copy may leave an existing store and vault folder of this account at 0700 and a lock file in an
+existing vault. Unless the outcome is `unchanged`, both
 stores' `movements.jsonl` gain a `copied` row (`to_store`, `to_slot` in the source's; `from_store`, `from_slot`,
 `archived` after a replace in the target's; `outcome` and `digest_key` in both, and `key_id` and `digest` only
 under the estate key), which an older
@@ -654,7 +657,8 @@ optional `_store`, each defaulting to this machine's vault, so every existing ca
 
 The harness scan (`store/raw/harness.json`) gains `inventory` (OBS-477): `spaces` (one, `this-account`, home `~`)
 with `skills` (`name`, `agent` `claude-code` or `codex`, `scope` `user`, `project` or `plugin`, `version`, and
-`project` or `plugin`) and `plugins` (`name`, `agent`, `scope` `user`, `project` or `local`, `project`, `version`,
+`project` or `plugin`; an enabled Codex plugin's skills included) and `plugins` (`name`, `agent`, `scope` `user`,
+`project` or `local`, `project`, `projectKey` (8 hex digits of the project path's SHA-256, never the path), `version`,
 `enabled` true, false or null, `marketplace`, `latest`, `latestFrom` `marketplace-catalogue` or `plugin-manifest`,
 `marketplaceUpdated`, `behind`), `findings` (`plugin-behind`), `open` and its own `degraded` (`source`
 `claude:installed_plugins.json`, `claude:settings.json`, `claude:known_marketplaces.json`,
@@ -669,7 +673,10 @@ is read from the plugin's manifest inside the marketplace's folder first, then t
 another source, or from a marketplace that is a local folder, has none. The section adds `stale` (source
 `harness.json`) to its `degraded` for a scan older than 24 hours. No path is recorded. An older reader ignores the key; the machine view
 reads a scan without it as `not-surveyed` until the next scan. `observatory_machine` takes `section: "skills"`
-(answer `{measuredAt, degraded, skills}`, `skills` holding `spaces`, `counts`, `findings`, `open`, `degraded`), and
+(answer `{measuredAt, degraded, skills}`, `skills` holding `spaces`, `page` (`limit`, `cursor`, `nextCursor`,
+`total`), `counts`, `findings`, `open`, `degraded`) with two new optional arguments for that section, `limit`
+(1 to 1000, default 200 skills) and `cursor` (an invalid one answers the first page and `degraded` code
+`invalid-cursor`), and
 its overview's `sections` lists `skills`; the tool's other answers are unchanged. `full machine --skills` prints the
 same section and cannot be combined with another mode. The board gains the finding type `harness.plugin_behind`
 (severity info; subject `harness:plugin-behind:<agent>:<plugin>:<scope>:<project>:<installed>:<latest>`).

@@ -345,6 +345,49 @@ class Copy(unittest.TestCase):
         self.assertEqual(receipt["from"]["store"], str(self.source_store.resolve()))
         self.assertEqual(receipt["to"]["store"], str(self.target.resolve()))
 
+    def test_json_refusals_stay_json_for_the_sources_names_and_never_quote_bytes(self):
+        p = self.vault_cmd("copy", "alpha-web", "prod", "lower", "--to-store", str(self.target), "--json")
+        refused = json.loads(p.stdout)
+        self.assertEqual((p.returncode, refused["outcome"], refused["code"]), (2, "refused", "invalid-slot"))
+        self.put()
+        slot = self.vault / "alpha-web/prod/API_TOKEN"
+        slot.write_bytes(b"abc\xa7def\n")
+        code, refused = self.copy()
+        self.assertEqual((code, refused["code"]), (2, "source-unreadable"))
+        self.assertNotIn("0xa7", refused["reason"])
+        self.assertNotIn("position", refused["reason"])
+        self.assertFalse(self.target.exists())
+
+    def test_a_target_slot_that_is_not_utf8_is_target_unsafe(self):
+        self.put()
+        self.assertEqual(self.copy()[0], 0)
+        (self.target / "projects/alpha-web/prod/API_TOKEN").write_bytes(b"\xff\xfe\n")
+        code, refused = self.copy("--replace")
+        self.assertEqual((code, refused["code"]), (2, "target-unsafe"))
+        self.assertNotIn("0xff", refused["reason"])
+
+    def test_the_journal_rows_carry_outcome_and_digest_key(self):
+        self.put()
+        self.copy()
+        mine = [r for r in self.journal(self.vault / "movements.jsonl") if r["event"] == "copied"][-1]
+        theirs = [r for r in self.journal(self.target / "projects/movements.jsonl") if r["event"] == "copied"][-1]
+        for row in (mine, theirs):
+            self.assertEqual((row["outcome"], row["digest_key"], row["tool"]), ("copied", "one-time", "vault.py"))
+
+    def test_a_store_inside_the_source_store_or_a_repository_is_refused(self):
+        self.put()
+        p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", str(self.source_store / "inner"),
+                           "--json")
+        self.assertEqual(json.loads(p.stdout)["code"], "nested-stores")
+        repo = self.base / "repo"
+        repo.mkdir()
+        sys.path.insert(0, str(ROOT / "tests"))
+        from git_env import git_env
+        subprocess.run(["git", "init", "-q", str(repo)], check=True, env=git_env(), capture_output=True)
+        p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", str(repo / "secrets"), "--json")
+        self.assertEqual(json.loads(p.stdout)["code"], "target-in-repository")
+        self.assertFalse((repo / "secrets").exists())
+
     def test_a_human_refusal_names_its_code(self):
         self.put()
         p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", str(self.source_store))

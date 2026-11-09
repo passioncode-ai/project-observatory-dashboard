@@ -2959,13 +2959,15 @@ def collect() -> list[dict]:
                 "evidence": ["store/raw/harness.json#changed", "store/harness-pins.json"]})
         # A PLUGIN BEHIND the newest version its marketplace's local copy publishes (OBS-477). The subject names
         # both versions, so an ack holds for this gap and the row speaks again when the marketplace moves on.
-        for _b in (_h.get("inventory") or {}).get("findings") or []:
+        _inv = _h.get("inventory") if isinstance(_h.get("inventory"), dict) else {}
+        for _b in _inv.get("findings") if isinstance(_inv.get("findings"), list) else []:
             if not isinstance(_b, dict) or _b.get("code") != "plugin-behind":
                 continue
             out.append({
                 "type": "harness.plugin_behind", "severity": "info",
                 "subject": (f"harness:plugin-behind:{_b.get('agent')}:{_b.get('plugin')}:{_b.get('scope')}:"
-                            f"{_b.get('project') or ''}:{_b.get('installed')}:{_b.get('latest')}"),
+                            f"{_b.get('project') or ''}{'.' + str(_b.get('projectKey')) if _b.get('projectKey') else ''}:"
+                            f"{_b.get('installed')}:{_b.get('latest')}"),
                 **titled("plugin {plugin} is at {installed}, its marketplace publishes {latest}",
                          plugin=_b.get("plugin"), installed=_b.get("installed"), latest=_b.get("latest")),
                 "detail": ("Read from the marketplace's local copy"

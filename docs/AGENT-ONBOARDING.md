@@ -135,7 +135,7 @@ To give another space on this machine (a second account's store, or a space bein
 run `python "$(project-observatory full-path)/tools/vault.py" copy PROJECT ENV NAME --to-store PATH --json`
 (`--to-slot NAME` or `PROJECT/ENV/NAME` for another slot there). Never copy a key with `cat`, a pipe, a
 named pipe or `use_secret.py run`: `copy` reads and writes the value inside one process, keeps my slot,
-records `copied` in both stores' movement journals, and answers a receipt (`vault-copy/1`) with keyed
+records `copied` in both stores' movement journals (nothing when the target already held it, `unchanged`), and answers a receipt (`vault-copy/1`) with keyed
 digests that must read `match: true`. A target slot that holds another value is refused
 (`target-slot-filled`); pass `--replace` only when I say so. Every refusal has a `code`, exits 2 and leaves the
 target without a value, metadata or journal line from it; `outcome: failed` (exit 1) means a write may have been partial:
@@ -361,7 +361,8 @@ Proof: `tests/test_git_hardening.py::MissingRegistrationReceipt` in the engine.
 
 `observatory_machine(section="skills")` (or `full machine --skills`) lists every skill and plugin of this
 space with its version, scope (`user`, `project`, `plugin`; a plugin install `user`, `project` or `local`) and
-agent (`claude-code`, `codex`), read from the last harness scan; it fetches nothing. `findings` holds a plugin
+agent (`claude-code`, `codex`), read from the last harness scan; it fetches nothing. Skills come 200 a page:
+follow `skills.page.nextCursor` with `cursor` before saying a skill is not installed. `findings` holds a plugin
 behind the newest version its marketplace's local copy publishes (`plugin-behind`, step `claude plugin update
 NAME --scope SCOPE` in the project's folder for a project or local install, which is mine to run unless I said
 otherwise). `open` names what is not reported yet (an organization's
