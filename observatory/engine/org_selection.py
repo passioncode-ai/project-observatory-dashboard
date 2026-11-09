@@ -192,7 +192,12 @@ def _read(path: pathlib.Path) -> dict | None:
 
 
 def _write(path: pathlib.Path, doc: dict) -> None:
-    private_io.write(path, json.dumps(doc, indent=1, sort_keys=True, ensure_ascii=False) + "\n")
+    try:
+        private_io.write(path, json.dumps(doc, indent=1, sort_keys=True, ensure_ascii=False) + "\n")
+    except (OSError, RuntimeError) as exc:
+        raise Refusal("record-unwritable", f"{path.name} of the selection cannot be written ({type(exc).__name__}: "
+                                           "a symbolic link, a folder that is not this account's, or a full disk); "
+                                           "nothing was decided", "project-observatory full doctor") from None
 
 
 def _revisions(org: str) -> list[pathlib.Path]:
@@ -233,11 +238,15 @@ def _journal_path(org: str, revision: int) -> pathlib.Path:
     return _folder(org) / "journals" / f"{revision:06d}.json"
 
 
-def journal(org: str, revision: int) -> dict | None:
+def journal(org: str, revision: int, digest: str | None = None) -> dict | None:
+    """The journal of one revision; with `digest`, it must name that revision's digest (a journal left by another
+    revision of the same number is not this one's)."""
     doc = _read(_journal_path(org, revision))
     if doc is not None and (doc.get("schema") != JOURNAL_SCHEMA or doc.get("revision") != revision
-                            or not isinstance(doc.get("items"), list)):
-        raise Refusal("record-unreadable", f"the journal of revision {revision} is not {JOURNAL_SCHEMA}")
+                            or not isinstance(doc.get("items"), list)
+                            or (digest is not None and doc.get("recordDigest") != digest)):
+        raise Refusal("record-unreadable", f"the journal of revision {revision} is not {JOURNAL_SCHEMA} for that "
+                                           "revision; nothing is decided from it")
     return doc
 
 
@@ -281,6 +290,10 @@ def decided(action: str, target: str, decision: Any = None, *, caller: str) -> d
     act = {"id": ACTIONS[action], "title": TITLES[action], "tool": "observatory.org.selection", "gate": "relayed"}
     answer = actions.action_decision(action=act, tier="T0", caller=caller, decision=decision, target=target,
                                      now=_now())
+    if answer.get("ok") is True and (not isinstance(decision, dict) or decision.get("target") != target):
+        # The contract leaves `target` optional; here it is required, so words about one organization (or one key)
+        # never decide another's selection.
+        answer = {"ok": False, "code": "decision-invalid"}
     if answer.get("ok") is not True:
         raise Refusal(answer.get("code") or "decision-invalid",
                       "the decision is not the operator's for this action and object, or is older than 24 hours: "
@@ -301,15 +314,23 @@ def _context(org: str, chosen: list[str]) -> dict:
     except org_view.Refusal as refusal:
         raise Refusal(refusal.code, str(refusal), refusal.command) from None
     av = org_view.accounts()
+    _doc, assigner = org_view.organization_checked(org)
     degraded: list[dict] = []
     pdoc = org_view._registry("projects.json", [], "")
-    projects = {p["id"]: p for p in org_view._project_rows(pdoc)}
-    slots = ["/".join(s) for s in org_view._slots(degraded)]
+    rows = org_view._project_rows(pdoc)
+    projects = {p["id"]: p for p in rows}
+    resolve = org_view._vault_resolver(rows)
+    owner = {}
+    slots = []
+    for folder, env, name in org_view._slots(degraded):
+        slot = f"{folder}/{env}/{name}"
+        slots.append(slot)
+        owner[slot] = resolve(folder)
     for d in kv["degraded"] + av["degraded"] + degraded:
         if d not in degraded:
             degraded.append(d)
-    return {"keys": kv, "accounts": av, "projects": projects, "slots": slots, "degraded": degraded,
-            "label": kv["label"]}
+    return {"keys": kv, "accounts": av, "projects": projects, "slots": slots, "slotProject": owner,
+            "default": assigner.default, "degraded": degraded, "label": kv["label"]}
 
 
 def _candidates(org: str, ctx: dict) -> dict[str, dict]:
@@ -355,10 +376,17 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
     cands = _candidates(org, ctx)
     base = _baseline(record)
     changes = (draft or {}).get("items") or {}
+    # Projects the person chose in this draft that the record did not hold: their keys take the defaults, as they
+    # would before any record (ORG-R15), rather than reading as found since.
+    newly = {i for i, c in changes.items() if c.get("kind") == "project" and c.get("decision") == "include"
+             and (base or {}).get(i, {}).get("decision") != "include"}
     items: dict[str, dict] = {}
     for ident, c in cands.items():
         row = {k: v for k, v in c.items() if k != "default"}
-        if base is None:
+        follows = (c["kind"] == "key" and c.get("project") in newly
+                   and (ident not in (base or {}) or base[ident].get("by") in ("rule", "default")))
+        if base is None or follows:
+            # Before any record, or a key nobody chose by hand whose project is chosen now: the default (ORG-R15).
             row.update(decision=c["default"], by="rule" if c["default"] in ("include", "hand-over-revoke") else
                        "default", new=False)
         elif ident in base:
@@ -368,11 +396,18 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
             if base[ident].get("ref"):
                 row["ref"] = base[ident]["ref"]
         else:
-            row.update(decision="keep" if c["kind"] == "key" else "exclude", by="default", new=True)
+            # ORG-R16: found since the record. Only what the organization's rules propose (a project or a key) is
+            # `new`, listed and never chosen; anything else that appeared waits for a person as needs-you always does.
+            row.update(decision="keep" if c["kind"] == "key" else "exclude", by="default",
+                       new=c["group"] == "proposed" and c["kind"] in ("project", "key"))
         items[ident] = row
+    known = set(ctx["projects"]) | {f"vault:{x}" for x in ctx["slots"]} | {a["id"] for a in
+                                                                          ctx["accounts"]["accounts"]}
     for ident, prior in (base or {}).items():
         if ident not in items:
-            items[ident] = {**prior, "new": False, "notFound": True}
+            # In the record and no longer a candidate: kept with its decision. `notFound` only when this space no
+            # longer knows it at all (a project gone from the registry, a slot deleted, an account not seen).
+            items[ident] = {**prior, "new": False, "notFound": ident not in known}
     # A key follows its project when nobody chose it by hand: a project not chosen hands no key over by default.
     chosen = {i for i, r in items.items() if r["kind"] == "project" and r["decision"] == "include"}
     for ident, change in changes.items():
@@ -396,6 +431,10 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
                        why=row["why"] + "; its project is not chosen, so nothing is asked for it")
     layout = (draft or {}).get("layout", (record or {}).get("layout") if base is not None else None)
     serves = (draft or {}).get("serves", (record or {}).get("serves", {}).get("space") if base is not None else None)
+    # A space is named only for the separate-space layout; in the others the selection serves this space, and the
+    # digest must not carry a name the record does not keep (ORG-R14: the applied form is the previewed one).
+    if layout != "separate-space":
+        serves = None
     return {"items": items, "layout": layout, "serves": serves}
 
 
@@ -408,27 +447,51 @@ def selection_digest(org: str, sel: dict) -> str:
                                     for i in sel["items"].values())})
 
 
-def _others_chosen(org: str) -> dict[str, str]:
-    """project id -> another organization whose current record chose it (ORG-R05, until contract CT-141)."""
+def _others_chosen(org: str) -> tuple[dict[str, str], list[dict]]:
+    """project id -> another organization whose current record chose it (ORG-R05, until contract CT-141), and what
+    could not be read. Each other record is verified as its own organization's history; one that does not verify is
+    named, never read past: the conflict check then cannot say no project is held elsewhere."""
     out: dict[str, str] = {}
+    unread: list[dict] = []
     base = root()
     if not base.is_dir() or base.is_symlink():
-        return out
-    for folder in sorted(p for p in base.iterdir() if p.is_dir() and not p.is_symlink()):
+        return out, unread
+    mine = _folder(org)
+    for folder in sorted(p for p in base.iterdir() if p.is_dir() and not p.is_symlink() and p != mine):
         revs = sorted(q for q in (folder / "revisions").glob("[0-9]*.json")) if (folder / "revisions").is_dir() else []
         if not revs:
             continue
         try:
-            doc = _read(revs[-1]) or {}
-        except Refusal:
-            continue
-        other = doc.get("organization")
-        if not isinstance(other, str) or other == org:
+            other = (_read(revs[-1]) or {}).get("organization")
+            if not isinstance(other, str) or _folder(other) != folder:
+                raise Refusal("record-unreadable", "a selection's folder does not match the organization it names")
+            doc = current(other) or {}
+        except Refusal as refusal:
+            unread.append({"source": f"store/org-selection/{folder.name}", "code": refusal.code,
+                           "reason": str(refusal)[:200],
+                           "effect": "whether another organization already holds a project is not known"})
             continue
         for i in doc.get("items") or []:
             if isinstance(i, dict) and i.get("kind") == "project" and i.get("decision") == "include":
                 out.setdefault(str(i.get("id")), other)
-    return out
+    return out, unread
+
+
+def _clash(org: str, items: Any) -> None:
+    """ORG-R05 before anything is written: refused for a project another organization's record holds, and refused
+    when another record cannot be read (the check cannot be made)."""
+    q = CMD.format(org=_q(org))
+    others, unread = _others_chosen(org)
+    if unread:
+        raise Refusal("conflict-unchecked", "another organization's selection does not read, so whether one of "
+                                            "these projects is already held elsewhere cannot be checked: "
+                                            + unread[0]["reason"], "project-observatory full doctor")
+    clash = sorted(i["id"] for i in items if i["kind"] == "project" and i["decision"] == "include"
+                   and i["id"] in others)
+    if clash:
+        raise Refusal("chosen-for-another", f"{clash[0]} is already chosen for {others[clash[0]]}; a project "
+                                            "belongs to one context until contract CT-141 decides otherwise "
+                                            "(ORG-R05)", f"{q} plan --exclude {clash[0]}")
 
 
 # ── the preview ────────────────────────────────────────────────────────────────
@@ -441,12 +504,22 @@ def _preview(org: str, ctx: dict, sel: dict) -> dict:
     revoked = [i for i in keys_out if i["decision"] == "hand-over-revoke"]
     accounts_in = [i for i in items if i["kind"] == "account" and i["decision"] == "include"]
     chosen_projects = {i["id"] for i in projects}
+    default = ctx.get("default")
+
+    def personal(organization: Any) -> bool:
+        # Personal: the default organization's, or no organization yet (a conflict, nothing configured). Another
+        # organization's projects, keys and accounts are not personal and are not counted as such.
+        return organization in (None, default)
     stay_projects = sum(1 for pid, p in ctx["projects"].items()
-                        if pid not in chosen_projects and p.get("organization") != "external"
-                        and p.get("organization_source") != "external")
-    stay_keys = len([s for s in ctx["slots"] if f"vault:{s}" not in {i["id"] for i in keys_out}])
+                        if pid not in chosen_projects and p.get("organization_source") != "external"
+                        and personal(p.get("organization")))
+    out_keys = {i["id"] for i in keys_out}
+    stay_keys = sum(1 for slot in ctx["slots"] if f"vault:{slot}" not in out_keys and (
+        ctx["slotProject"].get(slot) is None or ctx["slotProject"][slot] in chosen_projects
+        or personal((ctx["projects"].get(ctx["slotProject"][slot]) or {}).get("organization"))))
     stay_accounts = sum(1 for a in ctx["accounts"]["accounts"]
-                        if a["id"] not in {i["id"] for i in accounts_in} and a.get("source") != "external")
+                        if a["id"] not in {i["id"] for i in accounts_in} and a.get("source") != "external"
+                        and personal(a.get("organization")))
     human = ["passkey-entry"] if projects else []
     if sel["layout"] == "separate-space":
         human += ["admin-password", "computer-token"]
@@ -466,7 +539,10 @@ def _preview(org: str, ctx: dict, sel: dict) -> dict:
         "sent": "nothing: this record never leaves this computer, and no project item is handed to Fabric yet",
         # ORG-W5's fourth group: when this space becomes the organization's, everything personal moves out first
         # (ORG-R27); the step is OBS-426's, named here so the preview says it before anything is applied.
-        "movesOut": ({"projects": stay_projects, "keys": stay_keys, "waitingOn": "move-out",
+        # Another organization's items move out too: a space bound to one context refuses the others' (ORG-R20).
+        "movesOut": ({"projects": sum(1 for pid, p in ctx["projects"].items() if pid not in chosen_projects
+                                      and p.get("organization_source") != "external"),
+                      "keys": len(ctx["slots"]) - len(out_keys), "waitingOn": "move-out",
                       **DEPENDS["move-out"]} if sel["layout"] == "this-space" else None),
     }
 
@@ -512,14 +588,14 @@ def _chosen_projects(draft: dict | None, record: dict | None) -> list[str]:
 
 def _plan_answer(org: str, ctx: dict, sel: dict, record: dict | None, draft: dict | None) -> dict:
     digest = selection_digest(org, sel)
-    others = _others_chosen(org)
+    others, unread = _others_chosen(org)
+    ctx["degraded"] = ctx["degraded"] + [d for d in unread if d not in ctx["degraded"]]
     conflicts = [{"project": i["id"], "organization": others[i["id"]],
                   "why": f"already chosen for {others[i['id']]}: a project belongs to one context until contract "
                          "CT-141 decides otherwise (ORG-R05)"}
                  for i in sel["items"].values()
                  if i["kind"] == "project" and i["decision"] == "include" and i["id"] in others]
-    unknown = [i["id"] for i in sel["items"].values() if i.get("notFound") or
-               (i.get("group") == "by-hand" and i["kind"] == "project" and i["id"] not in ctx["projects"])]
+    unknown = [i["id"] for i in sel["items"].values() if i.get("notFound")]
     applied = bool(record) and record.get("selectionDigest") == digest
     any_items = bool(sel["items"]) or bool(record)
     state = ("empty" if not any_items else "conflict" if conflicts else "partial" if ctx["degraded"] else "complete")
@@ -567,20 +643,30 @@ def _org_checked(org: Any, *, configured: bool = True) -> str:
 
 
 class _locked:
-    """One writer per organization's selection at a time (the CLI, the MCP server, a second terminal)."""
+    """One writer per organization's selection at a time (the CLI, the MCP server, a second terminal). With `every`,
+    the lock of the whole store first, then the organization's: apply and undo check every other organization's
+    record (ORG-R05) and must not race another organization's apply. The order is always the store's, then the
+    organization's, so two writers never wait on each other in a circle."""
 
-    def __init__(self, org: str):
-        self.path = _folder(org) / ".lock"
-        self.cm = None
+    def __init__(self, org: str, *, every: bool = False):
+        self.paths = ([root() / ".lock"] if every else []) + [_folder(org) / ".lock"]
+        self.stack: contextlib.ExitStack | None = None
 
     def __enter__(self):
-        private_io.parent(self.path.parent)
-        self.cm = private_io.lock(self.path)
-        self.cm.__enter__()
+        self.stack = contextlib.ExitStack()
+        try:
+            for path in self.paths:
+                private_io.parent(path.parent)
+                self.stack.enter_context(private_io.lock(path))
+        except (OSError, RuntimeError) as exc:
+            self.stack.close()
+            raise Refusal("record-unwritable", f"the selection's lock cannot be taken ({type(exc).__name__}: a "
+                                               "symbolic link, a folder that is not this account's, or a full "
+                                               "disk); nothing was decided", "project-observatory full doctor") from None
         return self
 
     def __exit__(self, *exc):
-        return self.cm.__exit__(*exc)
+        return self.stack.__exit__(*exc)
 
 
 def _label_ok(text: Any) -> str:
@@ -754,21 +840,51 @@ def _record(org: str, sel: dict, digest: str, prior: dict | None, who: dict, *, 
     return body
 
 
+#: Steps that cannot be taken back once done: a project's entry signed in Fabric (ORG-R13) and a personal value revoked
+#: at its provider (ORG-R08). A revision that would drop an item with one of them done is refused.
+IRREVERSIBLE = ("entry-signed", "revoke-personal")
+
+
 def _supersede(org: str, prior: dict | None, kept: set[str]) -> None:
     """The prior revision's journal after a new revision: steps of items the new one no longer carries the same way
-    are `undone` (nothing of them left this computer); the rest carry over in the new journal."""
+    are `undone` (nothing of them left this computer); the rest carry over in the new journal. An irreversible step
+    that is done stays done: what happened is never rewritten."""
     if not prior:
         return
-    jdoc = journal(org, prior["revision"])
+    jdoc = journal(org, prior["revision"], prior["digest"])
     if not jdoc:
         return
     for item in jdoc["items"]:
         if item["id"] in kept:
             continue
         for s in item["steps"]:
-            if s["state"] in ("planned", "waiting", "done"):
+            if s["state"] in ("planned", "waiting", "done") and not (s["step"] in IRREVERSIBLE and s["state"] == "done"):
                 s["state"], s["at"] = "undone", _now()
     _write(_journal_path(org, prior["revision"]), jdoc)
+
+
+def _irreversible(org: str, prior: dict | None, sel: dict) -> None:
+    """Refuse a new revision that would drop or change an item whose irreversible step is done (ORG-R13): a project
+    already in the organization's context comes back only by a take-back (OBS-419), and a revoked personal value
+    cannot be kept."""
+    if not prior:
+        return
+    jdoc = journal(org, prior["revision"], prior["digest"]) or {}
+    q = CMD.format(org=_q(org))
+    for item in jdoc.get("items") or []:
+        done = [s["step"] for s in item["steps"] if s["step"] in IRREVERSIBLE and s["state"] == "done"]
+        if not done:
+            continue
+        before = next((i for i in prior["items"] if i["id"] == item["id"]), None)
+        after = sel["items"].get(item["id"])
+        if before is None or after is None or after["decision"] != before["decision"]:
+            if "entry-signed" in done:
+                raise Refusal("entry-signed", f"{item['id']} is already in the organization's context (your passkey "
+                                              "signed its entry in Fabric); taking it back is a new estate revision "
+                                              "your passkey signs (OBS-419)",
+                              f"project-observatory full org unassign PROJECT --org {_q(org)}")
+            raise Refusal("already-revoked", f"{item['id']}'s personal value is already revoked at its provider; the "
+                                             "selection cannot keep it personal", f"{q} show")
 
 
 def apply(org: str, digest: Any, *, decision: Any = None, caller: str = "cli") -> dict:
@@ -779,7 +895,7 @@ def apply(org: str, digest: Any, *, decision: Any = None, caller: str = "cli") -
     if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
         raise Refusal("not-previewed", "apply takes the digest the preview showed, so only the form the person saw is "
                                        "applied", f"{q} plan")
-    with _locked(org_ok):
+    with _locked(org_ok, every=True):
         record = current(org_ok)
         draft = _draft(org_ok)
         ctx = _context(org_ok, _chosen_projects(draft, record))
@@ -798,13 +914,8 @@ def apply(org: str, digest: Any, *, decision: Any = None, caller: str = "cli") -
                                        "(ORG-R29)", f"{q} plan --layout {RECOMMENDED_LAYOUT} --serves SPACE")
         if sel["layout"] == "separate-space" and not sel["serves"]:
             raise Refusal("no-serving-space", "name the space this selection serves", f"{q} plan --serves SPACE")
-        others = _others_chosen(org_ok)
-        clash = sorted(i["id"] for i in sel["items"].values()
-                       if i["kind"] == "project" and i["decision"] == "include" and i["id"] in others)
-        if clash:
-            raise Refusal("chosen-for-another", f"{clash[0]} is already chosen for {others[clash[0]]}; a project "
-                                                "belongs to one context until contract CT-141 decides otherwise "
-                                                "(ORG-R05)", f"{q} plan --exclude {clash[0]}")
+        _clash(org_ok, sel["items"].values())
+        _irreversible(org_ok, record, sel)
         who = decided("apply", org_ok, decision, caller=caller)
         rec = _record(org_ok, sel, now_digest, record, who)
         _commit(org_ok, record, rec)
@@ -828,35 +939,42 @@ def _resume(org: str, rec: dict) -> None:
     draft. Each part is idempotent."""
     revs = history(org)
     prior = revs[-2] if len(revs) >= 2 else None
-    jdoc = journal(org, rec["revision"])
+    jdoc = journal(org, rec["revision"], rec["digest"])
     if jdoc is None:
         jdoc = _journal_for(rec)
         carried = _carry(org, prior, jdoc)
         _write(_journal_path(org, rec["revision"]), jdoc)
     else:
-        carried = _carry(org, prior, copy.deepcopy(jdoc))
+        carried = _carry(org, prior, _journal_for(rec))
     _supersede(org, prior, carried)
     (_folder(org) / "draft.json").unlink(missing_ok=True)
 
 
 def _carry(org: str, prior: dict | None, jdoc: dict) -> set[str]:
-    """An item the new revision carries the same way keeps the progress the prior journal recorded (a confirmation,
-    a step another door finished): applying a changed selection never resets what already happened. Returns the
-    ids carried; every other item of the prior journal is superseded."""
+    """An item the new revision carries with the same steps keeps what already happened (a step done or failed, a
+    confirmation): a changed selection never resets it. A step still planned or waiting takes the new revision's
+    form, so what it waits on follows the new layout (a confirmation is asked only in a separate space, ORG-R08).
+    Returns the ids carried; every other item of the prior journal is superseded."""
     if not prior:
         return set()
-    old = {i["id"]: i for i in (journal(org, prior["revision"]) or {}).get("items") or []}
+    old = {i["id"]: i for i in (journal(org, prior["revision"], prior["digest"]) or {}).get("items") or []}
     carried = set()
     for item in jdoc["items"]:
         before = old.get(item["id"])
-        if before and [s["step"] for s in before["steps"]] == [s["step"] for s in item["steps"]]:
-            item["steps"] = copy.deepcopy(before["steps"])
-            carried.add(item["id"])
+        if not before or [s["step"] for s in before["steps"]] != [s["step"] for s in item["steps"]]:
+            continue
+        carried.add(item["id"])
+        for new, was in zip(item["steps"], before["steps"]):
+            if was.get("state") in ("done", "failed"):
+                new.clear()
+                new.update(copy.deepcopy(was))
+            elif was.get("confirmedAt") and new.get("waitingOn") == "replacement-confirmation":
+                new.update(confirmedAt=was["confirmedAt"], confirmedBy=was.get("confirmedBy"), waitingOn="rotation")
     return carried
 
 
 def _apply_answer(org: str, rec: dict, outcome: str, who: dict) -> dict:
-    jdoc = journal(org, rec["revision"])
+    jdoc = journal(org, rec["revision"], rec["digest"])
     c = counts(jdoc)
     waiting = any(r["waiting"] or r["planned"] for r in c.values())
     return {"schema": VIEW_SCHEMA, "answer": "apply", "organization": org, "outcome": outcome,
@@ -905,12 +1023,12 @@ def undo(org: str, *, decision: Any = None, caller: str = "cli") -> dict:
     entry revision is signed in Fabric: a project then comes back only by a take-back (OBS-419)."""
     org_ok = _org_checked(org, configured=False)
     q = CMD.format(org=_q(org_ok))
-    with _locked(org_ok):
+    with _locked(org_ok, every=True):
         revs = history(org_ok)
         if not revs:
             raise Refusal("nothing-to-undo", "no selection has been applied for this organization", f"{q} plan")
         cur = revs[-1]
-        jdoc = journal(org_ok, cur["revision"])
+        jdoc = journal(org_ok, cur["revision"], cur["digest"])
         signed = [i["id"] for i in (jdoc or {}).get("items") or []
                   if any(s["step"] == "entry-signed" and s["state"] == "done" for s in i["steps"])]
         if signed:
@@ -929,6 +1047,10 @@ def undo(org: str, *, decision: Any = None, caller: str = "cli") -> dict:
                    "serves": (restored.get("serves") or {}).get("space")}
         else:
             sel = {"items": {}, "layout": None, "serves": None}
+        # What is restored meets the same checks as an apply: a project another organization took meanwhile
+        # (ORG-R05), a personal value already revoked.
+        _clash(org_ok, sel["items"].values())
+        _irreversible(org_ok, cur, sel)
         rec = _record(org_ok, sel, selection_digest(org_ok, sel), cur, who, kind="undo", undoes=cur["digest"])
         _commit(org_ok, cur, rec)
     answer = _apply_answer(org_ok, rec, "undone", who)
@@ -957,7 +1079,9 @@ def confirm_replacement(org: str, key: Any, *, decision: Any = None, caller: str
                                                      "consumers switched) is the confirmation; nothing is asked of "
                                                      "you", f"{q} show")
         who = decided("confirm-replacement", ident, decision, caller=caller)
-        jdoc = journal(org_ok, rec["revision"]) or _journal_for(rec)
+        if journal(org_ok, rec["revision"], rec["digest"]) is None:
+            _resume(org_ok, rec)                       # an interrupted apply first, with what it carries
+        jdoc = journal(org_ok, rec["revision"], rec["digest"])
         entry = next(i for i in jdoc["items"] if i["id"] == ident)
         step = next(s for s in entry["steps"] if s["step"] == "revoke-personal")
         outcome = "already-confirmed" if step.get("confirmedAt") else "confirmed"
@@ -990,7 +1114,12 @@ def show(org: str) -> dict:
                 "draft": draft is not None, "history": [], "nextStep": "no selection is applied for this organization",
                 "command": f"{q} plan", "degraded": []}
     rec = revs[-1]
-    jdoc = journal(org_ok, rec["revision"])
+    try:
+        jdoc = journal(org_ok, rec["revision"], rec["digest"])
+    except Refusal as refusal:
+        return {"schema": VIEW_SCHEMA, "answer": "show", "organization": org_ok, "state": "error",
+                "error": refusal.code, "message": str(refusal), "command": f"{q} apply --digest "
+                                                                           f"{rec['selectionDigest']}", "degraded": []}
     new: list[str] = []
     try:
         hand = [i["id"] for i in rec["items"] if i["kind"] == "project" and i["decision"] == "include"]

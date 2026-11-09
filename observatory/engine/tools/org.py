@@ -273,6 +273,9 @@ def select(args) -> int:
                 raw = args.decision if args.decision is not None else Path(args.decision_file).read_text(encoding="utf-8")
                 decision = json.loads(raw)
             except (OSError, ValueError):
+                decision = None
+            if not isinstance(decision, dict):
+                # `null`, a list or a string is not a decision: never read as "no decision", which is the person's own.
                 raise S.Refusal("decision-invalid", "the decision is not one JSON object in contract DEC-0121's shape")
         caller = "cli" if decision is None else "agent:cli"
         if args.action == "plan":

@@ -49,9 +49,9 @@ PROJECTS = [
     {"id": "project:clone", "name": "clone", "owners": ["stranger"], "local_folders": ["clone"],
      "organization": "external", "organization_source": "external", "organization_why": "outside"},
 ]
-ORG_KEY = "vault:alpha-web/prod/OPENROUTER_API_KEY"
-HAND_KEY = "vault:alpha-web/prod/HAND_PUT"
-NOTES_KEY = "vault:notes/prod/OPENROUTER_API_KEY"
+ORG_SLOT = "vault:alpha-web/prod/OPENROUTER_API_KEY"
+HAND_SLOT = "vault:alpha-web/prod/HAND_PUT"
+NOTES_SLOT = "vault:notes/prod/OPENROUTER_API_KEY"
 
 
 class Base(unittest.TestCase):
@@ -146,9 +146,9 @@ class Defaults(Base):
         self.assertNotIn("project:notes", items, "a personal project is counted, not listed")
         self.assertNotIn("project:partner-app", items)
         self.assertNotIn("project:clone", items)
-        self.assertEqual(items[ORG_KEY]["decision"], "hand-over-revoke",
+        self.assertEqual(items[ORG_SLOT]["decision"], "hand-over-revoke",
                          "project and issuer agree: handed over and revoked once the replacement works")
-        self.assertEqual(items[HAND_KEY]["decision"], "keep", "put by hand: ambiguous, never chosen by default")
+        self.assertEqual(items[HAND_SLOT]["decision"], "keep", "put by hand: ambiguous, never chosen by default")
         self.assertEqual(items["openrouter:account:acme-or"]["decision"], "include")
         self.assertIsNone(v["layout"])
         self.assertEqual(v["recommendedLayout"], "separate-space")
@@ -156,10 +156,11 @@ class Defaults(Base):
         p = v["preview"]
         self.assertEqual(p["organization"]["projects"], 2)
         self.assertEqual((p["keysRequested"], p["keysRevoked"]), (1, 1))
-        self.assertEqual(p["staysPersonal"]["projects"], 3, "notes, shared-tool, partner-app; Not ours is not counted")
+        self.assertEqual(p["staysPersonal"]["projects"], 2,
+                         "notes and shared-tool; Partner's project is not personal, and Not ours is not counted")
         self.assertEqual(p["staysPersonal"]["keys"], 3)
-        self.assertIn("3 projects and 3 keys stay personal and are never sent", p["staysPersonal"]["line"])
-        self.assertEqual([c for c in p["cannotBeUndone"] if ORG_KEY in c][:1] != [], True)
+        self.assertIn("2 projects and 3 keys stay personal and are never sent", p["staysPersonal"]["line"])
+        self.assertEqual([c for c in p["cannotBeUndone"] if ORG_SLOT in c][:1] != [], True)
         self.assertEqual([h["step"] for h in p["humanSteps"]], ["passkey-entry"])
         self.assertTrue(v["digest"].startswith("sha256:"))
         self.assertEqual(v["state"], "complete", v["degraded"])
@@ -197,15 +198,15 @@ class Changes(Base):
     def test_item_by_item_with_a_label_layout_and_space(self):
         v = self.sel.plan("acme", {"include": ["project:notes"], "exclude": ["project:beta-api"],
                                    "labels": {"project:alpha-web": "Alpha website"},
-                                   "keys": {HAND_KEY: "hand-over-keep"}, "layout": "separate-space",
+                                   "keys": {HAND_SLOT: "hand-over-keep"}, "layout": "separate-space",
                                    "serves": "work-acme"})
         items = self.items(v)
         self.assertEqual((items["project:notes"]["decision"], items["project:notes"]["by"]), ("include", "hand"))
         self.assertEqual(items["project:beta-api"]["decision"], "exclude")
         self.assertEqual(items["project:alpha-web"]["label"], "Alpha website")
-        self.assertEqual(items[HAND_KEY]["decision"], "hand-over-keep")
-        self.assertIn(NOTES_KEY, items, "a project chosen by hand brings its keys into the plan (ORG-W6)")
-        self.assertEqual(items[NOTES_KEY]["decision"], "keep", "its issuer is personal: never chosen by default")
+        self.assertEqual(items[HAND_SLOT]["decision"], "hand-over-keep")
+        self.assertIn(NOTES_SLOT, items, "a project chosen by hand brings its keys into the plan (ORG-W6)")
+        self.assertEqual(items[NOTES_SLOT]["decision"], "keep", "its issuer is personal: never chosen by default")
         self.assertEqual((v["layout"], v["serves"], v["draft"]), ("separate-space", "work-acme", True))
         self.assertEqual(items["project:notes"]["decidedBy"], {"by": "person", "via": "cli"})
         self.assertEqual([h["step"] for h in v["preview"]["humanSteps"]],
@@ -228,18 +229,18 @@ class Changes(Base):
 
     def test_a_key_follows_its_project_unless_chosen_by_hand(self):
         v = self.sel.plan("acme", {"exclude": ["project:alpha-web"]})
-        self.assertEqual(self.items(v)[ORG_KEY]["decision"], "keep")
-        v = self.sel.plan("acme", {"keys": {ORG_KEY: "hand-over-keep"}})
-        self.assertEqual(self.items(v)[ORG_KEY]["decision"], "hand-over-keep")
+        self.assertEqual(self.items(v)[ORG_SLOT]["decision"], "keep")
+        v = self.sel.plan("acme", {"keys": {ORG_SLOT: "hand-over-keep"}})
+        self.assertEqual(self.items(v)[ORG_SLOT]["decision"], "hand-over-keep")
 
     def test_bad_changes_are_refused_and_change_nothing(self):
         for change, code in (({"include": ["project:nowhere"]}, "unknown-item"),
                              ({"include": ["not an id"]}, "unknown-item"),
-                             ({"keys": {ORG_KEY: "copy"}}, "invalid-choice"),
+                             ({"keys": {ORG_SLOT: "copy"}}, "invalid-choice"),
                              ({"keys": {"project:alpha-web": "keep"}}, "unknown-item"),
                              ({"labels": {"project:alpha-web": "line\nbreak"}}, "invalid-label"),
                              ({"labels": {"project:alpha-web": "x" * 81}}, "invalid-label"),
-                             ({"labels": {ORG_KEY: "x"}}, "unknown-item"),
+                             ({"labels": {ORG_SLOT: "x"}}, "unknown-item"),
                              ({"layout": "everywhere"}, "invalid-layout"),
                              ({"serves": "../elsewhere"}, "invalid-space"),
                              ({"includeGroup": "all"}, "invalid-group"),
@@ -294,10 +295,10 @@ class Apply(Base):
         steps = {i["id"]: {s["step"]: s for s in i["steps"]} for i in jdoc["items"]}
         self.assertEqual(steps["project:alpha-web"]["hand-to-fabric"]["waitingOn"], "fabric-adaptation-plan")
         self.assertEqual(steps["project:alpha-web"]["entry-signed"]["humanStep"], "passkey-entry")
-        self.assertEqual(steps[ORG_KEY]["credential-request"]["state"], "waiting")
-        self.assertEqual(steps[ORG_KEY]["revoke-personal"]["waitingOn"], "replacement-confirmation")
-        self.assertTrue(steps[ORG_KEY]["revoke-personal"]["cannotBeUndone"])
-        self.assertEqual(steps[HAND_KEY]["stays-personal"]["state"], "done")
+        self.assertEqual(steps[ORG_SLOT]["credential-request"]["state"], "waiting")
+        self.assertEqual(steps[ORG_SLOT]["revoke-personal"]["waitingOn"], "replacement-confirmation")
+        self.assertTrue(steps[ORG_SLOT]["revoke-personal"]["cannotBeUndone"])
+        self.assertEqual(steps[HAND_SLOT]["stays-personal"]["state"], "done")
         self.assertEqual(steps["openrouter:account:acme-or"]["recorded"]["state"], "done")
         self.assertEqual(steps["layout:separate-space"]["create-space"]["waitingOn"], "space-create")
         self.assertEqual(a["counts"]["project"], {"planned": 0, "waiting": 2, "done": 0, "failed": 0, "undone": 0})
@@ -369,6 +370,124 @@ class Apply(Base):
             self.sel.apply("acme", v["digest"])
         self.assertEqual(caught.exception.code, "chosen-for-another")
         self.assertIn("--exclude project:shared-tool", caught.exception.command)
+
+
+class ReviewRoundOne(Base):
+    """What the first review found: each case reproduced, then fixed."""
+
+    def test_undo_does_not_bring_back_a_project_another_organization_took(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        self.sel.apply("acme", self.sel.plan("acme", {"exclude": ["project:alpha-web"]})["digest"])
+        p = self.sel.plan("partner", {"include": ["project:alpha-web"], "layout": "one-space"})
+        self.sel.apply("partner", p["digest"])
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.undo("acme")
+        self.assertEqual(caught.exception.code, "chosen-for-another")
+        self.assertEqual(len(self.sel._revisions("acme")), 2, "nothing written")
+
+    def test_a_space_named_outside_the_separate_layout_does_not_change_the_form(self):
+        v = self.sel.plan("acme", {"layout": "this-space", "serves": "somewhere"})
+        self.assertIsNone(v["serves"])
+        self.sel.apply("acme", v["digest"])
+        again = self.sel.plan("acme")
+        self.assertTrue(again["applied"], "the applied form reads applied")
+        self.sel.apply("acme", self.ready()["digest"])
+        moved = self.sel.plan("acme", {"layout": "one-space"})
+        self.sel.apply("acme", moved["digest"])
+        self.assertTrue(self.sel.plan("acme")["applied"])
+        self.assertEqual(self.sel.apply("acme", self.sel.plan("acme")["digest"])["outcome"], "unchanged")
+
+    def test_a_layout_change_moves_what_a_revocation_waits_on(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        self.sel.apply("acme", self.sel.plan("acme", {"layout": "one-space"})["digest"])
+        step = next(s for i in self.sel.journal("acme", 2)["items"] if i["id"] == ORG_SLOT for s in i["steps"]
+                    if s["step"] == "revoke-personal")
+        self.assertEqual(step["waitingOn"], "rotation", "in one space nothing waits for a confirmation")
+        self.sel.apply("acme", self.ready()["digest"])
+        step = next(s for i in self.sel.journal("acme", 3)["items"] if i["id"] == ORG_SLOT for s in i["steps"]
+                    if s["step"] == "revoke-personal")
+        self.assertEqual(step["waitingOn"], "replacement-confirmation", "a separate space asks for it again")
+
+    def test_a_project_excluded_by_hand_stays_known(self):
+        self.sel.apply("acme", self.ready(include=["project:notes"])["digest"])
+        v = self.sel.plan("acme", {"exclude": ["project:notes"]})
+        self.sel.apply("acme", v["digest"])
+        v = self.sel.plan("acme")
+        self.assertEqual(v["unknown"], [])
+        self.assertEqual(self.items(v)["project:notes"]["decision"], "exclude")
+
+    def test_keys_of_a_project_chosen_after_a_record_take_the_defaults(self):
+        self.private("openrouter-issued.json", json.dumps({"issued": {
+            "alpha-llm": {"account": "acme-or", "destination": "vault:alpha-web/prod/OPENROUTER_API_KEY"},
+            "notes-llm": {"account": "acme-or", "destination": "vault:notes/prod/OPENROUTER_API_KEY"}}}))
+        self.sel.apply("acme", self.ready()["digest"])
+        v = self.sel.plan("acme", {"include": ["project:notes"]})
+        row = self.items(v)[NOTES_SLOT]
+        self.assertEqual((row["decision"], row["new"]), ("hand-over-revoke", False), row)
+
+    def test_the_words_must_name_the_organization(self):
+        words = self.decision("org.select.plan", "acme")
+        del words["target"]
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.plan("acme", {"layout": "one-space"}, caller="agent:mcp", decision=words)
+        self.assertEqual(caught.exception.code, "decision-invalid")
+
+    def test_an_unreadable_other_record_is_named_and_stops_apply(self):
+        self.sel.apply("partner", self.sel.plan("partner", {"layout": "one-space"})["digest"])
+        path = self.sel._revisions("partner")[0]
+        path.write_text(path.read_text().replace('"one-space"', '"this-space"'))
+        v = self.ready()
+        self.assertTrue([d for d in v["degraded"] if d["code"] == "record-unreadable"])
+        self.assertEqual(v["state"], "partial")
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.apply("acme", v["digest"])
+        self.assertEqual(caught.exception.code, "conflict-unchecked")
+
+    def test_a_revoked_value_is_never_kept_personal_by_a_later_revision(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        path = self.sel._journal_path("acme", 1)
+        jdoc = json.loads(path.read_text())
+        for item in jdoc["items"]:
+            for st in item["steps"]:
+                if item["id"] == ORG_SLOT and st["step"] == "revoke-personal":
+                    st["state"] = "done"
+        path.write_text(json.dumps(jdoc))
+        v = self.sel.plan("acme", {"keys": {ORG_SLOT: "keep"}})
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.apply("acme", v["digest"])
+        self.assertEqual(caught.exception.code, "already-revoked")
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.undo("acme")
+        self.assertEqual(caught.exception.code, "already-revoked")
+        # A change that keeps the key handed over carries the done step, and never rewrites it as undone.
+        self.sel.apply("acme", self.sel.plan("acme", {"keys": {ORG_SLOT: "hand-over-revoke"},
+                                                       "exclude": ["project:beta-api"]})["digest"])
+        step = next(st for i in self.sel.journal("acme", 2)["items"] if i["id"] == ORG_SLOT for st in i["steps"]
+                    if st["step"] == "revoke-personal")
+        self.assertEqual(step["state"], "done")
+
+    def test_a_store_that_cannot_be_written_is_a_typed_refusal(self):
+        import paths
+        paths.STORE.mkdir(parents=True, exist_ok=True)
+        elsewhere = Path(self.tmp.name).resolve() / "elsewhere"
+        elsewhere.mkdir()
+        (paths.STORE / "org-selection").symlink_to(elsewhere)
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.apply("acme", "sha256:" + "0" * 64)
+        self.assertEqual(caught.exception.code, "record-unwritable")
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.plan("acme", {"layout": "one-space"})
+        self.assertEqual(caught.exception.code, "record-unwritable")
+
+    def test_a_null_decision_on_the_command_line_is_refused(self):
+        import org as org_cli
+        importlib.reload(org_cli)
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            code = org_cli.main(["select", "--org", "acme", "plan", "--layout", "one-space", "--decision", "null",
+                                 "--json"])
+        self.assertEqual((code, json.loads(err.getvalue())["error"]), (1, "decision-invalid"))
+        self.assertFalse((self.sel._folder("acme") / "draft.json").exists())
 
 
 class WhatTheOrganizationSees(Base):
@@ -449,24 +568,24 @@ class UndoAndConfirm(Base):
     def test_confirm_replacement(self):
         v = self.ready()
         self.sel.apply("acme", v["digest"])
-        c = self.sel.confirm_replacement("acme", ORG_KEY)
+        c = self.sel.confirm_replacement("acme", ORG_SLOT)
         self.assertEqual((c["outcome"], c["step"]["waitingOn"]), ("confirmed", "rotation"))
         self.assertEqual(c["step"]["state"], "planned", "confirmed, still not revoked: no rotation door yet")
-        self.assertEqual(self.sel.confirm_replacement("acme", ORG_KEY[len("vault:"):])["outcome"], "already-confirmed")
-        for key, code in ((HAND_KEY, "not-revoking"), ("vault:nowhere/prod/X", "not-in-record")):
+        self.assertEqual(self.sel.confirm_replacement("acme", ORG_SLOT[len("vault:"):])["outcome"], "already-confirmed")
+        for key, code in ((HAND_SLOT, "not-revoking"), ("vault:nowhere/prod/X", "not-in-record")):
             with self.assertRaises(self.sel.Refusal) as caught:
                 self.sel.confirm_replacement("acme", key)
             self.assertEqual(caught.exception.code, code)
         # A changed selection carries the confirmation over (it already happened).
         self.sel.apply("acme", self.sel.plan("acme", {"exclude": ["project:beta-api"]})["digest"])
-        step = next(s for i in self.sel.journal("acme", 2)["items"] if i["id"] == ORG_KEY for s in i["steps"]
+        step = next(s for i in self.sel.journal("acme", 2)["items"] if i["id"] == ORG_SLOT for s in i["steps"]
                     if s["step"] == "revoke-personal")
         self.assertIn("confirmedAt", step)
 
     def test_this_space_lists_what_moves_out(self):
         v = self.sel.plan("acme", {"layout": "this-space"})
         self.assertEqual(v["preview"]["movesOut"]["waitingOn"], "move-out")
-        self.assertEqual(v["preview"]["movesOut"]["projects"], 3)
+        self.assertEqual(v["preview"]["movesOut"]["projects"], 3, "notes, shared-tool and Partner's project")
         a = self.sel.apply("acme", v["digest"])
         self.assertIn("move-out", [w["on"] for w in a["waitingOn"]])
         self.assertIsNone(self.ready()["preview"]["movesOut"])
@@ -475,7 +594,7 @@ class UndoAndConfirm(Base):
         v = self.sel.plan("acme", {"layout": "one-space"})
         self.sel.apply("acme", v["digest"])
         with self.assertRaises(self.sel.Refusal) as caught:
-            self.sel.confirm_replacement("acme", ORG_KEY)
+            self.sel.confirm_replacement("acme", ORG_SLOT)
         self.assertEqual(caught.exception.code, "confirmation-not-needed")
 
 
@@ -488,10 +607,23 @@ class NewSince(Base):
             {"id": "project:gamma", "name": "gamma", "owners": ["acme-inc"], "local_folders": ["gamma"],
              "organization": "acme", "organization_source": "rule", "organization_why": "repository owner acme-inc"}]})
         self.private("projects/beta-api/prod/LATER_KEY", STAND_IN_VALUE)
+        self.private("projects/beta-api/prod/LATER_BY_HAND", STAND_IN_VALUE)
+        self.private("openrouter-issued.json", json.dumps({"issued": {
+            "alpha-llm": {"account": "acme-or", "destination": "vault:alpha-web/prod/OPENROUTER_API_KEY"},
+            "notes-llm": {"account": "main", "destination": "vault:notes/prod/OPENROUTER_API_KEY"},
+            "later-llm": {"account": "acme-or", "destination": "vault:beta-api/prod/LATER_KEY"}}}))
+        # Something that needs a decision anyway, found since: listed as needs-you, not as proposed by the rules.
+        self.registry("projects.json", {"projects": PROJECTS + [
+            {"id": "project:gamma", "name": "gamma", "owners": ["acme-inc"], "local_folders": ["gamma"],
+             "organization": "acme", "organization_source": "rule", "organization_why": "repository owner acme-inc"},
+            {"id": "project:delta", "name": "delta", "owners": ["acme-inc", "your-user"], "local_folders": ["delta"],
+             "organization": None, "organization_source": "conflict", "organization_why": "acme vs person"}]})
         v = self.sel.plan("acme")
         items = self.items(v)
         self.assertEqual((items["project:gamma"]["decision"], items["project:gamma"]["new"]), ("exclude", True))
         self.assertEqual(items["vault:beta-api/prod/LATER_KEY"]["decision"], "keep")
+        self.assertEqual((items["project:delta"]["decision"], items["project:delta"]["new"]), ("exclude", False))
+        self.assertFalse(items["vault:beta-api/prod/LATER_BY_HAND"]["new"], "put by hand: no rule proposes it")
         self.assertIn("project:gamma", v["new"])
         self.assertEqual(items["project:alpha-web"]["decision"], "include", "the record's decisions stand")
         self.assertEqual(self.sel.show("acme")["new"], ["project:gamma", "vault:beta-api/prod/LATER_KEY"])
@@ -501,6 +633,7 @@ class NewSince(Base):
         rows = organization_findings.selection_findings(self.sel.new_since_all())
         self.assertEqual([(r["type"], r["subject"]) for r in rows], [("organization.selection_new", "organization:acme")])
         self.assertIn("2", rows[0]["title"])
+        self.assertIn("1 project(s), 1 key(s) and 0 account(s)", rows[0]["detail"])
         self.assertIn("full org select --org acme plan", rows[0]["action"])
 
     def test_no_finding_without_a_record(self):
@@ -542,6 +675,39 @@ class Gates(Base):
                                        decision=self.decision("org.select.undo", "acme"))["outcome"], "undone")
 
 
+class McpTool(Base):
+    """`observatory_org_selection` reads the operator's words from `decision` or from `_meta.decision`."""
+
+    def server(self):
+        import importlib.util
+        sys.path.insert(0, str(ROOT / "mcp"))
+        spec = importlib.util.spec_from_file_location("srv_org_selection", ROOT / "mcp/server.py")
+        mod = importlib.util.module_from_spec(spec)
+        sys.modules["srv_org_selection"] = mod
+        spec.loader.exec_module(mod)
+        return mod
+
+    def test_the_words_come_from_meta_or_the_argument(self):
+        m = self.server()
+
+        class Request:
+            def __init__(self, meta):
+                self.meta = meta
+
+        class Ctx:
+            def __init__(self, meta):
+                self.request_context = Request(meta)
+        refused = m.observatory_org_selection(org="acme", action="plan", changes={"layout": "one-space"})
+        self.assertEqual(refused["error"], "operator-decision-required")
+        meta = {"decision": self.decision("org.select.plan", "acme")}
+        v = m.observatory_org_selection(org="acme", action="plan", changes={"layout": "one-space"}, ctx=Ctx(meta))
+        self.assertEqual(v["layout"], "one-space")
+        a = m.observatory_org_selection(org="acme", action="apply", digest=v["digest"],
+                                        decision=self.decision("org.select.apply", "acme"))
+        self.assertEqual((a["outcome"], a["decidedBy"]["caller"]), ("applied", "agent:mcp"))
+        self.assertEqual(m.observatory_org_selection(org="acme", action="show")["state"], "waiting")
+
+
 class Cli(Base):
     """`full org select`: the same answers as the functions, text or JSON, refusals on stderr with their command."""
 
@@ -556,10 +722,10 @@ class Cli(Base):
     def test_plan_apply_show_undo(self):
         code, out, _ = self.run_cli("select", "--org", "acme", "plan", "--layout", "separate-space", "--serves",
                                     "work-acme", "--label", "project:alpha-web=Alpha website", "--exclude",
-                                    "project:beta-api", "--key", f"{HAND_KEY}=hand-over-keep", "--json")
+                                    "project:beta-api", "--key", f"{HAND_SLOT}=hand-over-keep", "--json")
         self.assertEqual(code, 0)
         plan = json.loads(out)
-        self.assertEqual(self.items(plan)[HAND_KEY]["decision"], "hand-over-keep")
+        self.assertEqual(self.items(plan)[HAND_SLOT]["decision"], "hand-over-keep")
         code, out, err = self.run_cli("select", "--org", "acme", "apply", "--json")
         self.assertEqual(code, 1)
         self.assertEqual(json.loads(err)["error"], "not-previewed")
@@ -569,7 +735,7 @@ class Cli(Base):
         self.assertEqual(code, 0)
         self.assertIn("revision 1", out)
         self.assertIn("fabric-adaptation-plan", out)
-        code, out, _ = self.run_cli("select", "--org", "acme", "confirm-replacement", ORG_KEY, "--json")
+        code, out, _ = self.run_cli("select", "--org", "acme", "confirm-replacement", ORG_SLOT, "--json")
         self.assertEqual((code, json.loads(out)["outcome"]), (0, "confirmed"))
         code, out, _ = self.run_cli("select", "--org", "acme", "undo")
         self.assertEqual(code, 0)

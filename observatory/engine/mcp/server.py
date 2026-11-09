@@ -621,7 +621,7 @@ def _meta_decision(ctx: "Context | None") -> Any:
     return extra.get("decision", getattr(meta, "decision", None))
 
 
-@server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True))
+@server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False))
 def observatory_org_selection(
     org: Annotated[str, Field(validation_alias=AliasChoices("org", "organization"),
                               description="An organization of config/organizations.json, not the default one.")],

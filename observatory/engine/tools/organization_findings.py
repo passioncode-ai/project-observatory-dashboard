@@ -84,14 +84,22 @@ def selection_findings(rows: list[dict]) -> list[dict]:
         if not isinstance(org, str) or not new:
             continue
         projects = sum(1 for i in new if str(i).startswith("project:"))
+        keys = sum(1 for i in new if str(i).startswith("vault:"))
+        accounts = len(new) - projects - keys
         out.append({
             "type": "organization.selection_new", "subject": f"organization:{org}", "severity": "info",
             **titled("{n} new items may belong to {organization}", n=len(new), organization=org),
-            "detail": (f"Found since {org}'s selection was applied: {projects} project(s) and {len(new) - projects} "
-                       "key(s) its rules would propose: " + ", ".join(sorted(new)[:12])
+            "detail": (f"Found since {org}'s selection was applied, and proposed by its rules: {projects} project(s), "
+                       f"{keys} key(s) and {accounts} account(s): " + ", ".join(sorted(new)[:12])
                        + (f", and {len(new) - 12} more" if len(new) > 12 else "")
                        + ". None is chosen by itself; each waits for a person (ORG-R16)."),
-            "action": (f"review them with `project-observatory full org select --org {org} plan`, include the ones "
-                       "that belong to it, then apply the new form"),
+            "action": (f"review them with `project-observatory full org select --org {_quoted(org)} plan`, include "
+                       "the ones that belong to it, then apply the new form"),
         })
     return out
+
+
+def _quoted(text: str) -> str:
+    """An organization's name as a shell word: free text in organizations.json, quoted unless plain."""
+    import re
+    return text if re.fullmatch(r"[A-Za-z0-9._@+-]+", text) else "'" + text.replace("'", "'\\''") + "'"
