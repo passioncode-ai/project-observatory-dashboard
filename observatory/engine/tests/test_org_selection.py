@@ -108,11 +108,31 @@ class Base(unittest.TestCase):
         path.write_text(text, encoding="utf-8")
         path.chmod(0o600)
 
-    def seal_values(self):
-        """Every vault value file unreadable to its own owner: anything that opened one would fail on it."""
-        for path in (self.secrets / "projects").rglob("*"):
-            if path.is_file() and not path.name.endswith((".json", ".jsonl")):
-                path.chmod(0)
+    @contextlib.contextmanager
+    def values_unopened(self):
+        """Opening any vault value file fails while this holds, on every platform (Windows reads a file whatever its
+        mode, so no chmod): anything in the selection that opened one would fail on it. Listing a folder is allowed."""
+        values = (self.secrets / "projects").resolve()
+        real_open, real_os_open = open, os.open
+
+        def value(path) -> bool:
+            try:
+                p = Path(os.fspath(path)).resolve()
+            except (TypeError, ValueError):
+                return False
+            return values in p.parents and not p.name.endswith((".json", ".jsonl"))
+
+        def guarded_open(file, *args, **kwargs):
+            if value(file):
+                raise AssertionError(f"a vault value file was opened: {Path(os.fspath(file)).name}")
+            return real_open(file, *args, **kwargs)
+
+        def guarded_os_open(path, *args, **kwargs):
+            if value(path):
+                raise AssertionError(f"a vault value file was opened: {Path(os.fspath(path)).name}")
+            return real_os_open(path, *args, **kwargs)
+        with patch("builtins.open", guarded_open), patch("os.open", guarded_os_open):
+            yield
 
     def items(self, view):
         return {i["id"]: i for i in view["items"]}
@@ -280,9 +300,13 @@ class Apply(Base):
         self.assertEqual(self.sel._revisions("acme"), [])
 
     def test_apply_writes_a_verified_revision_and_a_journal_that_waits(self):
-        self.seal_values()
-        v = self.ready(labels={"project:alpha-web": "Alpha website"})
-        a = self.sel.apply("acme", v["digest"])
+        with self.values_unopened():
+            import private_io
+            with self.assertRaises(AssertionError, msg="the guard holds for the engine's own reader"):
+                private_io.read(self.secrets / "projects" / ORG_SLOT[len("vault:"):])
+            v = self.ready(labels={"project:alpha-web": "Alpha website"})
+            a = self.sel.apply("acme", v["digest"])
+            self.sel.show("acme")
         self.assertEqual((a["outcome"], a["revision"], a["state"]), ("applied", 1, "waiting"))
         self.assertEqual(a["selectionDigest"], v["digest"], "the applied record has the previewed digest (ORG-R14)")
         self.assertEqual(a["decidedBy"], {"by": "person", "via": "cli"})
