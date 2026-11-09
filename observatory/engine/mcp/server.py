@@ -663,6 +663,12 @@ def observatory_org_selection(
     as `project-observatory full org select --org NAME ACTION --json` (schema `org-select/1`)."""
     import org_selection as S
     words = decision if decision is not None else _meta_decision(ctx)
+    stray = [name for name, value, takes in (("changes", changes, "plan"), ("digest", digest, "apply"),
+                                             ("key", key, "confirm-replacement"))
+             if value is not None and action != takes]
+    if stray:
+        # The same refusal as the CLI's: an argument the action does not take is never dropped without a word.
+        return S.Refusal("invalid-change", f"`{stray[0]}` belongs to another action, not to {action}").answer()
     try:
         if action == "show":
             return S.show(org)

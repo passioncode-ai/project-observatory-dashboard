@@ -775,6 +775,38 @@ class ReviewRoundFour(Base):
         self.assertTrue(self.sel.plan("acme")["draft"])
 
 
+class ReviewRoundFive(Base):
+    """What the fifth review named as non-blocking and this change fixes."""
+
+    def test_an_unreadable_other_record_never_blocks_undo_to_nothing(self):
+        self.sel.apply("partner", self.sel.plan("partner", {"layout": "one-space"})["digest"])
+        self.sel.apply("acme", self.ready()["digest"])
+        path = self.sel._revisions("partner")[0]
+        path.write_text(path.read_text().replace('"one-space"', '"this-space"'))
+        self.assertEqual(self.sel.undo("acme")["state"], "empty")
+
+    def test_a_default_exclusion_the_rules_propose_later_is_new(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        moved = [dict(p, organization="acme", organization_source="rule", organization_why="repository owner acme-inc")
+                 if p["id"] == "project:shared-tool" else p for p in PROJECTS]
+        self.registry("projects.json", {"projects": moved})
+        self.assertIn("project:shared-tool", self.sel.plan("acme")["new"])
+        v = self.sel.plan("acme", {"include": ["project:shared-tool"]})
+        self.assertNotIn("project:shared-tool", v["new"], "decided by the person: no longer new")
+
+    def test_the_answer_names_the_records_decider_and_the_caller(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        again = self.sel.apply("acme", self.sel.plan("acme")["digest"], caller="agent:mcp",
+                               decision=self.decision("org.select.apply", "acme"))
+        self.assertEqual((again["decidedBy"]["by"], again["calledBy"]["by"]), ("person", "operator"))
+
+    def test_the_tool_refuses_an_argument_its_action_does_not_take(self):
+        m = McpTool.server(self)
+        for args in ({"action": "show", "changes": {"layout": "one-space"}}, {"action": "plan", "digest": "x"},
+                     {"action": "apply", "key": ORG_SLOT}):
+            self.assertEqual(m.observatory_org_selection(org="acme", **args)["error"], "invalid-change", args)
+
+
 class WhatTheOrganizationSees(Base):
     """ORG-R03: a reference random per organization and a label only when typed; nothing is handed over."""
 

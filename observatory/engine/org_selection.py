@@ -401,7 +401,11 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
             row.update(decision=c["default"], by="rule" if c["default"] in ("include", "hand-over-revoke") else
                        "default", new=False)
         elif ident in base:
-            row.update(decision=base[ident]["decision"], by=base[ident].get("by", "record"), new=False)
+            # A row the record left out by default (it needed a decision then) that the rules propose now is found
+            # since, as ORG-R16 means it: listed as new, never chosen by itself.
+            again = (base[ident].get("by") == "default" and base[ident]["decision"] in ("exclude", "keep")
+                     and c["group"] == "proposed" and c["kind"] in ("project", "key"))
+            row.update(decision=base[ident]["decision"], by=base[ident].get("by", "record"), new=again)
             if base[ident].get("label"):
                 row["label"] = base[ident]["label"]
             if base[ident].get("ref"):
@@ -424,7 +428,7 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
     for ident, change in changes.items():
         row = items.get(ident) or {"id": ident, "kind": change["kind"], "group": "by-hand",
                                    "why": "you added it by hand", "new": False}
-        row.update(decision=change["decision"], by=change.get("by", "hand"))
+        row.update(decision=change["decision"], by=change.get("by", "hand"), new=False)
         if row.get("group") == "by-hand" or ident not in cands:
             # Chosen or left out by hand, not proposed by a rule: the record says so, not an older reason.
             row.update(group="by-hand", why="you chose it by hand" if change["decision"] not in ("exclude", "keep")
@@ -518,6 +522,9 @@ def _clash(org: str, items: Any) -> None:
     """ORG-R05 before anything is written: refused for a project another organization's record holds, and refused
     when another record cannot be read (the check cannot be made)."""
     q = CMD.format(org=_q(org))
+    items = list(items)
+    if not any(i["kind"] == "project" and i["decision"] == "include" for i in items):
+        return                                         # nothing chosen, nothing to clash: an undo to nothing works
     others, unread = _others_chosen(org)
     if unread:
         raise Refusal("conflict-unchecked", "another organization's selection does not read, so whether one of "
@@ -1141,7 +1148,7 @@ def _apply_answer(org: str, rec: dict, outcome: str, who: dict) -> dict:
     state = "error" if failed else "waiting" if waiting else "empty" if empty else "complete"
     return {"schema": VIEW_SCHEMA, "answer": "apply", "organization": org, "outcome": outcome,
             "state": state, "revision": rec["revision"], "digest": rec["digest"],
-            "selectionDigest": rec["selectionDigest"], "decidedBy": rec["decidedBy"] if outcome == "applied" else who,
+            "selectionDigest": rec["selectionDigest"], "decidedBy": rec["decidedBy"], "calledBy": who,
             "counts": c, "waitingOn": _waiting_on(jdoc), "fabricItems": fabric_items(rec),
             "humanSteps": [{"step": h, "what": HUMAN_STEPS[h]} for h in _human(rec)],
             "nextStep": ("a step failed: `show` names it and its command" if failed else
