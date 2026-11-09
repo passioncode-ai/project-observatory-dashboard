@@ -63,7 +63,9 @@ stops nothing), writes, boots the old daemon out, waits the same way, bootstraps
 answers 5, 37 or 125, up to BOOTSTRAP_ATTEMPTS); when the new one does not load it puts the previous daemon back
 and loads it, and when the old one does not stop in time it loads nothing and puts the previous file back, saying
 which in `put_back`. Every result of apply, replace and remove carries `steps`, one line per step with its
-outcome (a refusal before anything is read, exit 2, is an error instead). `apply` over its own loaded daemon replaces it the same way when the definition changed, and leaves it
+outcome (a refusal before anything is read, exit 2, is an error instead). launchd is believed only when it answers:
+a `launchctl print` that times out or fails is `launchd_unknown` and changes nothing, and a loaded label is booted out
+or counted as loaded by this tool only when launchd names this tool's own plist as its path. `apply` over its own loaded daemon replaces it the same way when the definition changed, and leaves it
 alone (`unchanged`) when it did not; `replace` reloads it even then.
 
 TRUSTED OWNERS (1.1.0). A program path normally belongs to root or the account. Where Homebrew's prefix is
@@ -334,6 +336,22 @@ class System(object):
     def loaded(self, label):
         return self.run(["print", "system/" + label])[0] == 0
 
+    def state(self, label):
+        """What launchd says of system/LABEL: (`loaded`, the plist path it was loaded from or None), (`gone`, None)
+        for its "not found" (NOT_FOUND), or (`unknown`, the exit) for any other answer, a timeout included."""
+        code, out, _tail = self.output([self.launchctl, "print", "system/" + label])
+        if code == 0:
+            match = re.search(r"^\s*path = (.+?)\s*$", out, re.M)
+            return "loaded", match.group(1) if match else None
+        if code == NOT_FOUND:
+            return "gone", None
+        return "unknown", code
+
+    def loaded_from(self, label, path):
+        """Whether system/LABEL is loaded from PATH: the only proof that a loaded label is this tool's job."""
+        state, where = self.state(label)
+        return state == "loaded" and where == path
+
     def wait_gone(self, label, seconds):
         """Ask launchd until it answers that it does not know system/LABEL (exit NOT_FOUND), for at most SECONDS
         (plus the time launchctl itself takes): (gone, seconds waited, the last exit of `print`). Any other answer,
@@ -368,8 +386,8 @@ class System(object):
             code, tail = self.run(["bootstrap", "system", path])
             if code == 0:
                 return True, code, tail, attempt
-            if code == TIMED_OUT and self.loaded(label):
-                # launchctl's own timeout, but launchd did load it: a retry would only meet "already loaded".
+            if code == TIMED_OUT and self.loaded_from(label, path):
+                # launchctl's own timeout, but launchd did load this file: a retry would only meet "already loaded".
                 return True, code, tail, attempt
             if code not in BOOTSTRAP_TRANSIENT:
                 break
@@ -1366,7 +1384,13 @@ def _install_one(system, account, definition, entries, holders=None, force=False
                           "again" % target)
         with open(target, "rb") as stream:
             previous = stream.read()
-    loaded = system.loaded(label)
+    state, where = system.state(label)
+    if state == "unknown":
+        return refuse("launchd_unknown", "launchctl print system/%s answered exit %s: nothing was changed; run it "
+                      "again" % (label, where))
+    loaded = state == "loaded"
+    if loaded and where is not None and where != target:
+        return refuse("label_taken", "system/%s is loaded from %s, not from this tool's %s" % (label, where, target))
     if entry is None and loaded:
         return refuse("label_taken", "system/%s is loaded and this tool did not load it" % label)
     data = plistlib.dumps(definition["daemon"], fmt=plistlib.FMT_XML, sort_keys=True)
@@ -1419,12 +1443,18 @@ def _install_one(system, account, definition, entries, holders=None, force=False
         restore_files()
         if previous is None:
             note = "nothing is left in /Library/LaunchDaemons"
-            if system.loaded(label):
-                # The refused bootstrap loaded it after all: a daemon with no file and no entry is never left.
+            state, where = system.state(label)
+            if state == "loaded" and where == target:
+                # The refused bootstrap loaded this file after all: a daemon with no file and no entry is never left.
                 gone, _code, _tail, _waited = system.stop(label, bootout_wait_seconds(definition["daemon"]))
                 note = ("nothing is left in /Library/LaunchDaemons, and the daemon its failed bootstrap loaded was "
-                        "booted out" if gone else "the daemon file is gone but system/%s is still loaded with no "
-                        "registry entry: `launchctl bootout system/%s` as root" % (label, label))
+                        "booted out" if gone else "the daemon file is gone but system/%s is still loaded from it with "
+                        "no registry entry: `launchctl bootout system/%s` as root" % (label, label))
+            elif state != "gone":
+                # Loaded from somewhere else, or launchd did not answer: never booted out, it may be another's job.
+                note = ("nothing is left in /Library/LaunchDaemons; system/%s is %s and was left alone (this tool "
+                        "did not load it)" % (label, "loaded from %s" % where if state == "loaded" else
+                                             "in a state launchctl did not tell (exit %s)" % where))
         elif system.loaded(label):
             note = ("the previous daemon file is back, and system/%s is loaded though its bootstrap failed: "
                     "`replace` loads the file again" % label)
@@ -1531,7 +1561,18 @@ def remove(system, account, label):
                 raise SpaceDaemonsError("%s is neither what this tool wrote nor a daemon labelled %s: it is left "
                                         "alone; move it aside by hand" % (target, label), "not-ours")
         waited = 0
-        if system.loaded(label):
+        state, where = system.state(label)
+        if state == "unknown":
+            # launchd did not answer: nothing is stopped or deleted on a guess.
+            problem = _problem("launchd_unknown", "launchctl print system/%s answered exit %s" % (label, where))
+            _step(steps, "bootout", "refused", problem["detail"])
+            return {"label": label, "user": account.name, "outcome": "failed", "problems": [problem],
+                    "steps": steps, "waited_seconds": 0, "ok": False,
+                    "note": "nothing was changed: run remove again"}
+        if state == "loaded" and where is not None and where != target:
+            raise SpaceDaemonsError("system/%s is loaded from %s, not from %s: this tool stops only the daemon it "
+                                    "loaded, so nothing was changed" % (label, where, target), "not-ours")
+        if state == "loaded":
             seconds = bootout_wait_seconds(_plist_doc(target))
             gone, code, tail, waited = system.stop(label, seconds)
             _step(steps, "bootout", "done" if code == 0 else "failed", ("exit %d %s" % (code, tail)).strip())

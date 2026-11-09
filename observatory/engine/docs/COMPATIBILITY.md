@@ -626,7 +626,10 @@ information. Until then the 1.1.0 copy keeps working as before, without `replace
   within the bound answers `outcome` `failed` with the problem `still_loaded` (or `bootout_failed` when launchctl
   refused the bootout), exit 1, and keeps the daemon file and the registry entry, so `remove` can run again; 1.1.0
   deleted both and answered `removed` while launchd still held the label. The answer gains `steps` and
-  `waited_seconds`.
+  `waited_seconds`. When the first `launchctl print` does not answer (a timeout, launchctl not starting), `remove`
+  answers `failed` with `launchd_unknown` and changes nothing (1.1.0 read it as "not loaded" and deleted the file and
+  the entry); when launchd names another plist than `/Library/LaunchDaemons/<label>.plist` as the label's path,
+  `remove` refuses (`not-ours`, exit 2) and boots nothing out.
 - `replace --user ACCOUNT --label LABEL` is new (root, isolated mode, the root-owned copy, as `apply`): the plan (a
   definition the rules refuse is `skipped` and stops nothing; a label with no definition is `not-found`), then
   `write`, `bootout`, `wait` (the same bound), `bootstrap` (again while launchd answers 5, 37 or 125, up to five
@@ -639,7 +642,10 @@ information. Until then the 1.1.0 copy keeps working as before, without `replace
 - `apply` over a daemon of its own that is loaded replaces it the same way when the definition changed (1.1.0 sent
   the bootstrap while the bootout was still finishing, and then put the old file back), and leaves it running with
   the new outcome `unchanged` when the daemon it would write is byte for byte the one written; `ok` counts
-  `unchanged` as done. A label loaded that this tool did not write is still refused (`label_taken`).
+  `unchanged` as done. A label loaded that this tool did not write is still refused (`label_taken`), and so is one launchd reports loaded
+  from another plist; a `launchctl print` that does not answer is `launchd_unknown`, refused before anything is
+  written. A loaded label is booted out, or a timed-out bootstrap counted as loaded, only when launchd names this
+  tool's plist as its path.
 - Every result row of `apply` and `replace` gains `steps`, a list of `{step, outcome, detail}` (`plan`, `write`,
   `bootout`, `wait`, `bootstrap`, `put-back`; outcomes `done`, `skipped`, `refused`, `failed`), and their answer
   gains `command`. A launchctl call that times out answers exit 125 (it was 127, which still means launchctl did not

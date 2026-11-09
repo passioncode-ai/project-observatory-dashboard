@@ -58,7 +58,8 @@ while the major version is 0, a minor release may change behaviour and says so h
   load it puts the previous daemon back and loads it, and when the old one does not stop in time it loads nothing
   and puts the previous file back, saying which in `put_back`. `apply` over its own loaded daemon replaces it the same
   way when the definition changed and leaves it running (`unchanged`) when it did not. Every result of `apply`,
-  `replace` and `remove` carries `steps`, one line per step. The root-owned copy changes: an administrator installs
+  `replace` and `remove` carries `steps`, one line per step. A `launchctl print` that does not answer is
+  `launchd_unknown` and changes nothing, and a label launchd reports loaded from another plist is never booted out. The root-owned copy changes: an administrator installs
   it again from this release (the steps are unchanged; `--version` prints `space-daemons 1.2.0` and the file's
   sha256). A listening port another process still holds (OBS-395 part 1) is not checked yet.
 

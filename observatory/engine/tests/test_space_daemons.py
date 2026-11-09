@@ -48,6 +48,10 @@ class Launchctl:
     def __init__(self, loaded=(), codes=None, agents=()):
         self.calls, self.loaded, self.codes, self.agents = [], set(loaded), dict(codes or {}), set(agents)
         self.linger, self.queue, self.stopping = {}, {}, {}
+        #: label -> the plist path `print system/LABEL` names (set by a bootstrap; absent for one loaded by hand).
+        self.paths = {}
+        #: `print system/LABEL` answers this code instead (a timeout, launchctl not starting).
+        self.print_code = None
         #: path -> ACL entries as `ls -lde` prints them; `stray` is an entry someone else left on every folder.
         self.acl, self.stray = {}, None
         #: the members of admin as dsmemberutil answers; `ds_code` set makes it fail to answer.
@@ -97,6 +101,11 @@ class Launchctl:
                 elif left is not None:
                     self.stopping[label] = left - 1
             code = 0 if label in self.loaded else 113
+            if self.print_code is not None:
+                code = self.print_code
+            elif code == 0 and label in self.paths:
+                return subprocess.CompletedProcess(argv, 0, "system/%s = {\n\tpath = %s\n}\n"
+                                                   % (label, self.paths[label]), "")
         else:
             queued = self.queue.get(verb) or []
             entry = queued.pop(0) if queued else self.codes.get(verb, 0)
@@ -107,6 +116,7 @@ class Launchctl:
                     code = 5
                 if code == 0 or loads:
                     self.loaded.add(label)
+                    self.paths[label] = argv[3]
             if code == 0 and verb == "bootout":
                 label = argv[2][len("system/"):]
                 if label in self.linger:
@@ -1262,6 +1272,74 @@ class Replacing(Base):
         self.assertIn("booted out", row["put_back"])
         self.assertNotIn(LABEL, self.launchctl.loaded)
         self.assertFalse(self.daemon().exists())
+        self.assertEqual(self.registry()["entries"], [])
+
+    def test_remove_changes_nothing_when_launchd_does_not_answer(self):
+        before = self.applied()
+        self.launchctl.print_code = 125
+        result = sd.remove(self.system(), self.account, LABEL)
+        self.assertEqual((result["outcome"], result["problems"][0]["code"]), ("failed", "launchd_unknown"))
+        self.assertNotIn("bootout", [c[0] for c in self.launchctl.calls])
+        self.assertEqual(self.daemon().read_bytes(), before)
+        self.assertEqual([e["label"] for e in self.registry()["entries"]], [LABEL])
+
+    def test_apply_changes_nothing_when_launchd_does_not_answer(self):
+        before = self.applied()
+        self.define(RunAtLoad=True)
+        self.launchctl.print_code = 125
+        calls = len(self.launchctl.calls)
+        row = sd.apply(self.system(), self.account)["results"][0]
+        self.assertEqual((row["outcome"], row["problems"][0]["code"]), ("refused", "launchd_unknown"))
+        self.assertFalse({"bootout", "bootstrap"} & {c[0] for c in self.launchctl.calls[calls:]})
+        self.assertEqual(self.daemon().read_bytes(), before)
+
+    def test_a_label_loaded_from_another_plist_is_never_booted_out(self):
+        self.applied()
+        self.launchctl.paths[LABEL] = "/var/empty/example-elsewhere/job.plist"
+        calls = len(self.launchctl.calls)
+        with self.assertRaises(sd.SpaceDaemonsError) as caught:
+            sd.remove(self.system(), self.account, LABEL)
+        self.assertEqual(caught.exception.code, "not-ours")
+        self.define(RunAtLoad=True)
+        row = sd.replace(self.system(), self.account, LABEL)["results"][0]
+        self.assertEqual((row["outcome"], row["problems"][0]["code"]), ("refused", "label_taken"))
+        self.assertNotIn("bootout", [c[0] for c in self.launchctl.calls[calls:]])
+        self.assertTrue(self.daemon().is_file())
+
+    def test_a_failed_bootstrap_never_boots_out_a_job_another_loader_holds(self):
+        self.define()
+        real = self.launchctl.__call__
+
+        def someone_else_loads_it(argv, **kw):
+            # Between the check and the bootstrap, another loader takes the label from a plist of its own.
+            if os.path.basename(argv[0]) == "launchctl" and argv[1] == "bootstrap":
+                self.launchctl.loaded.add(LABEL)
+                self.launchctl.paths[LABEL] = "/var/empty/example-elsewhere/job.plist"
+            return real(argv, **kw)
+        system = self.system()
+        system.runner = someone_else_loads_it
+        row = sd.apply(system, self.account)["results"][0]
+        self.assertEqual((row["outcome"], row["problems"][0]["code"]), ("failed", "bootstrap_failed"))
+        self.assertIn("was left alone", row["put_back"])
+        self.assertNotIn("bootout", [c[0] for c in self.launchctl.calls])
+        self.assertIn(LABEL, self.launchctl.loaded)
+        self.assertEqual(self.registry()["entries"], [])
+
+    def test_a_timed_out_bootstrap_counts_only_when_launchd_loaded_this_file(self):
+        self.define()
+        real = self.launchctl.__call__
+
+        def timeout_then_foreign(argv, **kw):
+            if os.path.basename(argv[0]) == "launchctl" and argv[1] == "bootstrap":
+                self.launchctl.loaded.add(LABEL)
+                self.launchctl.paths[LABEL] = "/var/empty/example-elsewhere/job.plist"
+                self.launchctl.calls.append(list(argv[1:]))
+                return subprocess.CompletedProcess(argv, 125, "", "synthetic timeout")
+            return real(argv, **kw)
+        system = self.system()
+        system.runner = timeout_then_foreign
+        row = sd.apply(system, self.account)["results"][0]
+        self.assertEqual(row["outcome"], "failed", "125 with another plist loaded is not this tool's daemon")
         self.assertEqual(self.registry()["entries"], [])
 
     def test_the_bound_follows_the_daemons_exit_timeout(self):
