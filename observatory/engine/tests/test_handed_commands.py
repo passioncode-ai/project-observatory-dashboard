@@ -124,6 +124,8 @@ SAMPLES = {
     "KEY": "plain/tidy-notes", "{_c.get('key')}": "plugin:tool@family/installer", "{c['key']}": "plain/tidy-notes",
     # The disposable folder a restore check verifies a carried secret store into (OBS-394).
     "DIR": "/srv/example-ws/verify-store",
+    # An organization's selection (OBS-417): the organization the command names, quoted as the code quotes it.
+    "{org}": "acme", "{_quoted(org)}": "acme",
 }
 PLACEHOLDER = re.compile(r"[A-Z][A-Z0-9_./,]*[A-Z]|[A-Z]{2,}")
 SHIPPED_TEXT = {".js", ".mjs", ".sh", ".json", ".md", ".html", ".txt"}

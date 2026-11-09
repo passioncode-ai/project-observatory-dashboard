@@ -82,7 +82,7 @@
         password and the administrator's computer token human
 
 `accounts`, `keys` and `select` print text, or with `--json` one JSON document; every other answer is one JSON document on stdout; a refusal is `{"error": code, "message": ...}` on stderr, exit 1. A
-refusal a person resolves also carries `nextStep` (in words) and `command`. Exit 1 too when every organization asked
+refusal a person resolves also carries `command` (and, outside `select`, `nextStep` in words). Exit 1 too when every organization asked
 failed, a check-in the server refused included.
 """
 from __future__ import annotations
@@ -125,7 +125,7 @@ class _Parser(argparse.ArgumentParser):
         super().error(credential_shape.redact(message))
 
     def parse_known_args(self, args=None, namespace=None):
-        top = self.prog == "project-observatory full org"
+        top = getattr(self, "top", False)
         if top:
             _Parser.typed = [str(a) for a in (sys.argv[1:] if args is None else args)]
         namespace, extras = super().parse_known_args(args, namespace)
@@ -139,6 +139,7 @@ class _Parser(argparse.ArgumentParser):
 def parser() -> argparse.ArgumentParser:
     p = _Parser(prog="project-observatory full org",
                                 description="This machine's organization enrollments (fabric-device/0.1).")
+    p.top = True                                       # the parser that keeps the typed words for its subparsers
     sub = p.add_subparsers(dest="command", required=True)
     enroll = sub.add_parser("enroll", help="enroll with an enrollment token from the vault")
     enroll.add_argument("--server", required=True, help="the organization server, https:// and an authority")

@@ -3201,8 +3201,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "93451a31254a9e0a68125e279449005bd130f13df4bb2087276d6aac2fd25f02",
-      "bytes": 129544,
+      "export_sha256": "11064a41626225be423a4e4aa73ad030829ab1aa68c07f44d3ae72085e2fe663",
+      "bytes": 129568,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -5115,8 +5115,8 @@
       "path": "tests/test_handed_commands.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "7323cffe4eefd93d1d715d18f4e3f17ef81755bf10ae528cd865ccb7c5cdf661",
-      "bytes": 26569
+      "export_sha256": "df42ccdffd12276bb36c4fa5742c1f0aa62e7d284fc84ec7c14283ccd23a183e",
+      "bytes": 26727
     },
     {
       "path": "tests/test_handoff.py",
@@ -7227,8 +7227,8 @@
       "path": "tools/org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8780189f5dd858441a0512f48180e46293c856dee959242b4ce5770856b7d7ca",
-      "bytes": 25012
+      "export_sha256": "7c3038b5ffc419710e7f068c0bad536baaf929f3c03203c1a7d745da5ea96fef",
+      "bytes": 25129
     },
     {
       "path": "tools/organization_findings.py",

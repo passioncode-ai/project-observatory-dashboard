@@ -661,7 +661,8 @@ def observatory_org_selection(
     places the projects in the organization's context, the macOS administrator password, the administrator's
     computer token. Refusals are typed answers with `command` (`operator-decision-required`, `decision-invalid`,
     `not-previewed`, `changed-since-preview`, `no-layout`, `chosen-for-another`, `record-unreadable`, ...). The same
-    as `project-observatory full org select --org NAME ACTION --json` (schema `org-select/1`)."""
+    as `project-observatory full org select --org NAME plan --json` and its other actions (schema
+    `org-select/1`)."""
     import org_selection as S
     words = decision if decision is not None else _meta_decision(ctx)
     stray = [name for name, value, takes in (("changes", changes, "plan"), ("digest", digest, "apply"),
