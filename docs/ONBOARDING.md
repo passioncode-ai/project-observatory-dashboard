@@ -554,6 +554,78 @@ DigitalOcean's API cannot mint a token: `digitalocean.py issue` prints the contr
 an expiration to choose, and `install --expires-on YYYY-MM-DD` (and `rotate --expires-on`) records the
 date the panel shows, or null with the reason when none is given.
 
+**Narrow credentials on request** (OBS-191 parts 2 and 3). An agent that needs a credential files a
+request instead of asking a person to mint one, and the administrator of this space decides it:
+
+```sh
+T="$(project-observatory full-path)/tools"
+python "$T/credential_requests.py" presets                       # what each door offers on request
+python "$T/credential_requests.py" request --agent urn:fabric:agent:acme:alpha-web \
+    --provider openrouter --preset model-key --limit 5 --reset monthly \
+    --slot alpha-web/prod/OPENROUTER_API_KEY --reason "summaries for the release notes"
+python "$T/credential_requests.py" list                          # open requests, names only
+python "$T/credential_requests.py" issue ID [--account LABEL]    # the door mints into the slot
+python "$T/credential_requests.py" refuse ID --reason not-allowed
+python "$T/credential_requests.py" revoke ID                     # at the provider, proved, then the slot
+```
+
+A request names the agent (`urn:fabric:agent:<publisher>:<id>`), the context (`personal`, the default,
+or an organization's `org:ID`), the provider and one of the presets its door offers, what it reaches
+(`--scope zone=example.com`), a ceiling where the provider has one (an OpenRouter key needs `--limit`,
+reset daily, weekly or monthly), how long it should live (`--expires-in-days`, 2 to 30 in an
+organization's context, default 30, and 2 to 365 in the personal one, default 90; or `--expires-at`),
+the vault slot the consumer reads, and one line of reason. No value travels with it. It is the
+contract's `credential-request/1` (fabric-agent-contract DEC-0111); `show ID --json` prints it and the
+decision as `credential-decision/1`, the documents an organization's exchange carries, and a request in
+the personal context has no request document because it never leaves this space. Refused before
+anything is written: a reason or scope that carries a path or anything shaped like a credential, more
+than 30 days in an organization's context, a provider or preset no door offers on request (Cloudflare's
+`dns-edit` and `zone-analytics-read` name one token per zone, so issuing one for a slot would roll the
+token another slot holds), a request in an organization's context from a space that is not enrolled in
+that organization, and a second open request for the same slot and context.
+
+`issue` is the administrator's `issued`: the issuing door (`openrouter.py`, `cloudflare.py`; Heroku,
+DigitalOcean and Sentry are not offered on request yet) mints a narrowed credential in the account
+`--account` names, ending no later than the request asked, in whole days counted from the issue (so it
+ends up to a day before the end asked for: a 30-day request issued soon after it was filed lives 29
+days), and delivers it straight into the slot in
+its own process, so the value is never an argument, never printed and never written elsewhere. It is
+refused, before any provider is called, when the slot already holds a value (a name already present is
+never overwritten: refuse the request, or file one for another NAME), and, for an organization's
+context, unless this space is enrolled in that organization and not removed from it. A provider answer
+that does not confirm an end no later than asked is revoked again, the value deleted, and the request
+stays open with the failed attempt recorded. The slot's `meta.json` then carries `provenance`: the
+request, the issuing door and account, the agent, context and slot it was issued for, the provider,
+preset, scope, ceiling, the end, and how to revoke it. `vault.py list` and `use_secret.py names` say
+"issued on request ID for CONTEXT by DOOR/ACCOUNT", and `observatory_credentials` gives each such row
+`issuedOnRequest`. A put or a rotation of the slot drops the provenance, since it describes one value.
+`refuse` takes one of the contract's reasons (`not-allowed`, `preset-unknown`, `expiry-too-long`,
+`scope-too-wide`, `provider-unavailable`, `unanswered`); `pending` records that it was seen and stays
+open; the consumer may `withdraw` an open request. `revoke` revokes at the provider through the same
+door the credential that request issued, by its identity (the OpenRouter key's hash, the Cloudflare
+token's id, kept in the queue), so a key the name holds after a rotation is never touched; it proves
+it by reading it back and deletes the slot's value only while it is still the one that request issued
+(a revocation names its request, DEC-0113). A Cloudflare re-issue rolls a token in place, so when the
+slot holds another value the token is left alone and the revocation reads "not proved". A refused
+revocation is recorded and the request stays `issued`; an unproved one may be run again, or closed
+with `revoke ID --settle "how it was checked"` once it was checked at the provider, which also closes
+a credential a failed issue could not revoke. An issue the process did not finish (the door started,
+no decision followed) is named on the next `issue` of that request instead of reading as a taken
+slot, and while it left a value in the slot the request cannot be refused or withdrawn either. An agent acting on the operator's word adds `--relayed-instruction "the words"
+--source WHERE`. Every request, decision, issue attempt and revocation is one line of
+`credential-requests.jsonl` beside the vault's movement journal, names only, and the board raises
+`credential.request_waiting` for a request nobody decided and `credential.revocation_refused` for one
+whose revocation the provider refused or did not show done (`revoke` then exits 1), and for a
+credential a failed issue could not revoke; `credential.request_queue_unreadable` says when lines of the
+queue could not be read, so a damaged queue never reads as an empty one. A credential the door minted
+and delivered before a later step failed is revoked again by its identity and its value deleted; a
+value put by someone else while the door ran is never overwritten, and a removal deletes only a value
+whose provenance names the request or that carries none (a value put by hand in the moment between the
+door's delivery and the queue's own check is the gap OBS-466 closes). An unproved revocation
+keeps the value, since its credential may still work. Sending a request to an organization in a check-in and
+receiving its sealed envelope are not built yet: the queue serves the space that holds both the
+request and the issuing door.
+
 **A DigitalOcean team's tokens, one place per team.** `tools/digitalocean.py stash` keeps a team's
 own token, read on stdin (or `stash --from-doctl CONTEXT|all`, which reads doctl's config and prints
 nothing), owner-only in `secrets/digitalocean-admin/`; it is never handed out. `teams [--probe]`
@@ -2401,7 +2473,8 @@ before anything else, and `plan` and `show` say so and give the command that
 finishes it (`apply --digest` with the record's own digest). What apply does today stays within what exists: a project waits on
 `fabric-adaptation-plan` (Fabric has no door Observatory hands adaptation items
 to yet, so nothing is sent; then the passkey signs the entry in Fabric), a key
-handed over waits on `credential-requests` (OBS-191 parts 2 and 3) and its
+handed over waits on `credential-requests` (the request queue exists since
+OBS-191 parts 2 and 3, but apply files no request into it yet) and its
 switch and revocation on `rotation` (OBS-416: no value is read, copied or
 written), and the layout on its own step (a new space, OBS-362; moving personal
 kinds out, OBS-426; contexts on every item, OBS-359). An account recorded is
@@ -2417,7 +2490,7 @@ estate revision (OBS-419). In the separate-space layout `confirm-replacement
 KEY` records that the organization's replacement works, so the revocation may
 follow once the rotation door exists; until the replacement has arrived and the
 key's consumers have switched to it, it is refused (`replacement-not-received`),
-which today is always, since those steps wait on OBS-191 and OBS-416. From the terminal each change is the
+which today is always, since apply files no request yet and the rotation is OBS-416. From the terminal each change is the
 person's own act; an agent passes the operator's words with `--decision JSON`
 (contract DEC-0121's shape, its `target` the organization, or
 `ORG:vault:FOLDER/ENV/NAME` for a confirmation; words carrying something shaped like a credential are refused) and calls `observatory_org_selection` with the same answers,

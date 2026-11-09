@@ -262,6 +262,8 @@ BOUNDARY += ('heroku_door',)
 BOUNDARY += ('sentry_door',)
 # Every door that can mint with an expiry does, and records it (OBS-191).
 BOUNDARY += ('key_expiry',)
+# Narrow credentials on request: the queue, the decision, delivery through the door (OBS-191 parts 2 and 3).
+BOUNDARY += ('credential_requests',)
 # The agents registry: Fabric descriptors, launchd and the MCP inventory -> registry/agents.json (OBS-83).
 BOUNDARY += ('scan_agents',)
 # The request for a why (M-8): once per record, with the next prompt, measured; and the

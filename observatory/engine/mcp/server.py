@@ -549,7 +549,9 @@ def observatory_credentials(
 
     Each vault row says when its value expires, from the slot's metadata:
     `expiresAt` as the minting door recorded it, or `expiry: none` with
-    `expiryReason`, or `expiry: not recorded` for a value put by hand.
+    `expiryReason`, or `expiry: not recorded` for a value put by hand. A value
+    issued on a credential request carries `issuedOnRequest` (the request id, its
+    context, agent, door and account; `credential_requests.py show ID` has the rest).
     """
     bad = _project_id_refusal(projectId, bare=True)
     if bad:

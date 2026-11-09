@@ -644,7 +644,7 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                the delegation token is read from stdin, never an argument
 
 `project-observatory full-path` (outside `full`) prints the engine directory, where the
-credential tools live: tools/vault.py, tools/use_secret.py, tools/install_key.py.
+credential tools live: tools/vault.py, tools/use_secret.py, tools/install_key.py, tools/credential_requests.py.
 
 Local excludes metric plugins, provider collectors, secret scans and model calls.
 Plugin execution remains an explicit command and can use enabled integrations.

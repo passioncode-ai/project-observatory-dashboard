@@ -1735,6 +1735,12 @@ def collect() -> list[dict]:
     out.extend(expiry_findings.from_store(
         pathlib.Path(os.environ.get("OBSERVATORY_VAULT_DIR", _store / "projects")),
         _store, TODAY))
+    # WHAT WAITS FOR THE ADMINISTRATOR (OBS-191 parts 2 and 3): a credential request nobody decided, and an
+    # issued credential whose revocation the provider refused. Names only, read from the queue beside the vault.
+    import credential_request_findings
+    out.extend(credential_request_findings.findings(
+        pathlib.Path(os.environ.get("OBSERVATORY_VAULT_DIR", _store / "projects")) / credential_request_findings.QUEUE_FILE,
+        TODAY))
     # WHAT SITS IN THE WORKING COPIES. The credential rules above read the
     # provider accounts; these read the disk, and the two disagree often enough
     # that neither is the other's summary.

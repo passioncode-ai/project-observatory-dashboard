@@ -102,8 +102,9 @@ DEPENDS = {
         "owner": "OBS-364"},
     "credential-requests": {
         "what": "the space that will hold the organization's key asks the organization for its own (provider, "
-                "scopes, environment, slot name; never a value); the request queue is not built",
-        "owner": "OBS-191 parts 2 and 3, OBS-360"},
+                "scopes, environment, slot name; never a value); the queue exists (OBS-191 parts 2 and 3) but apply files "
+                "no request into it yet, and the request reaching the organization is OBS-454",
+        "owner": "OBS-454, OBS-416"},
     "rotation": {
         "what": "consumers switch to the organization's replacement, then the personal value is revoked at its "
                 "provider with proof; the rotation door for a hand-over is not built",
@@ -1610,8 +1611,9 @@ def confirm_replacement(org: str, key: Any, *, decision: Any = None, caller: str
             # ORG-R08: a replacement that has not arrived, or consumers not switched to it, cannot be confirmed to
             # work; a confirmation now would release the revocation the moment the rotation door exists.
             raise Refusal("replacement-not-received", "the organization's replacement for this key has not arrived, "
-                                                      "or its consumers have not switched to it (the request queue "
-                                                      "and the rotation are OBS-191 and OBS-416, not built yet); "
+                                                      "or its consumers have not switched to it (apply files no "
+                                                      "request yet, the exchange with the organization is OBS-454 "
+                                                      "and the rotation OBS-416); "
                                                       "nothing to confirm", f"{q} show")
         step = next(s for s in entry["steps"] if s["step"] == "revoke-personal")
         outcome = "already-confirmed" if step.get("confirmedAt") else "confirmed"
