@@ -204,6 +204,9 @@ def _read(path: pathlib.Path) -> dict | None:
 def _write(path: pathlib.Path, doc: dict) -> None:
     try:
         private_io.write(path, json.dumps(doc, indent=1, sort_keys=True, ensure_ascii=False) + "\n")
+    except UnicodeError:
+        raise Refusal("record-unwritable", f"{path.name} of the selection cannot be written: it would hold text that "
+                                           "is not valid Unicode; nothing was decided") from None
     except (OSError, RuntimeError) as exc:
         raise Refusal("record-unwritable", f"{path.name} of the selection cannot be written ({type(exc).__name__}: "
                                            "a symbolic link, a folder that is not this account's, or a full disk); "
@@ -357,6 +360,12 @@ def decided(action: str, target: str, decision: Any = None, *, caller: str) -> d
         # A string, a list or a number is not a decision (CLI and MCP refuse it alike, before anything is written).
         raise Refusal("decision-invalid", "the decision is not one JSON object in contract DEC-0121's shape",
                       gate=GATES[action], action=ACTIONS[action])
+    try:
+        # Kept verbatim in the record: words that are not valid Unicode (a lone surrogate) could never be written.
+        json.dumps(decision, ensure_ascii=False).encode("utf-8")
+    except (UnicodeError, ValueError, TypeError, RecursionError):
+        raise Refusal("decision-invalid", "the decision is not valid Unicode text in contract DEC-0121's shape",
+                      gate=GATES[action], action=ACTIONS[action]) from None
     actions = _node_actions()
     act = {"id": ACTIONS[action], "title": TITLES[action], "tool": "observatory.org.selection", "gate": "relayed"}
     answer = actions.action_decision(action=act, tier="T0", caller=caller, decision=decision, target=target,
@@ -962,7 +971,7 @@ def _label_ok(text: Any) -> str:
     import unicodedata
     # One line of visible text: no control, format (bidirectional overrides among them) or line/paragraph separator.
     if not isinstance(text, str) or len(text) > LABEL_MAX \
-            or any(unicodedata.category(c) in ("Cc", "Cf", "Zl", "Zp") for c in text) \
+            or any(unicodedata.category(c) in ("Cc", "Cf", "Cs", "Zl", "Zp") for c in text) \
             or credential_shape.shaped(text):
         raise Refusal("invalid-label", f"a label is one line of at most {LABEL_MAX} characters the organization will "
                                        "read, never shaped like a credential")

@@ -328,7 +328,7 @@ def select(args) -> int:
             try:
                 raw = args.decision if args.decision is not None else Path(args.decision_file).read_text(encoding="utf-8")
                 decision = json.loads(raw)
-            except (OSError, ValueError):
+            except (OSError, ValueError, RecursionError):      # nested past Python's limit: not a decision either
                 decision = None
             if not isinstance(decision, dict):
                 # `null`, a list or a string is not a decision: never read as "no decision", which is the person's own.

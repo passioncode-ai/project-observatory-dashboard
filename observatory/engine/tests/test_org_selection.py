@@ -1530,6 +1530,38 @@ class ReviewRoundTwenty(Base):
         self.assertIn("separate-space", err.getvalue())
 
 
+class ReviewRoundTwentyTwo(Base):
+    """What the twenty-second review found: each case reproduced, then fixed."""
+
+    def test_text_that_is_not_valid_unicode_is_refused_not_a_traceback(self):
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.plan("acme", {"labels": {"project:alpha-web": "Alpha\udcff"}})
+        self.assertEqual(caught.exception.code, "invalid-label")
+        words = self.decision("org.select.plan", "acme", instruction="go \udcff")
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.plan("acme", {"layout": "one-space"}, decision=words, caller="agent:mcp")
+        self.assertEqual(caught.exception.code, "decision-invalid")
+        self.assertFalse(self.sel.plan("acme")["draft"], "nothing was written")
+
+    def test_a_decision_nested_past_the_limit_is_refused_by_the_cli(self):
+        deep = Path(self.tmp.name) / "deep.json"
+        deep.write_text("[" * 200000 + "]" * 200000)
+        import org as org_cli
+        importlib.reload(org_cli)
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = org_cli.main(["select", "--org", "acme", "plan", "--layout", "one-space",
+                                 "--decision-file", str(deep)])
+        self.assertEqual(code, 1)
+        self.assertIn("decision", err.getvalue())
+        self.assertNotIn("Traceback", err.getvalue())
+
+    def test_a_write_of_text_that_cannot_be_encoded_is_a_refusal(self):
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel._write(self.sel._folder("acme") / "probe.json", {"x": "\udcff"})
+        self.assertEqual(caught.exception.code, "record-unwritable")
+
+
 class WhatTheOrganizationSees(Base):
     """ORG-R03: a reference random per organization and a label only when typed; nothing is handed over."""
 
