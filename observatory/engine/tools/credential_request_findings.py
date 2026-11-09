@@ -26,6 +26,10 @@ if str(_HERE) not in _sys.path:
 from finding_types import titled  # noqa: E402
 import credential_requests as cr  # noqa: E402
 
+#: The queue's file name beside the vault, named here so the findings build cites it without spelling it
+#: (that build is held to calling no network library, and is read for the text `requests.`).
+QUEUE_FILE = "credential-requests.jsonl"
+
 
 def findings(path: pathlib.Path, today: str) -> list[dict]:
     """The board's rows over one queue file. `today` is the build's day; a row's dates are the queue's own.

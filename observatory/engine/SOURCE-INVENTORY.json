@@ -6807,8 +6807,8 @@
     {
       "path": "tools/build_findings.py",
       "source_sha256": "03136ce1f366d180307f7f0c17ab41a3de82631103750f081a6d79758569e0b3",
-      "export_sha256": "e2bfafe52ed28e5debaf1e1c9dc597e52bfa164415f0b3079b17a06bd068f71d",
-      "bytes": 291903,
+      "export_sha256": "038001380074e6993be1a3e444a20f839883ec186a4966ca50f7c5264a67c007",
+      "bytes": 291914,
       "python_comments_removed": 996,
       "python_docstrings_removed": 28,
       "tool_descriptions_retained": 0,
@@ -6936,8 +6936,8 @@
       "path": "tools/credential_request_findings.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "cccd46b0eef22fc99c79318ead9ba6f4c18f337c2be96705ccbd0ddc57dc1330",
-      "bytes": 6489
+      "export_sha256": "a4e2a74372985bb30a0117d06227bda3e2d85ce47a6b666c9218e3f1d5fe5916",
+      "bytes": 6729
     },
     {
       "path": "tools/credential_requests.py",
