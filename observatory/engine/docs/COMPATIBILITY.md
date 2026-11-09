@@ -644,7 +644,10 @@ was (a lock file the copy made in an existing vault is kept); a failed read or w
 id to compare, so a store another account owns there fails later as `target-not-writable`, `target-unsafe` or
 `filesystem-failed`), `target-not-writable`, `target-unsafe`, `target-slot-invalid`, `target-slot-filled`,
 `filesystem-refused`; with `--json` a refusal of the source's names is JSON too, and the `project:` sentence goes to
-stderr. A refused copy may leave an existing store and vault folder of this account at 0700 and a lock file in an
+stderr; a command line argparse refuses (a missing `--to-store`) stays argparse's usage text and exit 2.
+`target-in-repository` is asked of git and skipped where git cannot run. An undo after a refusal under the locks
+happens while both are held; on Windows a held lock file cannot be removed, so a new store a refused copy made
+stays there, empty but for its lock file. A refused copy may leave an existing store and vault folder of this account at 0700 and a lock file in an
 existing vault. Unless the outcome is `unchanged`, both
 stores' `movements.jsonl` gain a `copied` row (`to_store`, `to_slot` in the source's; `from_store`, `from_slot`,
 `archived` after a replace in the target's; `outcome` and `digest_key` in both, and `key_id` and `digest` only
@@ -663,14 +666,16 @@ is named as its vault folder's parent when the vault folder is `projects/`, else
 The harness scan (`store/raw/harness.json`) gains `inventory` (OBS-477): `spaces` (one, `this-account`, home `~`)
 with `skills` (`name`, `agent` `claude-code` or `codex`, `scope` `user`, `project` or `plugin`, `version`, and
 `project` or `plugin`; an enabled Codex plugin's skills included) and `plugins` (`name`, `agent`, `scope` `user`,
-`project` or `local`, `project`, `projectKey` (8 hex digits of the project path's SHA-256, never the path), `version`,
+`project` or `local`, `project`, `projectKey` (8 hex digits of the project path's SHA-256, never the path; a pseudonym, which a guessed path
+confirms, OBS-491), `version`,
 `enabled` true, false or null, `marketplace`, `latest`, `latestFrom` `marketplace-catalogue` or `plugin-manifest`,
 `marketplaceUpdated`, `behind`), `findings` (`plugin-behind`), `open` and its own `degraded` (`source`
 `claude:installed_plugins.json`, `claude:settings.json`, `claude:known_marketplaces.json`,
 `claude:marketplace:<name>`, `claude:marketplace:<name>:<plugin>`, `claude:project-settings:<project>`,
 `claude:local-settings:<project>`, `skill:<agent>:<scope>:<folder>`, `skills:<agent>:<scope>[:<project or plugin>]`,
 `projects-folder`, `codex:config.toml`, `codex:plugins-cache`, `codex:plugins-cache:<marketplace>[:<plugin>]`, code
-`unreadable`; `claude:installed_plugins.json`, `claude:settings.json`, a settings label above,
+`unreadable`; `claude:installed_plugins.json`, `claude:installed_plugins.json:<plugin>`, `claude:settings.json`, a
+settings label above,
 `claude:known_marketplaces.json:<name>` and `claude:marketplace:<name>`, code `unrecognised-shape`; `inventory`,
 code `failed`, when the inventory itself failed and the rest of the scan was kept). A plugin's `scope` is the word
 Claude Code recorded (`user`, `project`, `local`, or another such as `managed`, whose `enabled` is null). `latest`

@@ -954,15 +954,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "32bc1f87e3704be0dcf3fa110b70b3db7b4ccb5c43b7a8674127035b1dafa72f",
-      "bytes": 124976,
+      "export_sha256": "4c342be057eee29fc987fb02f10b198d5d7e7ba8432d27250cd0647d4bec438d",
+      "bytes": 125434,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "535200ea3ecc8bb56253aabac3f065f8105a3e32e92240c3fd9ba0bdf48559ed",
-      "bytes": 315262,
+      "export_sha256": "53e05689901c46e58184e8e317fa1015d56679e47e4502d51bea6e2d1e89884a",
+      "bytes": 315516,
       "upstream_modified": true
     },
     {
@@ -6558,8 +6558,8 @@
       "path": "tests/test_vault_copy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5a3b9513c51cf5e6a2c585d89e5a7c34a16f28133373d1708a7231842518814e",
-      "bytes": 26774
+      "export_sha256": "469b490db15f9837406fdd896a9f0959fba92042423b7e8aba8b7a5755c1e388",
+      "bytes": 28561
     },
     {
       "path": "tests/test_vault_digests.py",
@@ -7645,8 +7645,8 @@
     {
       "path": "tools/vault.py",
       "source_sha256": "1df9030175654ff330cee02d22de11b3b515188918216509cadbbc4f8a510f49",
-      "export_sha256": "462d01c948e6888209de2bb52e8444177191df9c86c99b3ca6d0372ccf4c9e67",
-      "bytes": 82643,
+      "export_sha256": "f755d147ae3aae1cb578865a83fcf022855c56a9dadcdf8d49f71b4fb9a85cab",
+      "bytes": 84489,
       "python_comments_removed": 19,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,

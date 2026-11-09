@@ -2057,7 +2057,8 @@ Proof: `tests/test_memory_freshness.py` in the engine.
 harness scan (`integrations.harness` on, `sources.harness_root` set; `full scan-harness` refreshes it), and
 scans nothing itself (OBS-477). Each skill has its name, version (from its `SKILL.md` front matter, only
 when it is release-shaped), scope (`user`, `project` with the project's folder name, or `plugin` with the
-plugin's `name@marketplace`) and the agent that loads it (`claude-code`, `codex`). Each plugin install has
+plugin's `name@marketplace`) and the agent that loads it (`claude-code`, `codex`; Codex's bundled `.system`
+skills are not read yet, OBS-491). Each plugin install has
 its version, its scope as the agent records it (`user`, `project` or `local`), whether the settings of that
 scope enable it (`enabledPlugins` of the user's settings, or the project's `.claude/settings.json` or
 `settings.local.json` for a project or local install; an override in another scope's settings is not read;
@@ -3488,12 +3489,15 @@ this copy and forgotten (the journal then keeps none). A refusal writes no value
 and removes the store and vault folders the copy had made (an existing vault keeps a lock file the copy
 made in it, which is harmless, and an existing store and vault folder of yours stay at the 0700 the copy
 set them to). Its codes: `invalid-slot` (the source slot's names), `source-empty`,
-`source-unreadable` (the slot or its metadata cannot be read as a private single-line value),
+`source-unreadable` (the slot, its metadata, the estate key or the leak register cannot be read as private
+files, or the slot does not hold one single-line value),
 `source-has-open-leak` (rotate and settle first), `target-not-absolute`, `target-not-plain` (`.` or `..`
 in the path), `target-link` (the store or its `projects/` is a link), `target-parent-missing`,
 `target-not-folder`, `target-is-vault-folder` (name the store that holds the vault),
-`target-in-repository` (the store would sit in a Git working tree), `same-store` (another spelling of this
-store included), `nested-stores` (one store inside the other, your store or its vault folder included), `target-other-account` (a store another
+`target-in-repository` (the store would sit in a Git working tree; asked of git, so it is not checked where
+git cannot run), `same-store` (another spelling of this
+store included), `nested-stores` (one store inside the other, your store or its vault folder included),
+`target-unsafe` also for a folder where the target slot should be, `target-other-account` (a store another
 account owns: a value written from here would be unreadable there, so another OS account's store is not
 served yet, OBS-489; not checked on Windows), `target-not-writable`,
 `target-unsafe` (a file or folder in the target fails the vault's own checks: a link below `projects/`, a

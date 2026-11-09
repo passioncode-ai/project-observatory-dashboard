@@ -452,6 +452,43 @@ class Copy(unittest.TestCase):
         p = subprocess.run([sys.executable, "-c", code], env=self.env, capture_output=True, text=True, timeout=60)
         self.assertEqual(p.stdout.split(), ["2", "True"], p.stderr)
 
+    def test_a_directory_at_the_target_slot_is_target_unsafe(self):
+        self.put()
+        (self.target / "projects/alpha-web/prod/API_TOKEN").mkdir(parents=True)
+        code, refused = self.copy()
+        self.assertEqual((code, refused["code"]), (2, "target-unsafe"))
+
+    def test_a_refusal_under_the_locks_undoes_the_new_vault_while_still_holding_them(self):
+        """The new vault's lock file is removed before the locks are let go, so no writer that waited on it can be
+        holding it when it goes."""
+        self.put()
+        p = self.run_patched(
+            "real = vault._mutation_lock\n"
+            "held = [0]\n"
+            "events = []\n"
+            "@contextlib.contextmanager\n"
+            "def tracking(store=None):\n"
+            "    with real(store):\n"
+            "        held[0] += 1\n"
+            "        try:\n"
+            "            (vault.STORE / 'alpha-web/prod/API_TOKEN').unlink(missing_ok=True)\n"
+            "            yield\n"
+            "        finally:\n"
+            "            held[0] -= 1\n"
+            "vault._mutation_lock = tracking\n"
+            "real_unlink = vault.pathlib.Path.unlink\n"
+            "def unlink(self, missing_ok=False):\n"
+            "    if self.name == '.vault.lock':\n"
+            "        events.append(held[0])\n"
+            "    return real_unlink(self, missing_ok=missing_ok)\n"
+            "vault.pathlib.Path.unlink = unlink\n"
+            "import atexit\n"
+            "atexit.register(lambda: print('held-at-unlink', events))\n")
+        lines = p.stdout.split("\n")
+        self.assertEqual(lines[0].strip(), "source-empty", p.stderr)
+        self.assertIn("held-at-unlink [2]", p.stdout, "both locks held when the lock file went")
+        self.assertFalse(self.target.exists())
+
     def test_a_human_refusal_names_its_code(self):
         self.put()
         p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", str(self.source_store))
