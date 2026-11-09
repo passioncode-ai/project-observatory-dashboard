@@ -37,12 +37,12 @@ REQUIRED = ["observatory_status", "observatory_project", "observatory_timeline",
 #: Every tool name `mcp/server.py` publishes in `tools/list` (OSS-07: existing MCP tool
 #: names stay available). Changing this list is changing the published surface.
 GOLDEN_TOOLS = [
-    # observatory_* tools (26)
+    # observatory_* tools (28)
     "observatory_assistant_ask", "observatory_assistant_conversation", "observatory_assistant_status",
     "observatory_checkpoint_latest", "observatory_checkpoint_write", "observatory_credentials",
     "observatory_explain", "observatory_findings", "observatory_handoff_accept",
     "observatory_handoff_create", "observatory_handoff_get", "observatory_learn", "observatory_lesson",
-    "observatory_machine",
+    "observatory_machine", "observatory_org_accounts", "observatory_org_keys",
     "observatory_overview", "observatory_project", "observatory_propose", "observatory_recall",
     "observatory_record", "observatory_resolve", "observatory_search", "observatory_secret_request",
     "observatory_ssh_keys",
@@ -483,6 +483,16 @@ async def run_credentials() -> None:
             data = payload(await session.call_tool("observatory_credentials", {"projectId": "project:absent-example"}))
             check("an unknown id is a typed degradation",
                   any(d.get("code") == "unknown-project" for d in data.get("degraded", [])), str(data.get("degraded")))
+            # OBS-411, OBS-415: the organization views answer over the wire, read-only and without a value.
+            data = payload(await session.call_tool("observatory_org_accounts", {}))
+            check("org accounts answers org-accounts/1 with its state and a degraded list",
+                  data.get("schema") == "org-accounts/1" and data.get("state") in ("empty", "partial", "complete")
+                  and isinstance(data.get("degraded"), list), json.dumps(data)[:200])
+            check("and no value crosses the wire there", "synthetic-not-a-value" not in json.dumps(data))
+            data = payload(await session.call_tool("observatory_org_keys", {"org": "example-team"}))
+            check("org keys with no organization configured is a typed refusal with its command",
+                  data.get("error") == "no-organizations" and bool(data.get("command"))
+                  and data.get("degraded") == [], json.dumps(data)[:200])
 
 
 async def run_refusals() -> None:

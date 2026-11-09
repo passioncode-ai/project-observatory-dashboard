@@ -228,9 +228,11 @@ def _project_view(p: dict, repos: dict, members: dict) -> dict:
     # it from a conversation; `resources` is what has been recorded as created.
     if p.get("organization_source"):
         import organizations
+        # The destinations only for a decided answer (ORG-R28): the same reading the session-start line uses.
+        r = organizations.reading(p)
         view["organization"] = {"name": p.get("organization"), "source": p["organization_source"],
-                                "why": p.get("organization_why", ""),
-                                **organizations.Assigner().destinations(p.get("organization"))}
+                                "why": p.get("organization_why", ""), "state": r["state"],
+                                **(r.get("destinations") or {})}
     if p.get("resources"):
         view["resources"] = [dict(r) for r in p["resources"] if isinstance(r, dict)]
     return view

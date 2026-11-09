@@ -1290,7 +1290,11 @@ Personal (shown as Personal with its own label beneath; its key is not renamed).
 Acceptance: every account appears exactly once, under one organization or under "Needs a decision"; a GitHub
 organization is never shown as an Observatory organization; nothing is sent anywhere; the grouping is the same on
 ORG-W1, Projects and Home.
-Coverage: none yet (OBS-411, OBS-412, OBS-413, OBS-418). Status: draft; product outcome unobserved.
+Coverage: the data under ORG-W1, `full org accounts` and `observatory_org_accounts` (OBS-411): `Views` in
+`tests/test_organizations.py` (every account exactly once, Not ours, needs a decision with its command, the empty,
+unconfigured and degraded states, no value in the answer) and the wire call in `tests/test_mcp_wire.py`. Not built:
+the page and its help (OBS-411), joined organizations (OBS-413), the grouping on Projects and Home (OBS-418).
+Status: draft; product outcome unobserved.
 
 ### OSS-103: say which organization each provider account belongs to
 
@@ -1322,7 +1326,11 @@ proposals are withdrawn; anything already chosen stays until taken back, OSS-108
 Acceptance: a rule never moves anything (ORG-R02); every proposal names its rule; a person's rule is never
 overwritten by an agent's or the hub's suggestion; a rule-mapped project not chosen gets no account of the joined
 organization in the session-start line.
-Coverage: none yet (OBS-412, OBS-413). Status: draft; product outcome unobserved.
+Coverage: the rules of step 3 and the readers of step 4 (OBS-412 part 2): `RulesPart2` in
+`tests/test_organizations.py` (`github_owners`, `openrouter_accounts`, an unknown rule named with the known ones, a
+source that is not a decision naming no account in the session-start line, the project view or the analytics
+findings, a conflict named on the board). Not built: saving a rule from the screen or `full org rules`, the hub's
+suggestions (OBS-412), `proposed` for a joined organization (OBS-413). Status: draft; product outcome unobserved.
 
 ### OSS-104: join an organization
 
@@ -1450,7 +1458,11 @@ with another person (a share is outside every context and is never selected).
 Acceptance: no value is ever sent, copied or placed in two contexts; a personal key is revoked only when the person
 chose it and only after its replacement works (confirmed by the person in the separate-space layout), and the preview says this step cannot be undone; a failed revocation
 is visible until settled.
-Coverage: none yet (OBS-415, OBS-416, OBS-417, OBS-191, OBS-360, OBS-425). Status: draft; product outcome unobserved.
+Coverage: the classification of step 1, `full org keys` and `observatory_org_keys` (OBS-415): `Views` in
+`tests/test_organizations.py` (organization, personal and ambiguous by project and issuer, put by hand, an
+undeclared environment, door admin keys not movable, every value file unreadable and none opened). Not built: values
+present twice and names the organization holds (ORG-R09, ORG-R10, OBS-415), the choices and the hand-over (OBS-416,
+OBS-417, OBS-191, OBS-360), the window (OBS-425). Status: draft; product outcome unobserved.
 
 ### OSS-107: decide where the organization's work lives on this computer
 

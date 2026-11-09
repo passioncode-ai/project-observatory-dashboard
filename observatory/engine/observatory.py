@@ -592,6 +592,8 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   org enroll|status|check-in|rotate|tick|flush|leave|records   this machine's organization
                                enrollments (fabric-device/0.1): enroll with a token from a vault slot,
                                signed check-ins, rotation, the activity outbox, share registrations
+  org accounts|keys --org NAME every provider account and its organization, and an organization's keys
+                               classified (organization, personal, ambiguous); read-only, names only
   scan                         the filesystem, GitHub, vault and session scans in one run (scan-fs,
                                scan-gh, scan-vault, scan-sessions)
   remotes                      one `git ls-remote` per checkout: what each remote holds (`local` asks no remote)

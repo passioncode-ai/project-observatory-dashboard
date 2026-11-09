@@ -1784,9 +1784,12 @@ def collect() -> list[dict]:
     out.extend(review_findings.findings(review_policy.status()))
     import organizations
     _pj = paths.REGISTRY / "projects.json"
-    out.extend(google_findings.organization_findings(
-        _gdoc, json.loads(_pj.read_text(encoding="utf-8")).get("projects", []) if _pj.is_file() else [],
-        organizations.load()))
+    _projects = json.loads(_pj.read_text(encoding="utf-8")).get("projects", []) if _pj.is_file() else []
+    _orgs = organizations.load()
+    out.extend(google_findings.organization_findings(_gdoc, _projects, _orgs))
+    # A CONFLICT NAMED ON THE BOARD, and the rules the engine does not read (OBS-412, tools/organization_findings.py).
+    import organization_findings
+    out.extend(organization_findings.findings(_projects, _orgs, organizations.load_problem()))
     # WHO ASKS FOR SECRETS, AND HOW OFTEN. The keyserver's journal is written on
     # every reveal, and a journal read by nothing can hold a burst of reveals of
     # one variable that no row on this board ever names.

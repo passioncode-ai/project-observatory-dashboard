@@ -255,17 +255,23 @@ def organization_line(p: dict, t) -> str:
     """Whose accounts this project uses, and the standing duty to report what is
     created. On its own line, because it is an instruction rather than a status:
     every session in a watched project reads it before its first turn."""
-    if not p.get("organization_source"):
-        return ""
     import organizations
-    org = p.get("organization")
-    if p["organization_source"] == "conflict":
+    # ONE READING (ORG-R28, `organizations.reading`): an organization's accounts are named only for a
+    # decided answer; a conflict, or a source this engine does not take for a decision, names none.
+    r = organizations.reading(p)
+    if r["state"] == "unset":
+        return ""
+    org = r.get("organization")
+    if r["state"] == "unresolved" and r["source"] == "conflict":
         head = t("organization unresolved: {why} — ask the operator before creating accounts",
-                 why=p.get("organization_why", ""))
-    elif org == "external":
+                 why=r.get("why", ""))
+    elif r["state"] == "unresolved":
+        head = t("organization not decided ({source}: {name}); ask the operator before creating accounts",
+                 source=r["source"], name=org or "?")
+    elif r["state"] == "external":
         return "\n" + t("organization: external — not the estate's accounts; create nothing on its behalf")
     else:
-        d = organizations.Assigner().destinations(org)
+        d = r["destinations"]
         where = []
         if d.get("ga4Account"):
             where.append(t("GA {account}", account=d["ga4Account"]))

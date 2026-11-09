@@ -574,6 +574,23 @@ first, never in the first half, so before the notice for certificates of about 6
 the enrollment's files changes. Downgrade: an older engine reads
 every added field as an unknown key and leaves `inventory/agents.md` in the wiki as it was last written.
 
+## Organizations: the remaining account rules, one reading, two read-only views (OBS-412 part 2, OBS-411, OBS-415, the release after 0.35.7)
+
+Additive; nothing migrates and nothing is written. `config/organizations.json` `match` accepts `github_owners` (read
+as `repository_owners`) and `openrouter_accounts` (an OpenRouter account by its stash label; it decides that
+account's organization and a key's issuer side, never a project's). An older engine ignores both keys: a project a
+`github_owners` rule assigned falls back to the older answer there. An unknown `match` key is still ignored; its
+message now names the known rules. The findings board gains `organization.unresolved` (a project in `conflict`) and
+`organization.config_problem` (a rule the engine does not read, or a file that does not parse), both silent without
+the file. `observatory_project`'s `organization` object gains `state` (`decided`, `external`, `unresolved`) and
+carries `ga4Account`, `figmaTeam` and `figmaProject` only when it is `decided`; the session-start line and the
+analytics findings read the same answer, so a source this engine does not take for a decision names no account.
+`full org accounts [--json]` (schema `org-accounts/1`) and `full org keys --org NAME [--json]` (schema `org-keys/1`)
+are new, read-only, and need no enrollment; the MCP server serves them as `observatory_org_accounts` and
+`observatory_org_keys` (28 `observatory_*` tools). Both schemas are this engine's own and may gain fields; a field
+is never renamed without a new schema name. Downgrade: an older engine has neither view nor the two findings, and
+reads the configuration as described above.
+
 ## Migration checksums: the same under every Python (OBS-387, 0.35.4)
 
 No migration and no new file. Until 0.35.3 the checksum recorded for each applied migration (`migration_checksums`)

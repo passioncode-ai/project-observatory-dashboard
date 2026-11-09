@@ -19,9 +19,11 @@ so a workspace that never configures this sees no change):
                    "ga4_legacy_accounts": ["accounts/<n>"],
                    "figma": {"team": "...", "project": "..."},
                    "match": {"repository_owners": ["..."], "products": ["product:..."],
+                             "github_owners": ["..."],
                              "digitalocean_teams": ["<team uuid or name>"],
                              "cloudflare_accounts": ["<account id>"],
-                             "heroku_teams": ["<team name>"]}}},
+                             "heroku_teams": ["<team name>"],
+                             "openrouter_accounts": ["<the label the door stashed it as>"]}}},
      "projects": {"project:<slug>": {"organization": "<name>", "why": "..."}}}
 
 THE ORDER, first answer wins:
@@ -42,6 +44,19 @@ holds), a Heroku app `heroku_registry` linked by its rule. A name is never evide
 account itself carries its organization in its own document (`organization` on the account rows of
 `registry/digitalocean-account.json` and `registry/cloudflare-account.json`, `team_organizations` in
 `registry/heroku-apps.json`): an account two organizations claim is shared and belongs to neither.
+
+THE REST OF THE ACCOUNT RULES (OBS-412 part 2). `github_owners` is `repository_owners` under the name the
+organization onboarding design gives it (ORG-W2): both are read, for a repository owner of any host, and an owner
+named under both counts once. `openrouter_accounts` names an OpenRouter account by the label its provisioning key
+was stashed as (`openrouter.py stash --as LABEL`; OpenRouter itself names no account). It decides that ACCOUNT's
+organization (`full org accounts`) and the issuer side of the keys it minted (`full org keys`, ORG-R06), never a
+project's: rule ORG-R26 builds a project's proposal from its repositories, deploys and zones, and a key is weighed
+per key, so one personal key in an organization's project does not make the project ambiguous.
+
+ONE READING FOR EVERY READER (rule ORG-R28). The session-start line, the analytics findings and the project view
+read a project's answer through `reading()`, which names an organization's accounts only for a DECIDED answer
+(declared, rule, default). Any other source (`conflict` today, `proposed` once a joined organization's rule only
+proposes, OBS-413) names none of them: a source this file does not know is never taken for a decision.
 """
 from __future__ import annotations
 
@@ -51,11 +66,20 @@ import paths
 
 CONFIG = "organizations.json"
 SOURCES = ("declared", "rule", "external", "default", "conflict")
+#: The sources a reader may act on: an organization's analytics account and design team are named only for these.
+DECIDED = ("declared", "rule", "default")
 #: `match` rules on provider accounts: the rule's name -> (provider, the account's word in a reason).
 ACCOUNT_RULES = {"digitalocean_teams": ("digitalocean", "DigitalOcean team"),
                  "cloudflare_accounts": ("cloudflare", "Cloudflare account"),
-                 "heroku_teams": ("heroku", "Heroku team")}
-MATCH_RULES = ("repository_owners", "products", *ACCOUNT_RULES)
+                 "heroku_teams": ("heroku", "Heroku team"),
+                 "openrouter_accounts": ("openrouter", "OpenRouter account")}
+#: `match` rules on repository owners: `github_owners` is the onboarding design's name for `repository_owners`.
+OWNER_RULES = ("repository_owners", "github_owners")
+MATCH_RULES = (*OWNER_RULES, "products", *ACCOUNT_RULES)
+#: Providers whose accounts a rule names but whose resources never decide a project (see the docstring).
+ACCOUNT_ONLY = ("openrouter",)
+#: Every provider an ACCOUNT_RULES rule names.
+PROVIDERS = tuple(prov for prov, _word in ACCOUNT_RULES.values())
 
 
 def load() -> dict:
@@ -66,9 +90,25 @@ def load() -> dict:
     return doc if isinstance(doc, dict) else {}
 
 
+def load_problem() -> str | None:
+    """Why `organizations.json` exists and is not read (`load` then answers {}), or None: absent or read."""
+    path = paths.config_file(CONFIG)
+    if not path.is_file():
+        return None
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except OSError as exc:
+        return f"unreadable ({type(exc).__name__})"
+    except ValueError as exc:
+        return f"not JSON (line {getattr(exc, 'lineno', '?')})"
+    return None if isinstance(doc, dict) else "not a JSON object"
+
+
 def validate(doc: dict) -> list[str]:
     """Problems with the file, named; an empty list means usable."""
     out: list[str] = []
+    if not isinstance(doc, dict):
+        return ["the file must be one JSON object"]
     orgs = doc.get("organizations") or {}
     if not isinstance(orgs, dict):
         return ["organizations must be an object keyed by name"]
@@ -83,10 +123,19 @@ def validate(doc: dict) -> list[str]:
         if acct is not None and not (isinstance(acct, str) and acct.startswith("accounts/")):
             out.append(f"{name}: ga4_account must look like accounts/<number>")
         match = org.get("match") or {}
+        if not isinstance(match, dict):
+            out.append(f"{name}: match must be an object of rules ({', '.join(MATCH_RULES)})")
+            continue
         for key in match:
-            if key not in MATCH_RULES or not isinstance(match[key], list):
-                out.append(f"{name}: match.{key} is not a known list rule")
-    for pid, row in (doc.get("projects") or {}).items():
+            if key not in MATCH_RULES:
+                out.append(f"{name}: match.{key} is not a known list rule; the known rules are "
+                           + ", ".join(MATCH_RULES))
+            elif not isinstance(match[key], list) or not all(isinstance(v, str) for v in match[key]):
+                out.append(f"{name}: match.{key} is not a known list rule: it must be a list of strings")
+    declared = doc.get("projects") or {}
+    if not isinstance(declared, dict):
+        return out + ["projects must be an object keyed by project id"]
+    for pid, row in declared.items():
         if not isinstance(row, dict) or row.get("organization") not in orgs and row.get("organization") != "external":
             out.append(f"{pid}: organization must name a configured organization or `external`")
         elif not row.get("why"):
@@ -131,6 +180,8 @@ def _usable_orgs(orgs) -> tuple[dict, list[str]]:
         for key, value in match.items():
             if key in MATCH_RULES and isinstance(value, list) and all(isinstance(v, str) for v in value):
                 kept[key] = value
+            elif key not in MATCH_RULES:
+                problems.append(f"{name}: match.{key} is not a known list rule; ignored (known: {', '.join(MATCH_RULES)})")
             else:
                 problems.append(f"{name}: match.{key} is not a known list rule; ignored")
         out[name] = {**org, "match": kept}
@@ -144,7 +195,10 @@ class Assigner:
                  products: dict[str, set[str]] | None = None):
         self.doc = load() if doc is None else doc
         self.orgs, self.problems = _usable_orgs(self.doc.get("organizations") or {})
-        self.declared = self.doc.get("projects") or {}
+        declared = self.doc.get("projects") or {}
+        self.declared = declared if isinstance(declared, dict) else {}
+        if not isinstance(declared, dict):
+            self.problems.append("projects must be an object keyed by project id; ignored")
         self.estate = _estate_owners() if estate_owners is None else {o.lower() for o in estate_owners}
         self.products = product_index() if products is None else products
         self.default = next((n for n, o in self.orgs.items() if isinstance(o, dict) and o.get("default") is True), None)
@@ -153,31 +207,40 @@ class Assigner:
     def active(self) -> bool:
         return bool(self.orgs)
 
-    def _account_hits(self, provider: str, keys: list[str]) -> list[str]:
-        """The organizations whose `match` names this provider account by any of its keys."""
+    def _rule_hits(self, provider: str, keys: list[str]) -> dict[str, list[str]]:
+        """organization -> the `match` rules that name this account by any of its keys. A repository owner
+        (`provider` "owner") is named by `repository_owners` or `github_owners`; any other provider by its
+        rule in ACCOUNT_RULES."""
         wanted = {str(k).lower() for k in keys if k}
-        out = []
+        rules = OWNER_RULES if provider == "owner" else [r for r, (p, _w) in ACCOUNT_RULES.items() if p == provider]
+        out: dict[str, list[str]] = {}
         for name, org in self.orgs.items():
             match = (org or {}).get("match") or {}
-            for rule, (prov, _word) in ACCOUNT_RULES.items():
-                if prov == provider and wanted & {str(v).lower() for v in match.get(rule) or []}:
-                    out.append(name)
-                    break
-        return sorted(out)
+            named = [r for r in rules if wanted & {str(v).lower() for v in match.get(r) or []}]
+            if named:
+                out[name] = named
+        return out
+
+    def _account_hits(self, provider: str, keys: list[str]) -> list[str]:
+        """The organizations whose `match` names this provider account by any of its keys."""
+        return sorted(self._rule_hits(provider, keys))
 
     def account(self, provider: str, keys: list[str]) -> dict:
         """The organization of one provider account, for its own row: `rule` when one organization's
         `match` names it, `conflict` (shared, ORG-R04) when two do, `none` when no rule names it. The
-        default organization is never assumed for an account: an unnamed account is undecided."""
-        hits = self._account_hits(provider, keys)
+        default organization is never assumed for an account: an unnamed account is undecided.
+        `provider` "owner" asks about a repository owner (`repository_owners`, `github_owners`)."""
+        hits = self._rule_hits(provider, keys)
         if len(hits) == 1:
-            return {"organization": hits[0], "organization_source": "rule",
-                    "organization_why": f"match.{_rule_of(provider)} names it"}
+            (name, rules), = hits.items()
+            return {"organization": name, "organization_source": "rule",
+                    "organization_why": " and ".join(f"match.{r}" for r in rules) + " names it"}
         if hits:
             return {"organization": None, "organization_source": "conflict",
-                    "organization_why": "shared: claimed by " + " and ".join(hits)}
+                    "organization_why": "shared: claimed by " + " and ".join(sorted(hits))}
+        rules = OWNER_RULES if provider == "owner" else (_rule_of(provider),)
         return {"organization": None, "organization_source": "none",
-                "organization_why": f"no organization's match.{_rule_of(provider)} names it"}
+                "organization_why": f"no organization's match.{' or match.'.join(rules)} names it"}
 
     def assign(self, project: dict, accounts: list[dict] | None = None) -> dict | None:
         """`accounts`: the provider accounts the registry attributes to this project, each
@@ -192,20 +255,7 @@ class Assigner:
         if isinstance(row, dict) and row.get("organization"):
             return {"organization": row["organization"], "source": "declared", "why": row.get("why", "")}
         owners = {o.lower() for o in project.get("owners") or []}
-        member_of = self.products.get(pid, set())
-        hits: dict[str, list[str]] = {}
-        for name, org in self.orgs.items():
-            match = (org or {}).get("match") or {}
-            by_owner = sorted(owners & {o.lower() for o in match.get("repository_owners") or []})
-            by_product = sorted(member_of & set(match.get("products") or []))
-            reasons = [f"repository owner {o}" for o in by_owner] + [f"product {p}" for p in by_product]
-            if reasons:
-                hits[name] = reasons
-        for acct in accounts or []:
-            for name in self._account_hits(acct.get("provider", ""), acct.get("keys") or []):
-                reason = f"{ACCOUNT_RULES[_rule_of(acct['provider'])][1]} {acct.get('label')} ({acct.get('via')})"
-                if reason not in hits.setdefault(name, []):
-                    hits[name].append(reason)
+        hits = self.hits(project, accounts)
         if len(hits) == 1:
             (name, reasons), = hits.items()
             return {"organization": name, "source": "rule", "why": "; ".join(reasons)}
@@ -219,6 +269,30 @@ class Assigner:
             return {"organization": self.default, "source": "default",
                     "why": "no rule matched" + ("" if owners else "; no repository")}
         return None
+
+    def hits(self, project: dict, accounts: list[dict] | None = None) -> dict[str, list[str]]:
+        """organization -> the reasons its rules match this project, from ALL its accounts together
+        (ORG-R26): its repository owners, its products, and the provider accounts its resources sit in.
+        One organization is the rule's answer; two are a conflict, named and decided by nobody but a person."""
+        owners = {o.lower() for o in project.get("owners") or []}
+        member_of = self.products.get(project.get("id"), set())
+        hits: dict[str, list[str]] = {}
+        for name, org in self.orgs.items():
+            match = (org or {}).get("match") or {}
+            named = {o.lower() for rule in OWNER_RULES for o in match.get(rule) or []}
+            by_owner = sorted(owners & named)
+            by_product = sorted(member_of & set(match.get("products") or []))
+            reasons = [f"repository owner {o}" for o in by_owner] + [f"product {p}" for p in by_product]
+            if reasons:
+                hits[name] = reasons
+        for acct in accounts or []:
+            if acct.get("provider") in ACCOUNT_ONLY:
+                continue
+            for name in self._account_hits(acct.get("provider", ""), acct.get("keys") or []):
+                reason = f"{ACCOUNT_RULES[_rule_of(acct['provider'])][1]} {acct.get('label')} ({acct.get('via')})"
+                if reason not in hits.setdefault(name, []):
+                    hits[name].append(reason)
+        return hits
 
     def destinations(self, organization: str | None) -> dict:
         """Where this organization's accounts are: what an agent creating one needs."""
@@ -234,6 +308,25 @@ class Assigner:
         if figma.get("project"):
             out["figmaProject"] = figma["project"]
         return out
+
+
+def reading(project: dict, assigner: "Assigner | None" = None) -> dict:
+    """What a reader of a project's organization may act on (ORG-R28), one answer for all of them.
+
+    `state`: `decided` (declared, rule or default: the organization's analytics account and design team may be
+    named, `destinations`), `external` (Not ours: create nothing on its behalf), `unresolved` (a conflict, or any
+    source this engine does not take for a decision, such as a joined organization's `proposed`: ask the person
+    before creating anything; no organization's account is named), or `unset` (no organization is configured)."""
+    source = project.get("organization_source")
+    org = project.get("organization")
+    if not source:
+        return {"state": "unset"}
+    base = {"organization": org, "source": source, "why": project.get("organization_why", "")}
+    if org == "external" or source == "external":
+        return {"state": "external", **base}
+    if source in DECIDED and org:
+        return {"state": "decided", **base, "destinations": (assigner or Assigner()).destinations(org)}
+    return {"state": "unresolved", **base}
 
 
 def _rule_of(provider: str) -> str:

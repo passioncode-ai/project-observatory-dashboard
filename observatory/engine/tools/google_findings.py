@@ -149,6 +149,17 @@ def findings(doc: dict | None, today: str = "") -> list[dict]:
     return out
 
 
+class _NoAssigner:
+    """`reading` asks an assigner for destinations; this rule reads them from `orgs_doc` itself."""
+
+    @staticmethod
+    def destinations(_organization):
+        return {}
+
+
+_NO_ASSIGNER = _NoAssigner()
+
+
 def organization_findings(doc: dict | None, projects: list[dict], orgs_doc: dict) -> list[dict]:
     """Where a property sits against whose project it measures.
 
@@ -167,10 +178,16 @@ def organization_findings(doc: dict | None, projects: list[dict], orgs_doc: dict
     by_id = {p["id"]: p for p in projects if isinstance(p, dict) and p.get("id")}
     out: list[dict] = []
 
+    _root = str(_pathlib.Path(__file__).resolve().parents[1])
+    if _root not in _sys.path:
+        _sys.path.append(_root)
+    import organizations
     for prop in props:
         pid, account = prop.get("project"), prop.get("account")
         project = by_id.get(pid or "")
-        if not project or not account or project.get("organization_source") in (None, "conflict", "external"):
+        # The decided answer only (ORG-R28, `organizations.reading`): a conflict, Not ours, or a source this
+        # engine does not take for a decision expects no account, so it is never "the wrong" one.
+        if not project or not account or organizations.reading(project, _NO_ASSIGNER)["state"] != "decided":
             continue
         org = orgs.get(project.get("organization") or "") or {}
         expected = org.get("ga4_account")
