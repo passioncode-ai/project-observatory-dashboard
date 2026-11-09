@@ -586,8 +586,9 @@ that organization, and a second open request for the same slot and context.
 
 `issue` is the administrator's `issued`: the issuing door (`openrouter.py`, `cloudflare.py`; Heroku,
 DigitalOcean and Sentry are not offered on request yet) mints a narrowed credential in the account
-`--account` names, ending no later than the request asked, in whole days (a request issued within two
-minutes of a whole day after it was filed gets a day less), and delivers it straight into the slot in
+`--account` names, ending no later than the request asked, in whole days counted from the issue (so it
+ends up to a day before the end asked for: a 30-day request issued soon after it was filed lives 29
+days), and delivers it straight into the slot in
 its own process, so the value is never an argument, never printed and never written elsewhere. It is
 refused, before any provider is called, when the slot already holds a value (a name already present is
 never overwritten: refuse the request, or file one for another NAME), and, for an organization's
@@ -618,7 +619,9 @@ whose revocation the provider refused or did not show done (`revoke` then exits 
 credential a failed issue could not revoke; `credential.request_queue_unreadable` says when lines of the
 queue could not be read, so a damaged queue never reads as an empty one. A credential the door minted
 and delivered before a later step failed is revoked again by its identity and its value deleted; a
-value put by someone else while the door ran is never deleted or overwritten. An unproved revocation
+value put by someone else while the door ran is never overwritten, and a removal deletes only a value
+whose provenance names the request or that carries none (a value put by hand in the moment between the
+door's delivery and the queue's own check is the gap OBS-466 closes). An unproved revocation
 keeps the value, since its credential may still work. Sending a request to an organization in a check-in and
 receiving its sealed envelope are not built yet: the queue serves the space that holds both the
 request and the issuing door.

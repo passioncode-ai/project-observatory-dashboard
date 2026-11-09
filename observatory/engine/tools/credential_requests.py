@@ -51,8 +51,8 @@ value it replaces without opening either.
 
 RULES THAT REFUSE, each before a provider is called:
   * a request in an organization's context is for at most 30 days (FAC-SEM-138), a personal one for at
-    most the doors' 365; both for more than a day, since the doors mint in whole days ending no later
-    than asked (a request issued within two minutes of a whole day after it was filed gets a day less);
+    most the doors' 365; both for more than a day, since the doors mint in whole days counted from the
+    issue and ending no later than asked (so a credential ends up to a day before the end asked for);
   * the reason and the scope carry no path and nothing shaped like a credential;
   * one open request per slot and context; an issue into a slot that already holds a value is refused
     (organization onboarding ORG-R10: a name already present is never overwritten; request another
@@ -960,9 +960,9 @@ def issue(request_id: str, *, account: str | None = None, instruction: str | Non
                              "refuse this request, or file one for another NAME"), "slot-filled")
         now = now or _now()
         end = _parse(request["expiresAt"])
-        # WHOLE DAYS, ENDING NO LATER THAN ASKED (FAC-SEM-138). The door takes its own clock a moment later
-        # than this one, so the days are counted to `MINT_MARGIN` before the end: a request issued within
-        # that margin of a whole day after it was filed gets a day less, never a credential that outlives it.
+        # WHOLE DAYS, ENDING NO LATER THAN ASKED (FAC-SEM-138). The doors mint in whole days from their own
+        # clock, a moment later than this one, so the days are counted to `MINT_MARGIN` before the end and
+        # rounded down: the credential ends up to a day before the end asked for, never after it.
         days = math.floor((end - now - MINT_MARGIN).total_seconds() / 86400) if end else 0
         if days < 1:
             raise Refused(f"the request's end ({request['expiresAt']}) leaves less than a whole day to mint; "

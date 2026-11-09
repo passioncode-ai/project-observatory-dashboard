@@ -961,8 +961,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "cf3dd33c7fcb5168cddb812733fb7357130ac3f7a57c51a20a1eda899f17f154",
-      "bytes": 301370,
+      "export_sha256": "05cb4154cabd3d5f4e8870024a6e27fcd96e3f651c518b9ddda9e83b8b74bdb1",
+      "bytes": 301615,
       "upstream_modified": true
     },
     {
@@ -6943,8 +6943,8 @@
       "path": "tools/credential_requests.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9a4b3f4bf3cfe44d8cb2e0828076a51a93891ccb01f37b2bbde12299381b7e59",
-      "bytes": 79174
+      "export_sha256": "38b9f71a06ca363a984b0c71cc832f5dea573a292b5c5d612d164a03d1c0dcc4",
+      "bytes": 79162
     },
     {
       "path": "tools/dashboard_open.py",
