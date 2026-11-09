@@ -134,6 +134,7 @@ class Suite(unittest.TestCase):
     def setUp(self):
         wipe()
         pin()
+        self.enroll("acme")                     # this space's enrollment in the organization most cases use
         self.door = FakeDoor()
         self.saved = dict(cr.DOORS)
         cr.DOORS["openrouter"] = self.door
@@ -149,6 +150,7 @@ class Suite(unittest.TestCase):
         return cr.file_request(**args)
 
     def enroll(self, org: str = "acme", removed: bool = False) -> None:
+        """A minimal enrollment state as `node.org` reads it: enrolled, or removed by the server."""
         folder = NODE_DIR / "orgs" / org
         folder.mkdir(parents=True, exist_ok=True)
         doc = {"schema": "org-enrollment/1", "org": org}
@@ -320,10 +322,10 @@ class Issuing(Suite):
         self.assertEqual(cr.requests()[0][rid]["state"], "open")
 
     def test_an_organizations_credential_lands_only_in_a_space_enrolled_in_it(self):
-        rid = self.file(context="org:acme", expires_in_days=7)["requestId"]
         with self.assertRaises(cr.Refused) as caught:
-            cr.issue(rid)
-        self.assertEqual(caught.exception.code, "wrong-context")
+            self.file(context="org:other", expires_in_days=7)
+        self.assertEqual(caught.exception.code, "wrong-context", "a request names its own enrollment's organization")
+        rid = self.file(context="org:acme", expires_in_days=7)["requestId"]
         self.enroll("acme", removed=True)
         with self.assertRaises(cr.Refused) as caught:
             cr.issue(rid)
@@ -409,6 +411,17 @@ class HardCases(Suite):
         self.assertEqual(caught.exception.code, "interrupted")
         rows = crf.findings(cr.queue_path(), stamp()[:10])
         self.assertIn("interrupted", rows[0]["detail"])
+
+    def test_a_pending_decision_does_not_hide_an_interrupted_issue_and_it_cannot_be_closed(self):
+        rid = self.file()["requestId"]
+        cr._append({"event": "issuing", "requestId": rid, "slot": "alpha-web/prod/OPENROUTER_API_KEY"})
+        vault.store_value("alpha-web", "prod", "OPENROUTER_API_KEY", "minted-before-a-crash-" + "c" * 20,
+                          replace=False, tool="test")
+        cr.pending(rid)
+        for act in (lambda: cr.issue(rid), lambda: cr.refuse(rid, "not-allowed"), lambda: cr.withdraw(rid)):
+            with self.assertRaises(cr.Refused) as caught:
+                act()
+            self.assertEqual(caught.exception.code, "interrupted")
 
     def test_a_filled_slot_names_the_request_that_filled_it(self):
         first = self.file()["requestId"]
@@ -755,12 +768,14 @@ class TheRealDoors(Suite):
         m, tokens, _calls = self.cloudflare()
         rid = self.file_cf()
 
-        def journal_fails(*a, **k):
-            raise RuntimeError("the movement journal could not be written")
-        m._journal = journal_fails                    # the door's last step, after its delivery
+        def answer_unreadable(*a, **k):
+            raise RuntimeError("the provider's answer could not be read")
+        m.answered = answer_unreadable                # a step of the door's after its delivery
         with self.assertRaises(cr.IssueFailed) as caught:
             cr.issue(rid)
         self.assertIn("revoked at the provider", str(caught.exception))
+        self.assertNotIn("NOT revoked", str(caught.exception))
+        self.assertFalse(cr.requests()[0][rid]["undoUnsettled"])
         self.assertEqual(tokens, {}, "the live token was revoked by its id")
         self.assertFalse((VAULT_DIR / "alpha-web/prod/CF_TOKEN").exists(), "and its value deleted")
         entry = cr.requests()[0][rid]
@@ -782,6 +797,22 @@ class TheRealDoors(Suite):
             cr.issue(rid, account="example")
         self.assertEqual(keys, {}, "the key the door delivered was revoked by its hash")
         self.assertFalse((VAULT_DIR / "alpha-web/prod/OPENROUTER_API_KEY").exists())
+
+    def test_a_slot_that_cannot_be_written_leaves_no_live_token(self):
+        m, tokens, _calls = self.cloudflare()
+        rid = self.file_cf()
+        original = vault.store_value
+
+        def disk_full(*a, **k):
+            raise OSError("disk full")
+        vault.store_value = disk_full
+        try:
+            with self.assertRaises(cr.IssueFailed):
+                cr.issue(rid)
+        finally:
+            vault.store_value = original
+        self.assertEqual(tokens, {}, "the door discarded what it minted")
+        self.assertFalse(cr.requests()[0][rid]["undoUnsettled"])
 
     def test_a_cloudflare_token_rolled_since_is_not_deleted(self):
         m, tokens, _calls = self.cloudflare()

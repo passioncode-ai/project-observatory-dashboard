@@ -664,7 +664,8 @@ def remove_value(project: str, env: str, name: str, *, tool: str = "vault.py", w
     """Delete a slot's value and metadata, keeping its rotation archives, and journal it. Answers `removed`,
     `absent` or `kept`. `expect` names the value that may go, checked under the vault's own lock, so a put or
     a rotation that lands while a door was talking to its provider is never deleted: a request id (only the
-    value whose provenance names that request), or None (only a value that carries no provenance). For a door
+    value whose provenance names that request), None (only a value that carries no provenance), or a tuple of
+    those (any of them). For a door
     that revoked the value at its provider first (`credential_requests.py revoke`), so the open leak check of
     `remove` does not apply: nothing the slot held still works."""
     slot = _slot(project, env, name)
@@ -674,7 +675,8 @@ def remove_value(project: str, env: str, name: str, *, tool: str = "vault.py", w
     if expect is not ANY_VALUE:
         held = _read_meta(slot).get("provenance")
         held_request = held.get("requestId") if isinstance(held, dict) else None
-        if held_request != expect:
+        accepted = tuple(expect) if isinstance(expect, (tuple, list, set, frozenset)) else (expect,)
+        if held_request not in accepted:
             return "kept"
     meta = _meta_path(slot)
     _no_symlinks(meta)

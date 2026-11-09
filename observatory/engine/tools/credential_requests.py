@@ -262,7 +262,8 @@ def fold(rows: list[dict], now: datetime.datetime | None = None) -> dict[str, di
             # is an issue a crash interrupted after the door began (`issue` checks the slot before another).
             entry["inFlight"] = row.get("at") or "?"
             continue
-        if event in ("decided", "attempt-failed"):
+        if event == "attempt-failed" or event == "decided" \
+                and (row.get("decision") or {}).get("outcome") != "pending":
             entry["inFlight"] = None
         if event == "decided" and isinstance(row.get("decision"), dict):
             decision = row["decision"]
@@ -568,6 +569,8 @@ class CloudflareDoor(Door):
                 vault.store_value(p, e, n, value, replace=False, tool="cloudflare.py")
             except vault.VaultBoundaryError as exc:
                 raise RuntimeError(f"vault refused the slot {p}/{e}/{n}: {exc}") from None
+            except Exception as exc:  # noqa: BLE001: the door discards its mint on a RuntimeError only
+                raise RuntimeError(f"the slot {p}/{e}/{n} could not be written ({type(exc).__name__})") from None
             minted["delivered"] = True
         said: list = []
         m.mint_answered, m.deliver_to_vault = mint, deliver_new
@@ -619,7 +622,10 @@ class CloudflareDoor(Door):
             proved = not present()
         except (ValueError, RuntimeError, LookupError, OSError, KeyError) as exc:
             raise RuntimeError(f"cloudflare.py refused: {credential_shape.redact(str(exc))}") from None
-        m._journal("revoke", f"cloudflare/{account}/{handle}", by_request=True)
+        try:
+            m._journal("revoke", f"cloudflare/{account}/{handle}", by_request=True)
+        except Exception:  # noqa: BLE001: a journal line that failed does not undo a proved deletion
+            pass
         return {"provider": "revoked", "proved": proved}
 
 
@@ -763,6 +769,12 @@ def build_request(*, agent: str, provider: str, preset: str, slot: str, reason: 
     if parsed_limit:
         doc["limit"] = parsed_limit
     DOORS[provider].check(doc)
+    if kind == "org":
+        # FAC-SEM-138: a request names its enrollment's own organization. Refused at filing, so the queue never
+        # holds a request the organization exchange (OBS-454) could not send.
+        why = _enrolled(context[len("org:"):])
+        if why:
+            raise Refused(why, "wrong-context")
     return doc, f"{project}/{env}/{name}"
 
 
@@ -798,12 +810,18 @@ def _relayed(action: str, target: str, instruction: str | None, source: str | No
             "instruction": words, "at": _stamp(_now()), "source": where}
 
 
-def _open_entry(request_id: str) -> tuple[str, dict]:
+def _open_entry(request_id: str, *, closing: bool = False) -> tuple[str, dict]:
     known, _degraded = requests()
     rid = resolve_id(request_id, known)
     entry = known[rid]
     if entry["state"] != "open":
         raise Refused(f"request {rid[:8]} is {entry['state']}, not open: it was decided already", "decided")
+    if closing and entry.get("inFlight") and _vault()._slot(*entry["slot"].split("/")).is_file():
+        # Closing it now would leave what the interrupted issue delivered with no record that names it.
+        raise Refused(f"an issue of request {rid[:8]} started at {entry['inFlight']} was interrupted, and "
+                      f"{entry['slot']} holds a value no decision records: revoke it through the door (its "
+                      f"`list` names the key or token for this slot) and remove the slot's value first",
+                      "interrupted")
     return rid, entry
 
 
@@ -824,7 +842,7 @@ def refuse(request_id: str, reason: str, *, note: str | None = None, instruction
     if reason not in REFUSALS or reason == "withdrawn":
         raise Refused(f"--reason is one of {', '.join(r for r in REFUSALS if r != 'withdrawn')}", "invalid")
     with _locked():
-        rid, _entry = _open_entry(request_id)
+        rid, _entry = _open_entry(request_id, closing=True)
         relayed = _relayed("credential.refuse", rid, instruction, source)
         row = {"event": "decided", "requestId": rid, "decision": decision_document(rid, "refused", reason=reason)}
         if note:
@@ -849,7 +867,7 @@ def withdraw(request_id: str) -> dict:
     """The consumer takes its open request back. Recorded as the contract's refusal `withdrawn`, by the queue's
     own rule (`by: policy`): nobody decided against it."""
     with _locked():
-        rid, _entry = _open_entry(request_id)
+        rid, _entry = _open_entry(request_id, closing=True)
         doc = decision_document(rid, "refused", reason="withdrawn", by="policy")
         _append({"event": "withdrawn", "requestId": rid, "decision": doc})
     return {"requestId": rid, "state": "withdrawn", "decision": doc}
@@ -973,11 +991,22 @@ def issue(request_id: str, *, account: str | None = None, instruction: str | Non
                 _fail(rid, "undo" if "NOT revoked" in undone else "issue", said,
                       **_handles(got.get("identity"), got.get("revoke")))
             else:
+                stage = "issue"
+                if any((got.get("identity") or {}).values()):
+                    # The door minted and did not deliver; it discards its mint itself, and this makes sure: a
+                    # credential that is already gone reads `gone`, one still live is revoked by its identity.
+                    try:
+                        result = door.revoke({"requestId": rid, "revoke": got.get("revoke") or {}},
+                                             got.get("identity") or {}, False)
+                        if not result.get("proved"):
+                            stage, said = "undo", said + "; what the door minted is NOT shown gone at the provider"
+                    except RuntimeError as exc:
+                        stage, said = "undo", f"{said}; what the door minted is NOT revoked for certain ({exc})"
                 if slot_path.is_file():
                     # Doors deliver last; a value here that the door did not deliver was put by someone else
                     # while the door ran (a request's delivery never overwrites one): it is left alone.
                     said += "; the slot holds a value this request did not put there, left as it is"
-                _fail(rid, "issue", said, **_handles(got.get("identity"), got.get("revoke")))
+                _fail(rid, stage, said, **_handles(got.get("identity"), got.get("revoke")))
             raise IssueFailed(said) from None
         identity = minted.get("identity") or {}
         provenance = {"requestId": rid, "issuedAt": _stamp(_now()), "decidedBy": "administrator",
@@ -1003,7 +1032,7 @@ def issue(request_id: str, *, account: str | None = None, instruction: str | Non
         except (vault.VaultBoundaryError, OSError, ValueError, KeyError, TypeError) as exc:
             problem = problem or f"the slot's metadata could not be read or written ({type(exc).__name__}: {exc})"
         if problem:
-            undone = _undo(door, provenance, identity, (project, env, name), mine=False)
+            undone = _undo(door, provenance, identity, (project, env, name), mine=True)
             _fail(rid, "undo" if "NOT revoked" in undone else "issue", f"{problem}; {undone}",
                   **_handles(identity, minted.get("revoke")))
             raise IssueFailed(f"{problem}; {undone}")
@@ -1032,8 +1061,10 @@ def _handles(identity, revoke_handle) -> dict:
 
 def _undo(door: Door, provenance: dict, identity: dict, slot: tuple[str, str, str], *, mine: bool = False) -> str:
     """A credential the request cannot keep: revoked at the provider by its identity, then its value deleted
-    from the slot only when it is still that value (one without a provenance, or this request's when `mine`),
-    under the vault's own lock. Says what happened; "NOT revoked" in the answer marks a credential that may
+    from the slot only when it is still that value (one without a provenance, or this request's own when
+    `mine`, as after a provenance write that failed half way), under the vault's own lock. Unlike `revoke`,
+    the value goes even when the revocation is not proved: the request was not issued, so nothing may read
+    a value it does not record. Says what happened; "NOT revoked" in the answer marks a credential that may
     still work (the board keeps it until it is settled)."""
     vault = _vault()
     proved = False
@@ -1046,7 +1077,7 @@ def _undo(door: Door, provenance: dict, identity: dict, slot: tuple[str, str, st
         said = f"NOT revoked at the provider ({exc}); revoke it with the door"
     try:
         removed = vault.remove_value(*slot, tool=TOOL, why="the issued credential did not meet its request",
-                                     expect=provenance.get("requestId") if mine else None)
+                                     expect=(None, provenance.get("requestId")) if mine else None)
         if removed == "kept":
             said += "; the slot holds another value now, left as it is"
     except (vault.VaultBoundaryError, OSError, ValueError):

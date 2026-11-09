@@ -961,8 +961,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "c473d823e42ad8f5a9a7d8ada22b1be40ca010dcdac1b86a5fa6e3b3c33c7ba0",
-      "bytes": 301186,
+      "export_sha256": "cf3dd33c7fcb5168cddb812733fb7357130ac3f7a57c51a20a1eda899f17f154",
+      "bytes": 301370,
       "upstream_modified": true
     },
     {
@@ -4711,8 +4711,8 @@
       "path": "tests/test_credential_requests.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fb0654a9523bd4aeb5f9c3296e74f08ebf380931a580b2075eace221d7c91264",
-      "bytes": 42868
+      "export_sha256": "cdb14b29292aeb89abe889e62a702859737d4f017031cc5c96b8ac9058652c72",
+      "bytes": 44564
     },
     {
       "path": "tests/test_credential_shape.py",
@@ -6943,8 +6943,8 @@
       "path": "tools/credential_requests.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e333729f2cc4d134e7488d729a8d70609c11e57afe9937b8b66c8b197c529910",
-      "bytes": 76730
+      "export_sha256": "9a4b3f4bf3cfe44d8cb2e0828076a51a93891ccb01f37b2bbde12299381b7e59",
+      "bytes": 79174
     },
     {
       "path": "tools/dashboard_open.py",
@@ -7624,8 +7624,8 @@
     {
       "path": "tools/vault.py",
       "source_sha256": "1df9030175654ff330cee02d22de11b3b515188918216509cadbbc4f8a510f49",
-      "export_sha256": "6265fa5dc4750158d17df5da445d797a4a4a9e5a594654831ca488a6395b6bba",
-      "bytes": 55843,
+      "export_sha256": "fbd220898a3b8bd80d52088fec0a2136f007fc4b9f5138063f65a095632f668f",
+      "bytes": 55986,
       "python_comments_removed": 19,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,

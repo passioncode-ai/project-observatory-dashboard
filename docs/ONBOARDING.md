@@ -581,7 +581,8 @@ the personal context has no request document because it never leaves this space.
 anything is written: a reason or scope that carries a path or anything shaped like a credential, more
 than 30 days in an organization's context, a provider or preset no door offers on request (Cloudflare's
 `dns-edit` and `zone-analytics-read` name one token per zone, so issuing one for a slot would roll the
-token another slot holds), and a second open request for the same slot and context.
+token another slot holds), a request in an organization's context from a space that is not enrolled in
+that organization, and a second open request for the same slot and context.
 
 `issue` is the administrator's `issued`: the issuing door (`openrouter.py`, `cloudflare.py`; Heroku,
 DigitalOcean and Sentry are not offered on request yet) mints a narrowed credential in the account
@@ -609,7 +610,7 @@ revocation is recorded and the request stays `issued`; an unproved one may be ru
 with `revoke ID --settle "how it was checked"` once it was checked at the provider, which also closes
 a credential a failed issue could not revoke. An issue the process did not finish (the door started,
 no decision followed) is named on the next `issue` of that request instead of reading as a taken
-slot. An agent acting on the operator's word adds `--relayed-instruction "the words"
+slot, and while it left a value in the slot the request cannot be refused or withdrawn either. An agent acting on the operator's word adds `--relayed-instruction "the words"
 --source WHERE`. Every request, decision, issue attempt and revocation is one line of
 `credential-requests.jsonl` beside the vault's movement journal, names only, and the board raises
 `credential.request_waiting` for a request nobody decided and `credential.revocation_refused` for one
