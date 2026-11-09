@@ -640,9 +640,9 @@ was (a lock file the copy made in an existing vault is kept); a failed read or w
 `filesystem-failed`, exit 1; a digest mismatch prints the receipt with `digest.match: false` and exits 1. The codes:
 `invalid-slot` (the source's names), `source-empty`, `source-unreadable`, `source-has-open-leak`,
 `target-not-absolute`, `target-not-plain`, `target-link`, `target-parent-missing`, `target-not-folder`,
-`target-is-vault-folder`, `target-in-repository`, `same-store`, `nested-stores`, `target-other-account` (POSIX only: Windows has no account
-id to compare, so a store another account owns there fails later as `target-not-writable`, `target-unsafe` or
-`filesystem-failed`), `target-not-writable`, `target-unsafe`, `target-slot-invalid`, `target-slot-filled`,
+`target-is-vault-folder`, `target-in-repository`, `same-store`, `nested-stores`, `target-other-account` (the folder's uid against the
+effective uid on POSIX; on Windows its owner SID must be this account, SYSTEM or Administrators, so an
+administrator's copy never rewrites another account's store to owner-only), `target-not-writable`, `target-unsafe`, `target-slot-invalid`, `target-slot-filled`,
 `filesystem-refused`; with `--json` a refusal of the source's names is JSON too, and the `project:` sentence goes to
 stderr; a command line argparse refuses (a missing `--to-store`) stays argparse's usage text and exit 2.
 `target-in-repository` is asked of git and skipped where git cannot run; a git that does not answer within 60 s
@@ -695,7 +695,9 @@ reads a scan without it as `not-surveyed` until the next scan. `observatory_mach
 (1 to 100, default 100 rows of one window over the findings, then each space's plugins, then its skills; `total`
 counts those rows; `counts` stay whole; a cursor past the end answers an empty last page; a skill's `name` is its
 front matter's only when it has a name's shape, else its folder's, at most 64 characters, and a plugin recorded
-under a name of another shape is left out with `unrecognised-shape`; the MCP answer's rows leave out their null fields and its `degraded` is at the top
+under a name of another shape is left out with `unrecognised-shape`; a version is kept only when release-shaped, at most 40 characters and 9 digits a number,
+`marketplaceUpdated` only when ISO-shaped, `project` at most 64 characters, and a SKILL.md is read up to its first
+64 KiB, so no field a third party wrote makes a row long; the MCP answer's rows leave out their null fields and its `degraded` is at the top
 only, not repeated under `skills`) and `cursor` (an invalid one answers the first page and `degraded` code
 `invalid-cursor`), and
 its overview's `sections` lists `skills`; the tool's other answers are unchanged. `full machine --skills` prints the

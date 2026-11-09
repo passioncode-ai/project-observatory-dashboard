@@ -464,7 +464,7 @@ class Harness(unittest.TestCase):
         self.assertEqual(behind["subject"], "harness:plugin-behind:claude-code:tool@family:user::1.0.0:1.1.0")
         self.assertEqual(behind["title_id"], "plugin {plugin} is at {installed}, its marketplace publishes {latest}")
         self.assertIn("`claude plugin update tool@family --scope user`", behind["action"])
-        self.assertNotIn(str(self.home), json.dumps(behind), "no path in the finding")
+        self.assertNotIn(json.dumps(str(self.home))[1:-1], json.dumps(behind), "no path in the finding")
         self.assertNotIn("SECRETVALUE", json.dumps(found))
         risk = {f["subject"].rsplit(":", 1)[0]: f["severity"] for f in found if f["type"] == "harness.skill_risk"}
         digests = {s["name"]: s["digest"][:12] for s in json.loads((self.out / "harness.json").read_text())["skills"]}
@@ -590,8 +590,9 @@ class Inventory(unittest.TestCase):
 
     def test_no_path_reaches_the_answer(self):
         text = json.dumps(self.inventory())
-        self.assertNotIn(str(self.base), text)
-        self.assertNotIn(str(self.home), text)
+        # As JSON spells a path (a Windows path's backslashes doubled), so the check holds on every platform.
+        self.assertNotIn(json.dumps(str(self.base))[1:-1], text)
+        self.assertNotIn(json.dumps(str(self.home))[1:-1], text)
 
     def test_an_unreadable_record_is_named_never_read_as_empty(self):
         claude = self.home / ".claude"
@@ -607,7 +608,7 @@ class Inventory(unittest.TestCase):
         self.assertIsNone(plugins[("claude-code", "kit@family")]["enabled"], "unknown, not disabled")
         self.assertIsNone(plugins[("codex", "helper@family")]["enabled"])
         self.assertIsNone(plugins[("claude-code", "tool@family")]["latest"])
-        self.assertNotIn(str(self.base), json.dumps(inv["degraded"]))
+        self.assertNotIn(json.dumps(str(self.base))[1:-1], json.dumps(inv["degraded"]))
 
     def test_an_unreadable_install_record_lists_no_plugin_and_says_so(self):
         write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", "{")
@@ -645,7 +646,7 @@ class Inventory(unittest.TestCase):
         self.assertEqual([(f["plugin"], f["scope"], f["project"], f["action"]) for f in inv["findings"]],
                          [("tool@family", "local", "alpha-web", "claude plugin update tool@family --scope local")])
         self.assertRegex(inv["findings"][0]["projectKey"], r"^[0-9a-f]{8}$")
-        self.assertNotIn(str(self.projects), json.dumps(inv))
+        self.assertNotIn(json.dumps(str(self.projects))[1:-1], json.dumps(inv))
 
     def test_a_version_needs_its_dots_and_a_tie_picks_the_release(self):
         self.assertIsNone(self.mod.version_key("123456789012"), "a sha of digits is no version")
@@ -720,7 +721,7 @@ class Inventory(unittest.TestCase):
         found = {(d["source"], d["code"]) for d in inv["degraded"]}
         self.assertIn(("skills:claude-code:user", "unreadable"), found)
         self.assertIn(("codex:plugins-cache", "unreadable"), found)
-        self.assertNotIn(str(self.home), json.dumps(inv["degraded"]))
+        self.assertNotIn(json.dumps(str(self.home))[1:-1], json.dumps(inv["degraded"]))
 
     def test_enabled_is_unknown_when_the_setting_has_another_shape(self):
         write_json(self.home / ".claude" / "settings.json", {"enabledPlugins": ["tool@family"]})
@@ -831,6 +832,25 @@ class Inventory(unittest.TestCase):
         self.assertIn(("claude:installed_plugins.json", "unrecognised-shape"),
                       {(d["source"], d["code"]) for d in inv["degraded"]})
         self.assertNotEqual(inv["degraded"][:1], [{"source": "inventory", "code": "failed"}])
+
+    def test_a_field_a_third_party_wrote_is_bounded(self):
+        versioned_skill(self.home / ".claude" / "skills", "long-version", "version: 1." + "9" * 5000 + "\n")
+        known = json.loads((self.home / ".claude" / "plugins" / "known_marketplaces.json").read_text())
+        known["family"]["lastUpdated"] = "2026-01-02T00:00:00Z" + "x" * 100_000
+        write_json(self.home / ".claude" / "plugins" / "known_marketplaces.json", known)
+        installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
+        installed["plugins"]["kit@family"][0]["projectPath"] = str(self.base / ("p" * 200))
+        installed["plugins"]["tool@family"][0]["version"] = "1." + "0" * 5000
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
+        (self.home / ".codex" / "plugins" / "cache" / "family" / "helper" / ("1." + "1" * 200)).mkdir()
+        inv = self.inventory()
+        self.assertNotEqual([d["source"] for d in inv["degraded"]][:1], ["inventory"], "the inventory did not fail")
+        rows = inv["spaces"][0]["skills"] + inv["spaces"][0]["plugins"] + inv["findings"]
+        self.assertLess(max(len(json.dumps(r)) for r in rows), 600)
+        skill = next(r for r in inv["spaces"][0]["skills"] if r["name"] == "long-version")
+        self.assertIsNone(skill["version"])
+        tool = next(p for p in inv["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertEqual((tool["version"], tool["marketplaceUpdated"]), (None, None))
 
     def test_an_unknown_scope_behind_is_no_finding(self):
         installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())

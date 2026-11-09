@@ -925,11 +925,16 @@ def _writable_by_this_account(store: pathlib.Path) -> None:
             continue
         if stat.S_ISLNK(info.st_mode):
             raise CopyRefused(f"{shown_path(folder)} is a symbolic link; name the folder it points at", "target-link")
-        if hasattr(os, "geteuid") and info.st_uid != os.geteuid():
+        # POSIX: the folder's uid against this process's effective uid. Windows keeps no uid: the folder's owner
+        # SID must be this account (or SYSTEM or Administrators, `osprivacy.owned_by_me`), or the owner-only list set
+        # below would lock that account out of its own store.
+        other = (info.st_uid != os.geteuid()) if hasattr(os, "geteuid") else not osprivacy.owned_by_me(folder)
+        if other:
+            whose = f" (uid {info.st_uid})" if hasattr(os, "geteuid") else ""
             raise CopyRefused(
-                f"{shown_path(folder)} belongs to another account (uid {info.st_uid}); a slot written from this "
-                f"account would be owned by it and unreadable there. Run the copy as that account from its own store, "
-                f"or across accounts through a sealed envelope (OBS-194)", "target-other-account")
+                f"{shown_path(folder)} belongs to another account{whose}; a slot written from this account would be "
+                f"owned by it and unreadable there. Another OS account's store is not served yet (OBS-489)",
+                "target-other-account")
         if not os.access(folder, os.W_OK | os.X_OK):
             raise CopyRefused(f"this account cannot write into {shown_path(folder)}", "target-not-writable")
         found = True

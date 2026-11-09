@@ -514,6 +514,11 @@ class Copy(unittest.TestCase):
         p = subprocess.run([sys.executable, "-c", code], env=self.env, capture_output=True, text=True, timeout=60)
         self.assertEqual(p.stdout.strip(), "refused", p.stderr)
 
+    def test_a_one_part_to_slot_keeps_the_project_and_env_and_json_keeps_stdout_for_the_answer(self):
+        self.put()
+        code, receipt = self.copy("--to-slot", "OTHER_TOKEN")
+        self.assertEqual((code, receipt["to"]["slot"]), (0, "alpha-web/prod/OTHER_TOKEN"))
+
     def test_a_human_refusal_names_its_code(self):
         self.put()
         p = self.vault_cmd("copy", "alpha-web", "prod", "API_TOKEN", "--to-store", str(self.source_store))

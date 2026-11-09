@@ -657,11 +657,20 @@ def skill_version(text: str) -> str | None:
         # Under `metadata:` only: the indented lines that follow it, up to the next top-level key.
         nested = re.search(r"^metadata:[ \t]*\n((?:[ \t]+.*(?:\n|$))+)", block, re.M)
         m = re.search(r"^[ \t]+version:\s*['\"]?([^'\"\s#]+)", nested.group(1), re.M) if nested else None
-    return m.group(1) if m and STRICT_VERSION.fullmatch(m.group(1)) else None
+    return _plain_version(m.group(1)) if m else None
 
 
 def _plain_version(value) -> str | None:
-    return value if isinstance(value, str) and STRICT_VERSION.fullmatch(value) else None
+    """A release-shaped version of a bounded length (at most 40 characters, 9 digits a number), else None: a version
+    a third party wrote can be any length, and one row must not make a page of the machine view as long as it."""
+    if not isinstance(value, str) or len(value) > 40 or not STRICT_VERSION.fullmatch(value):
+        return None
+    return value if all(len(n) <= 9 for n in re.findall(r"[0-9]+", value)) else None
+
+
+#: A recorded time as the inventory keeps it (`marketplaceUpdated`): ISO-shaped and short, or not kept.
+ISO_TIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}(?:[T ][0-9]{2}:[0-9]{2}(?::[0-9]{2}(?:\.[0-9]{1,9})?)?)?"
+                      r"(?:Z|[+-][0-9]{2}:?[0-9]{2})?")
 
 
 def version_key(version: str | None) -> tuple[int, ...] | None:
@@ -706,6 +715,8 @@ def _is_file(path: Path, source: str, degraded: list[dict]) -> bool:
         return False
 
 
+#: How much of a SKILL.md the inventory reads: its front matter sits at the top.
+SKILL_HEAD_MAX = 64 * 1024
 #: A name as the inventory keeps it: the shape skill and plugin names take, bounded, so one odd SKILL.md cannot make
 #: a row, and with it a page of the machine view, as long as the file.
 NAME_SHAPE = re.compile(r"[A-Za-z0-9][A-Za-z0-9:._-]{0,63}")
@@ -730,7 +741,9 @@ def _skill_rows(folder: Path, agent: str, scope: str, extra: dict, seen: set[str
             continue
         seen.add(real)
         try:
-            text = skill.read_text(encoding="utf-8", errors="replace")
+            # Only the front matter is read, so only the file's start: a skill file of any size costs the same.
+            with open(skill, encoding="utf-8", errors="replace") as stream:
+                text = stream.read(SKILL_HEAD_MAX)
         except OSError as exc:
             degraded.append({"source": f"skill:{agent}:{scope}:{skill.parent.name}", "code": "unreadable",
                              "reason": f"a skill's SKILL.md could not be read ({type(exc).__name__}); it is not in "
@@ -867,7 +880,7 @@ def _claude_plugins(claude: Path, degraded: list[dict]) -> tuple[list[dict], lis
                 where = record.get("projectPath")
                 folder = (Path(where) if isinstance(where, str) and where and "\0" not in where
                           and Path(where).is_absolute() else None)
-                project = folder.name if folder and folder.name else None
+                project = folder.name[:64] if folder and folder.name else None
                 # Two projects may share a folder name in two places; a short digest of the path tells their
                 # installs apart (a board subject, an ack) without the path itself.
                 project_key = hashlib.sha256(str(folder).encode("utf-8")).hexdigest()[:8] if project else None
@@ -895,7 +908,7 @@ def _claude_plugins(claude: Path, degraded: list[dict]) -> tuple[list[dict], lis
                    "enabled": enabled_in(settings, key, label), "marketplace": market or None, "latest": latest,
                    "latestFrom": latest_from,
                    "marketplaceUpdated": info.get("lastUpdated") if info and isinstance(info.get("lastUpdated"), str)
-                   else None,
+                   and ISO_TIME.fullmatch(info["lastUpdated"]) else None,
                    "behind": (have < newest) if have and newest else None}
             rows.append(row)
             where = record.get("installPath")
@@ -928,7 +941,7 @@ def _codex_plugins(home: Path, degraded: list[dict], skills: list[dict], seen: s
         for plugin in plugins:
             entries = [f.name for f in _folders(plugin, f"codex:plugins-cache:{market.name}:{plugin.name}", degraded)
                        if not f.name.startswith(".")]
-            versions = [v for v in entries if STRICT_VERSION.fullmatch(v)]
+            versions = [v for v in entries if _plain_version(v)]
             # Sorted by every number it has (a folder named `1` is a version here, unlike in a comparison with a
             # recorded version, where a bare number may be a commit), a release before its prerelease, then the name.
             version = max(versions, key=lambda v: (tuple(int(n) for n in re.findall(r"[0-9]+", v.split("-")[0])),

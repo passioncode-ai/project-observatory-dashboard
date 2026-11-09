@@ -3504,7 +3504,7 @@ git, so it is not checked where git cannot run), `same-store` (another spelling 
 store included), `nested-stores` (one store inside the other, your store or its vault folder included),
 `target-other-account` (a store another
 account owns: a value written from here would be unreadable there, so another OS account's store is not
-served yet, OBS-489; not checked on Windows), `target-not-writable`,
+served yet, OBS-489; on Windows by the folder's owner), `target-not-writable`,
 `target-unsafe` (a file or folder in the target fails the vault's own checks: a link below `projects/`, a
 folder where the slot should be, a slot or metadata file that is not owner-only, does not parse or is not
 UTF-8), `target-slot-invalid`,

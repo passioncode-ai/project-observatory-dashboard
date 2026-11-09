@@ -430,8 +430,8 @@
       "path": "collectors/scan_harness.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "be962899fbdfe76f345a3f90314baabd602013c1b8b103b5d1bf7f2cf29b926f",
-      "bytes": 72480
+      "export_sha256": "57afb1c31205b8734656e1b786fff1c673bf77c42ed27df2d2be1a95ec847e82",
+      "bytes": 73381
     },
     {
       "path": "collectors/scan_heroku.py",
@@ -954,15 +954,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "7aac451db18ad1dd8ea9022668ae020ba90168597001ef178e269332c95677bb",
-      "bytes": 126219,
+      "export_sha256": "5940da7e6495227ec71ee044c3f4563e30490512ae73920241d86bd6c7d0f499",
+      "bytes": 126522,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "749c5d6688e588842761bcbb5994a5693ea8da60217790be8428d6fde6805e81",
-      "bytes": 315892,
+      "export_sha256": "8dad7cc34c96961957ad833d94529e287a656c47da60f1ebf39830f668c2339b",
+      "bytes": 315902,
       "upstream_modified": true
     },
     {
@@ -5136,8 +5136,8 @@
       "path": "tests/test_harness.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5ff9c1e8d1c3aac896ab5928511ade02400b761d20c98d449fd6cfad4c17bb62",
-      "bytes": 58715
+      "export_sha256": "a110800292996aba74dc58b39634f9e9b4f0f24686686bdf3ca76b97744659b2",
+      "bytes": 60465
     },
     {
       "path": "tests/test_heroku.py",
@@ -6558,8 +6558,8 @@
       "path": "tests/test_vault_copy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0a35bc659363868af15dda30c4996f5d8999002ce0b16554e2edf3b257f58064",
-      "bytes": 29899
+      "export_sha256": "d516a66c0ac91fbbc6f796c325091a9164be2d4f214421ecc785770d7b91ffb1",
+      "bytes": 30174
     },
     {
       "path": "tests/test_vault_digests.py",
@@ -7645,8 +7645,8 @@
     {
       "path": "tools/vault.py",
       "source_sha256": "1df9030175654ff330cee02d22de11b3b515188918216509cadbbc4f8a510f49",
-      "export_sha256": "777bb0dfba42397dc954356d0125e963ef8c1e240735cbcb5165335fdf4bcdd5",
-      "bytes": 85768,
+      "export_sha256": "a422ee959c867396f06fcc6c2ba9ce2051ac76b3f1392a5d401edacfca04e971",
+      "bytes": 86135,
       "python_comments_removed": 19,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
