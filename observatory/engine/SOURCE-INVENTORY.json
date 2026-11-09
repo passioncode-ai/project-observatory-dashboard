@@ -3530,8 +3530,8 @@
       "path": "org_selection.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c89b4e4381f29a177e2de7de4cc79bcb0ce810993adfb2006e39414d2879e1f4",
-      "bytes": 105090
+      "export_sha256": "4166fe4d978d8dda6b9f675e23471a6063e778c2f65393f4f045959deb0b97d0",
+      "bytes": 107924
     },
     {
       "path": "org_view.py",
@@ -5736,8 +5736,8 @@
       "path": "tests/test_org_selection.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "31fd3960303b9f25106bed84995ed045fb368adece0f2968c1cf47a6b28e9746",
-      "bytes": 96275
+      "export_sha256": "19a2b70ec5dfad75894c7f68d0aa3b3f1bea7d18a35d9b4dc0b444d9c10b0df5",
+      "bytes": 100984
     },
     {
       "path": "tests/test_organizations.py",

@@ -1368,6 +1368,90 @@ class ReviewRoundSixteen(Base):
         self.assertEqual(v["preview"]["organization"]["projects"], 1)
 
 
+class ReviewRoundSeventeen(Base):
+    """What the seventeenth review found: each case reproduced, then fixed."""
+
+    def partner_holds_shared_tool(self) -> Path:
+        self.sel.apply("partner", self.sel.plan("partner", {"include": ["project:shared-tool"],
+                                                            "layout": "one-space"})["digest"])
+        return self.sel._folder("partner") / "revisions"
+
+    @contextlib.contextmanager
+    def denied(self, target: Path, call: str):
+        real = getattr(os, call)
+
+        def guarded(path, *args, **kwargs):
+            if Path(os.fspath(path)) == target:
+                raise PermissionError(13, "Permission denied")
+            return real(path, *args, **kwargs)
+        with patch(f"os.{call}", guarded):
+            yield
+
+    def test_an_unsearchable_record_of_another_organization_is_never_read_as_none(self):
+        revisions = self.partner_holds_shared_tool()
+        for call in ("lstat", "listdir"):
+            with self.subTest(call=call), self.denied(revisions, call):
+                v = self.ready(include=["project:shared-tool"])
+                self.assertEqual(v["state"], "partial")
+                self.assertIn("record-unreadable", [d["code"] for d in v["degraded"]])
+                self.assertIn("full doctor", v["command"])
+                with self.assertRaises(self.sel.Refusal) as caught:
+                    self.sel.apply("acme", v["digest"])
+                self.assertEqual(caught.exception.code, "conflict-unchecked")
+        self.assertIsNone(self.sel.current("acme"))
+
+    def test_a_revisions_entry_that_is_a_file_or_a_link_is_unread(self):
+        revisions = self.partner_holds_shared_tool()
+        moved = revisions.with_name("kept")
+        revisions.rename(moved)
+        try:
+            os.symlink(moved, revisions, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            revisions.write_text("not a folder")
+        v = self.ready(include=["project:shared-tool"])
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.apply("acme", v["digest"])
+        self.assertEqual(caught.exception.code, "conflict-unchecked")
+
+    def test_one_unreadable_organization_never_costs_the_others_their_finding(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        revisions = self.partner_holds_shared_tool()
+        self.registry("projects.json", {"projects": PROJECTS + [
+            {"id": "project:gamma", "name": "gamma", "owners": ["acme-inc"], "local_folders": ["gamma"],
+             "organization": "acme", "organization_source": "rule", "organization_why": "repository owner acme-inc"}]})
+        with self.denied(revisions, "lstat"):
+            rows = self.sel.new_since_all()
+        self.assertEqual([r["organization"] for r in rows], ["acme"])
+
+    def test_a_label_that_is_not_text_is_refused(self):
+        self.sel.plan("acme", {"labels": {"project:alpha-web": "Alpha"}})
+        for bad in (0, False, None, ["x"]):
+            with self.subTest(bad=bad), self.assertRaises(self.sel.Refusal) as caught:
+                self.sel.plan("acme", {"labels": {"project:alpha-web": bad}})
+            self.assertEqual(caught.exception.code, "invalid-label")
+        self.assertEqual(self.items(self.sel.plan("acme"))["project:alpha-web"]["label"], "Alpha")
+
+    def test_an_item_decided_both_ways_in_one_change_is_refused(self):
+        for change in ({"include": ["project:beta-api"], "exclude": ["project:beta-api"]},
+                       {"include": [HAND_SLOT], "keys": {HAND_SLOT: "keep"}},
+                       {"includeGroup": "proposed", "excludeGroup": "proposed"}):
+            with self.subTest(change=change), self.assertRaises(self.sel.Refusal) as caught:
+                self.sel.plan("acme", change)
+            self.assertEqual(caught.exception.code, "invalid-change")
+        self.assertFalse(self.sel.plan("acme")["draft"])
+
+    def test_an_account_whose_label_has_a_space_can_be_decided(self):
+        self.private("openrouter-issued.json", json.dumps({"issued": {
+            "alpha-llm": {"account": "acme-or", "destination": "vault:alpha-web/prod/OPENROUTER_API_KEY"},
+            "notes-llm": {"account": "main", "destination": "vault:notes/prod/OPENROUTER_API_KEY"},
+            "spare-llm": {"account": "spare team", "destination": "vault:beta-api/prod/OPENROUTER_API_KEY"}}}))
+        ident = "openrouter:account:spare team"
+        if ident not in self.items(self.sel.plan("acme")):
+            self.skipTest("the accounts view does not list this account for the organization")
+        v = self.sel.plan("acme", {"include": [ident]})
+        self.assertEqual(self.items(v)[ident]["decision"], "include")
+
+
 class WhatTheOrganizationSees(Base):
     """ORG-R03: a reference random per organization and a label only when typed; nothing is handed over."""
 

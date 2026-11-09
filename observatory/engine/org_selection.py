@@ -51,9 +51,11 @@ import datetime
 import getpass
 import hashlib
 import json
+import os
 import pathlib
 import re
 import secrets
+import stat
 import sys
 from typing import Any
 
@@ -607,6 +609,34 @@ def selection_digest(org: str, sel: dict) -> str:
                                     for i in sel["items"].values() if i.get("inForm", True))})
 
 
+def _other_revisions(folder: pathlib.Path) -> list[pathlib.Path]:
+    """Another organization's revisions, oldest first; none when it has no `revisions` folder yet. A folder that
+    cannot be searched or listed, or a `revisions` entry that is a symbolic link or not a folder, is refused: it is
+    never read as "no record", or the ORG-R05 check would pass over a project that record holds."""
+    revdir = folder / "revisions"
+    try:
+        mode = os.lstat(revdir).st_mode
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        raise Refusal("record-unreadable", f"an organization's selection folder cannot be searched "
+                                           f"({type(exc).__name__})") from None
+    if stat.S_ISLNK(mode) or not stat.S_ISDIR(mode):
+        raise Refusal("record-unreadable", "an organization's revisions are a symbolic link or not a folder; they "
+                                           "are not read")
+    try:
+        names = os.listdir(revdir)
+    except OSError as exc:
+        raise Refusal("record-unreadable", f"an organization's revisions cannot be listed ({type(exc).__name__})") \
+            from None
+    return sorted(revdir / n for n in names if n.endswith(".json") and n[:-5].isdigit())
+
+
+def _store_folders(base: pathlib.Path) -> list[pathlib.Path]:
+    """The organizations' folders of the store; an unlistable store raises OSError for the caller to name."""
+    return sorted(base.iterdir())
+
+
 def _others_chosen(org: str) -> tuple[dict[str, str], list[dict]]:
     """project id -> another organization whose current record chose it (ORG-R05, until contract CT-141), and what
     could not be read. Each other record is verified as its own organization's history; one that does not verify is
@@ -617,16 +647,21 @@ def _others_chosen(org: str) -> tuple[dict[str, str], list[dict]]:
     if not base.is_dir() or base.is_symlink():
         return out, unread
     mine = _folder(org)
-    for link in sorted(p for p in base.iterdir() if p.is_symlink()):
+    effect = "whether another organization already holds a project is not known"
+    try:
+        entries = _store_folders(base)
+    except OSError as exc:
+        return out, [{"source": "store/org-selection", "code": "record-unreadable",
+                      "reason": f"the selection store cannot be listed ({type(exc).__name__})", "effect": effect}]
+    for link in (p for p in entries if p.is_symlink()):
         unread.append({"source": f"store/org-selection/{link.name}", "code": "record-unreadable",
                        "reason": "an organization's selection folder is a symbolic link; it is not read",
-                       "effect": "whether another organization already holds a project is not known"})
-    for folder in sorted(p for p in base.iterdir() if p.is_dir() and not p.is_symlink() and p != mine):
-        revs = (sorted(q for q in (folder / "revisions").glob("[0-9]*.json") if q.stem.isdigit())
-                if (folder / "revisions").is_dir() else [])
-        if not revs:
-            continue
+                       "effect": effect})
+    for folder in (p for p in entries if p.is_dir() and not p.is_symlink() and p != mine):
         try:
+            revs = _other_revisions(folder)
+            if not revs:
+                continue
             other = (_read(revs[-1]) or {}).get("organization")
             if not isinstance(other, str) or _folder(other) != folder:
                 raise Refusal("record-unreadable", "a selection's folder does not match the organization it names")
@@ -798,8 +833,8 @@ def _chosen_projects(draft: dict | None, record: dict | None) -> list[str]:
 
 def _plan_answer(org: str, ctx: dict, sel: dict, record: dict | None, draft: dict | None) -> dict:
     digest = selection_digest(org, sel)
-    others, unread = _others_chosen(org)
-    ctx["degraded"] = ctx["degraded"] + [d for d in unread if d not in ctx["degraded"]]
+    others, others_unread = _others_chosen(org)
+    ctx["degraded"] = ctx["degraded"] + [d for d in others_unread if d not in ctx["degraded"]]
     conflicts = [{"project": i["id"], "organization": others[i["id"]], "code": "chosen-for-another",
                   "why": f"already chosen for {others[i['id']]}: a project belongs to one context until contract "
                          "CT-141 decides otherwise (ORG-R05)"}
@@ -825,6 +860,10 @@ def _plan_answer(org: str, ctx: dict, sel: dict, record: dict | None, draft: dic
                      "applied until both read", "project-observatory full doctor")
     elif conflicts:
         step, cmd = "clear the projects another organization already holds", f"{q} plan --exclude PROJECT"
+    elif others_unread and any(i["kind"] == "project" and i["decision"] == "include"
+                               for i in sel["items"].values()):
+        step, cmd = ("another organization's selection does not read, so whether a chosen project is already held "
+                     "elsewhere cannot be checked; nothing is applied until it reads", "project-observatory full doctor")
     elif unknown:
         step, cmd = (f"{len(unknown)} chosen item(s) no longer found here: leave each out, or restore it, then "
                      "preview again", f"{q} plan --exclude {unknown[0]}")
@@ -941,6 +980,14 @@ def _change(org: str, draft: dict | None, record: dict | None, changes: dict, wh
             not in (None, "separate-space"):
         raise Refusal("invalid-change", "a space is named only for the separate-space layout; in the others the "
                                         "selection serves this space")
+    named: dict[str, str] = {}
+    for verb in ("include", "exclude", "keys"):
+        for ident in changes.get(verb) or []:
+            if isinstance(ident, str) and named.setdefault(ident, verb) != verb:
+                raise Refusal("invalid-change", f"{_echo(ident)} is named by both `{named[ident]}` and `{verb}`; "
+                                                "decide each item once per change")
+    if changes.get("includeGroup") is not None and changes.get("includeGroup") == changes.get("excludeGroup"):
+        raise Refusal("invalid-change", "one group is both included and left out; decide it once per change")
     draft = copy.deepcopy(draft) if draft else {"schema": DRAFT_SCHEMA, "organization": org, "items": {}}
     if "layout" in changes:
         if changes["layout"] not in LAYOUTS:
@@ -962,6 +1009,8 @@ def _change(org: str, draft: dict | None, record: dict | None, changes: dict, wh
     sel = _effective(org, ctx, draft, record)
 
     def kind_of(ident: Any) -> str:
+        if isinstance(ident, str) and ident in sel["items"]:
+            return sel["items"][ident]["kind"]         # an id this space listed, a free-text label's space included
         if not isinstance(ident, str) or not ITEM_ID.fullmatch(ident):
             raise Refusal("unknown-item", "an item is a project (project:ID), a key (vault:FOLDER/ENV/NAME) or an "
                                           "account as `full org accounts` names it", f"{CMD.format(org=_q(org))} plan")
@@ -1018,7 +1067,7 @@ def _change(org: str, draft: dict | None, record: dict | None, changes: dict, wh
             raise Refusal("unknown-item", f"{_echo(ident)} is not a project; only a project carries a label")
         # A label changes what the organization reads, never whether the project goes (ORG-R02): a project nobody
         # chose stays out, and an item found since stays new until a person decides it.
-        put(ident, None, None, label_only=True, label=_label_ok(text) if text else "")
+        put(ident, None, None, label_only=True, label="" if text == "" else _label_ok(text))
     draft["updatedAt"] = _now()
     # Each change is its own draft, named at random: a revision removes the draft it consumed by this name, never
     # one changed since (two changes can fall in one second).
@@ -1637,12 +1686,15 @@ def new_since_all() -> list[dict]:
     base = root()
     if not base.is_dir() or base.is_symlink():
         return out
-    for folder in sorted(p for p in base.iterdir() if p.is_dir() and not p.is_symlink()):
-        revs = (sorted(q for q in (folder / "revisions").glob("[0-9]*.json") if q.stem.isdigit())
-                if (folder / "revisions").is_dir() else [])
-        if not revs:
-            continue
+    try:
+        entries = _store_folders(base)
+    except OSError:
+        return out
+    for folder in (p for p in entries if p.is_dir() and not p.is_symlink()):
         try:
+            revs = _other_revisions(folder)
+            if not revs:
+                continue
             org = (_read(revs[-1]) or {}).get("organization")
             if not isinstance(org, str) or _folder(org) != folder:
                 continue
