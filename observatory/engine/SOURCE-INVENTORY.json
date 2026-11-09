@@ -961,8 +961,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "1d3c43fd02b42965be8cbc6758d3c9b6d76fc7da83b2e5780c7b58753baf9c57",
-      "bytes": 294984,
+      "export_sha256": "7dcc0d85ecb063c0d63bb02d8dd6631e3596715b57f4e59eaf26008eb7062d70",
+      "bytes": 295098,
       "upstream_modified": true
     },
     {
@@ -3201,8 +3201,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "909a75efbd7806ec1295335a666a238baad07238d5ffec16d42ff5d1e6dcf00c",
-      "bytes": 123562,
+      "export_sha256": "9cb8f638cc00df429d9b718c8a240371fe58a83671b176e3ab23a62c9c4fc85c",
+      "bytes": 123648,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -3530,15 +3530,15 @@
       "path": "org_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3205e77ed9f0df8a9dc0b5e39a72120bbde0d52975fed3f57fba6946991e97f6",
-      "bytes": 51791
+      "export_sha256": "c0c642c72eee092848cfdf98da656ea7b7dc2b0794eaea4885fd0837d85b7dfa",
+      "bytes": 53595
     },
     {
       "path": "organizations.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d057dcced41adbbebd9aaa99250a39d0d030b9f334783699289d7de445228e4d",
-      "bytes": 25822
+      "export_sha256": "8803f2b12472f20a7df471946c8bc5e306ea447e6d0b4088126c9719bf655f22",
+      "bytes": 25847
     },
     {
       "path": "oslocks.py",
@@ -5729,8 +5729,8 @@
       "path": "tests/test_organizations.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "85e5637ebfb8bbafd47d5b35656b8a1568a35be58e9afb13fabcebd4e1abbf24",
-      "bytes": 56019
+      "export_sha256": "40fc2c896e17047e8bf2f5206774d9dca93368ae638af5a8639400f698a695cf",
+      "bytes": 58635
     },
     {
       "path": "tests/test_oslocks.py",

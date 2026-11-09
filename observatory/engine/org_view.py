@@ -49,8 +49,8 @@ ENVS = ("local", "stage", "prod")
 #: A default organization when `organizations.json` configures none: everything is personal (ORG-W1, empty state).
 IMPLICIT_DEFAULT = "personal"
 NOT_OURS = "external"
-#: An organization name as `--org` takes it: the keys of `organizations.json` are free text, so only the shape is
-#: checked here, and a value shaped like a credential is never echoed.
+#: An organization name a refusal may quote: the keys of `organizations.json` are free text, so any name is
+#: looked up, and only one of this shape (and not shaped like a credential) is echoed back.
 ORG_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._@+-]{0,79}")
 DOORS = {
     "openrouter": "openrouter-admin",
@@ -226,13 +226,15 @@ def issuers(degraded: list, cloudflare_accounts: dict[str, str] | None = None,
     its rows the latest for a slot."""
     out: dict[str, dict] = {}
     for name, row in sorted(_openrouter_ledger(degraded).items()):
-        dest = str((row or {}).get("destination") or "")
-        if isinstance(row, dict) and dest.startswith("vault:") and row.get("account"):
+        if not isinstance(row, dict):
+            continue
+        dest = str(row.get("destination") or "")
+        if dest.startswith("vault:") and row.get("account"):
             out[dest[len("vault:"):]] = {"provider": "openrouter", "rule": "openrouter", "keys": [str(row["account"])],
                                          "account": str(row["account"]), "accountId": f"openrouter:account:{row['account']}",
                                          "record": f"openrouter ledger ({name})"}
     for rec in _digitalocean_records(degraded):
-        if rec.get("vault"):
+        if isinstance(rec, dict) and rec.get("vault"):
             uuid = rec.get("team_uuid")
             keys = ((digitalocean_keys or {}).get(str(uuid)) or [str(uuid)]) if uuid else \
                 [str(rec["team_name"])] if rec.get("team_name") else []
@@ -254,6 +256,13 @@ def issuers(degraded: list, cloudflare_accounts: dict[str, str] | None = None,
     unresolved: set[str] = set()
     recorded = set(out)
     for row in _movements(degraded):
+        if row.get("tool") == "vault.py" and row.get("event") in ("put", "rotate"):
+            # A value put after the door delivered it is somebody else's: the door's row no longer says who
+            # issued it. The door's own delivery is journalled before its row, so it never undoes that row.
+            one = str(row.get("secret") or "")
+            if out.get(one, {}).get("provider") == "cloudflare":
+                del out[one]
+            continue
         if row.get("tool") != "cloudflare.py" or row.get("event") not in ("issue", "rotate"):
             continue
         slot = str(row.get("secret") or "")
@@ -479,13 +488,16 @@ def accounts() -> dict:
         acc.add(f"openrouter:account:{label}", "openrouter", "account", label, [label], "openrouter",
                 connected=True, via="provisioning key stashed")
     vault_projects = _vault_resolver(projects)
+    slots = ["/".join(x) for x in _slots([])]
+    slot_set = set(slots)
     for name, row in sorted(_openrouter_ledger(degraded).items()):
         if not isinstance(row, dict) or not row.get("account"):
             continue
         r = acc.add(f"openrouter:account:{row['account']}", "openrouter", "account", str(row["account"]),
                     [str(row["account"])], "openrouter", connected=False, via="openrouter ledger")
-        r["keys_issued"] += 1
         dest = str(row.get("destination") or "")
+        if not dest.startswith("vault:") or dest[len("vault:"):] in slot_set:
+            r["keys_issued"] += 1                              # a key whose vault slot is gone is not counted
         pid = vault_projects(dest[len("vault:"):].split("/", 1)[0]) if dest.startswith("vault:") else None
         if pid:
             r["projects"].add(pid)
@@ -494,12 +506,11 @@ def accounts() -> dict:
     # known only from such a record is an account this space reached too, and not connected: a team or account
     # whose own token is stashed is already listed above. The Heroku user is the one exception, reached through
     # the Heroku admin token whenever one is stashed.
-    slots = ["/".join(x) for x in _slots([])]
     do_by_uuid = {str(t["team_uuid"]): do_keys.get(t.get("id")) or [str(t["team_uuid"])]
                   for t in (do or {}).get("accounts") or [] if isinstance(t, dict) and t.get("team_uuid")}
     for slot, who in sorted(issuers(degraded, cf_names, slots, do_by_uuid).items()):
-        if who["provider"] == "openrouter":
-            continue                                            # counted from the ledger above, once per key
+        if who["provider"] == "openrouter" or slot not in slot_set:
+            continue                                            # counted from the ledger above; or no slot now
         row = acc.rows.get(who["accountId"])
         if row is None:
             row = acc.add(who["accountId"], who["provider"], "user" if who["accountId"] == "heroku:user" else
@@ -624,10 +635,14 @@ def _decide(row: dict, a: "organizations.Assigner", default: str | None, estate:
                "no rule kind names a Heroku user account; its own apps are the default organization's")
         out.update(organization=default, source="default", why=why)
     else:
-        rules = ("repository_owners or match.github_owners" if row["kind"] == "owner"
-                 else organizations._rule_of(row["rule"]) if row["rule"] in organizations.PROVIDERS else "?")
-        why = (f"no organization's match.{rules} names it" if row["kind"] != "doctl-context" else
-               "its team is unknown until its token is stashed, so no rule can name it yet")
+        if row["rule"] is None:
+            why = _no_rule_kind(a)["organization_why"]
+        elif row["kind"] == "doctl-context":
+            why = "its team is unknown until its token is stashed, so no rule can name it yet"
+        else:
+            rules = ("repository_owners or match.github_owners" if row["kind"] == "owner"
+                     else organizations._rule_of(row["rule"]))
+            why = f"no organization's match.{rules} names it"
         if not default and row["kind"] == "owner":
             why += ", and organizations.json marks no default organization"
         out.update(organization=None, source="none", why=why)
@@ -664,7 +679,7 @@ def keys(org: str) -> dict:
     """Each vault slot of the projects `org` holds, classified for it (ORG-R06), and the door admin keys that
     never move (ORG-R07). Names only: no slot, stash or value file is opened."""
     import credential_shape
-    if not isinstance(org, str) or not ORG_NAME.fullmatch(org) or credential_shape.shaped(org):
+    if not isinstance(org, str) or not org.strip() or len(org) > 200 or credential_shape.shaped(org):
         raise Refusal("invalid-organization", f"{credential_shape.echo(org)} is not an organization name",
                       ACCOUNTS_CMD)
     problem = organizations.load_problem()
@@ -677,7 +692,8 @@ def keys(org: str) -> dict:
         raise Refusal("no-organizations", "config/organizations.json configures no organization, so every key is "
                                           "personal and none is classified for another", ACCOUNTS_CMD)
     if org not in a.orgs:
-        raise Refusal("unknown-organization", f"no organization {org!r} in config/organizations.json; it has: "
+        said = repr(org) if ORG_NAME.fullmatch(org) else credential_shape.echo(org)
+        raise Refusal("unknown-organization", f"no organization {said} in config/organizations.json; it has: "
                                               + ", ".join(sorted(a.orgs)), ACCOUNTS_CMD)
     if org == a.default:
         raise Refusal("default-organization", f"{org!r} is the default organization (Personal): its keys stay where "
@@ -691,6 +707,8 @@ def keys(org: str) -> dict:
     hk = _quiet("heroku-apps.json")
     _passed_on("heroku", hk, degraded)
     claims = organizations.project_accounts(do, cf, (hk or {}).get("apps") or [])
+    for provider, doc_ in (("digitalocean", do), ("cloudflare", cf), ("heroku", hk)):
+        _passed_on(provider, doc_, degraded)
     scope: dict[str, dict] = {}
     for p in projects:
         r = organizations.reading(p, a)
@@ -728,7 +746,10 @@ def keys(org: str) -> dict:
             row["why"] += f"; environment {env!r} is not declared (local, stage, prod): it needs a choice (ORG-R22)"
             row["selected"] = False
         rows.append(row)
-    fixed = _not_movable(org, a, degraded)
+    heroku_teams = sorted({str(t) for t in (hk or {}).get("teams") or [] if isinstance(t, str)}
+                          | {str(x.get("team")) for x in (hk or {}).get("apps") or []
+                             if isinstance(x, dict) and x.get("team")} - {"personal"})
+    fixed = _not_movable(org, a, degraded, do_by_uuid, heroku_teams)
     degraded = _once(degraded)
     counts = {c: sum(1 for r in rows if r["class"] == c) for c in ("organization", "personal", "ambiguous")}
     counts["notMovable"] = len(fixed)
@@ -773,9 +794,12 @@ def _classify(org: str, default: str | None, side: dict | None, issuer: dict | N
     return "ambiguous", f"{psay}; it was issued in {acct}, which no rule names"
 
 
-def _not_movable(org: str, a, degraded: list) -> list[dict]:
+def _not_movable(org: str, a, degraded: list, do_by_uuid: dict[str, list[str]] | None = None,
+                 heroku_teams: list[str] | None = None) -> list[dict]:
     """ORG-R07: the admin and provisioning keys a door keeps. Never handed over: the organization's space
-    stashes its own, then a personal copy for an account of the organization is revoked."""
+    stashes its own, then a personal copy for an account of the organization is revoked. Each key is read
+    against every account it reaches, named as `accounts()` names them: a DigitalOcean team by what a rule may
+    name it by (`do_by_uuid`), the Heroku admin token by the user and the teams the Heroku scan saw through it."""
     out = []
     for provider, folder in DOORS.items():
         for label in _labels(_secret_store() / folder, degraded, f"{provider}:stash"):
@@ -783,15 +807,17 @@ def _not_movable(org: str, a, degraded: list) -> list[dict]:
             if provider == "openrouter":
                 accts = [("openrouter", [label], label)]
             elif provider == "digitalocean":
-                accts = [("digitalocean", [str(k) for k in (m.get("team_uuid"),) if k], m.get("team_name") or label)]
+                uuid = str(m.get("team_uuid") or "")
+                accts = [("digitalocean", (do_by_uuid or {}).get(uuid) or ([uuid] if uuid else []),
+                          m.get("team_name") or label)]
             elif provider == "cloudflare":
                 accts = [("cloudflare", [str(x["id"])], x.get("name") or x["id"]) for x in _stash_accounts(m)]
             else:
-                accts = [(None, [], "your Heroku user")]
+                accts = [(None, [], "your Heroku user")] + [("heroku", [t], t) for t in heroku_teams or []]
             named = []
             for rule, keys_, name in accts:
-                ans = a.account(rule, keys_) if rule and keys_ else {"organization": None,
-                                                                    "organization_source": "none"}
+                ans = (a.account(rule, keys_) if rule and keys_ else _no_rule_kind(a) if rule is None
+                       else {"organization": None, "organization_source": "none"})
                 named.append({"account": name, "organization": ans["organization"],
                               "source": ans["organization_source"]})
             ours = any(n["organization"] == org for n in named)

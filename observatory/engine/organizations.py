@@ -326,7 +326,7 @@ def reading(project: dict, assigner: "Assigner | None" = None) -> dict:
     base = {"organization": org, "source": source, "why": project.get("organization_why", "")}
     if org == "external" or source == "external":
         return {"state": "external", **base}
-    if source in DECIDED and org:
+    if source in DECIDED and isinstance(org, str) and org:
         return {"state": "decided", **base, "destinations": (assigner or Assigner()).destinations(org)}
     return {"state": "unresolved", **base}
 

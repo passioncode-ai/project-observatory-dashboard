@@ -2312,9 +2312,10 @@ is seen and not connected (a `doctl` context, an account only a door's record
 names). Each says what it holds
 (projects, resources, keys its door issued). Without `organizations.json` every
 account of yours reads Personal (`implicit`), and a repository owner outside
-`ownership.json` still reads Not ours. `state` is `empty`, `partial` (something in
-`degraded` was not read) or `complete`; `problems` repeats the rules the engine
-does not read.
+`ownership.json` still reads Not ours. `state` is `empty` (no account was found;
+`degraded` then says what was not read), `partial` (accounts were found and
+something in `degraded` was not read) or `complete`; `problems` repeats what
+`organizations.json` holds that the engine does not read.
 
 `org keys --org NAME` lists each vault slot of the projects NAME holds (and of
 projects whose disagreement includes it), plus each slot issued from one of its

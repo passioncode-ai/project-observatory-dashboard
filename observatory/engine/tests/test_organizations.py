@@ -824,7 +824,7 @@ class Views(Base):
         a = self.orgs.Assigner(doc=bad)
         self.assertEqual(a.assign({"id": "project:odd", "owners": ["company-org"]})["source"], "rule")
         self.assertEqual(self.orgs.reading({"organization": ["x"], "organization_source": "declared"}, a)["state"],
-                         "decided")
+                         "unresolved", "an organization that is not a name is no decision")
         self.assertEqual(a.destinations(["x"]), {})
         twin = "44444444-4444-4444-8444-444444444444"
         self.private("digitalocean-issued/twin.meta.json", json.dumps(
@@ -849,6 +849,37 @@ class Views(Base):
         self.assertFalse(v["configured"])
         self.assertTrue(any("acme" in p for p in v["problems"]))
         self.assertIn("names no usable organization", self.view.accounts_text(v))
+
+    def test_round_three_edges(self):
+        """Review round 3: an admin key read against every account it reaches, as `accounts()` names them; a
+        malformed ledger row; a value put by hand after the Cloudflare door delivered it."""
+        orgs = json.loads(self.home.joinpath("config", "organizations.json").read_text())
+        orgs["organizations"]["company"]["match"]["digitalocean_teams"] = ["Company Team"]
+        self.write("organizations.json", orgs)
+        self.registry("digitalocean-account.json", {"accounts": [
+            {"id": f"digitalocean:team:{TEAM}", "team_uuid": TEAM, "name": "Company Team"}], "resources": []})
+        self.registry("heroku-apps.json", {"teams": ["co-apps"], "apps": []})
+        self.private("heroku-admin/me", OR_TOKEN)
+        v = self.view.keys("company")
+        fixed = {(n["provider"], n["label"]): n for n in v["notMovable"]}
+        self.assertEqual(fixed[("digitalocean", "company-team")]["accounts"][0]["source"], "rule",
+                         "a team a rule names by its name is the organization's here too")
+        heroku = fixed[("heroku", "me")]
+        self.assertEqual([(x["account"], x["organization"]) for x in heroku["accounts"]],
+                         [("your Heroku user", "person"), ("co-apps", "company")])
+        self.assertTrue(heroku["action"].startswith("replace:"))
+        self.private("openrouter-issued.json", json.dumps({"issued": {"bad": ["not", "a", "row"],
+                                                                      "co-web-llm": {"account": "company-or",
+                                                                                     "destination": "vault:co-web/prod/OPENROUTER_API_KEY"}}}))
+        self.assertEqual(self.view.accounts()["schema"], "org-accounts/1", "a malformed ledger row is skipped")
+        self.assertEqual(self.view.keys("company")["schema"], "org-keys/1")
+        self.private("projects/movements.jsonl", "".join(json.dumps(r) + "\n" for r in (
+            {"event": "put", "secret": "co-web/prod/CF_TOKEN", "tool": "vault.py"},
+            {"event": "issue", "secret": "co-web/prod/CF_TOKEN", "tool": "cloudflare.py", "account": "Co Account"},
+            {"event": "put", "secret": "co-web/prod/CF_TOKEN", "tool": "vault.py"})))
+        k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
+        self.assertEqual((k["co-web/prod/CF_TOKEN"]["putBy"], k["co-web/prod/CF_TOKEN"]["class"]), ("hand", "ambiguous"),
+                         "a value put by hand after the door's delivery is no longer the door's")
 
     def test_keys_refusals_name_their_command(self):
         for org, code in (("person", "default-organization"), ("nobody", "unknown-organization"),

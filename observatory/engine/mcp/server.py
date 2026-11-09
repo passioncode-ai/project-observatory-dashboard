@@ -566,7 +566,8 @@ def observatory_org_accounts() -> dict[str, Any]:
     or listed in `needsDecision` with the reason and the command to run: `conflict` (two organizations claim it),
     `none` (a provider account no rule names, which decides no project until a rule does), or seen and not
     connected. Each account says what it holds (projects, resources, keys its door issued). `problems` names a rule the
-    engine does not read; `degraded` names each source not read, and `state` is `empty`, `partial` or `complete`.
+    engine does not read; `degraded` names each source not read, and `state` is `empty` (no account found; `degraded`
+    says what was not read), `partial` or `complete`.
 
     Read-only: nothing is written, sent or decided, and no key's value is returned, printed or kept (a `doctl`
     context is compared with the stashed tokens in memory by the DigitalOcean door, as `digitalocean.py teams`
@@ -594,8 +595,8 @@ def observatory_org_keys(
 
     Read-only and NEVER A VALUE: slots and stashes are listed by name, and no value file is opened, so a value
     present twice (ORG-R09) and a name the organization already holds (ORG-R10) are not checked here
-    (`notChecked`). A refusal (`error`: `invalid-organization`, `no-organizations`, `unknown-organization`,
-    `default-organization`) names its `command`. The same answer as
+    (`notChecked`). A refusal (`error`: `invalid-organization`, `unreadable-organizations`, `no-organizations`,
+    `unknown-organization`, `default-organization`) names its `command`. The same answer as
     `project-observatory full org keys --org NAME --json` (schema `org-keys/1`)."""
     import org_view
     try:
