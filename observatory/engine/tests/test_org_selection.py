@@ -1303,6 +1303,40 @@ class ReviewRoundFourteen(Base):
         self.assertIn("undo cannot restore", str(caught.exception))
 
 
+class ReviewRoundFifteen(Base):
+    """What the fifteenth review found: each case reproduced, then fixed."""
+
+    def test_a_decision_that_is_not_an_object_is_refused_not_a_crash(self):
+        m = McpTool.server(self)
+
+        class Request:
+            meta = {"decision": "yes"}
+
+        class Ctx:
+            request_context = Request()
+        for args in ({"action": "plan", "changes": {"layout": "one-space"}},
+                     {"action": "apply", "digest": "sha256:" + "0" * 64}):
+            self.assertEqual(m.observatory_org_selection(org="acme", ctx=Ctx(), **args)["error"], "decision-invalid",
+                             args)
+        self.assertEqual(m.observatory_org_selection(org="acme", action="plan", changes={"layout": "one-space"},
+                                                     decision=["yes"])["error"], "decision-invalid")
+
+    def test_in_one_space_a_kept_key_waits_for_contexts(self):
+        self.sel.apply("acme", self.sel.plan("acme", {"layout": "one-space"})["digest"])
+        step = next(st for i in self.sel.journal("acme", 1)["items"] if i["id"] == HAND_SLOT for st in i["steps"])
+        self.assertEqual((step["state"], step["waitingOn"]), ("waiting", "context-binding"))
+
+    def test_a_read_only_plan_reports_gate_none(self):
+        self.assertEqual(self.sel.plan("acme")["gate"], "none")
+        self.assertEqual(self.ready()["gate"], "relayed")
+
+    def test_an_empty_changes_mapping_on_apply_is_no_stray_argument(self):
+        m = McpTool.server(self)
+        answer = m.observatory_org_selection(org="acme", action="apply", changes={},
+                                             digest="sha256:" + "0" * 64)
+        self.assertNotEqual(answer.get("error"), "invalid-change")
+
+
 class WhatTheOrganizationSees(Base):
     """ORG-R03: a reference random per organization and a label only when typed; nothing is handed over."""
 

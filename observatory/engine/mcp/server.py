@@ -666,7 +666,7 @@ def observatory_org_selection(
     words = decision if decision is not None else _meta_decision(ctx)
     stray = [name for name, value, takes in (("changes", changes, "plan"), ("digest", digest, "apply"),
                                              ("key", key, "confirm-replacement"))
-             if value is not None and action != takes]
+             if value not in (None, {}, "") and action != takes]
     if action == "show" and decision is not None:
         stray.append("decision")                       # a read takes no words, as the CLI refuses them on show
     if stray:

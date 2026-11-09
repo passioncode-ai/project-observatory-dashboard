@@ -344,6 +344,10 @@ def decided(action: str, target: str, decision: Any = None, *, caller: str) -> d
                       "as `decision` (by operator, via relayed-instruction, action "
                       f"{ACTIONS[action]}, target {_echo(target)}, the words verbatim, when they said them)",
                       gate=GATES[action], action=ACTIONS[action])
+    if not isinstance(decision, dict):
+        # A string, a list or a number is not a decision (CLI and MCP refuse it alike, before anything is written).
+        raise Refusal("decision-invalid", "the decision is not one JSON object in contract DEC-0121's shape",
+                      gate=GATES[action], action=ACTIONS[action])
     actions = _node_actions()
     act = {"id": ACTIONS[action], "title": TITLES[action], "tool": "observatory.org.selection", "gate": "relayed"}
     answer = actions.action_decision(action=act, tier="T0", caller=caller, decision=decision, target=target,
@@ -837,7 +841,8 @@ def _plan_answer(org: str, ctx: dict, sel: dict, record: dict | None, draft: dic
             "items": _items_out(sel), "new": sorted(i["id"] for i in sel["items"].values() if i.get("new")),
             "newSince": (record or {}).get("decidedAt"),
             "conflicts": conflicts, "unknown": sorted(unknown), "unread": sorted(unread), "preview": _preview(org, ctx, sel),
-            "nextStep": step, "command": cmd, "gates": GATES, "degraded": ctx["degraded"]}
+            "nextStep": step, "command": cmd, "gates": GATES,
+            "gate": "relayed" if draft is not None else "none", "degraded": ctx["degraded"]}
 
 
 def _org_checked(org: Any, *, configured: bool = True) -> str:
@@ -1037,6 +1042,9 @@ def _steps(item: dict, layout: str) -> list[dict]:
         if layout == "this-space":
             # The space becomes the organization's: a personal key stays personal by moving out first (OBS-426).
             return [{"step": "stays-personal", "state": "waiting", "waitingOn": "move-out"}]
+        if layout == "one-space":
+            # Both contexts in one space: a personal key stays personal once every slot carries its context (OBS-359).
+            return [{"step": "stays-personal", "state": "waiting", "waitingOn": "context-binding"}]
         return [{"step": "stays-personal", "state": "done"}]
     if item["kind"] == "account" and item["decision"] == "include":
         return [{"step": "recorded", "state": "done"}]
@@ -1131,12 +1139,15 @@ def _supersede(org: str, prior: dict | None, new: dict | None) -> None:
     jdoc = journal(org, prior["revision"], prior["digest"])
     if not jdoc:
         return
-    now = {i["id"]: {st["step"] for st in i["steps"]} for i in (new or {}).get("items") or []}
+    now = {i["id"]: {st["step"]: st.get("waitingOn") for st in i["steps"]} for i in (new or {}).get("items") or []}
     changed = False
     for item in jdoc["items"]:
-        kept = now.get(item["id"], set())
+        kept = now.get(item["id"], {})
         for st in item["steps"]:
-            if st["step"] in kept or st["state"] not in ("planned", "waiting", "done"):
+            if st["state"] not in ("planned", "waiting", "done"):
+                continue
+            # Carried as it was: the same step, waiting on the same thing (a done step carries whatever it waited on).
+            if st["step"] in kept and (st["state"] == "done" or kept[st["step"]] == st.get("waitingOn")):
                 continue
             if st["step"] in IRREVERSIBLE and st["state"] == "done":
                 continue
@@ -1639,8 +1650,8 @@ def text(view: dict) -> str:
             for i in rows:
                 mark = "[x]" if i["decision"] not in ("exclude", "keep") else "[ ]"
                 extra = f" -> {i['decision']}" if kind == "key" else ""
-                tag = (f" (new: not in the record of {view['newSince']})" if view.get("newSince") else " (new)") \
-                    if i.get("new") else ""
+                tag = (f" (new: proposed since the record of {view['newSince']})" if view.get("newSince")
+                       else " (new)") if i.get("new") else ""
                 if i.get("notFound"):
                     tag += " (no longer found here)"
                 if i.get("unread"):
