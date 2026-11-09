@@ -11,6 +11,8 @@ ID_OVERRIDE=identity.ID_OVERRIDE
 OVERRIDES=json.load(open(paths.config_file('project_overrides.json')))["projects"]
 import organizations
 ORGS=organizations.Assigner()
+for _w in ORGS.problems:
+    print(f"organizations.json: {_w}", file=sys.stderr)
 REPO_STATUS=json.load(open(paths.config_file('repo_status.json')))["repositories"]
 REPO_OVERRIDES=json.load(open(paths.config_file('repo_overrides.json')))["repositories"]
 import atomic
@@ -433,7 +435,14 @@ if _refusal:
     print(f"emit REFUSED: {_refusal}", file=sys.stderr)
     raise SystemExit(1)
 
-_stamped("projects.json", {"schema_version":2,"updated_on":OBS,"projects":out_projs,"degraded":M.get("degraded",[])})
+# WRITTEN ONCE. With organizations configured, a project's organization may still come from the
+# provider accounts its resources sit in (OBS-412), known only once the infra documents below exist:
+# the rows as they stand HERE are kept and written after that (`_PROJECTS_AS_MEASURED`), so a reader
+# never sees a provisional organization and an unchanged document keeps its date. Steps below that
+# add to `out_projs` in memory (the Heroku-hinted sites) stay out of projects.json, as before.
+_PROJECTS_AS_MEASURED = json.loads(json.dumps(out_projs)) if ORGS.active else None
+if _PROJECTS_AS_MEASURED is None:
+    _stamped("projects.json", {"schema_version":2,"updated_on":OBS,"projects":out_projs,"degraded":M.get("degraded",[])})
 _stamped("identity.json", _idmap, stamps=())
 _stamped("repositories.json", {"schema_version":2,"updated_on":OBS,"repositories":out_repos,"degraded":M.get("degraded",[])})
 # ---- Heroku ----------------------------------------------------------------
@@ -456,6 +465,12 @@ if HEROKU_SRC.is_file():
     for e in _edges:
         add_rel(e["id"], e["type"], e["from"], e["to"], e["source_refs"], e.get("rule"))
     _doc = heroku_registry.document(_scan, heroku_apps, OBS)
+    # WHOSE EACH TEAM IS (OBS-412): only when organizations.json is configured, so a workspace that
+    # never set it up sees no new field.
+    if ORGS.active:
+        _doc["team_organizations"] = [
+            {"team": _tm, **ORGS.account("heroku", [_tm])}
+            for _tm in sorted({*(_doc.get("teams") or []), *(a["team"] for a in heroku_apps)} - {"personal"})]
     _stamped("heroku-apps.json", _doc)
     _t = _doc["totals"]
     print(f"heroku-apps.json: {_t['apps']} app(s), {_t['linked_to_a_project']} linked, "
@@ -576,6 +591,9 @@ _DO_SRC = paths.SCRATCH / "digitalocean.json"
 if _DO_SRC.is_file():
     _dodoc = _infra.digitalocean_document(json.loads(_DO_SRC.read_text(encoding="utf-8")),
                                           out_repos, relations, OBS)
+    if ORGS.active:
+        for _w in organizations.annotate_accounts(ORGS, "digitalocean", _dodoc["accounts"]):
+            print(f"  organizations.json: {_w}")
     _stamped("digitalocean-account.json", _dodoc)
     print(f"digitalocean-account.json: {_dodoc['totals']['resources']} resource(s) in "
           f"{len(_dodoc['accounts'])} team(s), {_dodoc['totals']['linked_to_a_project']} linked")
@@ -583,9 +601,28 @@ _CFA_SRC = paths.SCRATCH / "cloudflare_account.json"
 if _CFA_SRC.is_file():
     _cfadoc = _infra.cloudflare_document(json.loads(_CFA_SRC.read_text(encoding="utf-8")),
                                          zone_rows, out_repos, relations, OBS)
+    if ORGS.active:
+        organizations.annotate_accounts(ORGS, "cloudflare", _cfadoc["accounts"])
     _stamped("cloudflare-account.json", _cfadoc)
     print(f"cloudflare-account.json: {_cfadoc['totals']['resources']} resource(s) in "
           f"{len(_cfadoc['accounts'])} account(s), {_cfadoc['totals']['linked_to_a_project']} linked")
+
+# ---- organizations through provider accounts (OBS-412 part 1) -------------
+# A project whose organization was not declared is assigned again with the accounts its
+# MEASURED resources sit in (a DigitalOcean app, a Cloudflare Pages project or zone, a Heroku
+# app), then projects.json is written, once, from the rows as they stood after the projects.
+if _PROJECTS_AS_MEASURED is not None:
+    _reorg = organizations.reassign(ORGS, _PROJECTS_AS_MEASURED, organizations.project_accounts(
+        _dodoc if _DO_SRC.is_file() else None, _cfadoc if _CFA_SRC.is_file() else None, heroku_apps))
+    _orgs_of = {p["id"]: p for p in _PROJECTS_AS_MEASURED}
+    for _p in out_projs:                                   # the rows in memory read the same answer
+        for _f in ("organization", "organization_source", "organization_why"):
+            if _f in _orgs_of.get(_p["id"], {}):
+                _p[_f] = _orgs_of[_p["id"]][_f]
+    _stamped("projects.json", {"schema_version":2,"updated_on":OBS,"projects":_PROJECTS_AS_MEASURED,
+                               "degraded":M.get("degraded",[])})
+    if _reorg:
+        print(f"organizations: {len(_reorg)} project(s) assigned through their provider accounts")
 
 # ---- accounts (docs/design/DEPLOYMENTS.md, PB-127) ------------------------
 import accounts as _accounts

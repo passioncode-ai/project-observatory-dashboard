@@ -210,7 +210,8 @@ unmeasured, not proof that it contains no credential.
 
 ### The agents on this machine
 
-`registry/agents.json` (and its wiki copy `inventory/agents.json`) is generated each tick
+`registry/agents.json` (and its wiki copy `inventory/agents.json`, with the readable page
+`inventory/agents.md` beside it) is generated each tick
 with `features.machine_watch` on: one row per Fabric service descriptor, `id`
 `agent:<service-id>.<instance>`. Read `supervisor.state` (`running`, `loaded`, `not-loaded`,
 `not-measured`, `platform`, `unsupervised`), `manifest.state` (`pinned`, `absent`,

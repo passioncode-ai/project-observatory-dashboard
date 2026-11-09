@@ -183,6 +183,7 @@ def _tiles(doc: dict, provider: str, t: Translator) -> str:
 
 def _accounts(doc: dict, provider: str, t: Translator) -> str:
     rows = []
+    with_org = any(isinstance(a, dict) and "organization_source" in a for a in doc.get("accounts") or [])
     for a in doc.get("accounts") or []:
         unread = _e(", ".join(a.get("unread") or [])) or t.mark("none")
         if provider == "digitalocean":
@@ -191,11 +192,18 @@ def _accounts(doc: dict, provider: str, t: Translator) -> str:
         else:
             extra = t.date(a.get("token_expires_at")) if a.get("token_expires_at") else t.mark("not stated")
             reader = "inventory-read"
-        rows.append([_e(a.get("name") or a.get("label")), f'<span class="mono">{reader}</span>', extra,
-                     f'<span class="mono">{unread}</span>'])
+        row = [_e(a.get("name") or a.get("label")), f'<span class="mono">{reader}</span>', extra,
+               f'<span class="mono">{unread}</span>']
+        if with_org:
+            # OBS-412: whose the account is, from organizations.json; shared (two claim it) and
+            # undecided (none names it) are said in words, never as the default organization.
+            row.append(_e(a["organization"]) if a.get("organization") else
+                       t.mark("shared") if a.get("organization_source") == "conflict" else t.mark("undecided"))
+        rows.append(row)
     third = "Month to date" if provider == "digitalocean" else "Reader expires"
-    return _table(t, "Accounts", [("Account", False), ("Reader", False), (third, provider == "digitalocean"),
-                                  ("Not read", False)], rows, "No account is connected.")
+    heads = [("Account", False), ("Reader", False), (third, provider == "digitalocean"), ("Not read", False)]
+    return _table(t, "Accounts", heads + ([("Organization", False)] if with_org else []), rows,
+                  "No account is connected.")
 
 
 def _detail(r: dict, t: Translator) -> str:
@@ -293,4 +301,4 @@ def infra_html(page: str, payload: dict, t: Translator | None = None) -> str:
 #: Ids reached through a variable, so the catalog test can see them (tests/test_i18n.py).
 DYNAMIC = (tuple(KINDS.values()) + tuple(STATE_WORDS.values()) + REASONS
            + tuple(p[k] for p in PROVIDERS.values() for k in ("off", "switched_off", "unread"))
-           + ("Resource", "Month to date", "Reader expires"))
+           + ("Resource", "Reader", "Month to date", "Reader expires", "Organization", "shared", "undecided"))

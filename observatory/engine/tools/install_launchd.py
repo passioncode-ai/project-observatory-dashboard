@@ -838,9 +838,13 @@ def main() -> int:
     fd = osprivacy.open(PLIST, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | osprivacy.NOFOLLOW, 0o600)
     with os.fdopen(fd, "wb") as stream:
         stream.write(payload)
-    run("launchctl", "bootout", target)                                        
-    code, out = run("launchctl", "bootstrap", f"gui/{uid()}", str(PLIST))
-    if code != 0:
+    # Through the helpers (OBS-424): `stop_job` waits until launchd has finished the bootout and
+    # `start_job` retries a bootstrap launchd refuses for now; a bare `bootout` then `bootstrap` raced.
+    stopped, why = stop_job(LABEL)
+    if not stopped:
+        print(f"the loaded tick did not stop: {why}", file=sys.stderr)
+    ok, out = start_job(str(PLIST))
+    if not ok:
         print(f"bootstrap failed: {out}", file=sys.stderr)
         return 1
     print(f"installed {LABEL}, every {args.interval}s")

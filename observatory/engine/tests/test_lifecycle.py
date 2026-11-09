@@ -1483,5 +1483,50 @@ class StartAfterOwnTimeout(Workspace):
         self.assertEqual(calls, ["bootstrap", "print"])
 
 
+@unittest.skipIf(os.name == "nt", "the launchd installer's own path; Windows installs through Task Scheduler")
+class InstallReloadsThroughTheWaitingHelpers(Workspace):
+    """OBS-424: `install_launchd.py install` sent `bootout` and at once `bootstrap`, the race OBS-410 fixed
+    in `stop_job` and `start_job` (launchd refuses a bootstrap while the bootout is still finishing)."""
+
+    def run_install(self, start_ok: bool = True, stop_ok: bool = True):
+        il = self.reload("install_launchd")
+        calls, raw = [], []
+        maintenance = importlib.import_module("maintenance")
+        doc = {"Label": il.LABEL, "ProgramArguments": ["/usr/bin/true"]}
+        with patch.object(il.sys, "platform", "darwin"), patch.object(il, "scheduler_allowed", lambda: True), \
+                patch.object(il, "build", lambda interval, python=None: doc), \
+                patch.object(il, "lint_plist", lambda d: []), patch.object(il, "prepare_logs", lambda names: None), \
+                patch.object(il, "stop_job", lambda label: calls.append(("stop", label)) or (stop_ok, "still loaded")), \
+                patch.object(il, "start_job", lambda plist: calls.append(("start", plist)) or (start_ok, "refused")), \
+                patch.object(il, "run", lambda *a: raw.append(a) or (0, "")), \
+                patch.object(maintenance, "ensure", lambda home: {"schedule": {"label": "m"}, "auto_update": True}), \
+                patch.object(il.sys, "argv", ["install_launchd.py", "install"]), \
+                contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err:
+            code = il.main()
+        return il, code, calls, raw, err.getvalue()
+
+    def test_install_stops_and_starts_through_the_helpers(self):
+        il, code, calls, raw, _ = self.run_install()
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, [("stop", il.LABEL), ("start", str(il.PLIST))])
+        self.assertFalse([a for a in raw if "bootout" in a or "bootstrap" in a],
+                         "no bare bootout or bootstrap is sent beside the helpers")
+
+    def test_a_refused_load_is_named_and_fails_the_install(self):
+        _il, code, _calls, _raw, err = self.run_install(start_ok=False)
+        self.assertEqual(code, 1)
+        self.assertIn("bootstrap failed: refused", err)
+
+    def test_a_stop_that_did_not_finish_is_named(self):
+        _il, code, calls, _raw, err = self.run_install(stop_ok=False, start_ok=False)
+        self.assertEqual(code, 1)
+        self.assertIn("the loaded tick did not stop: still loaded", err)
+        self.assertEqual([c[0] for c in calls], ["stop", "start"], "the load is still tried, and its refusal named")
+
+    def test_the_installer_source_has_no_trailing_whitespace(self):
+        src = (ROOT / "tools" / "install_launchd.py").read_text(encoding="utf-8").splitlines()
+        self.assertEqual([n for n, line in enumerate(src, 1) if line != line.rstrip()], [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

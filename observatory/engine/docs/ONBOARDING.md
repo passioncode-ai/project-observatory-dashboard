@@ -577,6 +577,15 @@ every Droplet, app, database and volume with its project, team, state, stated mo
 findings, beside Heroku under Infrastructure. A cost the listing does not state (an app, a database,
 a volume) reads "not stated", never a zero. The Cloudflare page has the same six columns. A page
 never connected names the switch and the door's commands; a scan that read nothing names why.
+Two signals keep a team from going unread in silence (OBS-421): `full doctor` reports how many team
+tokens are stashed (`digitalocean.teams_stashed`, counted from the records, never a value) and, while
+`integrations.digitalocean` is off, an `attention` row `digitalocean-off` whose step is
+`project-observatory full configure integrations digitalocean true`; and `teams` names each `doctl`
+context whose token is not a stashed one, offline (team unknown), while `teams --probe` and the collector
+ask DigitalOcean which team the context's token answers for (10 s each) and name a team with no stash
+("member of team X via doctl context Y: no token stashed; `digitalocean.py stash --from-doctl Y`", in the
+scan's `degraded` as `digitalocean:doctl:Y`). No value is printed, and a context name shaped like a
+credential is not printed either.
 
 **A DigitalOcean managed database's password, without printing it.**
 `tools/digitalocean.py` uses the operator's `doctl` context. `db list` and
@@ -1873,7 +1882,9 @@ same summary.
   (each `<id>.<instance>.json` descriptor in the services directory): where it answers,
   the contract its manifest pins, who supervises it and whether launchd has it loaded or
   running, and which MCP declarations reach it by its origin. The wiki projection mirrors it
-  to `inventory/agents.json`. Nothing of a descriptor's `auth` is copied, and no row is guessed
+  to `inventory/agents.json` and writes a readable page beside it, `inventory/agents.md` (OBS-317):
+  one row per service key with its product, version, where it answers, contract pin, who holds it
+  and its MCP declarations, generated and never to be edited. Nothing of a descriptor's `auth` is copied, and no row is guessed
   from a name. A descriptor, manifest or launchd answer that could not be read is listed under
   `degraded`; without an MCP scan (`project-observatory full scan-mcp`) a row's
   `mcp_declarations` is `null`, not empty. URLs fail closed: an origin or repository that is
@@ -2225,7 +2236,9 @@ the registry then carries `organization`, `organization_source` and
 {"organizations": {
    "company": {"label": "Company", "ga4_account": "accounts/100",
                "figma": {"team": "Company Design", "project": "Builder"},
-               "match": {"repository_owners": ["company-org"], "products": ["product:suite"]}},
+               "match": {"repository_owners": ["company-org"], "products": ["product:suite"],
+                         "digitalocean_teams": ["Company Team"], "cloudflare_accounts": ["<account id>"],
+                         "heroku_teams": ["company-apps"]}},
    "person":  {"label": "Person", "default": true, "ga4_account": "accounts/200",
                "ga4_legacy_accounts": {"accounts/300": ["properties/31"]},
                "figma": {"team": "Personal"}}},
@@ -2233,11 +2246,27 @@ the registry then carries `organization`, `organization_source` and
 ```
 
 The first answer wins: a declaration (`projects` here, or `organization` in
-`project_overrides.json`), then a `match` rule on repository owner or product,
-then `external` when every repository owner is outside the estate
+`project_overrides.json`), then a `match` rule on repository owner, product or
+provider account, then `external` when every repository owner is outside the estate
 (`ownership.json`), then the `default` organization. Two organizations matching
 one project is reported as a `conflict` and assigns neither. An empty file turns
 the feature off.
+
+The provider account rules (OBS-412 part 1) are `digitalocean_teams` (a team's
+uuid, or its name while no other team here bears it; the emit warns about a name
+two teams bear), `cloudflare_accounts` (an account id) and `heroku_teams` (a team
+name). A rule that is not a list of strings is ignored and named. A project matches one only through a resource the registry already ties
+to it: a DigitalOcean app or a Cloudflare Pages project or zone whose `project`
+was measured through a repository or a site, a Heroku app linked by its rule. A
+team's name alone never assigns a project. Each account says whose it is in its
+own document: `organization`, `organization_source` (`rule`; `conflict` when two
+organizations claim it, a shared account that assigns nothing; `none` when no
+rule names it, never the default) and `organization_why` on the account rows of
+`registry/digitalocean-account.json` and `registry/cloudflare-account.json`, and
+`team_organizations` in `registry/heroku-apps.json`; the DigitalOcean and
+Cloudflare pages add an Organization column. An account claimed by two
+organizations is the shared case of the organization onboarding design's rule
+ORG-R04; the rest of that design (OBS-411 to OBS-420) is not built yet.
 
 Agents read the destination at session start: the Claude Code plugin prints the
 project's organization, its Google Analytics account and Figma team, and the
