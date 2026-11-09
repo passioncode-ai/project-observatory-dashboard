@@ -680,7 +680,7 @@ settings label above,
 code `failed`, when the inventory itself failed and the rest of the scan was kept). A plugin's `scope` is the word
 Claude Code recorded (`user`, `project`, `local`, or another such as `managed`, whose `enabled` is null). `latest`
 is read from the plugin's manifest inside the marketplace's folder first, then the catalogue entry; a plugin from
-another source, from a marketplace that is a local folder, whose folder is missing from the local copy, or whose
+another source, whose folder is missing from the marketplace's local copy, or whose
 catalogue sets `metadata.pluginRoot`, has none. A home folder that is not a folder adds `harness_root` `not-found`;
 Codex's `config.toml` whose `plugins` is not a table adds `codex:config.toml` `unrecognised-shape`. Every answer of
 the section carries `page`. The section adds `stale` (source
@@ -688,7 +688,8 @@ the section carries `page`. The section adds `stale` (source
 reads a scan without it as `not-surveyed` until the next scan. `observatory_machine` takes `section: "skills"`
 (answer `{measuredAt, degraded, skills}`, `skills` holding `spaces`, `page` (`limit`, `cursor`, `nextCursor`,
 `total`), `counts`, `findings`, `open`, `degraded`) with two new optional arguments for that section, `limit`
-(1 to 300, default 200 skills) and `cursor` (an invalid one answers the first page and `degraded` code
+(1 to 100, default 100 skills; the MCP answer's rows leave out their null fields and its `degraded` is at the top
+only, not repeated under `skills`) and `cursor` (an invalid one answers the first page and `degraded` code
 `invalid-cursor`), and
 its overview's `sections` lists `skills`; the tool's other answers are unchanged. `full machine --skills` prints the
 same section and cannot be combined with another mode. The board gains the finding type `harness.plugin_behind`

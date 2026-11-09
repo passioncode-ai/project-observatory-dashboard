@@ -105,7 +105,7 @@ def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
     scanned here. A scan that is missing, unreadable or older than the inventory is named in `degraded` with the
     command that fills it, and the lists are then empty, never a claim that nothing is installed.
 
-    `limit` pages the skills (a machine can hold over a thousand; the MCP tool answers 200 at a time): `cursor` is
+    `limit` pages the skills (a machine can hold over a thousand; the MCP tool answers 100 at a time): `cursor` is
     the offset `page.nextCursor` gave, across the spaces in order; plugins, findings and counts are always whole. A
     cursor that is not one this function gave is answered with `degraded` code `invalid-cursor` and the first page."""
     doc, problem = _load("harness.json", "scan-harness")

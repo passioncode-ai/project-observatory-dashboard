@@ -686,7 +686,9 @@ class Inventory(unittest.TestCase):
         tool = next(p for p in self.inventory()["spaces"][0]["plugins"] if p["name"] == "tool@family")
         self.assertEqual((tool["latest"], tool["behind"]), ("2.0.0", True), "the entry's 1.2.0 is not what installs")
 
-    def test_a_folder_marketplace_is_never_behind_and_a_root_project_has_no_name(self):
+    def test_a_folder_marketplace_is_compared_like_any_other_and_a_root_project_has_no_name(self):
+        """Claude Code copies a folder marketplace's plugin into its versioned cache, so the copy can fall behind
+        the folder's manifest like any other install."""
         known = json.loads((self.home / ".claude" / "plugins" / "known_marketplaces.json").read_text())
         known["family"]["source"] = {"source": "directory", "path": "/somewhere"}
         write_json(self.home / ".claude" / "plugins" / "known_marketplaces.json", known)
@@ -695,9 +697,8 @@ class Inventory(unittest.TestCase):
         write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
         inv = self.inventory()
         plugins = {p["name"]: p for p in inv["spaces"][0]["plugins"] if p["agent"] == "claude-code"}
-        self.assertEqual((plugins["tool@family"]["latest"], plugins["tool@family"]["latestFrom"],
-                          plugins["tool@family"]["behind"]), (None, None, None), "served in place: no latest")
-        self.assertEqual(inv["findings"], [])
+        self.assertEqual((plugins["tool@family"]["latest"], plugins["tool@family"]["behind"]), ("1.2.0", True))
+        self.assertEqual([f["plugin"] for f in inv["findings"]], ["tool@family"])
         self.assertEqual((plugins["kit@family"]["project"], plugins["kit@family"]["enabled"]), (None, None))
 
     def test_a_skill_version_is_read_at_the_top_or_under_metadata_only(self):
@@ -792,6 +793,18 @@ class Inventory(unittest.TestCase):
         self.assertIn(("codex:config.toml", "unrecognised-shape"), {(d["source"], d["code"]) for d in inv["degraded"]})
         helper = next(p for p in inv["spaces"][0]["plugins"] if p["agent"] == "codex")
         self.assertIsNone(helper["enabled"])
+
+    def test_codex_folders_sort_by_every_number_and_several_unnamed_ones_are_ambiguous(self):
+        cache = self.home / ".codex" / "plugins" / "cache" / "family"
+        for name in ("1", "0.9.0"):
+            (cache / "single" / name).mkdir(parents=True)
+        for name in ("build-a", "build-b"):
+            (cache / "twin" / name).mkdir(parents=True)
+        write_json(self.home / ".codex" / "config.toml", '[plugins."twin@family"]\nenabled = true\n')
+        inv = self.inventory()
+        plugins = {p["name"]: p for p in inv["spaces"][0]["plugins"] if p["agent"] == "codex"}
+        self.assertEqual(plugins["single@family"]["version"], "1")
+        self.assertIn(("codex:plugins-cache:family:twin", "ambiguous"), {(d["source"], d["code"]) for d in inv["degraded"]})
 
     def test_an_unknown_scope_behind_is_no_finding(self):
         installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())

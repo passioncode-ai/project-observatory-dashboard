@@ -764,7 +764,7 @@ def _marketplace_latest(name: str, market: dict, degraded: list[dict], cache: di
     try:
         folder = (root / source).resolve()
         folder.relative_to(root.resolve())
-    except (OSError, ValueError):
+    except (OSError, ValueError, RuntimeError):   # RuntimeError: a link loop, on Python 3.11 and 3.12
         return None, None
     if not folder.is_dir():
         # The plugin's folder is not in the local copy: whatever manifest Claude Code installs from is unknown.
@@ -864,11 +864,6 @@ def _claude_plugins(claude: Path, degraded: list[dict]) -> tuple[list[dict], lis
                                            "known"})
             latest, latest_from = _marketplace_latest(key.split("@", 1)[0], {**info, "_name": market},
                                                       degraded, catalogue_cache) if info else (None, None)
-            # A marketplace that is a local folder serves its plugins in place, whatever their version says, so
-            # nothing installed from it is behind.
-            in_place = bool(info) and isinstance(info.get("source"), dict) and info["source"].get("source") == "directory"
-            if in_place:
-                latest = latest_from = None
             version = _plain_version(record.get("version"))
             have, newest = version_key(version), version_key(latest)
             row = {"name": key, "agent": CLAUDE_CODE, "scope": scope, "project": project, "projectKey": project_key,
@@ -910,11 +905,18 @@ def _codex_plugins(home: Path, degraded: list[dict], skills: list[dict], seen: s
             entries = [f.name for f in _folders(plugin, f"codex:plugins-cache:{market.name}:{plugin.name}", degraded)
                        if not f.name.startswith(".")]
             versions = [v for v in entries if STRICT_VERSION.fullmatch(v)]
-            version = max(versions, key=lambda v: (version_key(v) or (), "-" not in v, v)) if versions else None
+            # Sorted by every number it has (a folder named `1` is a version here, unlike in a comparison with a
+            # recorded version, where a bare number may be a commit), a release before its prerelease, then the name.
+            version = max(versions, key=lambda v: (tuple(int(n) for n in re.findall(r"[0-9]+", v.split("-")[0])),
+                                                   "-" not in v, v)) if versions else None
             # A single folder named otherwise (a local build, a commit) is still the installed copy: its skills are
             # read from it, and its version stays unknown.
             only = entries
             loaded = version or (only[0] if len(only) == 1 else None)
+            if loaded is None and len(only) > 1:
+                degraded.append({"source": f"codex:plugins-cache:{market.name}:{plugin.name}", "code": "ambiguous",
+                                 "reason": "the plugin's cache holds several folders and none is named as a version; "
+                                           "which one Codex loads is not known, so its skills are not listed"})
             key = f"{plugin.name}@{market.name}"
             entry = table.get(key) if isinstance(table.get(key), dict) else None
             enabled = entry.get("enabled") if entry and isinstance(entry.get("enabled"), bool) else None
@@ -948,7 +950,15 @@ def inventory(home: Path, roots: list[Path]) -> dict:
                                    "set it with `project-observatory full configure sources harness_root ~`"})
     seen: set[str] = set()
     skills = _skill_rows(claude / "skills", CLAUDE_CODE, "user", {}, seen, degraded)
-    for root in dict.fromkeys(r.resolve() for r in roots):
+    resolved = []
+    for r in roots:
+        try:
+            resolved.append(r.resolve())
+        except (OSError, RuntimeError):
+            degraded.append({"source": "projects-folder", "code": "unreadable",
+                             "reason": "a configured projects folder could not be resolved; its projects' skills are "
+                                       "not in the inventory"})
+    for root in dict.fromkeys(resolved):
         for project in _folders(root, "projects-folder", degraded):
             # Listed whatever it holds: a project without `.claude/skills` lists nothing, one whose folder cannot
             # be searched is named in `degraded`.

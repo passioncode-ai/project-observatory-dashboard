@@ -21,7 +21,7 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **Skills and plugins in the machine view** (OBS-477; `docs/ONBOARDING.md`, scenario OSS-112).
   `observatory_machine(section="skills")` and `full machine --skills` list every skill and plugin of this space with
   its version, scope (user, project, plugin; a plugin install user, project or local) and agent (Claude Code,
-  Codex), skills 200 a page over MCP, whether a plugin is enabled, and the newest version its marketplace's local copy publishes; a plugin
+  Codex), skills 100 a page over MCP, whether a plugin is enabled, and the newest version its marketplace's local copy publishes; a plugin
   behind it is the finding `plugin-behind` (board: `harness.plugin_behind`). Read from the harness scan, which now
   keeps this inventory; nothing is fetched. Unreadable records are named in `degraded`. An organization's plugin
   enabled in a person's own space is not reported yet: it waits on the space's context binding (OBS-359), and the

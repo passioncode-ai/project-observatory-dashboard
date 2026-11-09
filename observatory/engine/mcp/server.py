@@ -746,7 +746,7 @@ def observatory_machine(
                                          "`full machine-move status --json` gives it; skills = every skill and plugin "
                                          "each agent loads, with version, scope and findings, as `full machine --skills` "
                                          "gives it.")] = "overview",
-    limit: Annotated[int | None, Field(ge=1, le=300, description="skills only: skills per page (default 200, at most 300); "
+    limit: Annotated[int | None, Field(ge=1, le=100, description="skills only: skills per page (at most and by default 100); "
                                                                   "plugins, findings and counts are always whole")] = None,
     cursor: Annotated[str | None, Field(description="skills only: the `skills.page.nextCursor` of the previous "
                                                     "answer")] = None,
@@ -781,12 +781,17 @@ def observatory_machine(
 
     `section="skills"`: every skill and plugin here with version, scope and agent, a plugin's
     enabled state and its marketplace's newest LOCAL version, findings (`plugin-behind`), `open`
-    (OBS-359) and `degraded`; from the last harness scan; 200 skills a page (`cursor`).
+    (OBS-359) and `degraded`; from the last harness scan; 100 skills a page (`cursor`).
     """
     if section == "skills" and explainPid is None:
         import machine_view
         skills = machine_view.skills_section(limit=limit or SKILLS_PAGE, cursor=cursor)
-        return {"measuredAt": skills["measuredAt"], "degraded": skills["degraded"], "skills": skills}
+        # Bounded for the host: `degraded` once, at the top; rows without their empty fields.
+        degraded = skills.pop("degraded")
+        skills["spaces"] = [{**space, "skills": [_present_fields(r) for r in space.get("skills") or []],
+                             "plugins": [_present_fields(r) for r in space.get("plugins") or []]}
+                            for space in skills["spaces"]]
+        return {"measuredAt": skills["measuredAt"], "degraded": degraded, "skills": skills}
     if section == "move" and explainPid is None:
         # The agent's path to the checklist (decision D13): the CLI's own function and peers.
         import machine_backup
@@ -876,8 +881,17 @@ def observatory_ssh_keys(
 
 MACHINE_TOP = 10
 #: Skills per page of `observatory_machine(section="skills")`: a machine measured holding 1,269 skills made an
-#: unpaged answer of 151,536 characters, past what a host keeps of one tool result.
-SKILLS_PAGE = 200
+#: unpaged answer of 151,536 characters, past what a host keeps of one tool result, and 200 skills beside its 116
+#: plugin installs still made 85,918 characters as the SDK serialises it.
+SKILLS_PAGE = 100
+
+
+def _present_fields(row: Any) -> Any:
+    """A row without its null fields (`project: null`, `latest: null`): the reader learns the same in fewer
+    characters; `false` stays, it says something."""
+    if not isinstance(row, dict):
+        return row
+    return {k: v for k, v in row.items() if v is not None}
 
 
 # Publish the additive bounded coverage contract on the actual tool, not only prose.

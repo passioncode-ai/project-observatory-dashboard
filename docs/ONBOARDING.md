@@ -2069,7 +2069,8 @@ newest version its marketplace publishes as the marketplace's local copy records
 marketplace's folder, else its catalogue entry's `version` (a manifest that cannot be read, or names no release,
 a plugin folder missing from the local copy, and a catalogue that sets `metadata.pluginRoot`, which is not
 followed yet, give no `latest`). A plugin from a Git repository or a URL has no `latest` (its manifest is not in the local
-copy), nor does one from a marketplace that is a local folder (served in place): nothing is fetched. A plugin
+copy); one from a marketplace that is a local folder is compared like any other (Claude Code installs a copy
+of it into its cache, which can fall behind the folder): nothing is fetched. A plugin
 behind that version and not known to be disabled (`enabled` true, or null) is a finding (`plugin-behind`, with `claude plugin update NAME --scope SCOPE` as the step, run
 in the project's folder for a project or local install), and the board shows it as `harness.plugin_behind`;
 a disabled install behind is listed (`behind: true`) but loads nothing and is not a finding. A project or
@@ -2081,8 +2082,9 @@ or has another shape (`installed_plugins.json`, a settings file, a marketplace c
 `SKILL.md`, Codex's plugin cache or `config.toml`) is named in `degraded`, never read as empty (`unreadable`, or `unrecognised-shape` for a record of another shape; `harness_root`
 `not-found` when the home folder the scan reads is not a folder); no
 scan yet, one older than the inventory, or one older than 24 hours (`stale`) is named there with the command
-that fills it. Agents read the same answer with `observatory_machine(section="skills")`, 200 skills a page
-(`limit`, and `cursor` from `skills.page.nextCursor`; plugins, findings and counts always whole).
+that fills it. Agents read the same answer with `observatory_machine(section="skills")`, 100 skills a page
+(`limit` up to 100, and `cursor` from `skills.page.nextCursor`; plugins, findings and counts always whole;
+rows there leave out their null fields, and `degraded` comes once, at the top).
 
 ### The disk guard
 
@@ -3480,7 +3482,8 @@ record `copied`, each naming the other store and slot (`vault.py movements` show
 holds both stores' locks. `--to-slot` takes `NAME` or `PROJECT/ENV/NAME` (default: the same slot). A
 target slot that holds another value is refused (`target-slot-filled`) unless `--replace`, which archives
 the old value there as `rotate` does; one that already holds this value is left alone (`unchanged`). The
-value's expiry and provenance travel with it, under `copied_from`; a header binding does not.
+value's expiry and provenance travel with it, and its metadata gains `copied_from` (the source store, slot and
+time); a header binding does not.
 
 The receipt names the slot, both stores and two keyed digests (HMAC-SHA-256): of what was read here and
 of what the target holds after the write. They are made under your store's estate key when it has one,
@@ -3497,11 +3500,12 @@ in the path), `target-link` (the store or its `projects/` is a link), `target-pa
 `target-in-repository` (the store would sit in a Git working tree; asked of git, so it is not checked where
 git cannot run), `same-store` (another spelling of this
 store included), `nested-stores` (one store inside the other, your store or its vault folder included),
-`target-unsafe` also for a folder where the target slot should be, `target-other-account` (a store another
+`target-other-account` (a store another
 account owns: a value written from here would be unreadable there, so another OS account's store is not
 served yet, OBS-489; not checked on Windows), `target-not-writable`,
 `target-unsafe` (a file or folder in the target fails the vault's own checks: a link below `projects/`, a
-slot or metadata file that is not owner-only, does not parse or is not UTF-8), `target-slot-invalid`,
+folder where the slot should be, a slot or metadata file that is not owner-only, does not parse or is not
+UTF-8), `target-slot-invalid`,
 `target-slot-filled`, `filesystem-refused` (the file system refused before anything was written).
 With `--json` it prints `{"schema": "vault-copy/1", "outcome": "refused", "code", "reason"}`; either way it
 exits 2. A read or a write that fails midway exits 1 with `outcome: failed`, code `filesystem-failed`: read

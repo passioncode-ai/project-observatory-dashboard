@@ -987,12 +987,10 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
     anything is written, or, when the slots changed while the copy waited for the locks, undoes what this call
     created in the target store (its folder, its vault folder, its lock file). A target slot that already holds a value is
     refused unless `replace`, which archives the old value there as `rotate` does; one that already holds this
-    value is left as it is (`unchanged`). The value's expiry and provenance travel with it, under `copied_from`;
-    the source's header binding does not. The receipt's digests are keyed (`_copy_digest_key`), never the value.
+    value is left as it is (`unchanged`). The value's expiry and provenance travel with it, and the metadata gains
+    `copied_from` (the source store, slot and time); the source's header binding does not. The receipt's digests are keyed (`_copy_digest_key`), never the value.
 
     Across machines this is OBS-194's sealed envelope, not this function."""
-    import hashlib
-    import hmac
     validate_names(project, env, name)
     src_label = f"{project}/{env}/{name}"
     try:
@@ -1090,8 +1088,11 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
         raise CopyRefused("the source store's estate key cannot be read as a private file; restore it with "
                           "`full vault-digests key import FILE`", "source-unreadable") from None
 
+    import vault_digests  # on the path `_copy_digest_key` put it on
+
     def keyed(text: str) -> str:
-        return hmac.new(bytes.fromhex(key), text.encode("utf-8"), hashlib.sha256).hexdigest()
+        # The estate digest exactly as `full vault-digests` computes it, so the two never drift apart.
+        return vault_digests.digest(key, text)
 
     # What this call creates in the target store is removed again when a refusal comes after it (the slots changed
     # while the copy waited for the locks, or a target file failed the vault's checks): the store folder and the

@@ -1179,8 +1179,8 @@ class Skills(Base):
         inventory = {**self.INVENTORY, "spaces": [{**self.INVENTORY["spaces"][0], "skills": rows}]}
         self.harness({"generated_at": self.now(), "inventory": inventory})
         first = self.server.observatory_machine(section="skills")["skills"]
-        self.assertEqual(len(first["spaces"][0]["skills"]), 200)
-        self.assertEqual((first["page"]["total"], first["page"]["nextCursor"]), (450, "200"))
+        self.assertEqual(len(first["spaces"][0]["skills"]), 100)
+        self.assertEqual((first["page"]["total"], first["page"]["nextCursor"]), (450, "100"))
         self.assertEqual(first["counts"]["skills"], 450)
         self.assertEqual(len(first["spaces"][0]["plugins"]), 1, "plugins stay whole")
         last = self.server.observatory_machine(section="skills", cursor="400")["skills"]
@@ -1189,6 +1189,24 @@ class Skills(Base):
         for cursor in ("nope", "\u00b2", "9" * 5000):
             bad = self.server.observatory_machine(section="skills", cursor=cursor)
             self.assertIn("invalid-cursor", {d["code"] for d in bad["degraded"]})
+
+    def test_the_answer_stays_within_what_a_host_keeps(self):
+        """The largest page (100 skills) beside a machine's worth of plugin installs, serialised as the SDK serialises it (two-space
+        indentation), stays under 80,000 characters: about 20,000 tokens, below a host's 25,000-token limit."""
+        plugin = {"name": "some-plugin-name@some-marketplace", "agent": "claude-code", "scope": "local",
+                  "project": "a-project-folder", "projectKey": "0123abcd", "version": "1.22.333", "enabled": True,
+                  "marketplace": "some-marketplace", "latest": None, "latestFrom": None,
+                  "marketplaceUpdated": "2026-01-02T03:04:05.678Z", "behind": None}
+        skill = {"name": "a-skill-with-a-long-name", "agent": "claude-code", "scope": "plugin", "version": None,
+                 "plugin": "some-plugin-name@some-marketplace"}
+        inventory = {**self.INVENTORY, "spaces": [{"space": "this-account", "home": "~", "skills": [skill] * 1300,
+                                                   "plugins": [plugin] * 130}]}
+        self.harness({"generated_at": self.now(), "inventory": inventory})
+        out = self.server.observatory_machine(section="skills", limit=100)
+        self.assertEqual(len(out["skills"]["spaces"][0]["skills"]), 100)
+        self.assertNotIn("degraded", out["skills"], "said once, at the top")
+        self.assertNotIn("latest", out["skills"]["spaces"][0]["plugins"][0], "a null field is left out")
+        self.assertLess(len(json.dumps(out, indent=2)), 80_000)
 
     def test_an_old_scan_is_named_stale(self):
         self.harness({"generated_at": "2026-01-03T00:00:00Z", "inventory": {**self.INVENTORY, "degraded": []}})
