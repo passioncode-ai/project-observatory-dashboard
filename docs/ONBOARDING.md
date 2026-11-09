@@ -2404,8 +2404,10 @@ to yet, so nothing is sent; then the passkey signs the entry in Fabric), a key
 handed over waits on `credential-requests` (OBS-191 parts 2 and 3) and its
 switch and revocation on `rotation` (OBS-416: no value is read, copied or
 written), and the layout on its own step (a new space, OBS-362; moving personal
-kinds out, OBS-426; contexts on every item, OBS-359). A key kept personal and an
-account recorded are `done`; nothing that has not happened reads `done`. `show`
+kinds out, OBS-426; contexts on every item, OBS-359). An account recorded is
+`done`, and so is a key kept personal in the separate-space layout; in this
+space or one space a kept key waits to move out or for its context (OBS-426,
+OBS-359). Nothing that has not happened reads `done`. `show`
 counts each kind's items as done, failed, waiting, planned or undone, and names
 what each waits on. `undo` restores the revision before as a new revision (the
 first one undone leaves nothing chosen, and the defaults apply again; undoing

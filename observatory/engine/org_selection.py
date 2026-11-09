@@ -25,8 +25,9 @@ nothing it has no door for (ORG-R25: a step that has not happened is never shown
 * the layout's own step (a new space, OBS-362; personal kinds moved out, OBS-426; contexts on every item, OBS-359)
   waits on its row.
 
-What does happen: a key kept personal and an account recorded for the organization are `done` (there is nothing
-else to do for them), the revision is written, and `show` reads the journal back with its counts.
+What does happen: an account recorded for the organization, and in the separate-space layout a key kept personal,
+are `done` (there is nothing else to do for them; in this space or one space a kept key waits to move out or for
+its context, OBS-426, OBS-359), the revision is written, and `show` reads the journal back with its counts.
 
 DEFAULTS (ORG-R15, ORG-R16). Without a record: projects the organization's rules give it, and accounts a rule names
 for it, are proposed and chosen; projects and accounts that need a decision are listed and not chosen; a key is
@@ -180,7 +181,12 @@ def _folder(org: str) -> pathlib.Path:
 
 def _read(path: pathlib.Path) -> dict | None:
     """A JSON file of this record, or None when absent. Not owner-only, a symbolic link or not JSON: refused."""
-    if not path.exists() and not path.is_symlink():
+    try:
+        absent = not path.exists() and not path.is_symlink()
+    except OSError as exc:                             # Python 3.11: a folder without search permission raises
+        raise Refusal("record-unreadable", f"{path.name} of the selection cannot be reached ({type(exc).__name__})",
+                      "project-observatory full doctor") from None
+    if absent:
         return None
     try:
         doc = json.loads(private_io.read(path))
@@ -204,9 +210,9 @@ def _write(path: pathlib.Path, doc: dict) -> None:
 
 def _revisions(org: str) -> list[pathlib.Path]:
     folder = _folder(org) / "revisions"
-    if not folder.is_dir() or folder.is_symlink():
-        return []
     try:
+        if not folder.is_dir() or folder.is_symlink():
+            return []
         return sorted(p for p in folder.glob("[0-9]*.json") if p.stem.isdigit())
     except OSError as exc:
         raise Refusal("record-unreadable", f"the selection's revisions do not list ({type(exc).__name__}); nothing "
@@ -273,7 +279,8 @@ def _draft(org: str, *, consumed_ok: bool = False) -> dict | None:
             from None
     rows_ok = isinstance((doc or {}).get("items"), dict) and all(
         isinstance(r, dict) and r.get("kind") in ("project", "key", "account")
-        and r.get("decision") in (ITEM_CHOICES if r.get("kind") != "key" else KEY_CHOICES)
+        and ((r.get("labelOnly") is True and "decision" not in r)
+             or r.get("decision") in (ITEM_CHOICES if r.get("kind") != "key" else KEY_CHOICES))
         for r in (doc or {}).get("items", {}).values()) if doc is not None else True
     if doc is not None and (doc.get("schema") != DRAFT_SCHEMA or doc.get("organization") != org or not rows_ok
                             or doc.get("layout", None) not in (None, *LAYOUTS)
@@ -503,15 +510,21 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
     # A key follows its project when nobody chose it by hand: a project not chosen hands no key over by default.
     chosen = {i for i, r in items.items() if r["kind"] == "project" and r["decision"] == "include"}
     for ident, change in changes.items():
-        decided_now = change.get("by", "hand") in ("hand", "group")
-        row = items.get(ident) or {"id": ident, "kind": change["kind"], "group": "by-hand", "new": False,
-                                   "why": "you added it by hand" if decided_now else
-                                   "not proposed for this organization; only its label is set"}
-        row.update(decision=change["decision"], by=change.get("by", "hand"),
-                   new=row.get("new", False) and not decided_now)
+        label_only = change.get("labelOnly") is True and "decision" not in change
+        decided_now = not label_only and change.get("by", "hand") in ("hand", "group")
+        row = items.get(ident)
+        if row is None:
+            row = {"id": ident, "kind": change["kind"], "group": "by-hand", "new": False,
+                   "why": "you added it by hand" if decided_now else
+                   "not proposed for this organization; only its label is set"}
+            if label_only:
+                row.update(decision="keep" if change["kind"] == "key" else "exclude", by="default")
+        if not label_only:
+            row.update(decision=change["decision"], by=change.get("by", "hand"),
+                       new=row.get("new", False) and not decided_now)
         if decided_now and (row.get("group") == "by-hand" or ident not in cands):
             # Chosen or left out by hand, not proposed by a rule: the record says so, not an older reason.
-            row.update(group="by-hand", why="you chose it by hand" if change["decision"] not in ("exclude", "keep")
+            row.update(group="by-hand", why="you chose it by hand" if row["decision"] not in ("exclude", "keep")
                        else "you left it out by hand")
         if "label" in change:
             if change["label"]:
@@ -778,7 +791,7 @@ def _chosen_projects(draft: dict | None, record: dict | None) -> list[str]:
     the draft leaves out is not chosen, whatever the record said."""
     chosen = {i for i, r in (_baseline(record) or {}).items() if r["kind"] == "project" and r["decision"] == "include"}
     for i, c in ((draft or {}).get("items") or {}).items():
-        if c.get("kind") == "project":
+        if c.get("kind") == "project" and "decision" in c:          # a label alone decides nothing
             (chosen.add if c.get("decision") == "include" else chosen.discard)(i)
     return sorted(chosen)
 
@@ -794,8 +807,9 @@ def _plan_answer(org: str, ctx: dict, sel: dict, record: dict | None, draft: dic
                  if i["kind"] == "project" and i["decision"] == "include" and i["id"] in others]
     conflicts += [c for c in _elsewhere(org, ctx, sel["items"].values())
                   if c["project"] not in {x["project"] for x in conflicts}]
-    unknown = [i["id"] for i in sel["items"].values() if i.get("notFound")]
-    unread = [i["id"] for i in sel["items"].values() if i.get("unread")]
+    # Only what is chosen counts: an excluded row or a key kept personal that is gone or unread moves nothing.
+    unknown = [i["id"] for i in sel["items"].values() if i.get("notFound") and i["decision"] not in ("exclude", "keep")]
+    unread = [i["id"] for i in sel["items"].values() if i.get("unread") and i["decision"] not in ("exclude", "keep")]
     applied = bool(record) and record.get("selectionDigest") == digest
     any_items = bool(sel["items"]) or bool(record)
     registry_unread = any(d.get("source") in ("registry/projects.json", "vault") for d in ctx["degraded"])
@@ -958,18 +972,18 @@ def _change(org: str, draft: dict | None, record: dict | None, changes: dict, wh
         raise Refusal("unknown-item", f"{_echo(ident)} is not a project, key or account this space knows for "
                                       f"{org}", f"{CMD.format(org=_q(org))} plan")
 
-    def put(ident: str, decision: str, by: str = "hand", *, label_only: bool = False, **more: Any) -> None:
+    def put(ident: str, decision: str | None, by: str | None = "hand", *, label_only: bool = False,
+            **more: Any) -> None:
         row = dict(draft["items"].get(ident) or {})
         if label_only:
-            # Typing a label is not deciding the item: who decided it stays as it was, and who labelled it is kept
-            # beside it (ORG-R11).
-            earlier = row.get("decidedBy") or (sel["items"].get(ident) or {}).get("decidedBy")
-            row.update(kind=kind_of(ident), decision=decision, by=by, labelledBy=who, **more)
-            if earlier:
-                row["decidedBy"] = earlier
-            else:
-                row.pop("decidedBy", None)
+            # Typing a label is not deciding the item: the draft keeps the label and who typed it, and a decision only
+            # when a person made one in this draft; otherwise the record or the defaults decide at plan time (ORG-R02,
+            # ORG-R11).
+            row.update(kind=kind_of(ident), labelledBy=who, **more)
+            if "decision" not in row:
+                row["labelOnly"] = True
         else:
+            row.pop("labelOnly", None)
             row.update(kind=kind_of(ident), decision=decision, by=by, decidedBy=who, **more)
         draft["items"][ident] = row
 
@@ -1002,11 +1016,9 @@ def _change(org: str, draft: dict | None, record: dict | None, changes: dict, wh
     for ident, text in (changes.get("labels") or {}).items():
         if kind_of(ident) != "project":
             raise Refusal("unknown-item", f"{_echo(ident)} is not a project; only a project carries a label")
-        row = draft["items"].get(ident) or sel["items"].get(ident) or {}
-        # A label changes what the organization reads, never whether the project goes (ORG-R02): its decision and
-        # `by` stay, a project nobody chose stays out, and an item found since stays new until a person decides it.
-        put(ident, row.get("decision", "exclude"), by=row.get("by", "default") if row else "default",
-            label_only=True, label=_label_ok(text) if text else "")
+        # A label changes what the organization reads, never whether the project goes (ORG-R02): a project nobody
+        # chose stays out, and an item found since stays new until a person decides it.
+        put(ident, None, None, label_only=True, label=_label_ok(text) if text else "")
     draft["updatedAt"] = _now()
     # Each change is its own draft, named at random: a revision removes the draft it consumed by this name, never
     # one changed since (two changes can fall in one second).
@@ -1146,8 +1158,8 @@ def _supersede(org: str, prior: dict | None, new: dict | None) -> None:
         for st in item["steps"]:
             if st["state"] not in ("planned", "waiting", "done"):
                 continue
-            # Carried as it was: the same step, waiting on the same thing (a done step carries whatever it waited on).
-            if st["step"] in kept and (st["state"] == "done" or kept[st["step"]] == st.get("waitingOn")):
+            # Carried as it was: the same step, waiting on the same thing.
+            if st["step"] in kept and kept[st["step"]] == st.get("waitingOn"):
                 continue
             if st["step"] in IRREVERSIBLE and st["state"] == "done":
                 continue
@@ -1308,10 +1320,14 @@ def _unfinished(org: str, rec: dict | None) -> bool:
     revs = history(org)
     prior = revs[-2] if len(revs) >= 2 else None
     old = journal(org, prior["revision"], prior["digest"]) if prior else None
-    now = {i["id"]: {st["step"] for st in i["steps"]} for i in (jdoc or {}).get("items") or []}
+    now = {i["id"]: {st["step"]: st.get("waitingOn") for st in i["steps"]} for i in (jdoc or {}).get("items") or []}
+
+    def carried(item_id: str, st: dict) -> bool:
+        kept = now.get(item_id, {})
+        return st["step"] in kept and kept[st["step"]] == st.get("waitingOn")
     return any((st["state"] in ("planned", "waiting")
                 or (st["state"] == "done" and st["step"] not in IRREVERSIBLE))
-               and st["step"] not in now.get(i["id"], set())
+               and not carried(i["id"], st)
                for i in (old or {}).get("items") or [] for st in i["steps"])
 
 
@@ -1330,7 +1346,11 @@ def _carry(org: str, prior: dict | None, jdoc: dict) -> None:
             was = before.get(new["step"])
             if not was:
                 continue
-            if was.get("state") in ("done", "failed"):
+            if was.get("state") in ("done", "failed") and (
+                    new["step"] in IRREVERSIBLE or was.get("waitingOn") == new.get("waitingOn")):
+                # What happened carries when the new form has the same step waiting on the same thing; an
+                # irreversible step always carries. A step that now waits on something else (a key kept personal
+                # that must first move out of this space) starts again in the new form: never read as done.
                 new.clear()
                 new.update(copy.deepcopy(was))
             elif was.get("confirmedAt") and new.get("waitingOn") == "replacement-confirmation":
@@ -1439,7 +1459,9 @@ def undo(org: str, *, decision: Any = None, caller: str = "cli") -> dict:
         try:
             ctx = _context(org_ok, sorted(i for i, r in sel["items"].items()
                                           if r["kind"] == "project" and r["decision"] == "include"))
-        except Refusal:
+        except Refusal as refusal:
+            if refusal.code not in ("no-organizations", "unknown-organization", "default-organization"):
+                raise                                  # a file that does not read is not "not configured"
             ctx = None                                 # not configured any more: a record outlives its rules
         foreign = _elsewhere(org_ok, ctx, sel["items"].values()) if ctx else []
         if foreign:
@@ -1650,7 +1672,7 @@ def text(view: dict) -> str:
             for i in rows:
                 mark = "[x]" if i["decision"] not in ("exclude", "keep") else "[ ]"
                 extra = f" -> {i['decision']}" if kind == "key" else ""
-                tag = (f" (new: proposed since the record of {view['newSince']})" if view.get("newSince")
+                tag = (f" (new: the record of {view['newSince']} does not choose it)" if view.get("newSince")
                        else " (new)") if i.get("new") else ""
                 if i.get("notFound"):
                     tag += " (no longer found here)"
@@ -1677,7 +1699,7 @@ def text(view: dict) -> str:
             for kind, row in sorted(view["counts"].items()):
                 lines.append(f"  {kind}: " + ", ".join(f"{n} {s}" for s, n in row.items() if n))
             for w in view["waitingOn"]:
-                lines.append(f"  waiting ({w['items']}): {w['on']}: {w.get('what', '')} [{w.get('owner', '')}]")
+                lines.append(f"  not done ({w['items']}): {w['on']}: {w.get('what', '')} [{w.get('owner', '')}]")
         for n in view.get("new") or []:
             lines.append(f"  new since the record (not chosen): {n}")
         if view.get("error"):
@@ -1690,7 +1712,7 @@ def text(view: dict) -> str:
         for kind, row in sorted((view.get("counts") or {}).items()):
             lines.append(f"  {kind}: " + ", ".join(f"{n} {s}" for s, n in row.items() if n))
         for w in view.get("waitingOn") or []:
-            lines.append(f"  waiting ({w.get('items', 1)}): {w['on']}: {w.get('what', '')} [{w.get('owner', '')}]")
+            lines.append(f"  not done ({w.get('items', 1)}): {w['on']}: {w.get('what', '')} [{w.get('owner', '')}]")
         lines.append(f"next: {view.get('nextStep', '')}\n  {view.get('command', '')}")
     for d in view.get("degraded") or []:
         lines.append(f"not read: {d.get('source')}: {d.get('reason')}")

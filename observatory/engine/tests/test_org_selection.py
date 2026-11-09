@@ -1337,6 +1337,37 @@ class ReviewRoundFifteen(Base):
         self.assertNotEqual(answer.get("error"), "invalid-change")
 
 
+class ReviewRoundSixteen(Base):
+    """What the sixteenth review found: each case reproduced, then fixed."""
+
+    def test_an_excluded_row_that_is_gone_moves_nothing_and_asks_nothing(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        self.registry("projects.json", {"projects": [p for p in PROJECTS if p["id"] != "project:shared-tool"]})
+        (self.secrets / "projects" / "alpha-web" / "prod" / "HAND_PUT").unlink()
+        v = self.sel.plan("acme")
+        self.assertEqual((v["unknown"], v["unread"]), ([], []))
+        self.assertIn("nothing to apply", v["nextStep"])
+
+    def test_a_layout_change_never_carries_a_kept_key_as_done(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        self.sel.apply("acme", self.sel.plan("acme", {"layout": "this-space"})["digest"])
+        step = next(st for i in self.sel.journal("acme", 2)["items"] if i["id"] == HAND_SLOT for st in i["steps"])
+        self.assertEqual((step["state"], step["waitingOn"]), ("waiting", "move-out"))
+        old = next(st for i in self.sel.journal("acme", 1)["items"] if i["id"] == HAND_SLOT for st in i["steps"])
+        self.assertEqual(old["state"], "undone", "the old journal's step no longer carried reads undone")
+
+    def test_a_label_before_the_first_apply_does_not_choose(self):
+        self.sel.plan("acme", {"labels": {"project:alpha-web": "Alpha"}, "layout": "one-space"})
+        moved = [dict(p, organization="person", organization_source="default", organization_why="no rule")
+                 if p["id"] == "project:alpha-web" else p for p in PROJECTS]
+        self.registry("projects.json", {"projects": moved})
+        v = self.sel.plan("acme")
+        row = self.items(v).get("project:alpha-web")
+        self.assertEqual(row["decision"], "exclude", "the label alone never kept it chosen")
+        self.assertEqual(row["label"], "Alpha")
+        self.assertEqual(v["preview"]["organization"]["projects"], 1)
+
+
 class WhatTheOrganizationSees(Base):
     """ORG-R03: a reference random per organization and a label only when typed; nothing is handed over."""
 
