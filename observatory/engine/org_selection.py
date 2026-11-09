@@ -423,9 +423,14 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
                                                                           ctx["accounts"]["accounts"]}
     for ident, prior in (base or {}).items():
         if ident not in items:
-            # In the record and no longer a candidate: kept with its decision. `notFound` only when this space no
-            # longer knows it at all (a project gone from the registry, a slot deleted, an account not seen).
-            items[ident] = {**prior, "new": False, "notFound": ident not in known}
+            # In the record and no longer a candidate: kept with its decision. Not known here: `unread` when the
+            # source that would list it did not read this time (the item may well exist), `notFound` only when its
+            # source read and does not list it (a project gone from the registry, a slot deleted, an account gone).
+            row = {**prior, "new": False}
+            if ident not in known:
+                source = _unread_source(prior.get("kind"), ident, ctx)
+                row.update({"unread": source} if source else {"notFound": True})
+            items[ident] = row
     # A key follows its project when nobody chose it by hand: a project not chosen hands no key over by default.
     chosen = {i for i, r in items.items() if r["kind"] == "project" and r["decision"] == "include"}
     for ident, change in changes.items():
@@ -447,6 +452,10 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
         if row["kind"] == "project":
             (chosen.add if row["decision"] == "include" else chosen.discard)(ident)
     for ident, row in items.items():
+        if row["kind"] == "key" and ident not in changes and row.get("new") and row["decision"] == "keep" \
+                and row.get("project") is not None and row["project"] not in chosen:
+            # Found since the record, in a project the person left out: it follows that decision, it is not new.
+            row.update(by="project", new=False)
         if row["kind"] == "key" and ident not in changes and row.get("by") in ("rule", "default", "project") \
                 and row["decision"] != "keep" and row.get("project") is not None and row["project"] not in chosen:
             # `by: project`: it follows its project, a decision already made, so it is neither a default left for a
@@ -462,13 +471,30 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
     return {"items": items, "layout": layout, "serves": serves}
 
 
+def _unread_source(kind: Any, ident: str, ctx: dict) -> str | None:
+    """The source that did not read and would have listed this item, or None when every such source read."""
+    for d in ctx["degraded"]:
+        src = str(d.get("source") or "")
+        if kind == "project" and src == "registry/projects.json":
+            return src
+        if kind == "key" and src.startswith("vault"):
+            return src
+        if kind == "account" and (src.split(":", 1)[0] == ident.split(":", 1)[0] or src.startswith("registry/")
+                                  or src == "github"):
+            return src
+    return None
+
+
 def selection_digest(org: str, sel: dict) -> str:
     """The digest of what is decided (the form the person previews, ORG-R14): the organization, the layout, the
     space it serves, and each item's decision and label. Reasons and counts are not in it: they explain, they do not
     decide."""
+    # An item found since the record that nobody decided yet is listed apart and is not part of the form: the record
+    # does not keep it either (ORG-R16), so the applied form reads applied until a person decides it.
     return _digest({"organization": org, "layout": sel["layout"], "serves": sel["serves"],
                     "items": sorted([i["id"], i["kind"], i["decision"], i.get("label")]
-                                    for i in sel["items"].values())})
+                                    for i in sel["items"].values()
+                                    if not (i.get("new") and i.get("by") == "default"))})
 
 
 def _others_chosen(org: str) -> tuple[dict[str, str], list[dict]]:
@@ -548,10 +574,13 @@ def _clash(org: str, items: Any) -> None:
 def _preview(org: str, ctx: dict, sel: dict) -> dict:
     """ORG-W7 as data: what moves, where, what the organization will see, and the line that proves the rest."""
     items = sel["items"].values()
-    projects = [i for i in items if i["kind"] == "project" and i["decision"] == "include" and not i.get("notFound")]
-    keys_out = [i for i in items if i["kind"] == "key" and i["decision"] != "keep" and not i.get("notFound")]
+    projects = [i for i in items if i["kind"] == "project" and i["decision"] == "include" and not i.get("notFound")
+                and not i.get("unread")]
+    keys_out = [i for i in items if i["kind"] == "key" and i["decision"] != "keep" and not i.get("notFound")
+                and not i.get("unread")]
     revoked = [i for i in keys_out if i["decision"] == "hand-over-revoke"]
-    accounts_in = [i for i in items if i["kind"] == "account" and i["decision"] == "include"]
+    accounts_in = [i for i in items if i["kind"] == "account" and i["decision"] == "include" and not i.get("notFound")
+                   and not i.get("unread")]
     chosen_projects = {i["id"] for i in projects}
     default = ctx.get("default")
 
@@ -611,15 +640,17 @@ def plan(org: str, changes: dict | None = None, *, decision: Any = None, caller:
     if "reset" in changes and changes["reset"] is not True:
         raise Refusal("invalid-change", "`reset` is true or absent")
     folder = _folder(org_ok)
-    # Reading the plan writes nothing, not even a lock; a change takes the organization's lock.
+    # The gate before anything is touched, the lock included; reading the plan writes nothing.
+    who = decided("plan", org_ok, decision, caller=caller) if changes else None
     with (_locked(org_ok) if changes else contextlib.nullcontext()):
         record = current(org_ok)
-        if changes:
-            who = decided("plan", org_ok, decision, caller=caller)
-            if changes.get("reset"):
-                # Before the draft is read: a damaged draft is dropped by the command its refusal names.
-                (folder / "draft.json").unlink(missing_ok=True)
-                changes = {k: v for k, v in changes.items() if k != "reset"}
+        reset = bool(changes.pop("reset", False))
+        if reset and changes:
+            # Every other change is checked before the draft is dropped: a refused call changes nothing.
+            _change(org_ok, None, record, changes, who)
+        if reset:
+            # Before the draft is read: a damaged draft is dropped by the command its refusal names.
+            (folder / "draft.json").unlink(missing_ok=True)
         draft = _draft(org_ok)
         if changes:
             draft = _change(org_ok, draft, record, changes, who)
@@ -655,10 +686,12 @@ def _plan_answer(org: str, ctx: dict, sel: dict, record: dict | None, draft: dic
     conflicts += [c for c in _elsewhere(org, ctx, sel["items"].values())
                   if c["project"] not in {x["project"] for x in conflicts}]
     unknown = [i["id"] for i in sel["items"].values() if i.get("notFound")]
+    unread = [i["id"] for i in sel["items"].values() if i.get("unread")]
     applied = bool(record) and record.get("selectionDigest") == digest
     any_items = bool(sel["items"]) or bool(record)
     state = ("empty" if not any_items else "conflict" if conflicts else "partial" if ctx["degraded"] or unknown
-             else "complete")
+             or unread else "complete")
+    undecided = sorted(i["id"] for i in sel["items"].values() if i.get("new") and i.get("by") == "default")
     q = CMD.format(org=_q(org))
     if record and _unfinished(org, record):
         step, cmd = RESUME_STEP, f"{q} apply --digest {record['selectionDigest']}"
@@ -672,6 +705,9 @@ def _plan_answer(org: str, ctx: dict, sel: dict, record: dict | None, draft: dic
                      f"{q} plan --layout {RECOMMENDED_LAYOUT} --serves SPACE")
     elif sel["layout"] == "separate-space" and not sel["serves"]:
         step, cmd = "name the space this selection serves (the new OS account or VM)", f"{q} plan --serves SPACE"
+    elif applied and undecided:
+        step, cmd = (f"this is the applied selection; {len(undecided)} item(s) found since wait for you: include or "
+                     "leave out each, then apply", f"{q} plan --include ID")
     elif applied:
         step, cmd = "this is the applied selection; nothing to apply", f"{q} show"
     else:
@@ -684,7 +720,7 @@ def _plan_answer(org: str, ctx: dict, sel: dict, record: dict | None, draft: dic
                                                 "selectionDigest": record["selectionDigest"]},
             "items": _items_out(sel), "new": sorted(i["id"] for i in sel["items"].values() if i.get("new")),
             "newSince": (record or {}).get("decidedAt"),
-            "conflicts": conflicts, "unknown": sorted(unknown), "preview": _preview(org, ctx, sel),
+            "conflicts": conflicts, "unknown": sorted(unknown), "unread": sorted(unread), "preview": _preview(org, ctx, sel),
             "nextStep": step, "command": cmd, "gates": GATES, "degraded": ctx["degraded"]}
 
 
@@ -1001,10 +1037,10 @@ def apply(org: str, digest: Any, *, decision: Any = None, caller: str = "cli") -
     if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest):
         raise Refusal("not-previewed", "apply takes the digest the preview showed, so only the form the person saw is "
                                        "applied", f"{q} plan")
+    # The gate first: nothing is written, not a lock nor a resume, for a call that is not the person's.
+    who = decided("apply", org_ok, decision, caller=caller)
     with _locked(org_ok, every=True):
         record = current(org_ok)
-        # The gate first: nothing is written, not even a resume, for a call that is not the person's.
-        who = decided("apply", org_ok, decision, caller=caller)
         if record and _unfinished(org_ok, record):
             # ORG-R12: finish what the last apply or undo left before anything else. Its own form is all it takes.
             _resume(org_ok, record)
@@ -1048,6 +1084,12 @@ def _complete(org: str, ctx: dict, sel: dict) -> None:
         raise Refusal("registry-unreadable", "registry/projects.json does not read, so which projects and keys are "
                                              "chosen is not known; nothing is applied until it reads",
                       "project-observatory full doctor")
+    unread = sorted((i["id"], i["unread"]) for i in sel["items"].values() if i.get("unread")
+                    and i["decision"] not in ("exclude", "keep"))
+    if unread:
+        raise Refusal("source-unreadable", f"{unread[0][0]} is chosen and its source ({unread[0][1]}) did not read this "
+                                           "time, so whether it is still here is not known; nothing is applied until "
+                                           "it reads (the choice stays)", "project-observatory full doctor")
     gone = sorted(i["id"] for i in sel["items"].values() if i.get("notFound")
                   and i["decision"] not in ("exclude", "keep"))
     if gone:
@@ -1204,11 +1246,11 @@ def undo(org: str, *, decision: Any = None, caller: str = "cli") -> dict:
     q = CMD.format(org=_q(org_ok))
     if not _revisions(org_ok):
         raise Refusal("nothing-to-undo", "no selection has been applied for this organization", f"{q} plan")
+    who = decided("undo", org_ok, decision, caller=caller)         # the gate before anything is written
     with _locked(org_ok, every=True):
         revs = history(org_ok)
         if not revs:
             raise Refusal("nothing-to-undo", "no selection has been applied for this organization", f"{q} plan")
-        who = decided("undo", org_ok, decision, caller=caller)     # the gate before anything is written
         if _unfinished(org_ok, revs[-1]):
             _resume(org_ok, revs[-1])                  # ORG-R12: the last apply or undo finishes first
         cur = revs[-1]
@@ -1241,7 +1283,15 @@ def undo(org: str, *, decision: Any = None, caller: str = "cli") -> dict:
         foreign = _elsewhere(org_ok, ctx, sel["items"].values()) if ctx else []
         if foreign:
             raise Refusal(foreign[0]["code"], f"{foreign[0]['project']} is {foreign[0]['why']}", f"{q} show")
-        if ctx is not None and restored is not None and restored["items"]:
+        if ctx is None:
+            import org_view
+            listed = {p["id"] for p in org_view._project_rows(org_view._registry("projects.json", [], ""))}
+            gone = sorted(i for i, r in sel["items"].items() if r["kind"] == "project" and r["decision"] == "include"
+                          and i not in listed)
+            if gone:
+                raise Refusal("items-not-found", f"{gone[0]} would come back and is no longer in the registry",
+                              f"{q} show")
+        if ctx is not None and restored is not None:
             # The restored form as a plan would read it now (items found since listed apart), so the plan reads it
             # applied afterwards: apply and undo define the digest the same way.
             pseudo = {"items": restored["items"], "layout": restored.get("layout"), "serves": restored.get("serves")}
@@ -1273,9 +1323,9 @@ def confirm_replacement(org: str, key: Any, *, decision: Any = None, caller: str
     ident = key if isinstance(key, str) and key.startswith("vault:") else f"vault:{key}" if isinstance(key, str) else ""
     if not _revisions(org_ok):
         raise Refusal("not-in-record", "no selection has been applied for this organization", f"{q} plan")
+    who = decided("confirm-replacement", ident, decision, caller=caller)   # the gate before anything is written
     with _locked(org_ok):
         rec = current(org_ok)
-        who = decided("confirm-replacement", ident, decision, caller=caller)   # the gate before anything is written
         item = next((i for i in (rec or {}).get("items") or [] if i["id"] == ident and i["kind"] == "key"), None)
         if item is None:
             raise Refusal("not-in-record", "that key is not in the applied selection", f"{q} show")

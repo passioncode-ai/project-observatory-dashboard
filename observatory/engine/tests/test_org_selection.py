@@ -874,6 +874,64 @@ class ReviewRoundSix(Base):
         self.assertTrue(u["draftDropped"])
 
 
+class ReviewRoundSeven(Base):
+    """What the seventh review found: each case reproduced, then fixed."""
+
+    def test_a_source_that_did_not_read_never_asks_to_drop_a_choice(self):
+        before = self.sel.apply("acme", self.ready()["digest"])
+        self.assertEqual(self.sel.plan("acme")["preview"]["accounts"], 2, before["counts"])
+        self.private("openrouter-issued.json", "{")
+        v = self.sel.plan("acme", {"labels": {"project:beta-api": "Billing"}})
+        self.assertEqual(v["unknown"], [])
+        self.assertIn("openrouter:account:acme-or", v["unread"])
+        self.assertEqual(v["preview"]["accounts"], 1, "the account whose source did not read is not counted as going")
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.apply("acme", v["digest"])
+        self.assertEqual(caught.exception.code, "source-unreadable")
+        self.assertNotIn("--exclude", caught.exception.command or "")
+
+    def test_items_nobody_decided_leave_the_applied_form_applied(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        self.registry("projects.json", {"projects": PROJECTS + [
+            {"id": "project:gamma", "name": "gamma", "owners": ["acme-inc"], "local_folders": ["gamma"],
+             "organization": "acme", "organization_source": "rule", "organization_why": "repository owner acme-inc"}]})
+        v = self.sel.plan("acme")
+        self.assertTrue(v["applied"])
+        self.assertIn("1 item(s) found since wait for you", v["nextStep"])
+        self.assertEqual(self.sel.apply("acme", v["digest"])["outcome"], "unchanged")
+
+    def test_a_key_found_later_in_a_project_left_out_is_not_new(self):
+        self.sel.apply("acme", self.sel.plan("acme", {"exclude": ["project:alpha-web"], "layout": "one-space"})
+                       ["digest"])
+        self.private("projects/alpha-web/prod/LATER_KEY", STAND_IN_VALUE)
+        self.private("openrouter-issued.json", json.dumps({"issued": {
+            "alpha-llm": {"account": "acme-or", "destination": "vault:alpha-web/prod/OPENROUTER_API_KEY"},
+            "later": {"account": "acme-or", "destination": "vault:alpha-web/prod/LATER_KEY"}}}))
+        self.assertEqual(self.sel.plan("acme")["new"], [])
+
+    def test_a_refused_change_with_reset_keeps_the_draft(self):
+        self.ready()
+        with self.assertRaises(self.sel.Refusal):
+            self.sel.plan("acme", {"reset": True, "layout": "everywhere"})
+        self.assertTrue(self.sel.plan("acme")["draft"])
+
+    def test_a_refused_agent_writes_nothing_not_even_a_lock(self):
+        with self.assertRaises(self.sel.Refusal):
+            self.sel.plan("acme", {"layout": "one-space"}, caller="agent:mcp")
+        with self.assertRaises(self.sel.Refusal):
+            self.sel.apply("acme", "sha256:" + "0" * 64, caller="agent:mcp")
+        self.assertEqual(self.files(), [])
+
+    def test_undo_without_the_organization_configured_checks_the_registry(self):
+        self.sel.apply("acme", self.ready(include=["project:notes"])["digest"])
+        self.sel.apply("acme", self.sel.plan("acme", {"exclude": ["project:notes"]})["digest"])
+        (self.home / "config" / "organizations.json").unlink()
+        self.registry("projects.json", {"projects": [p for p in PROJECTS if p["id"] != "project:notes"]})
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.undo("acme")
+        self.assertEqual(caught.exception.code, "items-not-found")
+
+
 class WhatTheOrganizationSees(Base):
     """ORG-R03: a reference random per organization and a label only when typed; nothing is handed over."""
 
