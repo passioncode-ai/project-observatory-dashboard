@@ -954,15 +954,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "62ad68128d715c2b230c5c688a680f09be9b780d6418f810bb09ed56dc696313",
-      "bytes": 120362,
+      "export_sha256": "64f4c0434a4f9ed1f107b82fe90b409a72c9afcd8ed70f0b95d0101a2c6112c8",
+      "bytes": 120667,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "e7f6512d9eed621f3cdd03ea230dc2774554fffa4e3ad791f5233781a319d82c",
-      "bytes": 302858,
+      "export_sha256": "b7c5e342e43755ad31ffddf5caf9087976b08823287257f2e33374edebd13a7d",
+      "bytes": 302956,
       "upstream_modified": true
     },
     {
@@ -6297,8 +6297,8 @@
       "path": "tests/test_space_daemons.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "db29f99ca7a1ab80279463e47e6e6e9791cc6d4b045d3193dead4a134168d60d",
-      "bytes": 82008
+      "export_sha256": "7f798e76308f54dde64864ae7463a554a639ff69733616ac8a8233c45ac09195",
+      "bytes": 83539
     },
     {
       "path": "tests/test_spend.py",
@@ -7491,8 +7491,8 @@
       "path": "tools/space_daemons.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e91e60ee7a28186151dd997b1915e3b15a1864c720fcab836ed888aab020276b",
-      "bytes": 88595
+      "export_sha256": "ab641f42a7fc21fd613f62132ab0d469907de679de54bb206b56e0be5dcb6981",
+      "bytes": 90173
     },
     {
       "path": "tools/spend.py",

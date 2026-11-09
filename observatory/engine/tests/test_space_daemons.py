@@ -1236,6 +1236,34 @@ class Replacing(Base):
         self.assertIn("exit 9", result["problems"][0]["detail"])
         self.assertTrue(self.daemon().is_file())
 
+    def test_a_print_that_does_not_answer_is_never_read_as_gone(self):
+        self.applied()
+        real = self.launchctl.__call__
+
+        def timing_out(argv, **kw):
+            if os.path.basename(argv[0]) == "launchctl" and argv[1:3] == ["print", f"system/{LABEL}"] and \
+                    ["bootout", f"system/{LABEL}"] in self.launchctl.calls:
+                self.launchctl.calls.append(list(argv[1:]))
+                raise subprocess.TimeoutExpired(argv, kw.get("timeout"))
+            return real(argv, **kw)
+        system = self.system()
+        system.runner = timing_out
+        result = sd.remove(system, self.account, LABEL)
+        self.assertEqual((result["outcome"], result["problems"][0]["code"]), ("failed", "still_loaded"))
+        self.assertIn("launchctl print answered exit 125", result["problems"][0]["detail"])
+        self.assertTrue(self.daemon().is_file(), "nothing is deleted while launchd's answer is unknown")
+        self.assertEqual([e["label"] for e in self.registry()["entries"]], [LABEL])
+
+    def test_a_failed_bootstrap_that_loaded_it_anyway_leaves_no_untracked_daemon(self):
+        self.define()
+        self.launchctl.queue["bootstrap"] = [(78, True)]
+        row = sd.apply(self.system(), self.account)["results"][0]
+        self.assertEqual(row["outcome"], "failed")
+        self.assertIn("booted out", row["put_back"])
+        self.assertNotIn(LABEL, self.launchctl.loaded)
+        self.assertFalse(self.daemon().exists())
+        self.assertEqual(self.registry()["entries"], [])
+
     def test_the_bound_follows_the_daemons_exit_timeout(self):
         self.assertEqual(sd.bootout_wait_seconds({}), sd.BOOTOUT_WAIT_SECONDS)
         self.assertEqual(sd.bootout_wait_seconds(None), sd.BOOTOUT_WAIT_SECONDS)

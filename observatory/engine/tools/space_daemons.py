@@ -60,9 +60,10 @@ is longer, at most BOOTOUT_WAIT_MAX_SECONDS) and only then deletes the file and 
 does not finish in time is `still_loaded` (or `bootout_failed`), exit 1, and keeps both, so `remove` runs again.
 `replace --label L` does in one step what `remove` then `apply` did in two: it plans (a definition the rules refuse
 stops nothing), writes, boots the old daemon out, waits the same way, bootstraps the new one (again while launchd
-answers 5, 37 or 125, up to BOOTSTRAP_ATTEMPTS), and on a refusal puts the previous daemon back and loads it,
-saying so in `put_back`. Every answer of apply, replace and remove carries `steps`, one line per step with its
-outcome. `apply` over its own loaded daemon replaces it the same way when the definition changed, and leaves it
+answers 5, 37 or 125, up to BOOTSTRAP_ATTEMPTS); when the new one does not load it puts the previous daemon back
+and loads it, and when the old one does not stop in time it loads nothing and puts the previous file back, saying
+which in `put_back`. Every result of apply, replace and remove carries `steps`, one line per step with its
+outcome (a refusal before anything is read, exit 2, is an error instead). `apply` over its own loaded daemon replaces it the same way when the definition changed, and leaves it
 alone (`unchanged`) when it did not; `replace` reloads it even then.
 
 TRUSTED OWNERS (1.1.0). A program path normally belongs to root or the account. Where Homebrew's prefix is
@@ -180,6 +181,9 @@ BOOTSTRAP_ATTEMPTS = 5
 BOOTSTRAP_TRANSIENT = frozenset({5, 37, 125})
 #: The exit `System.output` answers when launchctl did not finish within its timeout.
 TIMED_OUT = 125
+#: What `launchctl print system/<label>` answers for a label launchd does not know ("Could not find service").
+#: Only this reads as gone while a stop is waited for: a print that timed out or did not start says nothing.
+NOT_FOUND = 113
 
 #: Test seams. They take effect only when the switch is "1" AND the process is not root, so no
 #: ordinary environment variable can redirect a root write in production.
@@ -331,23 +335,29 @@ class System(object):
         return self.run(["print", "system/" + label])[0] == 0
 
     def wait_gone(self, label, seconds):
-        """Ask launchd until it no longer knows system/LABEL, for at most SECONDS: (gone, seconds waited)."""
+        """Ask launchd until it answers that it does not know system/LABEL (exit NOT_FOUND), for at most SECONDS
+        (plus the time launchctl itself takes): (gone, seconds waited, the last exit of `print`). Any other answer,
+        a print that timed out included, is not gone."""
         start = self.clock()
         delay = 0.25
-        while self.loaded(label):
+        while True:
+            code = self.run(["print", "system/" + label])[0]
+            if code == NOT_FOUND:
+                return True, round(self.clock() - start, 2), code
             waited = self.clock() - start
             if waited >= seconds:
-                return False, round(waited, 2)
+                return False, round(waited, 2), code
             self.sleep(min(delay, seconds - waited))
             delay = min(delay * 2, 2.0)
-        return True, round(self.clock() - start, 2)
 
     def stop(self, label, seconds):
         """`bootout system/LABEL`, then wait until the label is gone (OBS-475): `bootout` returns before the
         daemon's process has exited, and a bootstrap or an apply sent in that window is refused. Answers
         (gone, exit code of bootout, its last error line, seconds waited)."""
         code, tail = self.run(["bootout", "system/" + label])
-        gone, waited = self.wait_gone(label, seconds)
+        gone, waited, printed = self.wait_gone(label, seconds)
+        if not gone and printed != 0:
+            tail = ("%s; launchctl print answered exit %d" % (tail, printed)).lstrip("; ")
         return gone, code, tail, waited
 
     def start(self, label, path):
@@ -1290,7 +1300,7 @@ def _still_loaded(label, gone_code, tail, waited, seconds):
     after = "system/%s is still loaded %s s after bootout (the bound is %d s)" % (label, waited, seconds)
     if gone_code != 0:
         return _problem("bootout_failed", ("exit %d %s; %s" % (gone_code, tail, after)).replace("  ", " "))
-    return _problem("still_loaded", after)
+    return _problem("still_loaded", after + ("; " + tail if tail else ""))
 
 
 def _file_sha(path):
@@ -1409,6 +1419,12 @@ def _install_one(system, account, definition, entries, holders=None, force=False
         restore_files()
         if previous is None:
             note = "nothing is left in /Library/LaunchDaemons"
+            if system.loaded(label):
+                # The refused bootstrap loaded it after all: a daemon with no file and no entry is never left.
+                gone, _code, _tail, _waited = system.stop(label, bootout_wait_seconds(definition["daemon"]))
+                note = ("nothing is left in /Library/LaunchDaemons, and the daemon its failed bootstrap loaded was "
+                        "booted out" if gone else "the daemon file is gone but system/%s is still loaded with no "
+                        "registry entry: `launchctl bootout system/%s` as root" % (label, label))
         elif system.loaded(label):
             note = ("the previous daemon file is back, and system/%s is loaded though its bootstrap failed: "
                     "`replace` loads the file again" % label)
@@ -1480,8 +1496,10 @@ def apply(system, account, labels=None, force=False, verb="apply"):
             try:
                 results.append(_install_one(system, account, definition, entries, holders, force=force))
             except Exception as exc:  # one definition's failure never stops the others
+                detail = "%s: %s" % (type(exc).__name__, exc)
                 results.append({"label": definition["label"], "file": definition["file"], "outcome": "failed",
-                                "problems": [_problem("failed", "%s: %s" % (type(exc).__name__, exc))]})
+                                "problems": [_problem("failed", detail)],
+                                "steps": [{"step": verb, "outcome": "failed", "detail": detail}]})
     return {"tool": "space-daemons", "version": SPACE_DAEMONS_VERSION, "user": account.name, "uid": account.uid,
             "command": verb, "folder": folder, "logs": logs, "results": results, "trust": trust.as_dict(),
             "ok": all(r["outcome"] in DONE for r in results)}

@@ -618,9 +618,11 @@ and a 1.1.0 copy reads what 1.2.0 writes. The root-owned copy changes (`SPACE_DA
 administrator installs it again from the release with the same verified steps; `--version` prints the new sha256 for
 information. Until then the 1.1.0 copy keeps working as before, without `replace`.
 
-- `remove` answers only once `launchctl print system/<label>` no longer finds the label: up to 45 s
+- `remove` answers only once `launchctl print system/<label>` answers that it does not know the label (exit 113;
+  a print that times out or does not start is not read as gone): up to 45 s
   (`BOOTOUT_WAIT_SECONDS`), or the daemon's own `ExitTimeOut` and 5 s when that is longer, at most 300 s
-  (`BOOTOUT_WAIT_MAX_SECONDS`; an `ExitTimeOut` of 0, launchd's "never kill", gets 300 s). A stop that does not finish
+  (`BOOTOUT_WAIT_MAX_SECONDS`; an `ExitTimeOut` of 0, launchd's "never kill", gets 300 s), plus the time launchctl
+  itself takes to answer (each call has its own 60 s timeout). A stop that does not finish
   within the bound answers `outcome` `failed` with the problem `still_loaded` (or `bootout_failed` when launchctl
   refused the bootout), exit 1, and keeps the daemon file and the registry entry, so `remove` can run again; 1.1.0
   deleted both and answered `removed` while launchd still held the label. The answer gains `steps` and
@@ -630,8 +632,9 @@ information. Until then the 1.1.0 copy keeps working as before, without `replace
   `write`, `bootout`, `wait` (the same bound), `bootstrap` (again while launchd answers 5, 37 or 125, up to five
   attempts, as the engine's own jobs since OBS-410; 125 with the label loaded counts as loaded). When the new daemon
   does not load, the previous file and registry entry go back and the previous daemon is loaded again, and
-  `put_back` says which of these held; when the old daemon does not stop in time, nothing new is loaded and the
-  previous file goes back. It reloads even when nothing changed, and applies a label never applied. Its answer is
+  `put_back` says which of these held (a label with no previous daemon is left with no file, no entry and, if the
+  refused bootstrap loaded it after all, booted out); when the old daemon does not stop in time, nothing new is
+  loaded and the previous file goes back. It reloads even when nothing changed, and applies a label never applied. Its answer is
   `apply`'s, with `command` `replace`.
 - `apply` over a daemon of its own that is loaded replaces it the same way when the definition changed (1.1.0 sent
   the bootstrap while the bootout was still finishing, and then put the old file back), and leaves it running with

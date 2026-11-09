@@ -3153,6 +3153,10 @@ as `loaded` (`registered` when root wrote it and it is not loaded, `waiting-for-
 as usual. `apply` writes the registry entry before the plist, so a crash between the two leaves an
 entry whose plist is missing: `apply` writes it again, `remove` cleans it, `status` shows it as
 `missing`. `remove` deletes only a file whose bytes are what it wrote or whose label is the job's.
+An XML comment holding `--` (which launchd and plutil accept and XML forbids) is tolerated: the
+comments are removed from the bytes in one pass and the plist parsed again, so nothing inside a comment
+becomes a key. This is close to launchd's reading, not proven identical, so a comment that never closes,
+or comments beside a CDATA section, are refused as `xml_comment`.
 
 **Replacing a daemon** (space daemons 1.2.0). `launchctl bootout` returns before the daemon's
 process has exited, and launchd keeps the label until it has, so `remove` waits until the label is
@@ -3167,14 +3171,10 @@ sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons replace --
 
 It checks the new definition first (a refused one stops nothing), boots the old daemon out, waits
 the same way, loads the new one, and when the new one does not load puts the previous daemon back
-and loads it again, saying so in `put_back`; every answer lists its `steps`. `apply` over a daemon
+and loads it again, saying so in `put_back` (when the old daemon does not stop in time, nothing
+new is loaded and the previous file goes back); every answer lists its `steps`. `apply` over a daemon
 of its own replaces it the same way when the definition changed and leaves it running (`unchanged`)
 when it did not. A copy older than 1.2.0 has no `replace`: there, `remove` then `apply`.
-
-An XML comment holding `--` (which launchd and plutil accept and XML forbids) is tolerated: the
-comments are removed from the bytes in one pass and the plist parsed again, so nothing inside a comment
-becomes a key. This is close to launchd's reading, not proven identical, so a comment that never closes,
-or comments beside a CDATA section, are refused as `xml_comment`.
 
 **Trusted owners** (space daemons 1.1.0). On a Mac where Homebrew's prefix is owned by the host's admin
 account and its folders are group-writable by `admin`, every program there would be refused
