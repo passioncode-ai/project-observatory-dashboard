@@ -180,7 +180,7 @@ def _movements(degraded: list) -> list[dict]:
     try:
         import private_io
         text = private_io.read(path)
-    except (OSError, RuntimeError) as exc:
+    except (OSError, RuntimeError, ValueError) as exc:          # ValueError: bytes that are not UTF-8
         degraded.append({"source": "vault:movements", "code": "unreadable",
                          "reason": f"movements.jsonl does not read ({type(exc).__name__})",
                          "effect": "keys issued by the Cloudflare door read as put by hand"})
@@ -199,6 +199,10 @@ def _movements(degraded: list) -> list[dict]:
 def _slots(degraded: list) -> list[tuple[str, str, str]]:
     """(folder, env, NAME) of every vault slot, by its path: no slot file is opened."""
     root = _vault_root()
+    if root.exists() and not root.is_dir():
+        degraded.append({"source": "vault", "code": "unreadable", "reason": "the vault path is not a folder",
+                         "effect": "no key is listed, which is not evidence there is none"})
+        return []
     if not root.is_dir():
         if root.parent.is_dir():
             return []                     # a workspace that never stored a key: an empty vault, not an unread one
@@ -386,7 +390,7 @@ def accounts() -> dict:
     rdoc = _registry("repositories.json", degraded, "a repository owner's host is not known; GitHub is assumed")
     hosts: dict[str, set[str]] = {}
     names: dict[str, str] = {}
-    for r in (rdoc or {}).get("repositories") or []:
+    for r in _list(rdoc, "repositories"):
         nwo = str(r.get("name_with_owner") or "") if isinstance(r, dict) else ""
         if "/" in nwo:
             owner = nwo.split("/", 1)[0]
@@ -408,7 +412,7 @@ def accounts() -> dict:
                          "reason": "the GitHub scan has not run here",
                          "effect": "owners are taken from the registry's projects only"})
     for p in projects:
-        for o in p.get("owners") or []:
+        for o in (p.get("owners") if isinstance(p.get("owners"), list) else []):
             names.setdefault(str(o).lower(), str(o))
     for o in sorted(reached):
         names.setdefault(o, o)
@@ -421,7 +425,8 @@ def accounts() -> dict:
             row = acc.add(f"{h}:{low}", h, "owner", o, [o], "owner", connected=reached_here,
                           via="github scan" if (h == "github" and low in reached) else "registry")
             row["projects"].update(p["id"] for p in projects
-                                   if low in {str(x).lower() for x in p.get("owners") or []})
+                                   if low in {str(x).lower() for x in (p.get("owners")
+                                                                        if isinstance(p.get("owners"), list) else [])})
 
     # DigitalOcean: teams the collector measured, teams whose token the door stashed, contexts it did not.
     do = _quiet("digitalocean-account.json")
@@ -433,9 +438,9 @@ def accounts() -> dict:
                       do_keys.get(t.get("id")) or [], "digitalocean", connected=True,
                       via="registry/digitalocean-account.json", measured=(do or {}).get("scanned_on"))
     for r in _rows(do, "resources"):
-        if r.get("account_ref") in acc.rows:
+        if isinstance(r.get("account_ref"), str) and r["account_ref"] in acc.rows:
             acc.rows[r["account_ref"]]["resources"] += 1
-            if r.get("project"):
+            if isinstance(r.get("project"), str):
                 acc.rows[r["account_ref"]]["projects"].add(r["project"])
     _passed_on("digitalocean", do, degraded)
     stashed = _labels(_secret_store() / DOORS["digitalocean"], degraded, "digitalocean:stash")
@@ -478,9 +483,9 @@ def accounts() -> dict:
                 [str(t["account_id"])] if t.get("account_id") else [], "cloudflare", connected=True,
                 via="registry/cloudflare-account.json", measured=(cf or {}).get("scanned_on"))
     for r in _rows(cf, "resources"):
-        if r.get("account_ref") in acc.rows:
+        if isinstance(r.get("account_ref"), str) and r["account_ref"] in acc.rows:
             acc.rows[r["account_ref"]]["resources"] += 1
-            if r.get("project"):
+            if isinstance(r.get("project"), str):
                 acc.rows[r["account_ref"]]["projects"].add(r["project"])
     cf_stashed = _labels(_secret_store() / DOORS["cloudflare"], degraded, "cloudflare:stash")
     if cf_stashed and cf is None:
@@ -493,16 +498,16 @@ def accounts() -> dict:
     # Heroku: the teams the scan saw, and the user's own apps.
     hk = _quiet("heroku-apps.json")
     _passed_on("heroku", hk, degraded)
-    hteams = {str(t) for t in (hk or {}).get("teams") or [] if isinstance(t, str)}
+    hteams = {t for t in _list(hk, "teams") if isinstance(t, str)}
     for app in _rows(hk, "apps"):
-        team = app.get("team")
+        team = app.get("team") if isinstance(app.get("team"), str) else None
         ident = f"heroku:team:{team}" if team and team != "personal" else "heroku:user"
         row = acc.add(ident, "heroku", "team" if ident != "heroku:user" else "user",
                       team if ident != "heroku:user" else "your Heroku user",
                       [str(team)] if ident != "heroku:user" else [], "heroku" if ident != "heroku:user" else None,
                       connected=True, via="registry/heroku-apps.json", measured=(hk or {}).get("scanned_on"))
         row["resources"] += 1
-        if app.get("project"):
+        if isinstance(app.get("project"), str):
             row["projects"].add(app["project"])
     for team in sorted(hteams - {"personal"}):
         acc.add(f"heroku:team:{team}", "heroku", "team", team, [team], "heroku", connected=True,
@@ -537,8 +542,8 @@ def accounts() -> dict:
     # known only from such a record is an account this space reached too, and not connected: a team or account
     # whose own token is stashed is already listed above. The Heroku user is the one exception, reached through
     # the Heroku admin token whenever one is stashed.
-    do_by_uuid = {str(t["team_uuid"]): do_keys.get(t.get("id")) or [str(t["team_uuid"])]
-                  for t in _rows(do, "accounts") if t.get("team_uuid")}
+    do_by_uuid = {str(t["team_uuid"]): do_keys.get(t["id"]) or [str(t["team_uuid"])]
+                  for t in _rows(do, "accounts") if t.get("team_uuid") and isinstance(t.get("id"), str)}
     for slot, who in sorted(issuers(degraded, cf_names, slots, do_by_uuid).items()):
         if who["provider"] == "openrouter" or slot not in slot_set:
             continue                                            # counted from the ledger above; or no slot now
@@ -600,6 +605,18 @@ _NO_DESTINATIONS = _NoDestinations()
 def _project_rows(doc: dict | None) -> list[dict]:
     """The registry's project rows that can be read: an object with a string id."""
     return [p for p in (doc or {}).get("projects") or [] if isinstance(p, dict) and isinstance(p.get("id"), str)]
+
+
+def _label(org) -> str | None:
+    """An organization's label when it is one: a hand-edited list or object is never shown as a name."""
+    label = org.get("label") if isinstance(org, dict) else None
+    return label if isinstance(label, str) and label else None
+
+
+def _list(doc: dict | None, key: str) -> list:
+    """A registry document's list, or an empty one when the field holds anything else."""
+    value = (doc or {}).get(key) if isinstance(doc, dict) else None
+    return value if isinstance(value, list) else []
 
 
 def _rows(doc: dict | None, key: str) -> list[dict]:
@@ -726,8 +743,8 @@ def _groups(a, default: str, rows: list[dict], projects: list[dict]) -> list[dic
         if name == NOT_OURS and not members and not held:
             continue
         out.append({"name": name,
-                    "label": "Not ours" if name == NOT_OURS else ("Personal" if name == default and not org.get("label")
-                                                                 else org.get("label") or name),
+                    "label": "Not ours" if name == NOT_OURS else ("Personal" if name == default and not _label(org)
+                                                                 else _label(org) or name),
                     "kind": "not-ours" if name == NOT_OURS else ("personal" if name == default else "local"),
                     "implicit": name == default and not a.active,
                     "accounts": members, "projects": held})
@@ -775,8 +792,8 @@ def keys(org: str) -> dict:
             scope[p["id"]] = {"side": "conflict", "why": f"the project's rules disagree ({p.get('organization_why')})"}
     slots = _slots(degraded)
     do_keys = organizations.account_keys("digitalocean", _rows(do, "accounts"))
-    do_by_uuid = {str(t["team_uuid"]): do_keys.get(t.get("id")) or [str(t["team_uuid"])]
-                  for t in _rows(do, "accounts") if t.get("team_uuid")}
+    do_by_uuid = {str(t["team_uuid"]): do_keys.get(t["id"]) or [str(t["team_uuid"])]
+                  for t in _rows(do, "accounts") if t.get("team_uuid") and isinstance(t.get("id"), str)}
     who = issuers(degraded, cloudflare_names(cf, degraded), ["/".join(x) for x in slots], do_by_uuid)
     resolve = _vault_resolver(projects)
     rows = []
@@ -803,7 +820,7 @@ def keys(org: str) -> dict:
             row["why"] += f"; environment {env!r} is not declared (local, stage, prod): it needs a choice (ORG-R22)"
             row["selected"] = False
         rows.append(row)
-    heroku_teams = sorted(({str(t) for t in (hk or {}).get("teams") or [] if isinstance(t, str)}
+    heroku_teams = sorted(({t for t in _list(hk, "teams") if isinstance(t, str)}
                            | {str(x.get("team")) for x in _rows(hk, "apps") if x.get("team")}) - {"personal"})
     fixed = _not_movable(org, a, degraded, do_by_uuid, heroku_teams)
     degraded = _once(degraded)
@@ -811,7 +828,7 @@ def keys(org: str) -> dict:
     counts["notMovable"] = len(fixed)
     state = "empty" if not rows and not fixed else ("partial" if degraded else "complete")
     return {"schema": KEYS_SCHEMA, "generatedAt": _now(), "organization": org,
-            "label": (a.orgs.get(org) or {}).get("label") or org, "state": state,
+            "label": _label(a.orgs.get(org)) or org, "state": state,
             "projects": [{"id": pid, "side": s["side"], "why": s["why"]} for pid, s in sorted(scope.items())],
             "keys": rows, "notMovable": fixed, "counts": counts,
             "notChecked": ["values present twice in this space (ORG-R09) and names the organization already holds "

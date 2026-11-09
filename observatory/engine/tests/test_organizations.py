@@ -943,6 +943,30 @@ class Views(Base):
         self.assertIn(("registry/projects.json", "unreadable"), [(d["source"], d["code"]) for d in v["degraded"]])
         self.assertEqual(v["state"], "partial")
 
+    def test_round_six_edges(self):
+        """Review round 6: bytes that are not UTF-8 in the journal, a vault path that is a file, registry fields
+        of the wrong shape, a label that is not a name."""
+        path = self.secrets / "projects" / "movements.jsonl"
+        path.write_bytes(b"\xff\xfe not utf-8\n")
+        v = self.view.keys("company")
+        self.assertIn(("vault:movements", "unreadable"), [(d["source"], d["code"]) for d in v["degraded"]])
+        self.registry("heroku-apps.json", {"teams": 7, "apps": [{"team": ["x"], "project": ["y"]}]})
+        self.registry("digitalocean-account.json", {"accounts": [{"id": ["bad"], "team_uuid": TEAM}],
+                                                    "resources": [{"account_ref": ["x"], "project": ["y"]}]})
+        self.registry("repositories.json", {"repositories": 5})
+        self.assertEqual(self.view.accounts()["schema"], "org-accounts/1")
+        self.assertEqual(self.view.keys("company")["schema"], "org-keys/1")
+        orgs = json.loads(self.home.joinpath("config", "organizations.json").read_text())
+        orgs["organizations"]["company"]["label"] = ["not", "a", "name"]
+        self.write("organizations.json", orgs)
+        self.assertEqual(self.view.keys("company")["label"], "company")
+        self.assertIn("company", [g["label"] for g in self.view.accounts()["organizations"]])
+        import shutil
+        shutil.rmtree(self.secrets / "projects")
+        (self.secrets / "projects").write_text("not a folder")
+        v = self.view.keys("company")
+        self.assertIn(("vault", "unreadable"), [(d["source"], d["code"]) for d in v["degraded"]])
+
     def test_keys_refusals_name_their_command(self):
         for org, code in (("person", "default-organization"), ("nobody", "unknown-organization"),
                           ("sk-or-v1-" + "a" * 40, "invalid-organization")):

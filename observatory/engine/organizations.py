@@ -78,8 +78,6 @@ OWNER_RULES = ("repository_owners", "github_owners")
 MATCH_RULES = (*OWNER_RULES, "products", *ACCOUNT_RULES)
 #: Providers whose accounts a rule names but whose resources never decide a project (see the docstring).
 ACCOUNT_ONLY = ("openrouter",)
-#: Every provider an ACCOUNT_RULES rule names.
-PROVIDERS = tuple(prov for prov, _word in ACCOUNT_RULES.values())
 
 
 def load() -> dict:
@@ -355,7 +353,7 @@ def _rule_of(provider: str) -> str:
 def account_keys(provider: str, accounts: list[dict]) -> dict[str, list[str]]:
     """account row id -> what a `match` rule may name it by: a DigitalOcean team by its uuid, and by its
     name only when no other team here bears that name; a Cloudflare account by its id."""
-    rows = [a for a in accounts or [] if isinstance(a, dict)]
+    rows = [a for a in accounts or [] if isinstance(a, dict) and isinstance(a.get("id"), str)]
     if provider == "digitalocean":
         names: dict[str, int] = {}
         for a in rows:
@@ -403,18 +401,22 @@ def project_accounts(digitalocean: dict | None = None, cloudflare: dict | None =
 
     for provider, doc, key_field in (("digitalocean", digitalocean, "team_uuid"),
                                      ("cloudflare", cloudflare, "account_id")):
-        rows = [a for a in (doc or {}).get("accounts") or [] if isinstance(a, dict)]
+        listed = (doc or {}).get("accounts") if isinstance(doc, dict) else None
+        rows = [a for a in (listed if isinstance(listed, list) else [])
+                if isinstance(a, dict) and isinstance(a.get("id"), str)]
         accounts, keys = {a.get("id"): a for a in rows}, account_keys(provider, rows)
-        for r in sorted((r for r in (doc or {}).get("resources") or [] if isinstance(r, dict)),
+        resources = (doc or {}).get("resources") if isinstance(doc, dict) else None
+        for r in sorted((r for r in (resources if isinstance(resources, list) else []) if isinstance(r, dict)),
                         key=lambda r: str(r.get("id"))):
-            acct = accounts.get(r.get("account_ref"))
-            if not (r.get("project") and r.get("link_rule") and acct):
+            acct = accounts.get(r["account_ref"]) if isinstance(r.get("account_ref"), str) else None
+            if not (isinstance(r.get("project"), str) and r.get("link_rule") and acct):
                 continue
             add(r["project"], {"provider": provider, "keys": keys.get(acct.get("id")) or [],
                                "label": acct.get("name") or acct.get(key_field),
                                "via": f"{r.get('kind')} {r.get('name')}"})
     for a in sorted((a for a in heroku_apps or [] if isinstance(a, dict)), key=lambda a: str(a.get("id"))):
-        if a.get("project") and a.get("link_rule") and a.get("team") and a.get("team") != "personal":
+        if (isinstance(a.get("project"), str) and a.get("link_rule") and isinstance(a.get("team"), str)
+                and a.get("team") != "personal"):
             add(a["project"], {"provider": "heroku", "keys": [str(a["team"])], "label": a["team"],
                                "via": f"app {a.get('name')}"})
     return out
