@@ -1306,6 +1306,20 @@ class Replacing(Base):
         self.assertNotIn("bootout", [c[0] for c in self.launchctl.calls[calls:]])
         self.assertTrue(self.daemon().is_file())
 
+    def test_a_label_loaded_with_no_path_is_never_booted_out(self):
+        self.applied()
+        del self.launchctl.paths[LABEL]
+        calls = len(self.launchctl.calls)
+        with self.assertRaises(sd.SpaceDaemonsError) as caught:
+            sd.remove(self.system(), self.account, LABEL)
+        self.assertEqual(caught.exception.code, "not-ours")
+        self.assertIn("no plist launchctl names", str(caught.exception))
+        self.define(RunAtLoad=True)
+        row = sd.apply(self.system(), self.account)["results"][0]
+        self.assertEqual((row["outcome"], row["problems"][0]["code"]), ("refused", "label_taken"))
+        self.assertNotIn("bootout", [c[0] for c in self.launchctl.calls[calls:]])
+        self.assertTrue(self.daemon().is_file())
+
     def test_a_failed_bootstrap_never_boots_out_a_job_another_loader_holds(self):
         self.define()
         real = self.launchctl.__call__

@@ -1308,6 +1308,13 @@ def bootout_wait_seconds(doc):
     return min(max(BOOTOUT_WAIT_SECONDS, exit_timeout + 5), BOOTOUT_WAIT_MAX_SECONDS)
 
 
+def _described(state, where):
+    """What launchd answered for a label, in words: loaded from a plist (or none named), or an unknown state."""
+    if state == "loaded":
+        return "loaded from %s" % (where or "no plist launchctl names")
+    return "in a state launchctl did not tell (exit %s)" % where
+
+
 def _step(steps, name, outcome, detail=""):
     """One line of a receipt: what was done (`done`), left out (`skipped`), refused or failed, and why."""
     steps.append({"step": name, "outcome": outcome, "detail": detail})
@@ -1389,8 +1396,11 @@ def _install_one(system, account, definition, entries, holders=None, force=False
         return refuse("launchd_unknown", "launchctl print system/%s answered exit %s: nothing was changed; run it "
                       "again" % (label, where))
     loaded = state == "loaded"
-    if loaded and where is not None and where != target:
-        return refuse("label_taken", "system/%s is loaded from %s, not from this tool's %s" % (label, where, target))
+    if loaded and where != target:
+        # Only launchd naming this tool's own plist proves the job is the one it loaded; a label loaded with no
+        # path (submitted by hand) or from another plist is someone else's.
+        return refuse("label_taken", "system/%s is loaded from %s, not from this tool's %s"
+                      % (label, where or "no plist launchctl names", target))
     if entry is None and loaded:
         return refuse("label_taken", "system/%s is loaded and this tool did not load it" % label)
     data = plistlib.dumps(definition["daemon"], fmt=plistlib.FMT_XML, sort_keys=True)
@@ -1441,6 +1451,7 @@ def _install_one(system, account, definition, entries, holders=None, force=False
 
     def put_back(problem):
         restore_files()
+        note = None
         if previous is None:
             note = "nothing is left in /Library/LaunchDaemons"
             state, where = system.state(label)
@@ -1453,12 +1464,16 @@ def _install_one(system, account, definition, entries, holders=None, force=False
             elif state != "gone":
                 # Loaded from somewhere else, or launchd did not answer: never booted out, it may be another's job.
                 note = ("nothing is left in /Library/LaunchDaemons; system/%s is %s and was left alone (this tool "
-                        "did not load it)" % (label, "loaded from %s" % where if state == "loaded" else
-                                             "in a state launchctl did not tell (exit %s)" % where))
-        elif system.loaded(label):
-            note = ("the previous daemon file is back, and system/%s is loaded though its bootstrap failed: "
-                    "`replace` loads the file again" % label)
+                        "did not load it)" % (label, _described(state, where)))
         else:
+            state, where = system.state(label)
+            if state == "loaded" and where == target:
+                note = ("the previous daemon file is back, and system/%s is loaded from it though the bootstrap "
+                        "failed: `replace` loads the file again" % label)
+            elif state != "gone":
+                note = ("the previous daemon file is back; system/%s is %s and was left alone: `status --user %s` "
+                        "says what runs" % (label, _described(state, where), account.name))
+        if note is None:
             back, code, tail, attempts = system.start(label, target)
             note = ("the previous daemon is back and loaded" if back else
                     "the previous daemon file is back but did not load (exit %d %s): run apply again"
@@ -1470,7 +1485,7 @@ def _install_one(system, account, definition, entries, holders=None, force=False
     if loaded:
         seconds = bootout_wait_seconds(_plist_doc(target) if previous is None else plistlib.loads(previous))
         gone, code, tail, waited = system.stop(label, seconds)
-        _step(steps, "bootout", "done" if code == 0 else "failed", ("exit %d %s" % (code, tail)).strip())
+        _step(steps, "bootout", "done" if code == 0 or gone else "failed", ("exit %d %s" % (code, tail)).strip())
         if not gone:
             # Still the old job, or still stopping: the old file goes back (or none, as before), never a new
             # daemon over a label launchd has not let go.
@@ -1479,7 +1494,9 @@ def _install_one(system, account, definition, entries, holders=None, force=False
             restore_files()
             note = ("the previous daemon file is back; system/%s had not stopped, so it may still be running "
                     "its old definition or be gone: `status --user %s` says which, and `replace` tries again"
-                    % (label, account.name)) if previous is not None else "nothing is left in /Library/LaunchDaemons"
+                    % (label, account.name)) if previous is not None else (
+                "nothing new was loaded and the new file is gone; system/%s had not stopped, and the registry "
+                "entry stays as it was" % label)
             _step(steps, "put-back", "done", note)
             result.update(outcome="failed", problems=[problem], put_back=note)
             return result
@@ -1569,13 +1586,14 @@ def remove(system, account, label):
             return {"label": label, "user": account.name, "outcome": "failed", "problems": [problem],
                     "steps": steps, "waited_seconds": 0, "ok": False,
                     "note": "nothing was changed: run remove again"}
-        if state == "loaded" and where is not None and where != target:
+        if state == "loaded" and where != target:
             raise SpaceDaemonsError("system/%s is loaded from %s, not from %s: this tool stops only the daemon it "
-                                    "loaded, so nothing was changed" % (label, where, target), "not-ours")
+                                    "loaded, so nothing was changed" % (label, where or "no plist launchctl names",
+                                                                         target), "not-ours")
         if state == "loaded":
             seconds = bootout_wait_seconds(_plist_doc(target))
             gone, code, tail, waited = system.stop(label, seconds)
-            _step(steps, "bootout", "done" if code == 0 else "failed", ("exit %d %s" % (code, tail)).strip())
+            _step(steps, "bootout", "done" if code == 0 or gone else "failed", ("exit %d %s" % (code, tail)).strip())
             if not gone:
                 # The daemon has not stopped: its file and its entry stay, so `remove` (or `replace`) can run
                 # again, and an `apply` now would be refused for a label launchd still holds.

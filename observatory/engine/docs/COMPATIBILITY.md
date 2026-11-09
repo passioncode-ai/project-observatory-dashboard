@@ -628,7 +628,7 @@ information. Until then the 1.1.0 copy keeps working as before, without `replace
   deleted both and answered `removed` while launchd still held the label. The answer gains `steps` and
   `waited_seconds`. When the first `launchctl print` does not answer (a timeout, launchctl not starting), `remove`
   answers `failed` with `launchd_unknown` and changes nothing (1.1.0 read it as "not loaded" and deleted the file and
-  the entry); when launchd names another plist than `/Library/LaunchDaemons/<label>.plist` as the label's path,
+  the entry); when launchd names another plist than `/Library/LaunchDaemons/<label>.plist` as the label's path, or none,
   `remove` refuses (`not-ours`, exit 2) and boots nothing out.
 - `replace --user ACCOUNT --label LABEL` is new (root, isolated mode, the root-owned copy, as `apply`): the plan (a
   definition the rules refuse is `skipped` and stops nothing; a label with no definition is `not-found`), then
@@ -643,7 +643,7 @@ information. Until then the 1.1.0 copy keeps working as before, without `replace
   the bootstrap while the bootout was still finishing, and then put the old file back), and leaves it running with
   the new outcome `unchanged` when the daemon it would write is byte for byte the one written; `ok` counts
   `unchanged` as done. A label loaded that this tool did not write is still refused (`label_taken`), and so is one launchd reports loaded
-  from another plist; a `launchctl print` that does not answer is `launchd_unknown`, refused before anything is
+  from another plist or from none; a `launchctl print` that does not answer is `launchd_unknown`, refused before anything is
   written. A loaded label is booted out, or a timed-out bootstrap counted as loaded, only when launchd names this
   tool's plist as its path.
 - Every result row of `apply` and `replace` gains `steps`, a list of `{step, outcome, detail}` (`plan`, `write`,
