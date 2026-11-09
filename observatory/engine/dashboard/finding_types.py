@@ -70,6 +70,8 @@ LABELS: dict[str, str] = {
     "credential.expired": "Key expired",
     "credential.expiring": "Key expiring soon",
     "credential.lifetime_cap": "Key with a lifetime ceiling",
+    "credential.request_waiting": "Key request waiting for a decision",
+    "credential.revocation_refused": "Key revocation refused",
     "credential.project_file_in_git": "Key file tracked by git",
     "credential.project_file_readable": "Key file readable by others",
     "credential.project_file_unignored": "Key file not ignored by git",

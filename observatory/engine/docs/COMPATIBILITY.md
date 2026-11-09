@@ -591,6 +591,23 @@ are new, read-only, and need no enrollment; the MCP server serves them as `obser
 is never renamed without a new schema name. Downgrade: an older engine has neither view nor the two findings, and
 reads the configuration as described above.
 
+## Credentials on request: the queue and the provenance beside a slot (OBS-191 parts 2 and 3, the release after 0.35.8)
+
+Additive; nothing migrates. `tools/credential_requests.py` is new: it writes `credential-requests.jsonl` (schema
+`credential-queue/1`, one record per line: `requested` with a `credential-request/1` document and the slot,
+`decided` with a `credential-decision/1` document, `withdrawn`, `attempt-failed`, `revoked`) and its lock
+`.credential-requests.lock` in the vault's folder (`secrets/projects/`, or `OBSERVATORY_VAULT_DIR`), owner-only, names
+only; the vault's backup carries them with the rest of that folder. A slot's `meta.json` may gain `provenance` (the
+request id, `issuedAt`, `decidedBy`, `issuer`, `recipient` with agent, context and slot, `provider`, `preset`,
+`scope`, `limit`, `expiresAt`, `revoke`); `vault.py put` and `rotate` drop it, and the movement journal gains the
+events `provenance` and, for a value a revocation removed, `remove` with `tool` `credential_requests.py`.
+`observatory_credentials` vault rows gain `issuedOnRequest` for a slot that carries a provenance. The findings board
+gains `credential.request_waiting` and `credential.revocation_refused`, both silent without the queue file. Nothing
+is sent: the node's check-in still sends no `credentialRequests` and reads no decision, envelope or revocation (the
+`protocols` it lists are unchanged). Downgrade: an older engine ignores the queue file and the `provenance` member, and `vault.py
+put` and `rotate` there leave a stale `provenance` beside a new value, which the newer engine drops at the slot's
+next put or rotation.
+
 ## Migration checksums: the same under every Python (OBS-387, 0.35.4)
 
 No migration and no new file. Until 0.35.3 the checksum recorded for each applied migration (`migration_checksums`)

@@ -459,13 +459,18 @@ def project_vault_folders(folder: str) -> list[str]:
 
 
 def _expiry_note(slot) -> str:
-    """When a vault slot's value expires, from its metadata (OBS-191); empty when no door
-    recorded one, since most slots hold values no door minted."""
+    """When a vault slot's value expires, from its metadata (OBS-191), and the request it was
+    issued on when it was; empty when no door recorded either, since most slots hold values no
+    door minted."""
     try:
         meta = private_files._read_meta(slot)
     except (OSError, ValueError, private_files.VaultBoundaryError):
         return "metadata unreadable"
-    return private_files.key_expiry.describe(meta) if "expires_at" in meta else ""
+    notes = [private_files.key_expiry.describe(meta)] if "expires_at" in meta else []
+    if isinstance(meta.get("provenance"), dict):
+        # Issued on a credential request (OBS-191): which request, context and door, never the value.
+        notes.append(private_files.describe_provenance(meta["provenance"]))
+    return "; ".join(notes)
 
 
 def cmd_names(args) -> int:

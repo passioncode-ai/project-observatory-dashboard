@@ -736,6 +736,26 @@ def _slot_expiry(slot: Path) -> dict:
             "expiryReason": meta.get("expiry_reason") or "no reason recorded"}
 
 
+def _slot_provenance(slot: Path) -> dict:
+    """Where a slot's value came from, when it was issued on request (OBS-191 parts 2 and 3): the request, the
+    context it was issued into, the issuing door and account, and the agent it was issued for. Names only, from
+    `meta.json`; a slot with no recorded provenance (a value put by hand, or minted at a door directly) adds
+    nothing."""
+    meta_path = slot.with_name(slot.name + ".meta.json")
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
+    except (OSError, ValueError):
+        return {}
+    prov = meta.get("provenance") if isinstance(meta, dict) else None
+    if not isinstance(prov, dict):
+        return {}
+    recipient = prov.get("recipient") if isinstance(prov.get("recipient"), dict) else {}
+    issuer = prov.get("issuer") if isinstance(prov.get("issuer"), dict) else {}
+    return {"issuedOnRequest": {"requestId": prov.get("requestId"), "context": recipient.get("context"),
+                                "agentRef": recipient.get("agentRef"), "door": issuer.get("door"),
+                                "account": issuer.get("account")}}
+
+
 def _vault_holders() -> tuple[str, dict[str, list[str]], list[dict]]:
     """(this machine's name, {slot: peers holding it}, degraded) from the digest manifests.
 
@@ -880,6 +900,7 @@ def credentials(project_id: str) -> dict:
                         out["vault"].append({
                             "name": slot.name, "env": envdir.name, "project": name,
                             **_slot_expiry(slot),
+                            **_slot_provenance(slot),
                             "use": (f"python \"$(project-observatory full-path)/tools/use_secret.py\" "
                                     f"run --env {envdir.name} {name} {slot.name} -- <command>")})
 
