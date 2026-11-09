@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The application release is **0.35.8**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
+The application release is **0.35.9**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
 
 ## SQLite runtime prerequisite
 
@@ -574,7 +574,7 @@ first, never in the first half, so before the notice for certificates of about 6
 the enrollment's files changes. Downgrade: an older engine reads
 every added field as an unknown key and leaves `inventory/agents.md` in the wiki as it was last written.
 
-## Organizations: the remaining account rules, one reading, two read-only views (OBS-412 part 2, OBS-411, OBS-415, the release after 0.35.8)
+## Organizations: the remaining account rules, one reading, two read-only views (OBS-412 part 2, OBS-411, OBS-415, 0.35.9)
 
 Additive; nothing migrates and nothing is written. `config/organizations.json` `match` accepts `github_owners` (read
 as `repository_owners`) and `openrouter_accounts` (an OpenRouter account by its stash label; it decides that
@@ -591,7 +591,7 @@ are new, read-only, and need no enrollment; the MCP server serves them as `obser
 is never renamed without a new schema name. Downgrade: an older engine has neither view nor the two findings, and
 reads the configuration as described above.
 
-## Credentials on request: the queue and the provenance beside a slot (OBS-191 parts 2 and 3, the release after 0.35.8)
+## Credentials on request: the queue and the provenance beside a slot (OBS-191 parts 2 and 3, 0.35.9)
 
 Additive; nothing migrates. `tools/credential_requests.py` is new: it writes `credential-requests.jsonl` (schema
 `credential-queue/1`, one record per line: `requested` with a `credential-request/1` document and the slot,
@@ -611,7 +611,7 @@ is sent: the node's check-in still sends no `credentialRequests` and reads no de
 put` and `rotate` there leave a stale `provenance` beside a new value, which the newer engine drops at the slot's
 next put or rotation.
 
-## Organizations: the local selection record (OBS-417, the release after 0.35.8)
+## Organizations: the local selection record (OBS-417, 0.35.9)
 
 Additive. Nothing migrates, and nothing is written until a person (or an agent with the operator's words) changes
 or applies a selection: `full org select --org NAME plan|show|apply|undo|confirm-replacement` keeps

@@ -10,7 +10,7 @@ description: >-
   provider permissions or choosing a project's authentication architecture.
 license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 metadata:
-  version: "0.35.6"
+  version: "0.35.9"
 compatibility: >-
   Requires an initialized full Project Observatory installation, Python 3.11+
   and local shell access on macOS or Linux. Provider operations additionally
@@ -46,7 +46,7 @@ signed app, a request is answered `no-client` with that step.
 2. Select the user's initialized `OBSERVATORY_HOME`. Run
    `project-observatory full doctor`. A missing workspace
    needs the documented onboarding before secret operations.
-3. Run `"$OBSERVATORY_PYTHON" "${OBSERVATORY_ROOT:-$(project-observatory full-path)}/tools/skill_check.py" handling-secrets 0.35.6`
+3. Run `"$OBSERVATORY_PYTHON" "${OBSERVATORY_ROOT:-$(project-observatory full-path)}/tools/skill_check.py" handling-secrets 0.35.9`
    (`full agent install` records that interpreter; the stock macOS `python3` is too old). An
    empty `OBSERVATORY_ROOT`, or one naming a folder that is gone (a venv rebuilt on another
    Python), is replaced by what `project-observatory full-path` prints.
