@@ -3246,6 +3246,24 @@ comments are removed from the bytes in one pass and the plist parsed again, so n
 becomes a key. This is close to launchd's reading, not proven identical, so a comment that never closes,
 or comments beside a CDATA section, are refused as `xml_comment`.
 
+**Replacing a daemon** (space daemons 1.2.0). `launchctl bootout` returns before the daemon's
+process has exited, and launchd keeps the label until it has, so `remove` waits until the label is
+gone (45 s, or the daemon's own `ExitTimeOut` and 5 s when that is longer, at most 300 s) and only
+then deletes the file and the entry; a stop that does not finish in time answers `still_loaded`
+(exit 1) and keeps both, so it can run again. To put a changed definition in place of a daemon that
+runs, one command does it:
+
+```sh
+sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons replace --user ACCOUNT --label LABEL
+```
+
+It checks the new definition first (a refused one stops nothing), boots the old daemon out, waits
+the same way, loads the new one, and when the new one does not load puts the previous daemon back
+and loads it again, saying so in `put_back` (when the old daemon does not stop in time, nothing
+new is loaded and the previous file goes back); every answer lists its `steps`. `apply` over a daemon
+of its own replaces it the same way when the definition changed and leaves it running (`unchanged`)
+when it did not. A copy older than 1.2.0 has no `replace`: there, `remove` then `apply`.
+
 **Trusted owners** (space daemons 1.1.0). On a Mac where Homebrew's prefix is owned by the host's admin
 account and its folders are group-writable by `admin`, every program there would be refused
 (`program_owner`, `program_dir_writable`). The administrator may name, in a root-owned trust file,
@@ -3564,7 +3582,8 @@ installer would write now is rewritten by `project-observatory full maintain ens
 under launchd and systemd; on Windows the pass and the check) and by the next pass (the tick and the
 server), keeping what the installer does not write; `full doctor` names one whose program, argument
 or folder is gone (`job-path-missing`). An account with no GUI session answers `waiting-for-root`
-with the administrator's two steps, `remove` then `apply`.
+with the administrator's two steps, `remove` then `apply` (with space daemons 1.2.0, `replace`
+does both in one step and puts the previous daemon back if the new one does not load).
 
 `OBSERVATORY_SYSTEM_SETUP=0` in the environment keeps every one of these away from launchd,
 systemd, Task Scheduler and the credential store: `full init` answers `not-scheduled-here`,
