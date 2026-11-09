@@ -1253,6 +1253,56 @@ class ReviewRoundThirteen(Base):
         self.assertIn("Acme", rows[0]["title"])
 
 
+class ReviewRoundFourteen(Base):
+    """What the fourteenth review found: each case reproduced, then fixed."""
+
+    def test_where_the_words_were_said_carries_no_credential_and_a_session_id_is_fine(self):
+        planted = "sk-or-v1-" + "d" * 64
+        bad = self.decision("org.select.plan", "acme", source={"project": "example-team", "thread": planted})
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.plan("acme", {"layout": "one-space"}, caller="agent:mcp", decision=bad)
+        self.assertEqual(caught.exception.code, "decision-invalid")
+        self.assertNotIn(planted, json.dumps(caught.exception.answer()))
+        fine = dict(self.decision("org.select.plan", "acme"),
+                    instruction="as I said in session 0faeb32f-1111-4222-8333-444455556666, one space")
+        self.assertEqual(self.sel.plan("acme", {"layout": "one-space"}, caller="agent:mcp",
+                                       decision=fine)["layout"], "one-space")
+
+    def test_a_label_keeps_who_chose_a_project_by_hand(self):
+        include = dict(self.decision("org.select.plan", "acme"), instruction="include notes")
+        label = dict(self.decision("org.select.plan", "acme"), instruction="label notes as N")
+        self.sel.plan("acme", {"include": ["project:notes"], "layout": "one-space"}, caller="agent:mcp",
+                      decision=include)
+        self.sel.plan("acme", {"labels": {"project:notes": "N"}}, caller="agent:mcp", decision=label)
+        self.sel.apply("acme", self.sel.plan("acme")["digest"])
+        row = next(i for i in self.sel.current("acme")["items"] if i["id"] == "project:notes")
+        self.assertEqual((row["decidedBy"]["instruction"], row["labelledBy"]["instruction"]),
+                         ("include notes", "label notes as N"))
+        grouped = self.sel.plan("acme", {"includeGroup": "needs-you"}, caller="agent:mcp",
+                                decision=dict(include, instruction="take the ones that need me"))
+        self.sel.plan("acme", {"labels": {"project:shared-tool": "Shared"}}, caller="agent:mcp", decision=label)
+        row = self.items(self.sel.plan("acme"))["project:shared-tool"]
+        self.assertEqual((row["by"], row["decidedBy"]["instruction"]), ("group", "take the ones that need me"))
+        self.assertTrue(grouped)
+
+    def test_the_cli_never_prints_a_rejected_value_shaped_like_a_credential(self):
+        planted = "sk-or-v1-" + "e" * 64
+        err = io.StringIO()
+        import org as org_cli
+        importlib.reload(org_cli)
+        with contextlib.redirect_stderr(err), self.assertRaises(SystemExit):
+            org_cli.main(["select", "--org", "acme", "plan", "--layout", planted])
+        self.assertNotIn(planted, err.getvalue())
+
+    def test_undo_that_cannot_restore_says_so(self):
+        self.sel.apply("acme", self.ready(include=["project:notes"])["digest"])
+        self.sel.apply("acme", self.sel.plan("acme", {"exclude": ["project:notes"]})["digest"])
+        self.registry("projects.json", {"projects": [p for p in PROJECTS if p["id"] != "project:notes"]})
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.undo("acme")
+        self.assertIn("undo cannot restore", str(caught.exception))
+
+
 class WhatTheOrganizationSees(Base):
     """ORG-R03: a reference random per organization and a label only when typed; nothing is handed over."""
 

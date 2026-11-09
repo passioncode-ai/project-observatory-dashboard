@@ -99,8 +99,17 @@ import paths  # noqa: E402
 NODE = paths.setting_path("OBSERVATORY_NODE", paths.HOME / "node")
 
 
+class _Parser(argparse.ArgumentParser):
+    """argparse quotes a rejected value back (`invalid choice: '...'`): a value shaped like a credential, pasted
+    into the wrong place, is redacted before it is printed."""
+
+    def error(self, message):  # noqa: D401 - argparse's own hook
+        import credential_shape
+        super().error(credential_shape.redact(message))
+
+
 def parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="project-observatory full org",
+    p = _Parser(prog="project-observatory full org",
                                 description="This machine's organization enrollments (fabric-device/0.1).")
     sub = p.add_subparsers(dest="command", required=True)
     enroll = sub.add_parser("enroll", help="enroll with an enrollment token from the vault")

@@ -2417,8 +2417,8 @@ follow once the rotation door exists; until the replacement has arrived and the
 key's consumers have switched to it, it is refused (`replacement-not-received`),
 which today is always, since those steps wait on OBS-191 and OBS-416. From the terminal each change is the
 person's own act; an agent passes the operator's words with `--decision JSON`
-(contract DEC-0121's shape, its `target` the organization, or `ORG:KEY` for a
-confirmation; words carrying something shaped like a credential are refused) and calls `observatory_org_selection` with the same answers,
+(contract DEC-0121's shape, its `target` the organization, or
+`ORG:vault:FOLDER/ENV/NAME` for a confirmation; words carrying something shaped like a credential are refused) and calls `observatory_org_selection` with the same answers,
 which refuses a change, apply, undo or confirmation without them
 (`operator-decision-required`) or with words for another action or object, or
 words that already decided an earlier apply or undo (`decision-invalid`). A store that cannot be written (a symbolic link, a folder

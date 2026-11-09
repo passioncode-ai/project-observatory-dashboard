@@ -31,8 +31,9 @@ else to do for them), the revision is written, and `show` reads the journal back
 DEFAULTS (ORG-R15, ORG-R16). Without a record: projects the organization's rules give it, and accounts a rule names
 for it, are proposed and chosen; projects and accounts that need a decision are listed and not chosen; a key is
 handed over (and the personal value revoked once the replacement works) only when its project and its issuing
-account agree and its project is chosen. With a record: every item keeps the record's decision, and anything found
-since is listed as `new` and never chosen by itself.
+account agree and its project is chosen. With a record: every item keeps the record's decision; a project or key
+the rules propose that the record does not hold is listed as `new` and never chosen by itself (ORG-R16 names
+projects and keys); anything else found since is listed and waits, unchosen.
 
 THE GATES (contract DEC-0121, ORG-R23). Reading (`show`, `plan` without a change) needs nothing. Changing the plan,
 `apply`, `undo` and `confirm-replacement` are relayed: from the CLI they are the person's own act, recorded as
@@ -348,10 +349,14 @@ def decided(action: str, target: str, decision: Any = None, *, caller: str) -> d
     answer = actions.action_decision(action=act, tier="T0", caller=caller, decision=decision, target=target,
                                      now=_now())
     import credential_shape
-    if answer.get("ok") is True and credential_shape.shaped(decision.get("instruction")):
-        # The words are kept verbatim and shown back: words that carry something shaped like a credential are not.
-        raise Refusal("decision-invalid", "the operator's words carry something shaped like a credential; send their "
-                                          "words without it", gate=GATES[action], action=ACTIONS[action])
+    kept = [decision.get("instruction"), decision.get("target"),
+            *(((decision.get("source") or {}).values()) if isinstance(decision.get("source"), dict) else [])]
+    if answer.get("ok") is True and any(credential_shape.shaped(v, uuids=False) for v in kept if isinstance(v, str)):
+        # The words, the object and where they were said are kept verbatim and shown back: none may carry something
+        # shaped like a credential (a session's id, a UUID, is not one).
+        raise Refusal("decision-invalid", "the decision carries something shaped like a credential (in the words, the "
+                                          "object or where they were said); send it without", gate=GATES[action],
+                      action=ACTIONS[action])
     if answer.get("ok") is True and (not isinstance(decision, dict) or decision.get("target") != target):
         # The contract leaves `target` optional; here it is required, so words about one organization (or one key)
         # never decide another's selection.
@@ -509,8 +514,10 @@ def _effective(org: str, ctx: dict, draft: dict | None, record: dict | None) -> 
                 row["label"] = change["label"]
             else:
                 row.pop("label", None)
-        if change.get("decidedBy"):
-            row["decidedBy" if decided_now else "labelledBy"] = change["decidedBy"]
+        if change.get("decidedBy") and decided_now:
+            row["decidedBy"] = change["decidedBy"]
+        if change.get("labelledBy"):
+            row["labelledBy"] = change["labelledBy"]
         row.pop("unread", None)
         row.pop("notFound", None)
         if ident not in cands and ident not in known:
@@ -946,9 +953,19 @@ def _change(org: str, draft: dict | None, record: dict | None, changes: dict, wh
         raise Refusal("unknown-item", f"{_echo(ident)} is not a project, key or account this space knows for "
                                       f"{org}", f"{CMD.format(org=_q(org))} plan")
 
-    def put(ident: str, decision: str, by: str = "hand", **more: Any) -> None:
+    def put(ident: str, decision: str, by: str = "hand", *, label_only: bool = False, **more: Any) -> None:
         row = dict(draft["items"].get(ident) or {})
-        row.update(kind=kind_of(ident), decision=decision, by=by, decidedBy=who, **more)
+        if label_only:
+            # Typing a label is not deciding the item: who decided it stays as it was, and who labelled it is kept
+            # beside it (ORG-R11).
+            earlier = row.get("decidedBy") or (sel["items"].get(ident) or {}).get("decidedBy")
+            row.update(kind=kind_of(ident), decision=decision, by=by, labelledBy=who, **more)
+            if earlier:
+                row["decidedBy"] = earlier
+            else:
+                row.pop("decidedBy", None)
+        else:
+            row.update(kind=kind_of(ident), decision=decision, by=by, decidedBy=who, **more)
         draft["items"][ident] = row
 
     for verb in ("include", "exclude"):
@@ -984,7 +1001,7 @@ def _change(org: str, draft: dict | None, record: dict | None, changes: dict, wh
         # A label changes what the organization reads, never whether the project goes (ORG-R02): its decision and
         # `by` stay, a project nobody chose stays out, and an item found since stays new until a person decides it.
         put(ident, row.get("decision", "exclude"), by=row.get("by", "default") if row else "default",
-            label=_label_ok(text) if text else "")
+            label_only=True, label=_label_ok(text) if text else "")
     draft["updatedAt"] = _now()
     # Each change is its own draft, named at random: a revision removes the draft it consumed by this name, never
     # one changed since (two changes can fall in one second).
@@ -1429,7 +1446,11 @@ def undo(org: str, *, decision: Any = None, caller: str = "cli") -> dict:
             # applied afterwards: apply and undo define the digest the same way.
             pseudo = {"items": restored["items"], "layout": restored.get("layout"), "serves": restored.get("serves")}
             sel = _effective(org_ok, ctx, None, pseudo)
-            _complete(org_ok, ctx, sel)
+            try:
+                _complete(org_ok, ctx, sel)
+            except Refusal as refusal:
+                raise Refusal(refusal.code, f"undo cannot restore the revision before: {refusal}; apply a new "
+                                            "selection instead", f"{q} plan") from None
         _irreversible(org_ok, cur, sel)
         _unused(org_ok, "undo", who)
         try:
