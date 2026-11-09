@@ -6,10 +6,12 @@ full; fix OBS-410, the server 0.35.6 left unloaded on a Mac after its update; th
 
 ## State now
 
-- Open: tag `v0.35.7` once the release check of this PR is green; verify the published files; install on the release
-  manager's machine and in every space of the second Mac; hand the drill commands to the second Mac's host agent.
-- Waits: the hosted checks of this PR, read by the release manager's session; no scheduled watcher of this record.
-- Next task: tag, verify and install 0.35.7, then fill the Receipts below and run the drill with the second Mac.
+- Open: the install on the second Mac and the result of the «machine lost» drill there (G15, OBS-381), run by its
+  host agent with `--secret-store-verify-into`.
+- Waits: the second Mac's host agent, which received the install and the drill command; no watcher of this record
+  runs, the next release session reads its answer.
+- Next task: record the second Mac's install and drill result here, then release 0.35.8
+  ([record](../2026-11-09-release-0.35.8/README.md)).
 
 ## What it releases
 
@@ -70,4 +72,16 @@ full; fix OBS-410, the server 0.35.6 left unloaded on a Mac after its update; th
 
 ## Receipts
 
-- Pending: the tag, the release run, the verification and the installs.
+- Release PR #477 merged as `714cc099` on 2026-11-08T22:23:25Z.
+- Tag `v0.35.7` (tag object `7257e122`) on `714cc099`. Release run
+  [42534290023](https://github.com/passioncode-ai/project-observatory-dashboard/actions/runs/42534290023): the first attempt's `guard` refused because `check.yml` on `714cc099`
+  was still in progress after its 60-minute wait (slow runners). That `check.yml` run's Windows job then failed once
+  on `backup_vault: TIMEOUT, the list records only FAIL` (OBS-382, a known flake under load) and passed on rerun; the
+  release's failed jobs were rerun and every job of attempt 2 succeeded. The release published 19 files on
+  2026-11-09T01:38:30Z.
+- Verified by the release manager: `SHA256SUMS` OK, `gpg` `VALIDSIG 63B30DC324BD697487AA31944FAFB8AEC803B6A7`,
+  `gh attestation verify` of the wheel exited 0.
+- Installed on the release manager's machine with `full update --version 0.35.7 --apply` (exit 0). The server came
+  back by itself on 0.35.7: `serverd.out` shows 0.35.7 and the well-known answered 200.
+- The second Mac's host agent was handed the install and the G15 drill command with `--secret-store-verify-into`; its
+  result is open (State now).

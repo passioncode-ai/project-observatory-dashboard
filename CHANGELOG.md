@@ -7,6 +7,35 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Added
 
+- **Whose every account and key is, read-only** (OBS-411, OBS-415, organization onboarding ORG-W1 and ORG-W6;
+  `docs/ONBOARDING.md`). `project-observatory full org accounts [--json]` lists every provider account this space
+  reaches (repository owners, DigitalOcean teams and the `doctl` contexts with no stashed token, Cloudflare accounts,
+  Heroku teams and user, OpenRouter accounts), each under exactly one organization with its source (`rule`,
+  `default`, `external` for Not ours) or under "needs a decision" (`conflict`, `none` for a provider account no
+  rule names, or seen and not connected) with the reason and the command to run,
+  what each holds, and what was not read (`degraded`, `state` `empty`, `partial` or `complete`).
+  `project-observatory full org keys --org NAME [--json]` classifies each vault slot of NAME's projects as
+  `organization`, `personal` or `ambiguous` from the project's organization and the issuing account in the door's
+  record (or put by hand), marks which ones a selection would take (only when both agree), and lists the doors'
+  admin and provisioning keys as never moved. Names only: no value file is opened. Agents get the same answers from
+  the MCP tools `observatory_org_accounts` and `observatory_org_keys`.
+- **The remaining account rules, and one reading of a project's organization** (OBS-412 part 2).
+  `config/organizations.json` `match` accepts `github_owners` (the same as `repository_owners`) and
+  `openrouter_accounts` (an OpenRouter account by its stash label, which decides the account's organization and a
+  key's issuer, never a project's). The session-start line, the analytics findings and `observatory_project` read a
+  project's organization through one function and name an organization's accounts only for a decided answer. The
+  findings board names a project in conflict (`organization.unresolved`) and a rule the engine does not read or a
+  file that does not parse (`organization.config_problem`); an unknown rule's message names the known ones.
+
+## 0.35.8 (2026-11-09)
+
+The wiki gains a readable page of the installed agents beside its JSON. Organizations can match provider accounts
+(DigitalOcean and Heroku teams, Cloudflare accounts), and doctor says when DigitalOcean team tokens are stashed but
+the integration is off. An organization certificate is rotated before anyone is told it is expiring, and installing
+the tick reloads it without racing launchd.
+
+### Added
+
 - **`inventory/agents.md`, a readable page of the installed agents beside `inventory/agents.json`** (OBS-317,
   first half). The wiki projection writes it from `registry/agents.json`, with the frontmatter of the other inventory
   notes: one row per service key with its product,
@@ -36,25 +65,6 @@ while the major version is 0, a minor release may change behaviour and says so h
   emit warns; name the uuid), and a `match` rule that is not a list of strings is ignored and named instead of being
   read letter by letter. With organizations configured, `registry/projects.json` is written once per emit, after the
   provider documents.
-- **Whose every account and key is, read-only** (OBS-411, OBS-415, organization onboarding ORG-W1 and ORG-W6;
-  `docs/ONBOARDING.md`). `project-observatory full org accounts [--json]` lists every provider account this space
-  reaches (repository owners, DigitalOcean teams and the `doctl` contexts with no stashed token, Cloudflare accounts,
-  Heroku teams and user, OpenRouter accounts), each under exactly one organization with its source (`rule`,
-  `default`, `external` for Not ours) or under "needs a decision" (`conflict`, `none` for a provider account no
-  rule names, or seen and not connected) with the reason and the command to run,
-  what each holds, and what was not read (`degraded`, `state` `empty`, `partial` or `complete`).
-  `project-observatory full org keys --org NAME [--json]` classifies each vault slot of NAME's projects as
-  `organization`, `personal` or `ambiguous` from the project's organization and the issuing account in the door's
-  record (or put by hand), marks which ones a selection would take (only when both agree), and lists the doors'
-  admin and provisioning keys as never moved. Names only: no value file is opened. Agents get the same answers from
-  the MCP tools `observatory_org_accounts` and `observatory_org_keys`.
-- **The remaining account rules, and one reading of a project's organization** (OBS-412 part 2).
-  `config/organizations.json` `match` accepts `github_owners` (the same as `repository_owners`) and
-  `openrouter_accounts` (an OpenRouter account by its stash label, which decides the account's organization and a
-  key's issuer, never a project's). The session-start line, the analytics findings and `observatory_project` read a
-  project's organization through one function and name an organization's accounts only for a decided answer. The
-  findings board names a project in conflict (`organization.unresolved`) and a rule the engine does not read or a
-  file that does not parse (`organization.config_problem`); an unknown rule's message names the known ones.
 
 ### Fixed
 

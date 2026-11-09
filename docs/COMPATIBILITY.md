@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The application release is **0.35.7**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
+The application release is **0.35.8**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
 
 ## SQLite runtime prerequisite
 
@@ -551,7 +551,7 @@ was. `workspace_upgrade.restore` and `restore_store_only` and
 `setting_folders`. Without the flag
 every command line answers as before.
 
-## Registry and doctor: readable agents page, account organizations, DigitalOcean signals (OBS-317, OBS-412 part 1, OBS-421, OBS-423, the release after 0.35.7)
+## Registry and doctor: readable agents page, account organizations, DigitalOcean signals (OBS-317, OBS-412 part 1, OBS-421, OBS-423, 0.35.8)
 
 Additive; nothing migrates and no setting changes. With `features.wiki_projection` on, the projection writes
 `inventory/agents.md` beside `inventory/agents.json` in the wiki (generated, overwritten on each projection, built
@@ -574,7 +574,7 @@ first, never in the first half, so before the notice for certificates of about 6
 the enrollment's files changes. Downgrade: an older engine reads
 every added field as an unknown key and leaves `inventory/agents.md` in the wiki as it was last written.
 
-## Organizations: the remaining account rules, one reading, two read-only views (OBS-412 part 2, OBS-411, OBS-415, the release after 0.35.7)
+## Organizations: the remaining account rules, one reading, two read-only views (OBS-412 part 2, OBS-411, OBS-415, the release after 0.35.8)
 
 Additive; nothing migrates and nothing is written. `config/organizations.json` `match` accepts `github_owners` (read
 as `repository_owners`) and `openrouter_accounts` (an OpenRouter account by its stash label; it decides that

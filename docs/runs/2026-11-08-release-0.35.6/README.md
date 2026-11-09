@@ -6,11 +6,10 @@ Macs of the move.
 
 ## State now
 
-- Open: tag `v0.35.6` once the release check of PR #474 is green; verify the published files (`SHA256SUMS`, its
-  signature, the wheel's attestation); install on the release manager's machine and in every space of the second Mac
-  and run `full maintain ensure` there; the «machine lost» drill (G15, OBS-381) waits on OBS-394.
-- Waits: the hosted checks of PR #474, read by the release manager's session; no scheduled watcher of this record.
-- Next task: tag, verify and install 0.35.6, then fill the Receipts below.
+- Closed: 0.35.6 is tagged, published, verified and installed on the release manager's machine (Receipts). The
+  server it left unloaded on a Mac was brought back by hand and fixed in 0.35.7 (OBS-410).
+- Waits: none for this record.
+- Next task: none here; the release line continues in [release 0.35.8](../2026-11-09-release-0.35.8/README.md).
 
 ## What it releases
 
@@ -66,4 +65,17 @@ two administrator steps it prints: remove, then apply); `project-observatory ful
 
 ## Receipts
 
-- Pending: the tag, the release run, the verification and the installs.
+- Release PR #474 merged as `db205ebb` on 2026-11-08T14:42:35Z.
+- Tag `v0.35.6` (tag object `236eb862`) on `db205ebb`. Release run
+  [42494466480](https://github.com/passioncode-ai/project-observatory-dashboard/actions/runs/42494466480): every job succeeded on the first attempt; the release published 19
+  files on 2026-11-08T16:04:40Z.
+- Verified by the release manager: `shasum -a 256 -c SHA256SUMS --ignore-missing` answered OK; `gpg --verify
+  SHA256SUMS.asc SHA256SUMS` answered `VALIDSIG 63B30DC324BD697487AA31944FAFB8AEC803B6A7`; `gh attestation verify`
+  of the wheel exited 0.
+- Installed on the release manager's machine: `full update --version 0.35.6 --apply` exited 0, and all four job
+  definitions name `<venv>/bin/python3 -P -m observatory.job …` and no `lib/python3` folder.
+- Regression found there: after the update the server's label was missing from launchd (the port silent, the update's
+  report clean). It was restored with `tools/serverd.py --install` (the well-known answered 200) and fixed in 0.35.7 as
+  OBS-410.
+- The second Mac's spaces updated to 0.35.6 by themselves; they run no server job (no GUI session, scheduler off),
+  so they were not affected.
