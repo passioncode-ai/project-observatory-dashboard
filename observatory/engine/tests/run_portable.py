@@ -575,7 +575,10 @@ SUITE_SECONDS = {'credential_doors': 600, 'maintenance': 480, 'tick_py': 300, 'c
                  'session_reload': 300,
                  # 44 cases over the organization views with real door records: 77.8 s on windows-latest
                  # under the job's --jobs 4 (run 42561065821), past 120 s on the next run (42565089825).
-                 'organizations': 300}
+                 'organizations': 300,
+                 # 135 cases over the selection record with real files and locks: 38 s on a Mac at a load
+                 # average near 50, past 120 s on windows-latest under the job's --jobs 4 (run 42656670169).
+                 'org_selection': 360}
 
 
 def suite_timeout(name: str, timeout: int) -> int:
