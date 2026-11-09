@@ -17,6 +17,7 @@
     python "$T/credential_requests.py" pending ID [--note "…"]
     python "$T/credential_requests.py" withdraw ID
     python "$T/credential_requests.py" revoke ID [--relayed-instruction "…" --source WHERE]
+    python "$T/credential_requests.py" revoke ID --settle "how it was checked at the provider"
 
 WHY (OBS-191 parts 2 and 3). An agent that needs a credential used to get one by a person minting it
 at a door and putting it into a slot by hand. Here the consumer files a REQUEST instead: which agent,
@@ -27,8 +28,11 @@ narrowed credential with an expiry no later than the request asked, in the accou
 names, and delivers it straight into the slot, in the door's own process: the value is never an
 argument, never printed, never written anywhere else), `refuse` with one of the contract's reasons, or
 `pending`. The consumer may `withdraw` an open request; an issued one is ended by `revoke`, which
-revokes at the provider through the same door, proves it, and deletes the slot's value only when that
-value is still the one the request was issued (contract DEC-0113: a revocation names its request).
+revokes at the provider through the same door the credential the request issued, by its identity (an
+OpenRouter key hash, a Cloudflare token id, kept in the queue: never a name a rotation may have given
+to another credential), proves it by reading it back, and deletes the slot's value only when that value
+is still the one the request was issued (contract DEC-0113: a revocation names its request). One that
+is not proved is run again, or settled with `--settle` once a person checked it at the provider.
 
 THE SHAPES ARE THE CONTRACT'S (fabric-agent-contract DEC-0111, `credential-request/1` and
 `credential-decision/1`): `show --json` prints both documents as they would leave this space, so the
@@ -184,16 +188,16 @@ def _append(*rows: dict) -> None:
     vault._append_private(queue_path(), text)
 
 
-def read_rows(path: pathlib.Path | None = None) -> tuple[list[dict], list[dict]]:
-    """(rows, degraded). A line that does not parse is named in `degraded` by its number, never skipped in
-    silence and never allowed to hide the rows around it."""
-    vault = _vault()
-    path = path or queue_path()
-    vault._no_symlinks(path)
-    if not path.exists():
-        return [], []
+#: The members a `requested` record's document must carry, each a string, for the queue to read it.
+REQUIRED = ("requestId", "agentRef", "context", "provider", "preset", "expiresAt", "reason", "requestedAt")
+
+
+def parse_rows(text: str) -> tuple[list[dict], list[dict]]:
+    """(rows, degraded) from the queue's text. A line that does not parse, or a request record that lacks a
+    member every reader needs, is named in `degraded` by its number, never skipped in silence and never
+    allowed to hide the rows around it (one damaged line must not stop the board's build)."""
     rows, degraded = [], []
-    for number, line in enumerate(vault._read_private(path).splitlines(), 1):
+    for number, line in enumerate(text.splitlines(), 1):
         if not line.strip():
             continue
         try:
@@ -204,8 +208,26 @@ def read_rows(path: pathlib.Path | None = None) -> tuple[list[dict], list[dict]]
             degraded.append({"source": "credential-requests", "line": number,
                              "reason": "a line that is not a queue record; it is left as it is"})
             continue
+        if row.get("event") == "requested":
+            doc = row.get("request")
+            if not isinstance(doc, dict) or not all(isinstance(doc.get(k), str) for k in REQUIRED) \
+                    or not UUID.fullmatch(doc["requestId"]) or not isinstance(row.get("slot"), str) \
+                    or len(row["slot"].split("/")) != 3:
+                degraded.append({"source": "credential-requests", "line": number,
+                                 "reason": "a request record without the members it needs; it is left as it is"})
+                continue
         rows.append(row)
     return rows, degraded
+
+
+def read_rows(path: pathlib.Path | None = None) -> tuple[list[dict], list[dict]]:
+    """(rows, degraded) of the queue file (`parse_rows`)."""
+    vault = _vault()
+    path = path or queue_path()
+    vault._no_symlinks(path)
+    if not path.exists():
+        return [], []
+    return parse_rows(vault._read_private(path))
 
 
 def fold(rows: list[dict], now: datetime.datetime | None = None) -> dict[str, dict]:
@@ -222,11 +244,19 @@ def fold(rows: list[dict], now: datetime.datetime | None = None) -> dict[str, di
             if isinstance(doc, dict) and isinstance(doc.get("requestId"), str) and doc["requestId"] not in out:
                 out[doc["requestId"]] = {"request": doc, "slot": row.get("slot"), "state": "open",
                                          "requestedBy": row.get("by"), "decisions": [], "attempts": [],
-                                         "delivery": None, "revocation": None}
+                                         "delivery": None, "revocation": None, "inFlight": None,
+                                         "undoUnsettled": False}
             continue
         entry = out.get(row.get("requestId"))
         if entry is None:
             continue
+        if event == "issuing":
+            # The door was started for this request; a decision or a failed attempt ends it. One left standing
+            # is an issue a crash interrupted after the door began (`issue` checks the slot before another).
+            entry["inFlight"] = row.get("at") or "?"
+            continue
+        if event in ("decided", "attempt-failed"):
+            entry["inFlight"] = None
         if event == "decided" and isinstance(row.get("decision"), dict):
             decision = row["decision"]
             entry["decisions"].append({k: row.get(k) for k in ("decision", "relayed", "note", "at", "by")
@@ -240,11 +270,19 @@ def fold(rows: list[dict], now: datetime.datetime | None = None) -> dict[str, di
             entry["decisions"].append({"decision": row.get("decision"), "at": row.get("at"), "by": row.get("by")})
         elif event == "attempt-failed":
             entry["attempts"].append({k: row.get(k) for k in ("stage", "reason", "at", "by") if row.get(k)})
-        elif event == "revoked" and entry["state"] == "issued":
+            if row.get("stage") == "undo":
+                # A credential minted for the request that could not be revoked again: it may still work at the
+                # provider whatever the request's state, until a person settles it.
+                entry["undoUnsettled"] = True
+        elif event == "settled" and row.get("stage") == "undo":
+            entry["undoUnsettled"] = False
+        elif event == "revoked" and (entry["state"] == "issued" or entry["state"] == "revoked"
+                                     and (entry.get("revocation") or {}).get("proved") is False):
+            # A second revocation row follows only one that was not proved: a retry, or a settlement.
             entry["state"], entry["revocation"] = "revoked", row.get("revocation")
     for entry in out.values():
         if entry["state"] == "issued":
-            end = _parse(((entry.get("delivery") or {}).get("credential") or {}).get("expiresAt"))
+            end = _parse((((entry.get("delivery") or {}).get("credential")) or {}).get("expiresAt"))
             if end is not None and end <= now:
                 entry["state"] = "expired"
     return out
@@ -300,13 +338,18 @@ class Door:
             raise Refused(f"a {self.provider} credential carries no spend ceiling; leave --limit out", "limit-refused")
 
     def issue(self, request: dict, slot: tuple[str, str, str], account: str | None, expire_days: int) -> dict:
-        """Mint and deliver into the empty slot; answers the provenance's `issuer` and `revoke` members.
-        Raises IssueFailed when nothing reached the slot."""
+        """Mint and deliver into the empty slot, never over a value (a slot filled meanwhile refuses the
+        delivery, and the door undoes its mint); answers the provenance's `issuer` and `revoke` members and the
+        provider's `identity` of what it minted (a key hash, a token id: kept in the queue, never beside the
+        slot, since an identifier that long reads as a credential there). Raises IssueFailed when nothing
+        reached the slot."""
         raise NotImplementedError
 
-    def revoke(self, provenance: dict) -> dict:
-        """Revoke at the provider and prove it: `{"provider": "revoked" | "gone", "proved": bool}`. Raises
-        RuntimeError (with a reason that names no value) when the provider did not revoke it."""
+    def revoke(self, provenance: dict, identity: dict, replaced: bool) -> dict:
+        """Revoke at the provider the credential `identity` names, and prove it by reading it back:
+        `{"provider": "revoked" | "gone" | "not-touched", "proved": bool}`. Only that credential: a key the
+        name now holds after a rotation is another credential. `replaced` says the slot holds another value
+        now. Raises RuntimeError (with a reason that names no value) when the provider did not revoke it."""
         raise NotImplementedError
 
 
@@ -355,28 +398,36 @@ class OpenRouterDoor(Door):
                                 limit["reset"], expire_days)
         except (ValueError, RuntimeError, LookupError, OSError) as exc:
             raise IssueFailed(f"openrouter.py refused: {credential_shape.redact(str(exc))}") from None
+        key_hash = ((m.ledger().get("issued") or {}).get(r["name"]) or {}).get("hash")
         command = f'python "$(project-observatory full-path)/tools/openrouter.py" revoke {r["name"]}'
         return {"issuer": {"door": self.door, "account": r["account"]},
-                "revoke": {"door": self.door, "handle": r["name"], "account": r["account"], "command": command}}
+                "revoke": {"door": self.door, "handle": r["name"], "account": r["account"], "command": command},
+                "identity": {"hash": key_hash}}
 
-    def revoke(self, provenance):
+    def revoke(self, provenance, identity, replaced):
+        """By the key's HASH, one request however large the account (a name lookup pages through every key,
+        more than 20 000 on one account), and only that key: after `openrouter.py rotate` the name holds the
+        successor, which this request never issued."""
         m = self._module()
         handle = (provenance.get("revoke") or {}).get("handle")
         account = (provenance.get("revoke") or {}).get("account")
-        if not handle:
-            raise RuntimeError("the provenance names no OpenRouter key to revoke")
-        try:
-            with _quiet_door():
-                m.revoke_key(handle)
-        except LookupError:
-            pass                                      # the ledger no longer knows it: proved below at the provider
-        except (ValueError, RuntimeError, OSError) as exc:
-            raise RuntimeError(f"openrouter.py refused: {credential_shape.redact(str(exc))}") from None
+        key_hash = (identity or {}).get("hash")
+        if not handle or not key_hash:
+            raise RuntimeError("the request's record names no OpenRouter key hash to revoke")
         try:
             _label, admin = m.read_admin(account)
-            proved = m.find_key(admin, handle) is None
-        except (ValueError, RuntimeError, LookupError, OSError):
-            proved = False
+            if not m._alive(admin, key_hash):
+                return {"provider": "gone", "proved": True}
+            current = ((m.ledger().get("issued") or {}).get(handle) or {}).get("hash")
+            with _quiet_door():
+                if current == key_hash:
+                    m.revoke_key(handle)                  # the door's own revoke: its ledger row goes with it
+                else:
+                    m._request(f"/keys/{key_hash}", admin, method="DELETE")
+                    m._journal("revoke", f"openrouter/{account}/{handle}", by_request=True)
+            proved = not m._alive(admin, key_hash)
+        except (ValueError, RuntimeError, LookupError, OSError) as exc:
+            raise RuntimeError(f"openrouter.py refused: {credential_shape.redact(str(exc))}") from None
         return {"provider": "revoked", "proved": proved}
 
 
@@ -409,8 +460,8 @@ class CloudflareDoor(Door):
         if known is not None and request["preset"] not in self.presets():
             raise Refused(f"preset {request['preset']} is not issued on request: "
                           + ("its token is named by zone, not by slot, so issuing it for one slot would roll the "
-                             "token another slot holds" if "{slot}" not in str(known.get("name") or "")
-                             else "it does not deliver into a vault slot")
+                             "token another slot holds" if known.get("scope") == "zone"
+                             else "its token is not one per vault slot")
                           + f"; issue it with cloudflare.py by hand, or ask for a preset `{COMMAND} presets` lists",
                           "preset-unknown")
         super().check(request)
@@ -420,47 +471,89 @@ class CloudflareDoor(Door):
 
     def issue(self, request, slot, account, expire_days):
         m = self._module()
+        vault = _vault()
         project, env, name = slot
         scope = request.get("scope") or {}
-        if account and scope.get("account") and m.slug(account) != m.slug(scope["account"]):
-            raise Refused(f"the request asks for account {scope['account']}, and the issue names {account}",
-                          "account-mismatch")
-        account = account or scope.get("account")
         preset_key = request["preset"]
         preset = m.PRESETS[preset_key]
         target = f"{project}/{env}/{name}"
+
+        def deliver_new(value: str, p: str, e: str, n: str) -> None:
+            # NEVER OVER A VALUE (ORG-R10). The door's own delivery is `vault.py put --force`, since a re-issue
+            # rolls the token and the old value is dead; a request's issue must not overwrite a value put while
+            # the proof waited (up to about 80 s). A RuntimeError, so the door discards what it minted.
+            try:
+                vault.store_value(p, e, n, value, replace=False, tool="cloudflare.py")
+            except vault.VaultBoundaryError as exc:
+                raise RuntimeError(f"vault refused the slot {p}/{e}/{n}: {exc}") from None
+        door_deliver = m.deliver_to_vault
         try:
+            if account and scope.get("account"):
+                # The same account by either name: a stash label and an account slug both resolve here.
+                if m.find_account(account)[2].get("id") != m.find_account(scope["account"])[2].get("id"):
+                    raise Refused(f"the request asks for account {scope['account']}, and the issue names "
+                                  f"{account}", "account-mismatch")
+            account = account or scope.get("account")
+            m.deliver_to_vault = deliver_new
             with _quiet_door():
                 if preset.get("scope") == "zone":
                     rc = m.cmd_issue_zone(preset_key, scope["zone"], target, account, expire_days=expire_days)
                 else:
                     rc = m.cmd_issue_account(preset_key, target, account, expire_days=expire_days)
-            _stash, _admin, found = m.find_account(account)
         except (ValueError, RuntimeError, LookupError, OSError) as exc:
+            if isinstance(exc, Refused):
+                raise
             raise IssueFailed(f"cloudflare.py refused: {credential_shape.redact(str(exc))}") from None
+        finally:
+            m.deliver_to_vault = door_deliver
         if rc != 0:
             raise IssueFailed("cloudflare.py refused the issue; its own line above says why")
-        account_slug = m.slug(found.get("name") or "")
         token = preset["name"].format(zone=scope.get("zone", ""), slot=target)
-        return {"issuer": {"door": self.door, "account": account_slug},
-                "revoke": {"door": self.door, "account": account_slug, "handle": token, "command": None}}
-
-    def revoke(self, provenance):
-        m = self._module()
-        handle = (provenance.get("revoke") or {}).get("handle")
-        account = (provenance.get("revoke") or {}).get("account")
-        if not handle or not account:
-            raise RuntimeError("the provenance names no Cloudflare token to revoke")
         try:
             _stash, admin, found = m.find_account(account)
-            tid = m.existing_token(admin, found["id"], handle)
-            if tid:
-                m._request(f"/accounts/{found['id']}/tokens/{tid}", admin, method="DELETE")
-            proved = m.existing_token(admin, found["id"], handle) is None
+            # Every page of the account's tokens: page one alone looks exactly like a small account.
+            tid = next((row.get("id") for row in m._all(f"/accounts/{found['id']}/tokens", admin)
+                        if row.get("name") == token), None)
+        except (ValueError, RuntimeError, LookupError, OSError, KeyError) as exc:
+            raise IssueFailed(f"cloudflare.py issued the token, and its id could not be read back "
+                              f"({credential_shape.redact(str(exc))})") from None
+        account_slug = m.slug(found.get("name") or "")
+        return {"issuer": {"door": self.door, "account": account_slug},
+                "revoke": {"door": self.door, "account": account_slug, "handle": token, "command": None},
+                "identity": {"tokenId": tid}}
+
+    def revoke(self, provenance, identity, replaced):
+        """By the token's ID, read back by id (a listing by name reads one page of fifty). A re-issue ROLLS a
+        token in place, same id, new value: when the slot holds another value now, the token may carry it, so
+        nothing is deleted at Cloudflare and the revocation is not proved (check there, then settle it)."""
+        m = self._module()
+        account = (provenance.get("revoke") or {}).get("account")
+        handle = (provenance.get("revoke") or {}).get("handle")
+        tid = (identity or {}).get("tokenId")
+        if not account or not tid:
+            raise RuntimeError("the request's record names no Cloudflare token id to revoke")
+        try:
+            _stash, admin, found = m.find_account(account)
+            path = f"/accounts/{found['id']}/tokens/{tid}"
+
+            def present() -> bool:
+                try:
+                    return bool(m._request(path, admin).get("result"))
+                except RuntimeError as exc:
+                    if "HTTP 404" in str(exc):
+                        return False
+                    raise
+            if not present():
+                return {"provider": "gone", "proved": True}
+            if replaced:
+                return {"provider": "not-touched", "proved": False,
+                        "why": "the slot holds another value now, and a re-issue rolls this token in place"}
+            m._request(path, admin, method="DELETE")
+            proved = not present()
         except (ValueError, RuntimeError, LookupError, OSError, KeyError) as exc:
             raise RuntimeError(f"cloudflare.py refused: {credential_shape.redact(str(exc))}") from None
-        m._journal("revoke", f"cloudflare/{account}/{handle}")
-        return {"provider": "revoked" if tid else "gone", "proved": proved}
+        m._journal("revoke", f"cloudflare/{account}/{handle}", by_request=True)
+        return {"provider": "revoked", "proved": proved}
 
 
 #: The doors a request can be issued through. Heroku, DigitalOcean and Sentry are not offered yet: a
@@ -483,13 +576,15 @@ def presets() -> dict:
 
 # ─────────────────────────── a request ──────────────────────────────────────
 
-def _free_text(field: str, text) -> str:
+def _free_text(field: str, text, *, uuids: bool = True) -> str:
+    """One line a person reads. `uuids` off for the fields that cite a session or a request by its id (a
+    note, the operator's source, a settlement); a request's own reason keeps them refused."""
     if not isinstance(text, str) or not text.strip():
         raise Refused(f"{field} is empty", "invalid")
     text = text.strip()
     if len(text) > 300 or not LINE.fullmatch(text):
         raise Refused(f"{field} is one line of at most 300 characters", "invalid")
-    if credential_shape.find(text):
+    if credential_shape.find(text, uuids=uuids):
         raise Refused(f"{field} looks like it carries a credential; describe the need, never a value", "invalid")
     if PATHISH.search(text):
         raise Refused(f"{field} carries a path; name what is needed, not where it lives", "invalid")
@@ -628,10 +723,10 @@ def _relayed(action: str, target: str, instruction: str | None, source: str | No
         raise Refused("--relayed-instruction and --source go together: the operator's words and where they "
                       "were said", "invalid")
     words = instruction.strip()
-    if len(words) > 500 or not LINE.fullmatch(words) or credential_shape.find(words):
+    if len(words) > 500 or not LINE.fullmatch(words) or credential_shape.find(words, uuids=False):
         raise Refused("--relayed-instruction is the operator's words, one line of at most 500 characters, "
                       "never a value", "invalid")
-    where = _free_text("--source", source)
+    where = _free_text("--source", source, uuids=False)
     return {"by": "operator", "via": "relayed-instruction", "action": action, "target": target[:8],
             "instruction": words, "at": _stamp(_now()), "source": where}
 
@@ -666,7 +761,7 @@ def refuse(request_id: str, reason: str, *, note: str | None = None, instruction
         relayed = _relayed("credential.refuse", rid, instruction, source)
         row = {"event": "decided", "requestId": rid, "decision": decision_document(rid, "refused", reason=reason)}
         if note:
-            row["note"] = _free_text("--note", note)
+            row["note"] = _free_text("--note", note, uuids=False)
         if relayed:
             row["relayed"] = relayed
         _append(row)
@@ -678,7 +773,7 @@ def pending(request_id: str, *, note: str | None = None) -> dict:
         rid, _entry = _open_entry(request_id)
         row = {"event": "decided", "requestId": rid, "decision": decision_document(rid, "pending")}
         if note:
-            row["note"] = _free_text("--note", note)
+            row["note"] = _free_text("--note", note, uuids=False)
         _append(row)
     return {"requestId": rid, "state": "open", "decision": row["decision"]}
 
@@ -726,7 +821,7 @@ def issue(request_id: str, *, account: str | None = None, instruction: str | Non
           source: str | None = None, now: datetime.datetime | None = None) -> dict:
     """The administrator's `issued`: the door mints into the request's slot, the end and the slot are checked,
     the provenance is written beside the slot, then the decision. Raises Refused before any provider call,
-    IssueFailed after one that delivered nothing (recorded; the request stays open)."""
+    IssueFailed after one that left nothing in the slot (recorded; the request stays open)."""
     vault = _vault()
     with _locked():
         rid, entry = _open_entry(request_id)
@@ -749,8 +844,18 @@ def issue(request_id: str, *, account: str | None = None, instruction: str | Non
         project, env, name = entry["slot"].split("/")
         slot_path = vault._slot(project, env, name)
         if slot_path.is_file():
+            held = vault.provenance_of(project, env, name)
+            if entry.get("inFlight"):
+                raise Refused(f"an issue of this request started at {entry['inFlight']} and was interrupted after "
+                              f"the door began: {entry['slot']} holds a value no decision records. Revoke it "
+                              f"through the door (its `list` names the key or token for this slot), remove the "
+                              f"slot's value, then issue again", "interrupted")
+            other = (held or {}).get("requestId")
             raise Refused(f"{entry['slot']} already holds a value, and a name already present is never "
-                          f"overwritten (ORG-R10): refuse this request, or file one for another NAME", "slot-filled")
+                          f"overwritten (ORG-R10): "
+                          + (f"it was issued on request {other[:8]}; `{COMMAND} revoke {other[:8]}` ends it, "
+                             f"then issue this one" if isinstance(other, str) else
+                             "refuse this request, or file one for another NAME"), "slot-filled")
         now = now or _now()
         end = _parse(request["expiresAt"])
         # WHOLE DAYS, ENDING NO LATER THAN ASKED (FAC-SEM-138). The door takes its own clock a moment later
@@ -762,11 +867,25 @@ def issue(request_id: str, *, account: str | None = None, instruction: str | Non
                           f"refuse it with `{COMMAND} refuse {rid[:8]} --reason unanswered`, and the consumer "
                           f"asks again for longer", "expiry-too-short")
         days = min(days, key_expiry.MAX_DAYS)
+        # ON THE RECORD BEFORE THE DOOR STARTS: a crash between the delivery and the decision leaves this row
+        # standing, and the next `issue` of the request says so instead of calling the slot simply taken.
+        _append({"event": "issuing", "requestId": rid, "slot": entry["slot"]})
         try:
             minted = door.issue(request, (project, env, name), account, days)
-        except IssueFailed as exc:
+        except Refused as exc:
+            # Refused inside the door before it minted (an account the request does not name): on the record,
+            # so the issue is not read as interrupted.
             _fail(rid, "issue", str(exc))
             raise
+        except IssueFailed as exc:
+            said = str(exc)
+            if slot_path.is_file():
+                # Doors deliver last and undo their own mint when a step after it fails, so a value here was put
+                # by someone else while the door ran (a delivery never overwrites one): it is left alone.
+                said += "; the slot holds a value now that this request did not put there, left as it is"
+            _fail(rid, "issue", said)
+            raise IssueFailed(said) from None
+        identity = minted.get("identity") or {}
         provenance = {"requestId": rid, "issuedAt": _stamp(_now()), "decidedBy": "administrator",
                       "issuer": minted["issuer"],
                       "recipient": {"agentRef": request["agentRef"], "context": context, "slot": entry["slot"]},
@@ -782,34 +901,39 @@ def issue(request_id: str, *, account: str | None = None, instruction: str | Non
             problem = "the provider's answer did not confirm when the credential ends"
         elif recorded > end:
             problem = f"the provider set an end ({meta['expires_at']}) later than the request asked"
+        else:
+            provenance["expiresAt"] = meta["expires_at"]
+            try:
+                vault.record_provenance(project, env, name, provenance, tool=TOOL)
+            except (vault.VaultBoundaryError, OSError, ValueError) as exc:
+                # Without it a revocation could not tell this value from another and would delete nothing.
+                problem = f"the provenance could not be written beside the slot ({exc})"
         if problem:
-            undone = _undo(door, provenance, (project, env, name))
-            _fail(rid, "issue", f"{problem}; {undone}")
+            undone = _undo(door, provenance, identity, (project, env, name))
+            _fail(rid, "undo" if "NOT revoked" in undone else "issue", f"{problem}; {undone}")
             raise IssueFailed(f"{problem}; {undone}")
-        provenance["expiresAt"] = meta["expires_at"]
-        notes = []
-        try:
-            vault.record_provenance(project, env, name, provenance, tool=TOOL)
-        except (vault.VaultBoundaryError, OSError, ValueError) as exc:
-            notes.append(f"provenance not recorded beside the slot: {exc}")
         credential = {"slot": name, "provider": request["provider"], "preset": request["preset"],
                       "expiresAt": meta["expires_at"]}
         row = {"event": "decided", "requestId": rid,
                "decision": decision_document(rid, "issued", credential=credential),
-               "delivery": {"slot": entry["slot"], "credential": credential, "provenance": provenance}}
+               "delivery": {"slot": entry["slot"], "credential": credential, "provenance": provenance,
+                            "identity": identity}}
         if relayed:
             row["relayed"] = relayed
         _append(row)
     return {"requestId": rid, "state": "issued", "decision": row["decision"], "slot": entry["slot"],
-            "issuer": provenance["issuer"], "expiresAt": meta["expires_at"], "notes": notes}
+            "issuer": provenance["issuer"], "expiresAt": meta["expires_at"]}
 
 
-def _undo(door: Door, provenance: dict, slot: tuple[str, str, str]) -> str:
-    """A credential the request cannot keep: revoked at the provider, its value deleted. Says what happened."""
+def _undo(door: Door, provenance: dict, identity: dict, slot: tuple[str, str, str]) -> str:
+    """A credential the request cannot keep: revoked at the provider, its value deleted. Says what happened;
+    "NOT revoked" in the answer marks a credential that may still work (the board keeps it)."""
     vault = _vault()
     try:
-        result = door.revoke(provenance)
-        said = "revoked at the provider" + ("" if result.get("proved") else " (the revocation is not proved)")
+        result = door.revoke(provenance, identity, False)
+        said = "revoked at the provider" + ("" if result.get("proved") else " (the revocation is NOT proved)")
+        if not result.get("proved"):
+            said = "NOT revoked for certain at the provider: the revocation is not proved; check there"
     except RuntimeError as exc:
         said = f"NOT revoked at the provider ({exc}); revoke it with the door"
     try:
@@ -819,37 +943,60 @@ def _undo(door: Door, provenance: dict, slot: tuple[str, str, str]) -> str:
     return said
 
 
-def revoke(request_id: str, *, instruction: str | None = None, source: str | None = None) -> dict:
-    """End an issued request: revoke at the provider through its door and prove it, then delete the slot's
-    value when it is still the one this request was issued (DEC-0113). A refused revocation is recorded and
-    the request stays `issued`, listed until it is settled."""
+def revoke(request_id: str, *, instruction: str | None = None, source: str | None = None,
+           settle: str | None = None) -> dict:
+    """End an issued request: revoke at the provider through its door the credential this request issued (by
+    its identity, never by a name another credential may hold now) and prove it, then delete the slot's
+    value when it is still the one this request issued (DEC-0113). A refused revocation is recorded and the
+    request stays `issued`; an unproved one reads `revoked` with `proved: false` and may be run again, or
+    settled with `--settle "how it was checked"` once it was checked at the provider."""
     vault = _vault()
     with _locked():
         known, _degraded = requests()
         rid = resolve_id(request_id, known)
         entry = known[rid]
-        if entry["state"] not in ("issued", "expired"):
-            raise Refused(f"request {rid[:8]} is {entry['state']}; only an issued credential is revoked", "not-issued")
+        unproved = entry["state"] == "revoked" and (entry.get("revocation") or {}).get("proved") is False
         relayed = _relayed("credential.revoke", rid, instruction, source)
+        if settle is not None and entry.get("undoUnsettled") and not unproved:
+            how = _free_text("--settle", settle, uuids=False)
+            row = {"event": "settled", "requestId": rid, "stage": "undo", "how": how}
+            if relayed:
+                row["relayed"] = relayed
+            _append(row)
+            return {"requestId": rid, "state": entry["state"], "settled": {"stage": "undo", "how": how}}
+        if settle is not None:
+            if not unproved:
+                raise Refused(f"request {rid[:8]} has no unproved revocation to settle", "not-unproved")
+            revocation = {**(entry.get("revocation") or {}), "proved": True,
+                          "settled": _free_text("--settle", settle, uuids=False), "settledAt": _stamp(_now())}
+            row = {"event": "revoked", "requestId": rid, "revocation": revocation}
+            if relayed:
+                row["relayed"] = relayed
+            _append(row)
+            return {"requestId": rid, "state": "revoked", "revocation": revocation}
+        if entry["state"] not in ("issued", "expired") and not unproved:
+            raise Refused(f"request {rid[:8]} is {entry['state']}; only an issued credential is revoked", "not-issued")
         delivery = entry.get("delivery") or {}
         provenance = delivery.get("provenance") or {}
         door = DOORS.get(entry["request"]["provider"])
         if door is None:
             raise Refused(f"no door here revokes {entry['request']['provider']} credentials", "provider-unavailable")
+        project, env, name = entry["slot"].split("/")
+        present = vault._slot(project, env, name).is_file()
+        held = vault.provenance_of(project, env, name) if present else None
+        mine = present and (held or {}).get("requestId") == rid
         try:
-            result = door.revoke(provenance)
+            result = door.revoke(provenance, delivery.get("identity") or {}, present and not mine)
         except RuntimeError as exc:
             _fail(rid, "revoke", str(exc))
             raise
-        project, env, name = entry["slot"].split("/")
-        held = vault.provenance_of(project, env, name) if vault._slot(project, env, name).is_file() else None
-        if held is None and not vault._slot(project, env, name).is_file():
-            slot_state = "absent"
-        elif (held or {}).get("requestId") == rid:
+        if mine:
             vault.remove_value(project, env, name, tool=TOOL, why=f"request {rid[:8]} revoked")
             slot_state = "removed"
-        else:
+        elif present:
             slot_state = "kept: it holds another value now"
+        else:
+            slot_state = "absent"
         revocation = {**result, "slot": slot_state, "revokedAt": _stamp(_now())}
         row = {"event": "revoked", "requestId": rid, "revocation": revocation}
         if relayed:
@@ -975,6 +1122,10 @@ def parser() -> argparse.ArgumentParser:
         if verb == "refuse":
             p.add_argument("--reason", required=True, choices=[r for r in REFUSALS if r != "withdrawn"])
             p.add_argument("--note", help="one line beside the decision")
+        if verb == "revoke":
+            p.add_argument("--settle", metavar="HOW",
+                           help="close a revocation that was not proved (or a credential a failed issue could not "
+                                "revoke) once it was checked at the provider: how it was checked, one line")
         p.add_argument("--relayed-instruction", metavar="WORDS",
                        help="an agent acting on the operator's word: the words, verbatim")
         p.add_argument("--source", metavar="WHERE", help="where the operator said it (a session, a thread)")
@@ -1025,8 +1176,7 @@ def run(a) -> int:
     if a.cmd == "issue":
         r = issue(a.id, account=a.account, instruction=a.relayed_instruction, source=a.source)
         _print(r, a.json, f"issued request {r['requestId'][:8]} into {r['slot']} by {r['issuer']['door']}/"
-                          f"{r['issuer']['account']}, ends {r['expiresAt']}; value hidden"
-                          + "".join(f"\n  note: {n}" for n in r["notes"]))
+                          f"{r['issuer']['account']}, ends {r['expiresAt']}; value hidden")
         return 0
     if a.cmd == "refuse":
         r = refuse(a.id, a.reason, note=a.note, instruction=a.relayed_instruction, source=a.source)
@@ -1041,8 +1191,14 @@ def run(a) -> int:
         _print(r, a.json, f"withdrew request {r['requestId'][:8]}")
         return 0
     if a.cmd == "revoke":
-        r = revoke(a.id, instruction=a.relayed_instruction, source=a.source)
+        r = revoke(a.id, instruction=a.relayed_instruction, source=a.source, settle=a.settle)
+        if "settled" in r:
+            _print(r, a.json, f"settled request {r['requestId'][:8]}: {r['settled']['how']}")
+            return 0
         rev = r["revocation"]
+        if rev.get("settled"):
+            _print(r, a.json, f"settled the revocation of request {r['requestId'][:8]}: {rev['settled']}")
+            return 0
         _print(r, a.json, f"revoked request {r['requestId'][:8]} at the provider "
                           f"({'proved' if rev.get('proved') else 'NOT proved: check at the provider'}); "
                           f"the slot: {rev['slot']}")
@@ -1067,6 +1223,8 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as exc:
         # The vault's own boundary (a symbolic link on the way, a file that is not owner-only): its message
         # names the rule, never a value.
+        if getattr(a, "json", False):
+            print(json.dumps({"error": "vault-boundary", "message": str(exc)}, ensure_ascii=False))
         print(f"refused: {exc}", file=sys.stderr)
         return 2
     except OSError as exc:

@@ -120,12 +120,13 @@ class FakeDoor(cr.Door):
         vault.record_expiry(project, env, name, at, None if at else "unconfirmed", tool="fake")
         return {"issuer": {"door": self.door, "account": account or "example"},
                 "revoke": {"door": self.door, "handle": f"{project}-{env}", "account": account or "example",
-                           "command": None}}
+                           "command": None},
+                "identity": {"hash": f"h-{len(self.issued)}"}}
 
-    def revoke(self, provenance):
+    def revoke(self, provenance, identity, replaced):
         if self.revoke_fails:
             raise RuntimeError("the provider did not answer")
-        self.revoked.append(provenance)
+        self.revoked.append({**provenance, "identity": identity, "replaced": replaced})
         return {"provider": "revoked", "proved": True}
 
 
@@ -370,6 +371,106 @@ class Issuing(Suite):
         self.assertEqual(days, 11, "a request issued at once is minted a day short, never past its end")
 
 
+class HardCases(Suite):
+
+    def test_one_request_is_never_issued_twice_at_once(self):
+        import threading
+        rid = self.file()["requestId"]
+        seen: dict = {}
+        door_issue = self.door.issue
+
+        def issue_while_another_waits(request, slot, account, days):
+            def second():
+                try:
+                    cr.issue(rid)
+                    seen["second"] = "issued"
+                except cr.Refused as exc:
+                    seen["second"] = exc.code
+            other = threading.Thread(target=second)
+            other.start()
+            other.join(0.5)
+            seen["blocked"] = other.is_alive()
+            seen["thread"] = other
+            return door_issue(request, slot, account, days)
+        self.door.issue = issue_while_another_waits
+        cr.issue(rid)
+        seen["thread"].join(10)
+        self.assertTrue(seen["blocked"], "the second issue waited for the queue's lock")
+        self.assertEqual(seen["second"], "decided")
+        self.assertEqual(len(self.door.issued), 1)
+
+    def test_an_interrupted_issue_is_named_not_called_a_taken_slot(self):
+        rid = self.file()["requestId"]
+        cr._append({"event": "issuing", "requestId": rid, "slot": "alpha-web/prod/OPENROUTER_API_KEY"})
+        vault.store_value("alpha-web", "prod", "OPENROUTER_API_KEY", "minted-before-a-crash-" + "c" * 20,
+                          replace=False, tool="test")
+        with self.assertRaises(cr.Refused) as caught:
+            cr.issue(rid)
+        self.assertEqual(caught.exception.code, "interrupted")
+        rows = crf.findings(cr.queue_path(), stamp()[:10])
+        self.assertIn("interrupted", rows[0]["detail"])
+
+    def test_a_filled_slot_names_the_request_that_filled_it(self):
+        first = self.file()["requestId"]
+        cr.issue(first)
+        second = self.file(reason="a renewal")["requestId"]
+        with self.assertRaises(cr.Refused) as caught:
+            cr.issue(second)
+        self.assertIn(f"revoke {first[:8]}", str(caught.exception))
+
+    def test_two_requests_for_one_slot_are_two_board_rows(self):
+        self.file()
+        self.file(context="org:acme", expires_in_days=5)
+        rows = crf.findings(cr.queue_path(), stamp()[:10])
+        self.assertEqual(len({(r["type"], r["subject"]) for r in rows}), 2)
+        self.assertTrue(all(r["subject"].startswith("credential:vault/alpha-web/prod/") for r in rows))
+
+    def test_a_request_record_without_its_members_is_named_and_breaks_nothing(self):
+        rid = self.file()["requestId"]
+        cr._append({"event": "requested", "request": {"requestId": "not-a-uuid"}, "slot": "x"})
+        known, degraded = cr.requests()
+        self.assertEqual(set(known), {rid})
+        self.assertEqual(len(degraded), 1)
+        self.assertEqual(len(crf.findings(cr.queue_path(), stamp()[:10])), 1)
+        self.assertEqual(len(cr.listing("all")["requests"]), 1)
+
+    def test_the_operators_words_may_cite_an_id_a_reason_may_not(self):
+        rid = self.file()["requestId"]
+        cr.pending(rid, note="seen in session 7b0d2c1e-4a5b-4c6d-8e9f-0a1b2c3d4e5f")
+        cr.refuse(rid, "not-allowed", instruction="refuse request 7b0d2c1e-4a5b-4c6d-8e9f-0a1b2c3d4e5f",
+                  source="session 7b0d2c1e-4a5b-4c6d-8e9f-0a1b2c3d4e5f")
+        with self.assertRaises(cr.Refused):
+            self.file(slot="beta-api/prod/KEY", reason="like 7b0d2c1e-4a5b-4c6d-8e9f-0a1b2c3d4e5f had")
+
+    def test_a_provenance_that_cannot_be_written_undoes_the_issue(self):
+        rid = self.file()["requestId"]
+        original = vault.record_provenance
+
+        def refuse(*a, **k):
+            raise vault.VaultBoundaryError("the metadata is not owner-only")
+        vault.record_provenance = refuse
+        try:
+            with self.assertRaises(cr.IssueFailed):
+                cr.issue(rid)
+        finally:
+            vault.record_provenance = original
+        self.assertEqual(len(self.door.revoked), 1)
+        self.assertFalse((VAULT_DIR / "alpha-web/prod/OPENROUTER_API_KEY").exists())
+        self.assertEqual(cr.requests()[0][rid]["state"], "open")
+
+    def test_a_credential_a_failed_issue_could_not_revoke_stays_on_the_board_until_settled(self):
+        cr.DOORS["openrouter"] = FakeDoor(answer_end="later", revoke_fails=True)
+        rid = self.file()["requestId"]
+        with self.assertRaises(cr.IssueFailed):
+            cr.issue(rid)
+        cr.refuse(rid, "unanswered")
+        rows = crf.findings(cr.queue_path(), stamp()[:10])
+        self.assertEqual([r["type"] for r in rows], ["credential.revocation_refused"])
+        self.assertIn("could not be revoked again", rows[0]["detail"])
+        cr.revoke(rid, settle="deleted at the provider by hand, session 4e2f")
+        self.assertEqual(crf.findings(cr.queue_path(), stamp()[:10]), [])
+
+
 class Revoking(Suite):
 
     def issued(self) -> str:
@@ -412,7 +513,7 @@ class Revoking(Suite):
 
     def test_a_revocation_the_provider_does_not_show_is_not_called_done(self):
         rid = self.issued()
-        self.door.revoke = lambda provenance: {"provider": "revoked", "proved": False}
+        self.door.revoke = lambda provenance, identity, replaced: {"provider": "revoked", "proved": False}
         rc, out, err = quiet(cr.main, ["revoke", rid[:8]])
         self.assertEqual(rc, 1, "an unproved revocation is not a success")
         self.assertIn("NOT proved", out)
@@ -467,27 +568,34 @@ class TheRealDoors(Suite):
         spec.loader.exec_module(module)
         return module
 
-    def test_openrouter_mints_into_the_slot_and_revokes_by_its_key_name(self):
+    def openrouter(self):
         m = self.load("tools/openrouter.py", "or_requests")
         store = BASE / "or-store"
+        import shutil
+        shutil.rmtree(store, ignore_errors=True)
         m.ADMIN_STORE = store / "openrouter-admin"
         m.ADMIN_STORE.mkdir(parents=True, exist_ok=True)
         private_io.write(m.ADMIN_STORE / "example", "prov\n")
         m.LEDGER = store / "ledger.json"
         m._journal = lambda *a, **k: None
         keys: dict[str, dict] = {}
+        listed: list[str] = []
 
         def fake(path, key, payload=None, method=None):
             if path.startswith("/keys?"):
+                listed.append(path)
                 return {"data": list(keys.values())}
             if path == "/keys" and payload:
-                h = f"h{len(keys) + 1}"
+                h = f"h{len(keys) + 1}x{len(listed)}"
                 keys[h] = {"hash": h, "name": payload["name"], "expires_at": payload.get("expires_at"),
                            "limit": payload["limit"]}
-                return {"data": keys[h], "key": VALUE}
+                return {"data": keys[h], "key": VALUE + h}
             if path.startswith("/keys/") and method == "DELETE":
                 keys.pop(path.split("/")[2], None)
                 return {}
+            if path.startswith("/keys/") and method == "PATCH":
+                keys[path.split("/")[2]].update(payload)
+                return {"data": keys[path.split("/")[2]]}
             if path.startswith("/keys/"):
                 return {"data": keys.get(path.split("/")[2])}
             return {"data": []}
@@ -495,50 +603,93 @@ class TheRealDoors(Suite):
         door = cr.OpenRouterDoor()
         door._module = staticmethod(lambda: m)
         cr.DOORS["openrouter"] = door
+        return m, keys, listed
+
+    def test_openrouter_mints_into_the_slot_and_revokes_its_own_key_by_hash(self):
+        m, keys, listed = self.openrouter()
         rid = self.file(limit="7.5", reset="weekly")["requestId"]
         r = cr.issue(rid, account="example")
         slot = "alpha-web/prod/OPENROUTER_API_KEY"
-        self.assertEqual((VAULT_DIR / slot).read_text().strip(), VALUE)
+        self.assertTrue((VAULT_DIR / slot).read_text().strip().startswith(VALUE))
         prov = meta_of(slot)["provenance"]
         self.assertEqual(prov["revoke"]["handle"], "alpha-web-prod-openrouter-api-key")
-        self.assertIn("openrouter.py\" revoke alpha-web-prod-openrouter-api-key", prov["revoke"]["command"])
+        self.assertIn('openrouter.py" revoke alpha-web-prod-openrouter-api-key', prov["revoke"]["command"])
+        self.assertNotIn("identity", prov, "a key hash stays in the queue, never beside the slot")
         row = list(keys.values())[0]
         self.assertEqual((row["limit"], row["expires_at"]), (7.5, r["expiresAt"]))
         self.assertNotIn(VALUE, everything_written() + m.LEDGER.read_text())
+        before = len(listed)
         rev = cr.revoke(rid)
         self.assertEqual((rev["revocation"]["proved"], keys), (True, {}))
+        self.assertEqual(len(listed), before, "the revocation reads the key by its hash, never the listing")
 
-    def test_cloudflare_issues_a_token_named_by_its_slot_and_deletes_it_by_name(self):
+    def test_a_rotation_by_the_door_is_never_revoked_by_the_request(self):
+        m, keys, _listed = self.openrouter()
+        rid = self.file()["requestId"]
+        cr.issue(rid, account="example")
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            m.rotate_one("alpha-web-prod-openrouter-api-key")
+        self.assertEqual(len(keys), 1, "the rotation deleted the key the request issued")
+        successor = list(keys)[0]
+        rev = cr.revoke(rid)
+        self.assertEqual((rev["revocation"]["provider"], rev["revocation"]["slot"]),
+                         ("gone", "kept: it holds another value now"))
+        self.assertIn(successor, keys, "the successor the consumer reads is untouched")
+
+    def cloudflare(self, pages_before: int = 0):
         m = self.load("tools/cloudflare.py", "cf_requests")
-        tokens: dict[str, str] = {}
+        tokens: dict[str, dict] = {f"old-{i}": {"id": f"old-{i}", "name": f"another token {i}"}
+                                   for i in range(pages_before)}
         calls: list = []
 
         def issue_zone(preset_key, zone, target, account_label, wait=2.0, expire_days=90):
             calls.append((preset_key, zone, target, account_label, expire_days))
             project, env, name = target.split("/")
-            vault.store_value(project, env, name, VALUE, replace=False, tool="fake-cloudflare")
+            tid = f"tid-{len(tokens)}"
+            tokens[tid] = {"id": tid, "name": m.PRESETS[preset_key]["name"].format(zone=zone, slot=target)}
+            try:
+                m.deliver_to_vault(VALUE, project, env, name)
+            except RuntimeError:
+                tokens.pop(tid)                       # the door discards what it minted
+                return 1
             vault.record_expiry(project, env, name, stamp(expire_days), tool="cloudflare.py")
-            tokens[m.PRESETS[preset_key]["name"].format(zone=zone, slot=target)] = "tid-1"
             return 0
+
+        def request(path, token, payload=None, method=None):
+            tid = path.rsplit("/", 1)[-1]
+            if method == "DELETE":
+                tokens.pop(tid, None)
+                return {}
+            if tid in tokens:
+                return {"result": tokens[tid]}
+            raise RuntimeError("cloudflare GET /accounts/<id>/tokens/<id>: HTTP 404")
         m.cmd_issue_zone = issue_zone
         m.find_account = lambda wanted: ("stash", "admin", {"id": "acct-id", "name": "Example Team"})
-        m.existing_token = lambda admin, account_id, name: tokens.get(name)
-        m._request = lambda path, token, payload=None, method=None: (
-            tokens.clear() if method == "DELETE" else None) or {}
+        m._all = lambda path, token: list(tokens.values())
+        m.existing_token = lambda admin, account_id, name: next(
+            (t["id"] for t in list(tokens.values())[:50] if t["name"] == name), None)
+        m._request = request
         m._journal = lambda *a, **k: None
         door = cr.CloudflareDoor()
         door._module = staticmethod(lambda: m)
         cr.DOORS["cloudflare"] = door
-        with self.assertRaises(cr.Refused) as caught:
-            cr.file_request(agent=AGENT, provider="cloudflare", preset="dns-edit", slot="alpha-web/prod/CF_TOKEN",
-                            reason="dns", scope=["zone=example.com"])
-        self.assertIn("named by zone", str(caught.exception))
+        return m, tokens, calls
+
+    def file_cf(self, **kw):
+        args = dict(agent=AGENT, provider="cloudflare", preset="email-routing", slot="alpha-web/prod/CF_TOKEN",
+                    reason="mail rules", scope=["zone=example.com"], expires_in_days=20)
+        args.update(kw)
+        return cr.file_request(**args)["requestId"]
+
+    def test_cloudflare_issues_a_token_named_by_its_slot_and_deletes_it_by_id_past_the_first_page(self):
+        m, tokens, calls = self.cloudflare(pages_before=60)
+        for preset, why in (("dns-edit", "named by zone"), ("analytics", "not one per vault slot")):
+            with self.assertRaises(cr.Refused) as caught:
+                self.file_cf(preset=preset)
+            self.assertIn(why, str(caught.exception))
         with self.assertRaises(cr.Refused):
-            cr.file_request(agent=AGENT, provider="cloudflare", preset="email-routing",
-                            slot="alpha-web/prod/CF_TOKEN", reason="mail", scope=["zone=example.com"], limit="5")
-        rid = cr.file_request(agent=AGENT, provider="cloudflare", preset="email-routing",
-                              slot="alpha-web/prod/CF_TOKEN", reason="mail rules", scope=["zone=example.com"],
-                              expires_in_days=20)["requestId"]
+            self.file_cf(limit="5")
+        rid = self.file_cf()
         r = cr.issue(rid)
         self.assertEqual(calls[0][:3], ("email-routing", "example.com", "alpha-web/prod/CF_TOKEN"))
         prov = meta_of("alpha-web/prod/CF_TOKEN")["provenance"]
@@ -547,6 +698,37 @@ class TheRealDoors(Suite):
         self.assertEqual(r["decision"]["credential"]["slot"], "CF_TOKEN")
         rev = cr.revoke(rid)
         self.assertEqual((rev["revocation"]["provider"], rev["revocation"]["proved"]), ("revoked", True))
+        self.assertEqual(len(tokens), 60, "the token past the first page was found and deleted; no other")
+
+    def test_a_value_put_while_the_door_waits_is_never_overwritten(self):
+        m, tokens, _calls = self.cloudflare()
+        rid = self.file_cf()
+        door_issue = m.cmd_issue_zone
+
+        def racing(*args, **kwargs):
+            vault.store_value("alpha-web", "prod", "CF_TOKEN", "put-meanwhile-" + "m" * 20, replace=False,
+                              tool="test")
+            return door_issue(*args, **kwargs)
+        m.cmd_issue_zone = racing
+        with self.assertRaises(cr.IssueFailed):
+            cr.issue(rid)
+        self.assertEqual((VAULT_DIR / "alpha-web/prod/CF_TOKEN").read_text().strip(), "put-meanwhile-" + "m" * 20)
+        self.assertEqual(tokens, {}, "the minted token was discarded")
+        self.assertEqual(cr.requests()[0][rid]["state"], "open")
+
+    def test_a_cloudflare_token_rolled_since_is_not_deleted(self):
+        m, tokens, _calls = self.cloudflare()
+        rid = self.file_cf()
+        cr.issue(rid)
+        vault.store_value("alpha-web", "prod", "CF_TOKEN", "rolled-in-place-" + "q" * 20, replace=True, tool="test")
+        rev = cr.revoke(rid)
+        self.assertEqual((rev["revocation"]["provider"], rev["revocation"]["proved"]), ("not-touched", False))
+        self.assertEqual(len(tokens), 1, "the token the slot's new value may be is left alone")
+        rows = crf.findings(cr.queue_path(), stamp()[:10])
+        self.assertEqual([f["title_id"] for f in rows], ["Revoking {slot} at {provider} was not proved"])
+        settled = cr.revoke(rid, settle="checked at Cloudflare: the token was rolled for session 0f3c")
+        self.assertTrue(settled["revocation"]["proved"])
+        self.assertEqual(crf.findings(cr.queue_path(), stamp()[:10]), [])
 
 
 class TheCommandLine(Suite):

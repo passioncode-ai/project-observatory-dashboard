@@ -28,55 +28,69 @@ import credential_requests as cr  # noqa: E402
 
 
 def findings(path: pathlib.Path, today: str) -> list[dict]:
-    """The board's rows over one queue file. `today` is the build's day; a row's dates are the queue's own."""
+    """The board's rows over one queue file. `today` is the build's day; a row's dates are the queue's own.
+    Each row's subject carries the request's id after the slot, so two requests for one slot are two rows."""
     if not path.is_file():
         return []
-    rows = []
     try:
-        lines = path.read_text(encoding="utf-8").splitlines()
+        rows, _degraded = cr.parse_rows(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return []
-    for line in lines:
-        try:
-            row = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(row, dict) and row.get("schema") == cr.SCHEMA:
-            rows.append(row)
     out = []
     for rid, entry in cr.fold(rows).items():
-        request, slot = entry["request"], entry.get("slot") or "?"
-        if entry["state"] == "open":
-            failure = entry["attempts"][-1] if entry["attempts"] else None
-            out.append({
-                "type": "credential.request_waiting", "subject": f"credential:vault/{slot}", "severity": "warning",
-                **titled("{agent} asks for a {provider} key for {slot}", agent=request["agentRef"],
-                         provider=request["provider"], slot=slot),
-                "detail": (f"Request {rid[:8]} ({request['preset']}, in {request['context']}, until "
-                           f"{request['expiresAt'][:10]}) waits for the administrator's decision since "
-                           f"{request['requestedAt'][:10]}: {request['reason']}"
-                           + (f". The last issue failed: {failure.get('reason')}" if failure else "")),
-                "action": (f"`{cr.COMMAND} issue {rid[:8]} [--account LABEL]` mints it through the door into the "
-                           f"slot; `{cr.COMMAND} refuse {rid[:8]} --reason not-allowed` refuses it"),
-            })
-        elif entry["state"] in ("issued", "expired") and entry["attempts"] \
-                and entry["attempts"][-1].get("stage") == "revoke":
-            out.append({
-                "type": "credential.revocation_refused", "subject": f"credential:vault/{slot}",
-                "severity": "warning",
-                **titled("Revoking {slot} at {provider} was refused", slot=slot, provider=request["provider"]),
-                "detail": (f"Request {rid[:8]}'s credential still works at {request['provider']}: "
-                           f"{entry['attempts'][-1].get('reason')}"),
-                "action": f"`{cr.COMMAND} revoke {rid[:8]}` again once the door can reach the provider",
-            })
-        elif entry["state"] == "revoked" and (entry.get("revocation") or {}).get("proved") is False:
-            out.append({
-                "type": "credential.revocation_refused", "subject": f"credential:vault/{slot}",
-                "severity": "warning",
-                **titled("Revoking {slot} at {provider} was not proved", slot=slot, provider=request["provider"]),
-                "detail": (f"Request {rid[:8]}'s credential was revoked through the door, and reading it back at "
-                           f"{request['provider']} did not show it gone; it may still work there."),
-                "action": (f"check the key at {request['provider']} with the door's `list` or `ping`, delete it there "
-                           f"if it is still listed, then record it with `vault.py moved`"),
-            })
+        try:
+            out.extend(_rows(rid, entry))
+        except (KeyError, TypeError, AttributeError):
+            continue                                   # one damaged record never stops the board's build
+    return out
+
+
+def _rows(rid: str, entry: dict) -> list[dict]:
+    request, slot = entry["request"], entry.get("slot") or "?"
+    subject = f"credential:vault/{slot}#{rid[:8]}"
+    out = []
+    if entry["state"] == "open":
+        failure = entry["attempts"][-1] if entry["attempts"] else None
+        out.append({
+            "type": "credential.request_waiting", "subject": subject, "severity": "warning",
+            **titled("{agent} asks for a {provider} key for {slot}", agent=request["agentRef"],
+                     provider=request["provider"], slot=slot),
+            "detail": (f"Request {rid[:8]} ({request['preset']}, in {request['context']}, until "
+                       f"{request['expiresAt'][:10]}) waits for the administrator's decision since "
+                       f"{request['requestedAt'][:10]}: {request['reason']}"
+                       + (f". An issue started at {entry['inFlight']} was interrupted; `issue` says what is left"
+                          if entry.get("inFlight") else "")
+                       + (f". The last issue failed: {failure.get('reason')}" if failure else "")),
+            "action": (f"`{cr.COMMAND} issue {rid[:8]} [--account LABEL]` mints it through the door into the "
+                       f"slot; `{cr.COMMAND} refuse {rid[:8]} --reason not-allowed` refuses it"),
+        })
+    revocation = entry.get("revocation") or {}
+    attempts = entry["attempts"]
+    if entry["state"] in ("issued", "expired") and attempts and attempts[-1].get("stage") == "revoke":
+        out.append({
+            "type": "credential.revocation_refused", "subject": subject, "severity": "warning",
+            **titled("Revoking {slot} at {provider} was refused", slot=slot, provider=request["provider"]),
+            "detail": f"Request {rid[:8]}'s credential still works at {request['provider']}: {attempts[-1].get('reason')}",
+            "action": f"`{cr.COMMAND} revoke {rid[:8]}` again once the door can reach the provider",
+        })
+    elif entry["state"] == "revoked" and revocation.get("proved") is False:
+        out.append({
+            "type": "credential.revocation_refused", "subject": subject, "severity": "warning",
+            **titled("Revoking {slot} at {provider} was not proved", slot=slot, provider=request["provider"]),
+            "detail": (f"Request {rid[:8]}'s credential was not shown gone at {request['provider']}"
+                       + (f" ({revocation['why']})" if revocation.get("why") else "") + "; it may still work there."),
+            "action": (f"`{cr.COMMAND} revoke {rid[:8]}` again, or check it at {request['provider']} (the door's "
+                       f"`list`), delete it there if it is still listed, then `{cr.COMMAND} revoke {rid[:8]} "
+                       f"--settle \"how it was checked\"`"),
+        })
+    if entry.get("undoUnsettled"):
+        undo = next((a for a in reversed(attempts) if a.get("stage") == "undo"), {})
+        out.append({
+            "type": "credential.revocation_refused", "subject": subject + "#undo", "severity": "warning",
+            **titled("Revoking {slot} at {provider} was refused", slot=slot, provider=request["provider"]),
+            "detail": (f"A credential minted for request {rid[:8]} did not meet it and could not be revoked again: "
+                       f"{undo.get('reason')}"),
+            "action": (f"delete it at {request['provider']} through the door (its `list` names it), then "
+                       f"`{cr.COMMAND} revoke {rid[:8]} --settle \"how it was checked\"`"),
+        })
     return out

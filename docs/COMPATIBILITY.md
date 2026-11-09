@@ -595,7 +595,9 @@ reads the configuration as described above.
 
 Additive; nothing migrates. `tools/credential_requests.py` is new: it writes `credential-requests.jsonl` (schema
 `credential-queue/1`, one record per line: `requested` with a `credential-request/1` document and the slot,
-`decided` with a `credential-decision/1` document, `withdrawn`, `attempt-failed`, `revoked`) and its lock
+`issuing` before a door starts, `decided` with a `credential-decision/1` document (an issue's carries the delivery
+with the provider's identity of the credential, a key hash or a token id), `withdrawn`, `attempt-failed`,
+`revoked`, `settled`) and its lock
 `.credential-requests.lock` in the vault's folder (`secrets/projects/`, or `OBSERVATORY_VAULT_DIR`), owner-only, names
 only; the vault's backup carries them with the rest of that folder. A slot's `meta.json` may gain `provenance` (the
 request id, `issuedAt`, `decidedBy`, `issuer`, `recipient` with agent, context and slot, `provider`, `preset`,

@@ -14,7 +14,8 @@ while the major version is 0, a minor release may change behaviour and says so h
   The administrator decides: `issue ID [--account LABEL]` has the issuing door (`openrouter.py`, `cloudflare.py`) mint
   a narrowed credential ending no later than asked and deliver it straight into the slot, `refuse ID --reason R` takes
   one of the contract's reasons, `pending ID` keeps it open, the consumer may `withdraw ID`, and `revoke ID` revokes at
-  the provider with proof and deletes the slot's value only while it is the one issued. Refused before any provider
+  the provider, by the credential's own identity (an OpenRouter key hash, a Cloudflare token id), with proof, and deletes
+  the slot's value only while it is the one issued; `revoke ID --settle "how"` closes one not proved. Refused before any provider
   call: a decided request, a slot that holds a value (never overwritten), an organization this space is not enrolled
   in, a preset whose token another slot would share; a credential whose end is unconfirmed or later than asked is
   revoked again. The slot's metadata records the delivery's provenance (`vault.record_provenance`: issuer, recipient,

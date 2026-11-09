@@ -600,13 +600,21 @@ preset, scope, ceiling, the end, and how to revoke it. `vault.py list` and `use_
 `refuse` takes one of the contract's reasons (`not-allowed`, `preset-unknown`, `expiry-too-long`,
 `scope-too-wide`, `provider-unavailable`, `unanswered`); `pending` records that it was seen and stays
 open; the consumer may `withdraw` an open request. `revoke` revokes at the provider through the same
-door, proves it, and deletes the slot's value only while it is still the one that request issued (a
-revocation names its request, DEC-0113); a refused revocation is recorded and the request stays
-`issued`. An agent acting on the operator's word adds `--relayed-instruction "the words"
+door the credential that request issued, by its identity (the OpenRouter key's hash, the Cloudflare
+token's id, kept in the queue), so a key the name holds after a rotation is never touched; it proves
+it by reading it back and deletes the slot's value only while it is still the one that request issued
+(a revocation names its request, DEC-0113). A Cloudflare re-issue rolls a token in place, so when the
+slot holds another value the token is left alone and the revocation reads "not proved". A refused
+revocation is recorded and the request stays `issued`; an unproved one may be run again, or closed
+with `revoke ID --settle "how it was checked"` once it was checked at the provider, which also closes
+a credential a failed issue could not revoke. An issue the process did not finish (the door started,
+no decision followed) is named on the next `issue` of that request instead of reading as a taken
+slot. An agent acting on the operator's word adds `--relayed-instruction "the words"
 --source WHERE`. Every request, decision, issue attempt and revocation is one line of
 `credential-requests.jsonl` beside the vault's movement journal, names only, and the board raises
 `credential.request_waiting` for a request nobody decided and `credential.revocation_refused` for one
-whose revocation the provider refused or did not show done (`revoke` then exits 1). Sending a request to an organization in a check-in and
+whose revocation the provider refused or did not show done (`revoke` then exits 1), and for a
+credential a failed issue could not revoke. Sending a request to an organization in a check-in and
 receiving its sealed envelope are not built yet: the queue serves the space that holds both the
 request and the issuing door.
 

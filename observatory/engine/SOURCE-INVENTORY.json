@@ -954,22 +954,22 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "01aeb4050f7997670527c92325d217358dbde25a90b125e56a7c30ca7739d9d1",
-      "bytes": 116948,
+      "export_sha256": "7e33be0392715f963cefdf2d5749695b2606113ab796f11ccd5f7f5441c098cb",
+      "bytes": 117098,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "beee105e5496373821a7b9962c0f70fc65abb63c791a424f52df289b6dfcef85",
-      "bytes": 300013,
+      "export_sha256": "bb1474d10d4e7223ad7912e8ce72efbd4b3896eebcf31dcdea8e1d5417b84ca3",
+      "bytes": 300769,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "bcf30c2c18b758a3b50a7fe6c983888dcb21906fa8fd422408e84f96f906a94b",
-      "bytes": 237285,
+      "export_sha256": "6df228246cd686f9afffeae43ea8b1666b23357c8a98e3e2e6f1ff300c0a5bf4",
+      "bytes": 237698,
       "upstream_modified": true
     },
     {
@@ -4708,6 +4708,13 @@
       "upstream_modified": true
     },
     {
+      "path": "tests/test_credential_requests.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "7ef80a12c093c3767078041d56017ca5e0273a87e1c6ba54e2eead6d3152357d",
+      "bytes": 38772
+    },
+    {
       "path": "tests/test_credential_shape.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -6926,6 +6933,20 @@
       "upstream_modified": true
     },
     {
+      "path": "tools/credential_request_findings.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "a5c813f95a1d72a62c53214535a583fae70a630844dc0bb7479d56cadab2e062",
+      "bytes": 5592
+    },
+    {
+      "path": "tools/credential_requests.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "060b03f9c1c2a3d5b57bd9419286ca3fc158b9fa92033a7b3e51cba97ca1f801",
+      "bytes": 68811
+    },
+    {
       "path": "tools/dashboard_open.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -7687,7 +7708,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 1034,
+  "file_count": 1037,
   "excluded": [
     "git-history",
     "operator-registries",
