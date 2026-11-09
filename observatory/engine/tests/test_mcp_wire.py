@@ -467,7 +467,9 @@ async def run_credentials() -> None:
         (slot / name).write_text("{}" if name.endswith(".json") else "synthetic-not-a-value", encoding="utf-8")
     params = StdioServerParameters(command=sys.executable, args=[str(ROOT / "mcp/server.py")], cwd=str(ROOT),
                                    env={**os.environ, "OBSERVATORY_VAULT_DIR": str(vault),
-                                        "OBSERVATORY_DB": str(vault.parent / "test.db")})
+                                        "OBSERVATORY_DB": str(vault.parent / "test.db"),
+                                        # `observatory_org_accounts` reads doctl's contexts: never this machine's.
+                                        "DOCTL_CONFIG": str(vault.parent / "no-doctl.yaml")})
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as session:
             await session.discover()

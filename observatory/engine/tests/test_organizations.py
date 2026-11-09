@@ -419,8 +419,8 @@ class ProviderAccounts(Base):
         a = self.orgs.Assigner(doc=orgs, estate_owners={"company-org"}, products={})
         self.assertEqual(a.account("heroku", ["c"])["organization"], None, "a string is not read letter by letter")
         self.assertEqual(a.assign({"id": "project:x", "owners": ["company-org"]})["source"], "default")
-        self.assertEqual(sorted(a.problems), ["company: match.heroku_teams is not a known list rule; ignored",
-                                              "company: match.repository_owners is not a known list rule; ignored"])
+        self.assertEqual(sorted(a.problems), ["company: match.heroku_teams must be a list of strings; ignored",
+                                              "company: match.repository_owners must be a list of strings; ignored"])
 
     def test_a_team_name_two_teams_bear_decides_nothing_and_is_warned_about(self):
         orgs = json.loads(json.dumps(self.config))
@@ -918,6 +918,30 @@ class Views(Base):
         self.assertIn("project:co-web", groups["personal"]["projects"],
                       "without organizations.json a group holds its accounts' projects")
         self.assertEqual(groups["external"]["projects"], ["project:clone"])
+
+    def test_round_five_edges(self):
+        """Review round 5: hand-edited organizations reach the analytics rule and the board before their
+        problem is named; a registry document that is not an object is said."""
+        import google_findings, organization_findings
+        importlib.reload(google_findings)
+        importlib.reload(organization_findings)
+        doc = {"properties": [{"property": "properties/1", "project": "project:co-web", "account": "accounts/9"}],
+               "accounts": [{"account": "accounts/9"}]}
+        projects = [{"id": "project:co-web", "organization": "company", "organization_source": "rule"}]
+        for orgs in ({"organizations": {"company": {"ga4_account": "accounts/100", "ga4_legacy_accounts": ["x"]},
+                                        "person": "a string", "default": True}},
+                     {"organizations": ["not", "an", "object"]}, ["not", "an", "object"]):
+            got = google_findings.organization_findings(doc, projects, orgs)
+            self.assertIsInstance(got, list)
+            if isinstance(orgs, dict) and isinstance(orgs["organizations"], dict):
+                self.assertEqual([f["type"] for f in got if f["type"] == "analytics.property_wrong_account"],
+                                 ["analytics.property_wrong_account"])
+                self.assertEqual([f["type"] for f in organization_findings.findings(projects, orgs)],
+                                 ["organization.config_problem"])
+        self.registry("projects.json", ["not", "an", "object"])
+        v = self.view.accounts()
+        self.assertIn(("registry/projects.json", "unreadable"), [(d["source"], d["code"]) for d in v["degraded"]])
+        self.assertEqual(v["state"], "partial")
 
     def test_keys_refusals_name_their_command(self):
         for org, code in (("person", "default-organization"), ("nobody", "unknown-organization"),

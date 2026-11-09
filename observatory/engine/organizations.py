@@ -200,7 +200,7 @@ def _usable_orgs(orgs) -> tuple[dict, list[str]]:
             elif key not in MATCH_RULES:
                 problems.append(f"{name}: match.{key} is not a known list rule; ignored (known: {', '.join(MATCH_RULES)})")
             else:
-                problems.append(f"{name}: match.{key} is not a known list rule; ignored")
+                problems.append(f"{name}: match.{key} must be a list of strings; ignored")
         out[name] = {**org, "match": kept}
     return out, problems
 

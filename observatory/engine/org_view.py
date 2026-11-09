@@ -95,7 +95,11 @@ def _registry(name: str, degraded: list, effect: str) -> dict | None:
         degraded.append({"source": f"registry/{name}", "code": "unreadable",
                          "reason": f"registry/{name} does not read ({type(exc).__name__})", "effect": effect})
         return None
-    return doc if isinstance(doc, dict) else None
+    if not isinstance(doc, dict):
+        degraded.append({"source": f"registry/{name}", "code": "unreadable",
+                         "reason": f"registry/{name} is not one JSON object", "effect": effect})
+        return None
+    return doc
 
 
 def _secret_store() -> pathlib.Path:
@@ -515,7 +519,7 @@ def accounts() -> dict:
         acc.add(f"openrouter:account:{label}", "openrouter", "account", label, [label], "openrouter",
                 connected=True, via="provisioning key stashed")
     vault_projects = _vault_resolver(projects)
-    slots = ["/".join(x) for x in _slots([])]
+    slots = ["/".join(x) for x in _slots(degraded)]
     slot_set = set(slots)
     for name, row in sorted(_openrouter_ledger(degraded).items()):
         if not isinstance(row, dict) or not row.get("account"):
@@ -799,8 +803,8 @@ def keys(org: str) -> dict:
             row["why"] += f"; environment {env!r} is not declared (local, stage, prod): it needs a choice (ORG-R22)"
             row["selected"] = False
         rows.append(row)
-    heroku_teams = sorted({str(t) for t in (hk or {}).get("teams") or [] if isinstance(t, str)}
-                          | {str(x.get("team")) for x in _rows(hk, "apps") if x.get("team")} - {"personal"})
+    heroku_teams = sorted(({str(t) for t in (hk or {}).get("teams") or [] if isinstance(t, str)}
+                           | {str(x.get("team")) for x in _rows(hk, "apps") if x.get("team")}) - {"personal"})
     fixed = _not_movable(org, a, degraded, do_by_uuid, heroku_teams)
     degraded = _once(degraded)
     counts = {c: sum(1 for r in rows if r["class"] == c) for c in ("organization", "personal", "ambiguous")}
