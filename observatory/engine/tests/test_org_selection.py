@@ -324,7 +324,7 @@ class Apply(Base):
         self.assertEqual(shown["state"], "waiting")
         self.assertIn("apply --digest", shown["command"])
         again = self.sel.apply("acme", self.sel.plan("acme")["digest"])
-        self.assertEqual(again["outcome"], "unchanged")
+        self.assertEqual(again["outcome"], "resumed")
         self.assertIsNotNone(self.sel.journal("acme", 1))
 
     def test_a_second_revision_names_its_predecessor_and_keeps_references(self):
@@ -549,7 +549,7 @@ class ReviewRoundTwo(Base):
         self.assertTrue(p["applied"])
         self.assertIn("apply --digest", p["command"], "never `nothing to apply` for an unfinished apply")
         self.assertEqual(self.sel.show("acme")["state"], "waiting")
-        self.assertEqual(self.sel.apply("acme", p["digest"])["outcome"], "unchanged")
+        self.assertEqual(self.sel.apply("acme", p["digest"])["outcome"], "resumed")
         old = next(i for i in self.sel.journal("acme", 1)["items"] if i["id"] == "project:beta-api")
         self.assertEqual({st["state"] for st in old["steps"]}, {"undone"})
         self.assertIn("nothing to apply", self.sel.plan("acme")["nextStep"])
@@ -592,6 +592,108 @@ class ReviewRoundTwo(Base):
         u = self.sel.undo("acme")
         self.assertEqual((u["state"], u["outcome"]), ("empty", "undone"))
         self.assertIn("nothing is selected", u["nextStep"])
+
+
+class ReviewRoundThree(Base):
+    """What the third review found: each case reproduced, then fixed."""
+
+    def test_a_change_that_leaves_the_applied_form_keeps_no_draft(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        v = self.sel.plan("acme", {"exclude": ["project:shared-tool"]})
+        self.assertEqual((v["applied"], v["draft"]), (True, False))
+        self.assertIn("nothing to apply", v["nextStep"])
+
+    def interrupt(self, fn):
+        """Run `fn` with the commit stopped right after the revision is written."""
+        real = self.sel._supersede
+
+        def stop(*args, **kwargs):
+            raise KeyboardInterrupt
+        self.sel._supersede = stop
+        try:
+            with self.assertRaises(KeyboardInterrupt):
+                fn()
+        finally:
+            self.sel._supersede = real
+
+    def test_an_undo_to_nothing_that_stopped_is_named_and_finished(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        self.interrupt(lambda: self.sel.undo("acme"))
+        shown = self.sel.show("acme")
+        self.assertEqual(shown["state"], "waiting", "never empty while the undo has not finished")
+        self.assertIn("apply --digest", shown["command"])
+        self.assertIn("stopped", self.sel.plan("acme")["nextStep"])
+        digest = shown["command"].rsplit(" ", 1)[1]
+        self.assertEqual(self.sel.apply("acme", digest)["outcome"], "resumed",
+                         "the record's own form finishes it, although the defaults read another form now")
+        self.assertEqual({st["state"] for i in self.sel.journal("acme", 1)["items"] for st in i["steps"]}, {"undone"})
+        self.assertEqual(self.sel.show("acme")["state"], "empty")
+
+    def test_any_apply_finishes_the_one_that_stopped_first(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        self.interrupt(lambda: self.sel.apply("acme", self.sel.plan("acme", {"exclude": ["project:beta-api"]})
+                                              ["digest"]))
+        v = self.sel.plan("acme", {"exclude": ["project:alpha-web"]})
+        self.sel.apply("acme", v["digest"])
+        states = {st["state"] for i in self.sel.journal("acme", 1)["items"] if i["id"] == "project:beta-api"
+                  for st in i["steps"]}
+        self.assertEqual(states, {"undone"}, "revision 1's journal is settled before revision 3 is written")
+
+    def test_org_keys_lists_the_keys_of_a_project_chosen_by_hand(self):
+        import org_view
+        self.assertNotIn(NOTES_SLOT, {k["id"] for k in org_view.keys("acme")["keys"]})
+        self.sel.apply("acme", self.ready(include=["project:notes"])["digest"])
+        self.assertIn(NOTES_SLOT, {k["id"] for k in org_view.keys("acme")["keys"]})
+
+    def test_items_found_since_stay_new_after_an_unrelated_apply(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        self.registry("projects.json", {"projects": PROJECTS + [
+            {"id": "project:gamma", "name": "gamma", "owners": ["acme-inc"], "local_folders": ["gamma"],
+             "organization": "acme", "organization_source": "rule", "organization_why": "repository owner acme-inc"}]})
+        self.sel.apply("acme", self.sel.plan("acme", {"exclude": ["project:beta-api"]})["digest"])
+        self.assertIn("project:gamma", self.sel.plan("acme")["new"])
+        self.assertNotIn("project:gamma", {i["id"] for i in self.sel.current("acme")["items"]})
+        self.assertEqual(self.sel.show("acme")["new"], ["project:gamma"])
+
+    def test_a_refusal_never_hands_out_another_form_to_apply(self):
+        v = self.ready()
+        self.sel.plan("acme", {"exclude": ["project:beta-api"]})
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.apply("acme", v["digest"])
+        self.assertNotIn("digest", caught.exception.answer())
+
+    def test_a_project_gone_from_the_registry_is_not_counted(self):
+        self.sel.apply("acme", self.ready(include=["project:notes"])["digest"])
+        self.registry("projects.json", {"projects": [p for p in PROJECTS if p["id"] != "project:notes"]})
+        self.private("projects/notes/prod/OPENROUTER_API_KEY", STAND_IN_VALUE)
+        (self.secrets / "projects" / "notes" / "prod" / "OPENROUTER_API_KEY").unlink()
+        v = self.sel.plan("acme")
+        self.assertIn("project:notes", v["unknown"])
+        self.assertEqual((v["state"], v["preview"]["organization"]["projects"]), ("partial", 2))
+
+    def test_undo_refuses_a_project_another_organizations_rules_now_hold(self):
+        self.sel.apply("acme", self.ready(include=["project:notes"])["digest"])
+        self.sel.apply("acme", self.sel.plan("acme", {"exclude": ["project:notes"]})["digest"])
+        moved = [dict(p, organization="partner", organization_source="rule", organization_why="partner rule")
+                 if p["id"] == "project:notes" else p for p in PROJECTS]
+        self.registry("projects.json", {"projects": moved})
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.undo("acme")
+        self.assertEqual(caught.exception.code, "chosen-for-another")
+
+    def test_nothing_is_created_for_an_organization_never_selected(self):
+        for fn in (lambda: self.sel.undo("acme"), lambda: self.sel.confirm_replacement("acme", ORG_SLOT)):
+            with self.assertRaises(self.sel.Refusal):
+                fn()
+        self.assertEqual(self.files(), [])
+
+    def test_the_cli_refuses_a_flag_its_action_does_not_take(self):
+        import org as org_cli
+        importlib.reload(org_cli)
+        err = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(err):
+            code = org_cli.main(["select", "--org", "acme", "show", "--exclude", "project:beta-api", "--json"])
+        self.assertEqual((code, json.loads(err.getvalue())["error"]), (1, "invalid-change"))
 
 
 class WhatTheOrganizationSees(Base):
@@ -752,7 +854,7 @@ class NewSince(Base):
         rows = organization_findings.selection_findings(self.sel.new_since_all())
         self.assertEqual([(r["type"], r["subject"]) for r in rows], [("organization.selection_new", "organization:acme")])
         self.assertIn("2", rows[0]["title"])
-        self.assertIn("1 project(s), 1 key(s) and 0 account(s)", rows[0]["detail"])
+        self.assertIn("1 project(s) and 1 key(s)", rows[0]["detail"])
         self.assertIn("full org select --org acme plan", rows[0]["action"])
 
     def test_no_finding_without_a_record(self):

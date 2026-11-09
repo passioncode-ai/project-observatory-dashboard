@@ -2363,8 +2363,8 @@ organization's replacement works, only when its project and its issuing
 account agree and its project is chosen. Every other key stays personal. Once a
 selection is applied, the next plan starts from the record, and anything found
 since (a new project or key the rules would propose) is listed as `new` and
-never chosen by itself (ORG-R16); the findings board names it as
-`organization.selection_new`. Changes are item by item (`--include`,
+never chosen by itself (ORG-R16); it stays out of the record until a person
+decides it, and the findings board names it as `organization.selection_new`. Changes are item by item (`--include`,
 `--exclude`, `--key KEY=hand-over-revoke|hand-over-keep|keep`, `--label
 PROJECT=TEXT`, the name the organization would read, empty by default), or a
 whole group as it is listed now (`--include-group proposed|needs-you`; each
@@ -2385,9 +2385,10 @@ decides a project may be in two), a project that is Not ours (`not-ours`; `confl
 not read, so the check cannot be made), and a change to an item whose
 irreversible step is done (`entry-signed`, `already-revoked`). It writes the next revision, which names its predecessor's
 digest and verifies against its own on every read, and a journal of steps per
-item. Applying the same form again changes nothing and finishes an interrupted
-apply; until it does, `plan` and `show` say the last apply stopped and give that
-command. What apply does today stays within what exists: a project waits on
+item. Applying the same form again changes nothing. An apply or undo that
+stopped after its revision was written is finished by the next apply or undo
+before anything else, and `plan` and `show` say so and give the command that
+finishes it (`apply --digest` with the record's own digest). What apply does today stays within what exists: a project waits on
 `fabric-adaptation-plan` (Fabric has no door Observatory hands adaptation items
 to yet, so nothing is sent; then the passkey signs the entry in Fabric), a key
 handed over waits on `credential-requests` (OBS-191 parts 2 and 3) and its
@@ -2397,7 +2398,8 @@ kinds out, OBS-426; contexts on every item, OBS-359). A key kept personal and an
 account recorded are `done`; nothing that has not happened reads `done`. `show`
 counts each kind's items as done, failed, waiting, planned or undone, and names
 what each waits on. `undo` restores the revision before as a new revision (the
-first one undone leaves nothing chosen, and the defaults apply again); it is
+first one undone leaves nothing chosen, and the defaults apply again; undoing
+an undo restores what it removed; a draft not yet applied is dropped with it); it is
 refused once a project's entry is signed in Fabric, where a take-back is a new
 estate revision (OBS-419). In the separate-space layout `confirm-replacement
 KEY` records that the organization's replacement works, so the revocation may

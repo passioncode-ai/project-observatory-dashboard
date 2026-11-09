@@ -779,16 +779,25 @@ def organization_checked(org: object) -> "tuple[dict, organizations.Assigner]":
     return doc, a
 
 
-def keys(org: str, chosen: "list[str] | tuple[str, ...]" = ()) -> dict:
+def keys(org: str, chosen: "list[str] | tuple[str, ...] | None" = None) -> dict:
     """Each vault slot of the projects `org` holds, classified for it (ORG-R06), and the door admin keys that
     never move (ORG-R07). Names only: no slot, stash or value file is opened.
 
-    `chosen`: project ids the person chose for `org` by hand in the selection (OBS-417, `org_selection.py`). Each
-    one known to the registry joins the scope as the organization's, by that decision, so its keys are listed and
-    classified as for a project the rules give the organization (ORG-W6 lists the keys of the chosen projects). An
-    id the registry does not know is ignored here; the selection names it."""
+    `chosen`: project ids the person chose for `org` in the selection (OBS-417, `org_selection.py`). Each one known
+    to the registry joins the scope as the organization's, by that decision, so its keys are listed and classified
+    as for a project the rules give the organization (ORG-W6 lists the keys of the chosen projects). An id the
+    registry does not know is ignored here; the selection names it. None (`full org keys`, `observatory_org_keys`):
+    the projects the applied selection chose, read from its record."""
     doc, a = organization_checked(org)
     degraded: list[dict] = []
+    if chosen is None:
+        import org_selection
+        try:
+            chosen = org_selection.recorded_projects(org)
+        except org_selection.Refusal as refusal:
+            chosen = []
+            degraded.append({"source": "store/org-selection", "code": refusal.code, "reason": str(refusal)[:200],
+                             "effect": "projects chosen by hand in the selection are not in scope"})
     pdoc = _registry("projects.json", degraded, "no project is known to be the organization's, so no key is in scope")
     projects = _project_rows(pdoc)
     do, cf, hk = _quiet("digitalocean-account.json"), _quiet("cloudflare-account.json"), _quiet("heroku-apps.json")
