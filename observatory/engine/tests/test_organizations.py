@@ -538,7 +538,7 @@ class RulesPart2(Base):
         self.assertEqual([f["title"] for f in out], ["organizations.json is not read: not JSON (line 1)"])
 
 
-OR_TOKEN = "synthetic-not-a-value"
+STAND_IN_VALUE = "synthetic-not-a-value"
 
 
 class Views(Base):
@@ -581,9 +581,9 @@ class Views(Base):
             (gh / f"{owner}.json").write_text("[]")
         # A door's stash and records: value files hold a planted value nothing may print, and are made
         # unreadable to prove no value file is opened (ORG-R03, the rows' "never a value").
-        self.private("openrouter-admin/company-or", OR_TOKEN)
+        self.private("openrouter-admin/company-or", STAND_IN_VALUE)
         self.private("openrouter-admin/company-or.meta.json", json.dumps({"kind": "provisioning"}))
-        self.private("digitalocean-admin/company-team", OR_TOKEN)
+        self.private("digitalocean-admin/company-team", STAND_IN_VALUE)
         self.private("digitalocean-admin/company-team.meta.json",
                      json.dumps({"kind": "team", "team_uuid": TEAM, "team_name": "Company Team"}))
         self.private("openrouter-issued.json", json.dumps({"issued": {
@@ -593,24 +593,24 @@ class Views(Base):
             "both-llm": {"account": "main", "destination": "vault:both/prod/OPENROUTER_API_KEY"},
             "mine-from-co": {"account": "company-or", "destination": "vault:mine/local/OPENROUTER_API_KEY"}}}))
         self.private("heroku-issued.json", json.dumps({"issued": {
-            "co-web/prod/EXAMPLE_HEROKU_TOKEN": {"team": "co-apps"}}}))
-        for slot in ("co-web/prod/OPENROUTER_API_KEY", "co-web/stage/OPENROUTER_API_KEY", "co-web/prod/EXAMPLE_HEROKU_TOKEN",
+            "co-web/prod/DEPLOY_HEROKU_TOKEN": {"team": "co-apps"}}}))
+        for slot in ("co-web/prod/OPENROUTER_API_KEY", "co-web/stage/OPENROUTER_API_KEY", "co-web/prod/DEPLOY_HEROKU_TOKEN",
                      "co-web/prod/HAND_PUT", "co-web/qa/OPENROUTER_API_KEY", "co-web/prod/CF_TOKEN",
                      "mine/prod/OPENROUTER_API_KEY", "mine/local/OPENROUTER_API_KEY", "both/prod/OPENROUTER_API_KEY"):
-            self.private(f"projects/{slot}", OR_TOKEN)
+            self.private(f"projects/{slot}", STAND_IN_VALUE)
         for slot in ("co-web/prod/BLOB_ACCESS_ID", "co-web/prod/BLOB_SECRET"):
-            self.private(f"projects/{slot}", OR_TOKEN)
+            self.private(f"projects/{slot}", STAND_IN_VALUE)
         self.private("projects/movements.jsonl", "".join(json.dumps(row) + "\n" for row in (
             {"event": "issue", "secret": "co-web/prod/CF_TOKEN", "tool": "cloudflare.py", "account": "Co Account"},
             {"event": "issue", "secret": "co-web/prod/BLOB_*", "tool": "cloudflare.py", "account": "Co Account"})))
         self.private("digitalocean-issued/other.meta.json", json.dumps(
             {"label": "other", "team_uuid": "33333333-3333-4333-8333-333333333333", "team_name": "Elsewhere",
              "vault": "mine/prod/DO_TOKEN"}))
-        self.private("projects/mine/prod/DO_TOKEN", OR_TOKEN)
+        self.private("projects/mine/prod/DO_TOKEN", STAND_IN_VALUE)
         self.registry("cloudflare-account.json", {"accounts": [
             {"id": "cloudflare:account:acc-co", "account_id": "acc-co", "name": "Co Account"},
             {"id": "cloudflare:account:acc-loose", "account_id": "acc-loose", "name": "Loose"}], "resources": []})
-        self.doctl.write_text("access-token: " + OR_TOKEN + "-doctl\n")
+        self.doctl.write_text("access-token: " + STAND_IN_VALUE + "-doctl\n")
         self.doctl.chmod(0o600)
         import org_view
         self.view = importlib.reload(org_view)
@@ -690,7 +690,7 @@ class Views(Base):
         self.assertEqual([g["name"] for g in v["organizations"]], ["person", "company", "external"])
         self.assertEqual((groups["person"]["label"], groups["person"]["kind"]), ("Example Person", "personal"))
         self.assertEqual(groups["company"]["projects"], ["project:co-web"])
-        self.assertNotIn(OR_TOKEN, json.dumps(v))
+        self.assertNotIn(STAND_IN_VALUE, json.dumps(v))
         self.assertEqual(v["state"], "complete", v["degraded"])
 
     def test_the_accounts_text_and_the_cli_say_the_same(self):
@@ -709,7 +709,7 @@ class Views(Base):
         self.assertIn("Example Company (local)", text)
         self.assertIn("Needs a decision (", text)
         self.assertIn("--from-doctl default", text)
-        self.assertNotIn(OR_TOKEN, text)
+        self.assertNotIn(STAND_IN_VALUE, text)
 
     def test_empty_unconfigured_and_degraded_are_said(self):
         import paths
@@ -751,7 +751,7 @@ class Views(Base):
         self.assertIn("personal", k["co-web/stage/OPENROUTER_API_KEY"]["why"])
         hand = k["co-web/prod/HAND_PUT"]
         self.assertEqual((hand["class"], hand["putBy"], hand["issuer"]), ("ambiguous", "hand", None))
-        self.assertEqual(k["co-web/prod/EXAMPLE_HEROKU_TOKEN"]["class"], "organization")
+        self.assertEqual(k["co-web/prod/DEPLOY_HEROKU_TOKEN"]["class"], "organization")
         self.assertEqual(k["co-web/prod/CF_TOKEN"]["issuer"]["record"], "movements journal (cloudflare.py)")
         self.assertEqual(k["co-web/prod/CF_TOKEN"]["class"], "organization")
         qa = k["co-web/qa/OPENROUTER_API_KEY"]
@@ -770,7 +770,7 @@ class Views(Base):
         self.assertNotIn("mine/prod/DO_TOKEN", k, "issued in a team no rule names, in a personal project")
         self.assertEqual(v["counts"], {"organization": 5, "personal": 1, "ambiguous": 4, "notMovable": 2})
         self.assertEqual([p["id"] for p in v["projects"]], ["project:both", "project:co-web"])
-        self.assertNotIn(OR_TOKEN, json.dumps(v))
+        self.assertNotIn(STAND_IN_VALUE, json.dumps(v))
         self.assertIn("ORG-R09", v["notChecked"][0])
 
     def test_cloudflare_keys_without_a_scan_read_the_admin_tokens_record(self):
@@ -780,7 +780,7 @@ class Views(Base):
         self.assertEqual(k["co-web/prod/CF_TOKEN"]["issuer"]["source"], "none", "no scan, no stash: no id")
         v = self.view.keys("company")
         self.assertEqual([d["code"] for d in v["degraded"] if d["source"] == "cloudflare:journal"], ["unresolved"])
-        self.private("cloudflare-admin/co", OR_TOKEN)
+        self.private("cloudflare-admin/co", STAND_IN_VALUE)
         self.private("cloudflare-admin/co.meta.json", json.dumps(
             {"kind": "admin", "accounts": [{"id": "acc-co", "name": "Co Account"}, {"id": "acc-p", "name": "Mine"}]}))
         v = self.view.keys("company")
@@ -837,7 +837,7 @@ class Views(Base):
         self.assertEqual(self.view.issuers([], {"co account": "acc-co"})["co-web/prod/OPENROUTER_API_KEY"]["provider"],
                          "openrouter", "a door's own record wins over a journal row")
         self.private("heroku-issued.json", json.dumps({"issued": {"both/prod/USER_TOKEN": {"team": None}}}))
-        self.private("projects/both/prod/USER_TOKEN", OR_TOKEN)
+        self.private("projects/both/prod/USER_TOKEN", STAND_IN_VALUE)
         k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
         self.assertEqual((k["both/prod/USER_TOKEN"]["class"], k["both/prod/USER_TOKEN"]["issuer"]["source"]),
                          ("personal", "default"), "the Heroku user reads the default organization in both views")
@@ -859,7 +859,7 @@ class Views(Base):
         self.registry("digitalocean-account.json", {"accounts": [
             {"id": f"digitalocean:team:{TEAM}", "team_uuid": TEAM, "name": "Company Team"}], "resources": []})
         self.registry("heroku-apps.json", {"teams": ["co-apps"], "apps": []})
-        self.private("heroku-admin/me", OR_TOKEN)
+        self.private("heroku-admin/me", STAND_IN_VALUE)
         v = self.view.keys("company")
         fixed = {(n["provider"], n["label"]): n for n in v["notMovable"]}
         self.assertEqual(fixed[("digitalocean", "company-team")]["accounts"][0]["source"], "rule",
@@ -886,13 +886,13 @@ class Views(Base):
         reserved name, and the projects a group holds without organizations.json."""
         self.private("projects/movements.jsonl", "".join(json.dumps(r) + "\n" for r in (
             {"event": "put", "secret": "co-web/prod/OPENROUTER_API_KEY", "tool": "vault.py"},
-            {"event": "issue", "secret": "openrouter/company-or/co-web-llm", "tool": "openrouter.py",
+            {"event": "issue", "secret": "/".join(("openrouter", "company-or", "co-web-llm")), "tool": "openrouter.py",
              "to": "vault:co-web/prod/OPENROUTER_API_KEY"},
-            {"event": "issue", "secret": "co-web/prod/EXAMPLE_HEROKU_TOKEN", "tool": "heroku.py"},
-            {"event": "put", "secret": "co-web/prod/EXAMPLE_HEROKU_TOKEN", "tool": "secret_prompt"},
+            {"event": "issue", "secret": "co-web/prod/DEPLOY_HEROKU_TOKEN", "tool": "heroku.py"},
+            {"event": "put", "secret": "co-web/prod/DEPLOY_HEROKU_TOKEN", "tool": "secret_prompt"},
             {"event": "put", "secret": "co-web/prod/OPENROUTER_API_KEY", "tool": "vault.py"})))
         k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
-        for slot in ("co-web/prod/OPENROUTER_API_KEY", "co-web/prod/EXAMPLE_HEROKU_TOKEN"):
+        for slot in ("co-web/prod/OPENROUTER_API_KEY", "co-web/prod/DEPLOY_HEROKU_TOKEN"):
             self.assertEqual((k[slot]["putBy"], k[slot]["selected"]), ("hand", False), slot)
         self.private("projects/movements.jsonl", json.dumps(
             {"event": "put", "secret": "co-web/prod/OPENROUTER_API_KEY", "tool": "vault.py"}) + "\n")
