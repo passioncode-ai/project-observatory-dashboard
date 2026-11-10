@@ -362,6 +362,32 @@ class Return(Base):
         self.assertTrue(path.is_file(), 'nothing moved')
         self.assertEqual(self.entry()['forward'], HAND)
 
+    def test_a_forward_unloaded_by_hand_is_cleared_by_return_so_cutover_is_not_stuck(self):
+        path = self.hand_forward(['/usr/bin/ssh', '-N', '-L', f'127.0.0.1:{PORT}:127.0.0.1:{PORT}', VIA])
+        run = Launchctl(loaded={JOB, HAND})
+        self.leave(run)
+        self.assertEqual(MM.return_job(JOB, self.home, runner=run, platform='darwin', uid=UID)['forward']['state'],
+                         'adopted-left')
+        run.loaded.discard(HAND)   # the hint's other way: launchctl bootout by hand
+        path.unlink()
+        for flag in (True, False):
+            with self.subTest(remove_adopted=flag):
+                MI.set_forward(JOB, self.home, forward=HAND, adopted=True)
+                result = MM.return_job(JOB, self.home, runner=run, platform='darwin', uid=UID, remove_adopted=flag)
+                self.assertEqual(result['forward']['state'], 'not-running')
+                self.assertNotIn('forward', self.entry(), 'nothing holds the port, so nothing blocks cutover')
+
+    def test_remove_adopted_clears_an_unloaded_record_whose_plist_is_no_longer_a_forward(self):
+        path = self.hand_forward(['/usr/bin/ssh', '-N', '-L', f'127.0.0.1:{PORT}:127.0.0.1:{PORT}', VIA])
+        run = Launchctl(loaded={JOB, HAND})
+        self.leave(run)
+        run.loaded.discard(HAND)
+        path.write_bytes(plistlib.dumps({'Label': HAND, 'ProgramArguments': ['/bin/sleep', '60']}))
+        result = MM.return_job(JOB, self.home, runner=run, platform='darwin', uid=UID, remove_adopted=True)
+        self.assertEqual(result['forward']['state'], 'not-running')
+        self.assertTrue(path.is_file(), 'a job that is not a forward is never moved')
+        self.assertNotIn('forward', self.entry())
+
     def test_return_of_a_label_not_placed_elsewhere_is_refused_and_changes_nothing(self):
         self.leave(Launchctl(loaded={JOB}))
         before = MI.placement_path(self.home).read_bytes()

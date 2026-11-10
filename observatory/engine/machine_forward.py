@@ -346,7 +346,8 @@ def remove(entry: dict, home: Path, *, runner, uid: int, remove_adopted: bool = 
     """Undo the forward a placement entry records. A job this engine installed (its label has PREFIX and the
     entry does not say adopted) is unloaded and its plist removed; an adopted one is left as it is unless
     REMOVE_ADOPTED, which unloads it and sets its plist aside under the data folder. Answers `state`
-    (`removed`, `adopted-left`, `adopted-removed`, `none`) and raises ForwardError when an unload fails."""
+    (`removed`, `adopted-left`, `adopted-removed`, `not-running` for one not loaded any more, `none`) and raises
+    ForwardError when an unload fails."""
     label, adopted = recorded(entry)
     sid = entry.get("serviceId") if isinstance(entry.get("serviceId"), str) else None
     if label is None:
@@ -366,6 +367,12 @@ def remove(entry: dict, home: Path, *, runner, uid: int, remove_adopted: bool = 
         found = [p for p in (home / "Library/LaunchAgents").glob("*.plist")
                  if p.is_file() and mi.job_label(p) == label] if (home / "Library/LaunchAgents").is_dir() else []
         path = found[0] if found else path
+    if not ours and loaded(runner, label, uid) is False:
+        # Unloaded since it was adopted (a launchctl bootout by hand): it holds no port any more, so its record is
+        # cleared and its plist, if any, is left where it is. A sandbox (None) is read as still loaded.
+        return {"state": "not-running", "label": label, "definition": str(path) if path.is_file() else None,
+                "hint": f"{label} is not loaded, so it holds no port here: its record is cleared and its plist is "
+                        "left as it is"}
     if not ours and not remove_adopted:
         port = None
         try:
@@ -378,7 +385,7 @@ def remove(entry: dict, home: Path, *, runner, uid: int, remove_adopted: bool = 
                 "hint": f"{label} was set up by hand and adopted, so it is left running and still holds {held} "
                         "here: the service cannot start here while it does. Run return again with "
                         f"--remove-adopted to unload it and set its plist aside, or launchctl bootout "
-                        f"gui/{uid}/{label} yourself"}
+                        f"gui/{uid}/{label} yourself and run return again to clear its record"}
     if not ours:
         # Unload and move only what is still an ssh forward of a local port: the record names a label, and the
         # file under it may have changed since it was adopted.
