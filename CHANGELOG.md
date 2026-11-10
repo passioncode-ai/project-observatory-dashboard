@@ -3,6 +3,16 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Fixed
+
+- **systemd units name their working folder without quotes** (OBS-503). systemd does not unquote `WorkingDirectory=`,
+  so the quoted path the Linux installer wrote was refused as `bad-setting` and the `-check` and `-maintain` timers
+  never ran. Both unit writers now write the path bare (a space needs no escaping there); a path with a quote,
+  backslash, newline, `%` or `$`, a relative path, or one ending in white space is refused. Reinstalling the jobs
+  rewrites the units.
+
 ## 0.35.11 (2026-11-10)
 
 A service moved to another machine stays reachable at its old local address: on macOS, `full machine-move leave
