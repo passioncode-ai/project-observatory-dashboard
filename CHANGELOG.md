@@ -3,7 +3,15 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.35.11 (2026-11-10)
+
+A service moved to another machine stays reachable at its old local address: on macOS, `full machine-move leave
+LABEL --to MACHINE_ID --via USER@HOST` installs one launchd ssh job that forwards the service's local port to where it
+now runs, adopts a forward you set up by hand for the same port and destination, and records it in `placement.json`.
+The new `full machine-move return LABEL` removes that forward when the job comes back, and `cutover` refuses while a
+forward is recorded. No setting or migration changes: `placement.json` keeps its schema `observatory-placement/1`,
+and older readers ignore its two new fields.
+The observatory-log plugin stays at 0.35.9: no skill changed.
 
 ### Added
 
