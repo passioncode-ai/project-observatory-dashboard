@@ -3,7 +3,17 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.35.10 (2026-11-10)
+
+A key can be copied into another secret store on this machine: `tools/vault.py copy` reads and writes the value in
+one process, never shows it, keeps the source and records `copied` in both stores' journals. The machine view gains
+a skills section (`observatory_machine(section="skills")`, `full machine --skills`) listing this space's skills and
+plugins, with the finding `plugin-behind` for a plugin behind its marketplace. Space daemons 1.2.0 replace a loaded
+daemon in one step (`replace`), and `remove` answers only once launchd has let the label go. The root-owned copy
+changes, so an administrator installs it again from this release, with the same steps; its `--version` prints
+`space-daemons 1.2.0 sha256 747e472e066f426a87b5174e662889109d2637fb661d0b1f59e2943279f61af0`. The desktop app's
+updater now pulls `zip` 9.5.0, which fixes three advisories. The observatory-log plugin stays at 0.35.9: no skill
+changed.
 
 ### Added
 
