@@ -632,7 +632,10 @@ def return_job(label: str, home: Path, *, runner=subprocess.run, platform: str =
         forward = mf.remove(entry, home, runner=runner, uid=uid, remove_adopted=remove_adopted)
     except mf.ForwardError as exc:
         raise MachineMoveFailed(str(exc)) from None
-    mi.set_forward(label, home, forward=None, machine=me)
+    if forward.get("state") != "adopted-left":
+        # A hand-made forward left loaded still holds the port: its record stays, so `return --remove-adopted`
+        # finds it and `cutover` keeps refusing until it is gone.
+        mi.set_forward(label, home, forward=None, machine=me)
     there = entry.get("placedOn") if mi.valid_id(entry.get("placedOn")) else "the machine it runs on"
     return {"label": label, "machine": me, "placed_on": entry.get("placedOn"), "forward": forward,
             "placement": str(mi.placement_path(home)),

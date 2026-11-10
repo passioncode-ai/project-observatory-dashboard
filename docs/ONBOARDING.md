@@ -3208,9 +3208,13 @@ service with a local port says so in `forward.hint`.
 When the job comes back, run `return LABEL` on this machine before `cutover`: it unloads and
 removes the forward this engine installed and clears `forward`; the job stays placed on the other
 machine until `leave` there and `cutover` here. A forward set up by hand is left loaded (it still
-holds the port, and the answer says so) unless you add `--remove-adopted`, which unloads it and sets
+holds the port, and the answer says so; it stays recorded, so `cutover` keeps refusing) until you run
+`return` again with `--remove-adopted`, which unloads it and sets
 its plist aside in `${XDG_DATA_HOME:-~/.local/share}/project-observatory/machine-move/forwards-set-aside/`, never
-deleting it, and only while that plist still runs an ssh forward of a local port. `cutover` refuses while a forward is recorded for the label and names `return`.
+deleting it, and only while that plist still runs an ssh forward of a local port. Unloading it
+yourself (`launchctl bootout`) is not enough while its plist stays in `~/Library/LaunchAgents`: it
+loads again at the next login, so it stays recorded until `--remove-adopted` sets the plist aside;
+once no forward is left under its label, `return` clears the record (`not-running`). `cutover` refuses while a forward is recorded for the label and names `return`.
 
 A staged plist can be days old: the restore staged it, and a service released anew since then lives
 in a new release folder. Before it moves anything or asks you, `cutover` checks that the staged plist's

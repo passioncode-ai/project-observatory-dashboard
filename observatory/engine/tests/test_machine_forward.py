@@ -5,7 +5,7 @@
 descriptor's origin is a local port, installs one launchd job that forwards that port to the space on the
 other machine where the service now runs; the `elsewhere` entry names that job in `forward`. A hand-made
 forward of the same port to the same space is adopted, never installed twice. `full machine-move return
-LABEL` removes the forward this engine installed, and only clears the record of an adopted one.
+LABEL` removes the forward this engine installed; an adopted one stays loaded and recorded unless --remove-adopted.
 
 Hermetic: a temporary HOME, a fake launchctl (no launchd is asked), no ssh, no network; whether the
 port is free is the test's answer, never a socket of this machine.
@@ -329,6 +329,14 @@ class Return(Base):
         self.assertTrue(path.is_file())
         self.assertIn(HAND, run.loaded)
         self.assertEqual(run.verbs('bootout'), [['launchctl', 'bootout', f'gui/{UID}/{JOB}']])
+        self.assertEqual((self.entry()['forward'], self.entry()['forwardAdopted']), (HAND, True),
+                         'it still holds the port, so its record stays')
+        with self.assertRaisesRegex(MM.MachineMoveError, f'machine-move return {JOB}'):
+            MM.cutover(JOB, self.home, runner=run, platform='darwin', uid=UID, confirm=lambda *a: True)
+        # The hint's next step works: the rerun with --remove-adopted finds the forward and unloads it.
+        again = MM.return_job(JOB, self.home, runner=run, platform='darwin', uid=UID, remove_adopted=True)
+        self.assertEqual(again['forward']['state'], 'adopted-removed')
+        self.assertNotIn(HAND, run.loaded)
         self.assertNotIn('forward', self.entry())
 
     def test_return_with_remove_adopted_unloads_it_and_sets_its_plist_aside(self):
@@ -348,11 +356,73 @@ class Return(Base):
         run = Launchctl(loaded={JOB, HAND})
         self.leave(run)
         path.write_bytes(plistlib.dumps({'Label': HAND, 'ProgramArguments': ['/bin/sleep', '60']}))
+        plain = MM.return_job(JOB, self.home, runner=run, platform='darwin', uid=UID)
+        self.assertIn(f'launchctl bootout gui/{UID}/{HAND}', plain['forward']['hint'], 'the step that works here')
         with self.assertRaisesRegex(MM.MachineMoveFailed, 'no longer an ssh forward'):
             MM.return_job(JOB, self.home, runner=run, platform='darwin', uid=UID, remove_adopted=True)
         self.assertIn(HAND, run.loaded)
         self.assertTrue(path.is_file(), 'nothing moved')
         self.assertEqual(self.entry()['forward'], HAND)
+
+    def test_a_forward_unloaded_by_hand_is_cleared_by_return_so_cutover_is_not_stuck(self):
+        path = self.hand_forward(['/usr/bin/ssh', '-N', '-L', f'127.0.0.1:{PORT}:127.0.0.1:{PORT}', VIA])
+        run = Launchctl(loaded={JOB, HAND})
+        self.leave(run)
+        self.assertEqual(MM.return_job(JOB, self.home, runner=run, platform='darwin', uid=UID)['forward']['state'],
+                         'adopted-left')
+        run.loaded.discard(HAND)   # the hint's other way: launchctl bootout by hand
+        path.unlink()
+        for flag in (True, False):
+            with self.subTest(remove_adopted=flag):
+                MI.set_forward(JOB, self.home, forward=HAND, adopted=True)
+                result = MM.return_job(JOB, self.home, runner=run, platform='darwin', uid=UID, remove_adopted=flag)
+                self.assertEqual(result['forward']['state'], 'not-running')
+                self.assertNotIn('forward', self.entry(), 'nothing holds the port, so nothing blocks cutover')
+
+    def test_remove_adopted_clears_an_unloaded_record_whose_plist_is_no_longer_a_forward(self):
+        path = self.hand_forward(['/usr/bin/ssh', '-N', '-L', f'127.0.0.1:{PORT}:127.0.0.1:{PORT}', VIA])
+        run = Launchctl(loaded={JOB, HAND})
+        self.leave(run)
+        run.loaded.discard(HAND)
+        path.write_bytes(plistlib.dumps({'Label': HAND, 'ProgramArguments': ['/bin/sleep', '60']}))
+        result = MM.return_job(JOB, self.home, runner=run, platform='darwin', uid=UID, remove_adopted=True)
+        self.assertEqual(result['forward']['state'], 'not-running')
+        self.assertTrue(path.is_file(), 'a job that is not a forward is never moved')
+        self.assertNotIn('forward', self.entry())
+
+    def test_an_unloaded_forward_whose_plist_would_load_again_at_login_stays_recorded(self):
+        path = self.hand_forward(['/usr/bin/ssh', '-N', '-L', f'127.0.0.1:{PORT}:127.0.0.1:{PORT}', VIA])
+        run = Launchctl(loaded={JOB, HAND})
+        self.leave(run)
+        run.loaded.discard(HAND)   # booted out by hand, the plist still in LaunchAgents
+        result = MM.return_job(JOB, self.home, runner=run, platform='darwin', uid=UID)
+        self.assertEqual(result['forward']['state'], 'adopted-left')
+        self.assertIn('next login', result['forward']['hint'])
+        self.assertEqual(self.entry()['forward'], HAND, 'it would take the port again at login')
+        result = MM.return_job(JOB, self.home, runner=run, platform='darwin', uid=UID, remove_adopted=True)
+        self.assertEqual(result['forward']['state'], 'adopted-removed')
+        self.assertFalse(path.exists(), 'set aside, so it cannot load again')
+        self.assertEqual(run.verbs('bootout'), [['launchctl', 'bootout', f'gui/{UID}/{JOB}']], 'nothing to unload')
+        self.assertNotIn('forward', self.entry())
+
+    def test_in_a_sandbox_an_adopted_forward_reads_as_still_loaded(self):
+        path = self.hand_forward(['/usr/bin/ssh', '-N', '-L', f'127.0.0.1:{PORT}:127.0.0.1:{PORT}', VIA])
+        run = Launchctl(loaded={JOB, HAND})
+        self.leave(run)
+        path.unlink()   # launchd is never asked here, so an absent plist proves nothing about the job
+        with patch.dict(os.environ, {'OBSERVATORY_SYSTEM_SETUP': '0'}):
+            result = MM.return_job(JOB, self.home, runner=run, platform='darwin', uid=UID)
+        self.assertEqual(result['forward']['state'], 'adopted-left')
+        self.assertEqual(self.entry()['forward'], HAND)
+
+    def test_an_unloaded_forward_of_this_engine_is_removed_with_its_plist(self):
+        run = Launchctl(loaded={JOB})
+        self.leave(run)
+        run.loaded.discard(OWN)
+        result = MM.return_job(JOB, self.home, runner=run, platform='darwin', uid=UID)
+        self.assertEqual(result['forward']['state'], 'removed')
+        self.assertFalse(self.own_plist().exists(), 'its KeepAlive plist never stays behind')
+        self.assertNotIn('forward', self.entry())
 
     def test_return_of_a_label_not_placed_elsewhere_is_refused_and_changes_nothing(self):
         self.leave(Launchctl(loaded={JOB}))

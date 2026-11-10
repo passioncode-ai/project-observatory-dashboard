@@ -31,6 +31,11 @@ Merged to `main` since `v0.35.10`:
   its plist aside under `machine-move/forwards-set-aside/`. `cutover` refuses while a forward is recorded for the
   label. Off macOS, `--via` and `return` are refused before anything moves. Tests:
   `observatory/engine/tests/test_machine_forward.py`.
+- PR #494 (`3ad2178e`), the blocking finding of this release PR's second review round: a plain `full machine-move
+  return LABEL` over an adopted forward that still holds the port keeps its `forward` record, so the hinted rerun with
+  `--remove-adopted` finds it and `cutover` keeps refusing; an adopted forward no longer loaded, with no forward left
+  under its label, is cleared. Tests in `observatory/engine/tests/test_machine_forward.py`. This release PR was rebased
+  onto it and `observatory/engine/SOURCE-INVENTORY.json` regenerated.
 - The `observatory-log` plugin stays at 0.35.9: `git diff v0.35.10 HEAD -- observatory/engine/skill .claude-plugin`
   printed nothing.
 
