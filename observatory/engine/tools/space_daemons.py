@@ -15,7 +15,7 @@ WHO RUNS IT. An administrator, once per job, with sudo:
 
 `-I` (isolated mode) is part of the command: Python then leaves the script's folder and the user's
 site-packages out of its module path and ignores every PYTHON* variable, so no module the space's
-account planted is imported as root. `apply` and `remove` refuse to run without it (`not-isolated`).
+account planted is imported as root. `apply`, `replace` and `remove` refuse to run without it (`not-isolated`).
 
 Root must never run a file the space's account can write, so this script is not run from the engine's
 folder. The administrator installs a root-owned copy once, from the release downloaded and verified in
@@ -38,7 +38,7 @@ the administrator's OWN account, never copied from the space account's folders:
 
 `--version` prints the version and this file's sha256 for information; the verification is above.
 
-`apply` and `remove` refuse to run from a copy that is not owned by root, is writable by group or
+`apply`, `replace` and `remove` refuse to run from a copy that is not owned by root, is writable by group or
 others, is a symbolic link, or sits in a folder anyone but root can write. `plan`, `status` and
 `--version` work from any copy. That check runs after Python has read this file's imports: with `-I`
 the script's folder is not searched for modules, and the folder must still be root's alone before the
@@ -46,11 +46,30 @@ copy goes in, which the administrator checks (`ls -ld /usr/local /usr/local/libe
 
     space_daemons.py --version                       the version and the sha256 of this file (information)
     space_daemons.py plan   --user NAME [--from background|staged] [--label L ...] [--json]
-    space_daemons.py apply  --user NAME [--label L ...] [--json]          (root)
-    space_daemons.py remove --user NAME --label L [--json]                (root)
+    space_daemons.py apply   --user NAME [--label L ...] [--json]         (root)
+    space_daemons.py replace --user NAME --label L [--json]               (root)
+    space_daemons.py remove  --user NAME --label L [--json]               (root)
     space_daemons.py status --user NAME [--json]
     space_daemons.py trust show [--user NAME] [--json]
     space_daemons.py trust set --owner NAME ... --group NAME ... [--json]   (root)
+
+REPLACING A DAEMON (1.2.0). `launchctl bootout` returns before the daemon's process has exited, and launchd
+refuses a bootstrap (exit 5, 37) or this tool's `apply` (`label_taken`) for the label until it has. So `remove`
+waits until launchd no longer knows the label (BOOTOUT_WAIT_SECONDS, or the daemon's ExitTimeOut and 5 s when that
+is longer, at most BOOTOUT_WAIT_MAX_SECONDS) and only then deletes the file and the registry entry; a stop that
+does not finish in time is `still_loaded` (or `bootout_failed`), exit 1, and keeps both, so `remove` runs again.
+`replace --label L` does in one step what `remove` then `apply` did in two: it plans (a definition the rules refuse
+stops nothing), writes, boots the old daemon out, waits the same way, bootstraps the new one (again while launchd
+answers 5, 37 or 125, up to BOOTSTRAP_ATTEMPTS); when the new one does not load it puts the previous daemon back
+and loads it, and when the old one does not stop in time it loads nothing and puts the previous file back, saying
+which in `put_back`. Every result of apply, replace and remove carries `steps`, one line per step with its
+outcome (a refusal exit 2 answers, `not-ours` among them, is an error with no steps instead). launchd is believed only when it
+answers: a `launchctl print` that times out or fails is `launchd_unknown` and changes nothing, and a loaded label
+is booted out or counted as loaded by this tool only when launchd names this tool's own plist as its path. An
+apply or replace interrupted while it waits (Ctrl-C) puts the previous file and registry entry back before it
+exits; a SIGHUP or SIGTERM does not yet (OBS-484).
+`apply` over its own loaded daemon replaces it the same way when the definition changed, and leaves it alone
+(`unchanged`) when it did not; `replace` reloads it even then.
 
 TRUSTED OWNERS (1.1.0). A program path normally belongs to root or the account. Where Homebrew's prefix is
 owned by the host's admin account and group-writable by `admin`, the administrator lists those in the
@@ -105,6 +124,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 
 try:
     import fcntl
@@ -113,7 +133,7 @@ try:
 except ImportError:  # Windows: the module still imports, so its pure rules can be tested there.
     fcntl = grp = pwd = None
 
-SPACE_DAEMONS_VERSION = "1.1.0"
+SPACE_DAEMONS_VERSION = "1.2.0"
 REGISTRY_SCHEMA = "observatory-space-daemons/1"
 DAEMONS_DIR = "Library/LaunchDaemons"
 REGISTRY_DIR = "Library/Application Support/ProjectObservatory"
@@ -153,6 +173,22 @@ BACKGROUND_PARTS = ("background", "LaunchAgents")
 STAGED_PARTS = ("machine-move", "LaunchAgents")
 MAX_DEFINITION_BYTES = 64 * 1024
 FIRST_PERSON_UID = 500
+#: How long `remove` and `replace` wait for launchd to let a label go after `bootout` (1.2.0, OBS-475): `bootout`
+#: returns before the daemon's process has exited, and launchd refuses a bootstrap of the same label until it has.
+#: launchd's default ExitTimeOut (20 s) and a margin; a daemon whose own ExitTimeOut is longer gets it and 5 s more,
+#: never more than BOOTOUT_WAIT_MAX_SECONDS (an ExitTimeOut of 0, which launchd reads as "never kill", gets that).
+BOOTOUT_WAIT_SECONDS = 45
+BOOTOUT_WAIT_MAX_SECONDS = 300
+#: Bootstrap attempts, and the exits launchd gives while a bootout of the same label is still finishing
+#: (5, EIO "Input/output error"; 37, EALREADY "Operation already in progress"; 125, launchctl's own timeout here),
+#: the same set the engine's `install_launchd.start_job` retries (OBS-410).
+BOOTSTRAP_ATTEMPTS = 5
+BOOTSTRAP_TRANSIENT = frozenset({5, 37, 125})
+#: The exit `System.output` answers when launchctl did not finish within its timeout.
+TIMED_OUT = 125
+#: What `launchctl print system/<label>` answers for a label launchd does not know ("Could not find service").
+#: Only this reads as gone while a stop is waited for: a print that timed out or did not start says nothing.
+NOT_FOUND = 113
 
 #: Test seams. They take effect only when the switch is "1" AND the process is not root, so no
 #: ordinary environment variable can redirect a root write in production.
@@ -237,11 +273,14 @@ class System(object):
     `euid` for os.geteuid(); `set_owner(fd or path)` makes a written file or folder root:wheel; `self_check()` answers
     the problems of the copy being run (an empty list when it is the root-owned one); `owner_uid` is
     who must own the system folders it writes into (root; a test's own uid in a temporary root);
-    `isolated` whether Python runs in isolated mode (`-I`); `chown_fd` gives a log file to the account."""
+    `isolated` whether Python runs in isolated mode (`-I`); `chown_fd` gives a log file to the account;
+    `sleep` and `clock` stand in for time.sleep and time.monotonic while a stop or a start waits for launchd."""
 
     def __init__(self, root="/", runner=None, euid=None, set_owner=None, self_check=None, launchctl=LAUNCHCTL,
-                 owner_uid=0, isolated=None, chmod=CHMOD, chown_fd=None):
+                 owner_uid=0, isolated=None, chmod=CHMOD, chown_fd=None, sleep=None, clock=None):
         self.root = root
+        self.sleep = sleep or time.sleep
+        self.clock = clock or time.monotonic
         self.isolated = (sys.flags.isolated == 1) if isolated is None else isolated
         self.chmod = chmod
         #: chown_fd(fd, uid, gid): hands a pre-created log file to the account (os.fchown).
@@ -286,6 +325,8 @@ class System(object):
         """ARGV through the runner: (exit code, its output, last line of its error)."""
         try:
             p = self.runner(list(argv), capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        except subprocess.TimeoutExpired as exc:
+            return TIMED_OUT, "", type(exc).__name__
         except (OSError, subprocess.SubprocessError) as exc:
             return 127, "", type(exc).__name__
         tail = ((p.stderr or "").strip().splitlines() or [""])[-1][:200]
@@ -297,6 +338,65 @@ class System(object):
 
     def loaded(self, label):
         return self.run(["print", "system/" + label])[0] == 0
+
+    def state(self, label):
+        """What launchd says of system/LABEL: (`loaded`, the plist path it was loaded from or None), (`gone`, None)
+        for its "not found" (NOT_FOUND), or (`unknown`, the exit) for any other answer, a timeout included."""
+        code, out, _tail = self.output([self.launchctl, "print", "system/" + label])
+        if code == 0:
+            match = re.search(r"^\s*path = (.+?)\s*$", out, re.M)
+            return "loaded", match.group(1) if match else None
+        if code == NOT_FOUND:
+            return "gone", None
+        return "unknown", code
+
+    def loaded_from(self, label, path):
+        """Whether system/LABEL is loaded from PATH: the only proof that a loaded label is this tool's job."""
+        state, where = self.state(label)
+        return state == "loaded" and where == path
+
+    def wait_gone(self, label, seconds):
+        """Ask launchd until it answers that it does not know system/LABEL (exit NOT_FOUND), for at most SECONDS
+        (plus the time launchctl itself takes): (gone, seconds waited, the last exit of `print`). Any other answer,
+        a print that timed out included, is not gone."""
+        start = self.clock()
+        delay = 0.25
+        while True:
+            code = self.run(["print", "system/" + label])[0]
+            if code == NOT_FOUND:
+                return True, round(self.clock() - start, 2), code
+            waited = self.clock() - start
+            if waited >= seconds:
+                return False, round(waited, 2), code
+            self.sleep(min(delay, seconds - waited))
+            delay = min(delay * 2, 2.0)
+
+    def stop(self, label, seconds):
+        """`bootout system/LABEL`, then wait until the label is gone (OBS-475): `bootout` returns before the
+        daemon's process has exited, and a bootstrap or an apply sent in that window is refused. Answers
+        (gone, exit code of bootout, its last error line, seconds waited)."""
+        code, tail = self.run(["bootout", "system/" + label])
+        gone, waited, printed = self.wait_gone(label, seconds)
+        if not gone and printed != 0:
+            tail = ("%s; launchctl print answered exit %d" % (tail, printed)).lstrip("; ")
+        return gone, code, tail, waited
+
+    def start(self, label, path):
+        """`bootstrap system PATH`, again while launchd answers that a bootout of LABEL is still finishing.
+        Answers (loaded, exit code of the last attempt, its last error line, attempts)."""
+        code, tail, attempt = 0, "", 0
+        for attempt in range(1, BOOTSTRAP_ATTEMPTS + 1):
+            code, tail = self.run(["bootstrap", "system", path])
+            if code == 0:
+                return True, code, tail, attempt
+            if code == TIMED_OUT and self.loaded_from(label, path):
+                # launchctl's own timeout, but launchd did load this file: a retry would only meet "already loaded".
+                return True, code, tail, attempt
+            if code not in BOOTSTRAP_TRANSIENT:
+                break
+            if attempt < BOOTSTRAP_ATTEMPTS:
+                self.sleep(float(attempt))
+        return False, code, tail, attempt
 
 
 def _own_root(target):
@@ -1182,7 +1282,8 @@ def label_holders(system):
     return holders
 
 
-def _plist_label(path):
+def _plist_doc(path):
+    """The plist at PATH as a dict, read without following a link; None when it is not one."""
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
         fd = os.open(path, flags)
@@ -1190,7 +1291,44 @@ def _plist_label(path):
             doc = plistlib.loads(stream.read(1024 * 1024))
     except Exception:  # not a plist, or a link
         return None
-    return doc.get("Label") if isinstance(doc, dict) else None
+    return doc if isinstance(doc, dict) else None
+
+
+def _plist_label(path):
+    doc = _plist_doc(path)
+    return doc.get("Label") if doc is not None else None
+
+
+def bootout_wait_seconds(doc):
+    """How long a stop of the daemon DOC describes waits for launchd to let its label go: BOOTOUT_WAIT_SECONDS,
+    or its own ExitTimeOut and 5 s when that is longer, at most BOOTOUT_WAIT_MAX_SECONDS (ExitTimeOut 0 is
+    launchd's "never kill", so it gets the most)."""
+    exit_timeout = doc.get("ExitTimeOut") if isinstance(doc, dict) else None
+    if not _is_int(exit_timeout) or exit_timeout < 0:
+        return BOOTOUT_WAIT_SECONDS
+    if exit_timeout == 0:
+        return BOOTOUT_WAIT_MAX_SECONDS
+    return min(max(BOOTOUT_WAIT_SECONDS, exit_timeout + 5), BOOTOUT_WAIT_MAX_SECONDS)
+
+
+def _described(state, where):
+    """What launchd answered for a label, in words: loaded from a plist (or none named), or an unknown state."""
+    if state == "loaded":
+        return "loaded from %s" % (where or "no plist launchctl names")
+    return "in a state launchctl did not tell (exit %s)" % where
+
+
+def _step(steps, name, outcome, detail=""):
+    """One line of a receipt: what was done (`done`), left out (`skipped`), refused or failed, and why."""
+    steps.append({"step": name, "outcome": outcome, "detail": detail})
+
+
+def _still_loaded(label, gone_code, tail, waited, seconds):
+    """The problem of a stop that did not finish: `bootout_failed` when launchctl refused it, else `still_loaded`."""
+    after = "system/%s is still loaded %s s after bootout (the bound is %d s)" % (label, waited, seconds)
+    if gone_code != 0:
+        return _problem("bootout_failed", ("exit %d %s; %s" % (gone_code, tail, after)).replace("  ", " "))
+    return _problem("still_loaded", after + ("; " + tail if tail else ""))
 
 
 def _file_sha(path):
@@ -1217,61 +1355,81 @@ def plan(account, source="background", labels=None, system=None):
             "from": source, "folder": folder, "definitions": defs, "not_found": missing, "trust": trust.as_dict()}
 
 
-def _install_one(system, account, definition, entries, holders=None):
-    """Write and load one daemon; on a failure put back what was there. Answers its outcome."""
+def _install_one(system, account, definition, entries, holders=None, force=False):
+    """Write and load one daemon, replacing this tool's own loaded daemon of the label (1.2.0, OBS-395 part 2,
+    OBS-475): plan, write, bootout, wait until launchd has let the label go, bootstrap; on a failure put back
+    what was there and say whether it runs again. A daemon whose definition did not change and that is loaded
+    is left alone (`unchanged`) unless FORCE (`replace`). Answers its outcome with the receipt in `steps`."""
     label = definition["label"]
     target = system.daemon_path(label)
     mine = [e for e in entries if e["label"] == label]
     entry = mine[0] if mine else None
-    result = {"label": label, "file": definition["file"], "daemon": target}
-    if entry is not None and (entry.get("user") != account.name or entry.get("uid") != account.uid):
-        result.update(outcome="refused", problems=[_problem("owned_by_other_account", str(entry.get("user")))])
+    steps = []
+    result = {"label": label, "file": definition["file"], "daemon": target, "steps": steps}
+
+    def refuse(code, detail=""):
+        _step(steps, "plan", "refused", code)
+        result.update(outcome="refused", problems=[_problem(code, detail)])
         return result
+
+    if entry is not None and (entry.get("user") != account.name or entry.get("uid") != account.uid):
+        return refuse("owned_by_other_account", str(entry.get("user")))
     # One copy only: a job this account already runs as an agent is never started a second time as a daemon.
     if system.run(["print", "gui/%d/%s" % (account.uid, label)])[0] == 0:
-        result.update(outcome="refused", problems=[_problem(
-            "loaded-in-gui", "gui/%d/%s is loaded; unload the agent first" % (account.uid, label))])
-        return result
+        return refuse("loaded-in-gui", "gui/%d/%s is loaded; unload the agent first" % (account.uid, label))
     # The system domain's label namespace: a label any other daemon plist carries is someone else's.
     holders = label_holders(system) if holders is None else holders
     taken = [p for p in holders.get(label, []) if not (p == target and entry is not None)]
     if taken:
-        result.update(outcome="refused", problems=[_problem("label_taken", "already the label of " + ", ".join(taken))])
-        return result
+        return refuse("label_taken", "already the label of " + ", ".join(taken))
     previous = None
     if os.path.lexists(target):
         if os.path.islink(target) or not os.path.isfile(target):
-            result.update(outcome="refused", problems=[_problem("not_written_by_this_tool", "not a regular file")])
-            return result
+            return refuse("not_written_by_this_tool", "not a regular file")
         if entry is None:
-            result.update(outcome="refused", problems=[_problem(
-                "not_written_by_this_tool", "%s exists and the registry does not name it" % target)])
-            return result
+            return refuse("not_written_by_this_tool", "%s exists and the registry does not name it" % target)
         current = _file_sha(target)
         if current != entry.get("writtenSha256"):
-            result.update(outcome="refused", problems=[_problem(
-                "changed_since_written", "%s differs from what this tool wrote; `remove` it, then apply again"
-                % target)])
-            return result
+            return refuse("changed_since_written", "%s differs from what this tool wrote; `remove` it, then apply "
+                          "again" % target)
         with open(target, "rb") as stream:
             previous = stream.read()
-    elif entry is None and system.loaded(label):
-        result.update(outcome="refused", problems=[_problem(
-            "label_taken", "system/%s is loaded and this tool did not load it" % label)])
+    state, where = system.state(label)
+    if state == "unknown":
+        return refuse("launchd_unknown", "launchctl print system/%s answered exit %s: nothing was changed; run it "
+                      "again" % (label, where))
+    loaded = state == "loaded"
+    if loaded and where != target:
+        # Only launchd naming this tool's own plist proves the job is the one it loaded; a label loaded with no
+        # path (submitted by hand) or from another plist is someone else's.
+        return refuse("label_taken", "system/%s is loaded from %s, not from this tool's %s"
+                      % (label, where or "no plist launchctl names", target))
+    if entry is None and loaded:
+        return refuse("label_taken", "system/%s is loaded and this tool did not load it" % label)
+    data = plistlib.dumps(definition["daemon"], fmt=plistlib.FMT_XML, sort_keys=True)
+    written_sha = _sha256_bytes(data)
+    others = [e for e in entries if e["label"] != label]
+    if previous is not None and loaded and not force and entry.get("writtenSha256") == written_sha:
+        # The same daemon, running: nothing to replace, so nothing is stopped.
+        if (entry.get("source"), entry.get("sourceSha256")) != (definition["file"], definition["source_sha256"]):
+            entry = dict(entry, source=definition["file"], sourceSha256=definition["source_sha256"])
+            write_registry(system, others + [entry])
+            entries[:] = others + [entry]
+        _step(steps, "plan", "done", "unchanged and loaded: nothing to replace (`replace` reloads it)")
+        result.update(outcome="unchanged", written_sha256=written_sha)
         return result
     # The log files exist, the account's, before launchd ever opens them (whichever credentials it uses).
     try:
         logs = [prepare_log_file(system, account, definition["daemon"][key]) for key in LOG_KEYS]
     except LogFileError as exc:
-        result.update(outcome="refused", problems=[_problem("log-file", str(exc))])
-        return result
+        return refuse("log-file", str(exc))
     result["logs"] = dict(zip(("out", "err"), (definition["daemon"][key] for key in LOG_KEYS)))
     result["log_files"] = logs
-    data = plistlib.dumps(definition["daemon"], fmt=plistlib.FMT_XML, sort_keys=True)
+    _step(steps, "plan", "done", "replaces the loaded daemon" if loaded else (
+        "replaces the daemon file; nothing is loaded" if previous is not None else "a new daemon"))
     new_entry = {"label": label, "user": account.name, "uid": account.uid, "source": definition["file"],
                  "sourceSha256": definition["source_sha256"], "written": target,
-                 "writtenSha256": _sha256_bytes(data), "at": _now()}
-    others = [e for e in entries if e["label"] != label]
+                 "writtenSha256": written_sha, "at": _now()}
     # The registry first: a crash between the two writes leaves an entry whose plist is missing (apply
     # writes it again, remove cleans it, status says `missing`), never a daemon nobody recorded.
     write_registry(system, others + [new_entry])
@@ -1280,51 +1438,112 @@ def _install_one(system, account, definition, entries, holders=None):
         write_atomic(target, data, system)
     except Exception as exc:
         write_registry(system, others + ([entry] if entry is not None else []))
+        _step(steps, "write", "failed", "%s: %s" % (type(exc).__name__, exc))
         result.update(outcome="failed", problems=[_problem("write_failed", "%s: %s" % (type(exc).__name__, exc))])
         return result
+    _step(steps, "write", "done", target)
 
-    def put_back(problem):
+    def restore_files():
         if previous is not None:
             write_atomic(target, previous, system)
             write_registry(system, others + [entry])
-            if not system.loaded(label):
-                system.run(["bootstrap", "system", target])
-            note = "the previous daemon is back"
         else:
             if os.path.lexists(target):
                 os.unlink(target)
-            write_registry(system, others)
+            write_registry(system, others + ([entry] if entry is not None else []))
+
+    def put_back(problem):
+        restore_files()
+        note = None
+        if previous is None:
             note = "nothing is left in /Library/LaunchDaemons"
+            state, where = system.state(label)
+            if state == "loaded" and where == target:
+                # The refused bootstrap loaded this file after all: a daemon with no file and no entry is never left.
+                gone, _code, _tail, _waited = system.stop(label, bootout_wait_seconds(definition["daemon"]))
+                note = ("nothing is left in /Library/LaunchDaemons, and the daemon its failed bootstrap loaded was "
+                        "booted out" if gone else "the daemon file is gone but system/%s is still loaded from it with "
+                        "no registry entry: `launchctl bootout system/%s` as root" % (label, label))
+            elif state != "gone":
+                # Loaded from somewhere else, or launchd did not answer: never booted out, it may be another's job.
+                note = ("nothing is left in /Library/LaunchDaemons; system/%s is %s and was left alone (this tool "
+                        "did not load it)" % (label, _described(state, where)))
+        else:
+            state, where = system.state(label)
+            if state == "loaded" and where == target:
+                note = ("the previous daemon file is back, but system/%s was loaded from that path by this run's "
+                        "bootstrap though it answered a failure, so it may run the definition this run wrote: "
+                        "`replace` loads the previous file again" % label)
+            elif state != "gone":
+                note = ("the previous daemon file is back; system/%s is %s and was left alone: `status --user %s` "
+                        "says what runs" % (label, _described(state, where), account.name))
+        if note is None:
+            back, code, tail, attempts = system.start(label, target)
+            note = ("the previous daemon is back and loaded" if back else
+                    "the previous daemon file is back but did not load (exit %d %s): run apply again"
+                    % (code, tail)).replace("  ", " ")
+        _step(steps, "put-back", "done", note)
         result.update(outcome="failed", problems=[problem], put_back=note)
         return result
 
-    if system.loaded(label):
-        code, tail = system.run(["bootout", "system/" + label])
-        if code != 0 and system.loaded(label):
-            # Still the old job: put the old file back (or none, as before) and leave it running.
-            if previous is not None:
-                write_atomic(target, previous, system)
-            elif os.path.lexists(target):
-                os.unlink(target)
-            write_registry(system, others + ([entry] if entry is not None else []))
-            result.update(outcome="failed", problems=[_problem("bootout_failed", "exit %d %s" % (code, tail))])
+    try:
+        return _swap(system, account, label, target, previous, loaded, steps, result, restore_files, put_back,
+                     entries, others, new_entry)
+    except BaseException:
+        # Interrupted (Ctrl-C during a wait of up to 300 s) or failed: the files go back to what launchd last
+        # loaded, so the next apply never reads the new definition as already running.
+        if result.get("outcome") != "loaded":
+            restore_files()
+        raise
+
+
+def _swap(system, account, label, target, previous, loaded, steps, result, restore_files, put_back, entries, others,
+          new_entry):
+    """The second half of `_install_one`, once the new file is written: stop the old daemon, wait, load the new one."""
+    if loaded:
+        seconds = bootout_wait_seconds(_plist_doc(target) if previous is None else plistlib.loads(previous))
+        gone, code, tail, waited = system.stop(label, seconds)
+        _step(steps, "bootout", "done" if code == 0 or gone else "failed", ("exit %d %s" % (code, tail)).strip())
+        if not gone:
+            # Still the old job, or still stopping: the old file goes back (or none, as before), never a new
+            # daemon over a label launchd has not let go.
+            problem = _still_loaded(label, code, tail, waited, seconds)
+            _step(steps, "wait", "failed", problem["detail"])
+            restore_files()
+            note = ("the previous daemon file is back; system/%s had not stopped, so it may still be running "
+                    "its old definition or be gone: `status --user %s` says which, and `replace` tries again"
+                    % (label, account.name)) if previous is not None else (
+                "nothing new was loaded and the new file is gone; system/%s had not stopped, and the registry "
+                "entry stays as it was" % label)
+            _step(steps, "put-back", "done", note)
+            result.update(outcome="failed", problems=[problem], put_back=note)
             return result
-    code, tail = system.run(["bootstrap", "system", target])
-    if code != 0:
+        _step(steps, "wait", "done", "system/%s gone after %s s" % (label, waited))
+    else:
+        _step(steps, "bootout", "skipped", "system/%s is not loaded" % label)
+    ok, code, tail, attempts = system.start(label, target)
+    if not ok:
+        _step(steps, "bootstrap", "failed", ("exit %d %s (attempt %d)" % (code, tail, attempts)).replace("  ", " "))
         return put_back(_problem("bootstrap_failed", ("exit %d %s" % (code, tail)).strip()))
+    _step(steps, "bootstrap", "done", "attempt %d" % attempts)
     entries[:] = others + [new_entry]
     result.update(outcome="loaded", written_sha256=new_entry["writtenSha256"])
     return result
 
 
-def apply(system, account, labels=None):
-    _require_root(system, "apply", account.name)
+#: The outcomes a run of apply or replace counts as done.
+DONE = ("loaded", "unchanged")
+
+
+def apply(system, account, labels=None, force=False, verb="apply"):
+    _require_root(system, verb, account.name)
     folder = account.background_dir()
     logs = system.log_dir(account.name)
     trust = read_trust(system, account)
     defs = read_definitions(folder, account, labels, logs, trust)
     found = set(d["label"] for d in defs)
-    results = [{"label": label, "outcome": "not-found", "problems": [_problem("not_found", folder)]}
+    results = [{"label": label, "outcome": "not-found", "problems": [_problem("not_found", folder)],
+                "steps": [{"step": "plan", "outcome": "refused", "detail": "not_found"}]}
                for label in (labels or []) if label not in found]
     with _Lock(system):
         entries = read_registry(system)
@@ -1333,21 +1552,35 @@ def apply(system, account, labels=None):
         holders = label_holders(system)
         for definition in defs:
             if definition["problems"]:
+                # Refused in the plan: nothing of it is written and the daemon that runs keeps running.
                 results.append({"label": definition["label"], "file": definition["file"], "outcome": "skipped",
-                                "problems": definition["problems"]})
+                                "problems": definition["problems"],
+                                "steps": [{"step": "plan", "outcome": "refused",
+                                           "detail": ", ".join(p["code"] for p in definition["problems"])}]})
                 continue
             try:
-                results.append(_install_one(system, account, definition, entries, holders))
+                results.append(_install_one(system, account, definition, entries, holders, force=force))
             except Exception as exc:  # one definition's failure never stops the others
+                detail = "%s: %s" % (type(exc).__name__, exc)
                 results.append({"label": definition["label"], "file": definition["file"], "outcome": "failed",
-                                "problems": [_problem("failed", "%s: %s" % (type(exc).__name__, exc))]})
+                                "problems": [_problem("failed", detail)],
+                                "steps": [{"step": verb, "outcome": "failed", "detail": detail}]})
     return {"tool": "space-daemons", "version": SPACE_DAEMONS_VERSION, "user": account.name, "uid": account.uid,
-            "folder": folder, "logs": logs, "results": results, "trust": trust.as_dict(),
-            "ok": all(r["outcome"] == "loaded" for r in results)}
+            "command": verb, "folder": folder, "logs": logs, "results": results, "trust": trust.as_dict(),
+            "ok": all(r["outcome"] in DONE for r in results)}
+
+
+def replace(system, account, label):
+    """Put the account's current definition of LABEL in place of the daemon that runs, in one step (1.2.0,
+    OBS-475): plan (a definition the rules refuse stops nothing), write, bootout, wait until launchd has let the
+    label go, bootstrap; on a refusal the previous daemon is put back and loaded again, and the answer says so.
+    It reloads even when nothing changed; a label never applied is applied."""
+    return apply(system, account, [label], force=True, verb="replace")
 
 
 def remove(system, account, label):
     _require_root(system, "remove", account.name)
+    steps = []
     with _Lock(system):
         entries = read_registry(system)
         mine = [e for e in entries if e["label"] == label and e.get("user") == account.name]
@@ -1362,16 +1595,42 @@ def remove(system, account, label):
             if _file_sha(target) != mine[0].get("writtenSha256") and _plist_label(target) != label:
                 raise SpaceDaemonsError("%s is neither what this tool wrote nor a daemon labelled %s: it is left "
                                         "alone; move it aside by hand" % (target, label), "not-ours")
-        if system.loaded(label):
-            code, tail = system.run(["bootout", "system/" + label])
-            if code != 0 and system.loaded(label):
-                return {"label": label, "user": account.name, "outcome": "failed",
-                        "problems": [_problem("bootout_failed", ("exit %d %s" % (code, tail)).strip())], "ok": False}
+        waited = 0
+        state, where = system.state(label)
+        if state == "unknown":
+            # launchd did not answer: nothing is stopped or deleted on a guess.
+            problem = _problem("launchd_unknown", "launchctl print system/%s answered exit %s" % (label, where))
+            _step(steps, "bootout", "refused", problem["detail"])
+            return {"label": label, "user": account.name, "outcome": "failed", "problems": [problem],
+                    "steps": steps, "waited_seconds": 0, "ok": False,
+                    "note": "nothing was changed: run remove again"}
+        if state == "loaded" and where != target:
+            raise SpaceDaemonsError("system/%s is loaded from %s, not from %s: this tool stops only the daemon it "
+                                    "loaded, so nothing was changed" % (label, where or "no plist launchctl names",
+                                                                         target), "not-ours")
+        if state == "loaded":
+            seconds = bootout_wait_seconds(_plist_doc(target))
+            gone, code, tail, waited = system.stop(label, seconds)
+            _step(steps, "bootout", "done" if code == 0 or gone else "failed", ("exit %d %s" % (code, tail)).strip())
+            if not gone:
+                # The daemon has not stopped: its file and its entry stay, so `remove` (or `replace`) can run
+                # again, and an `apply` now would be refused for a label launchd still holds.
+                problem = _still_loaded(label, code, tail, waited, seconds)
+                _step(steps, "wait", "failed", problem["detail"])
+                return {"label": label, "user": account.name, "outcome": "failed", "problems": [problem],
+                        "steps": steps, "waited_seconds": waited, "ok": False,
+                        "note": "the daemon file and its registry entry are kept: run remove again once it has "
+                                "stopped"}
+            _step(steps, "wait", "done", "system/%s gone after %s s" % (label, waited))
+        else:
+            _step(steps, "bootout", "skipped", "system/%s is not loaded" % label)
         if os.path.lexists(target):
             os.unlink(target)
         write_registry(system, [e for e in entries if e["label"] != label])
+        _step(steps, "delete", "done", target)
     kept = [p for p in log_paths(system.log_dir(account.name), label) if os.path.lexists(p)]
     return {"label": label, "user": account.name, "outcome": "removed", "ok": True, "logs_kept": kept,
+            "steps": steps, "waited_seconds": waited,
             "note": "the log files stay in %s; delete them by hand if they are not wanted"
                     % system.log_dir(account.name) if kept else ""}
 
@@ -1407,7 +1666,8 @@ def parser():
                                  description="run a headless space's background jobs as system-domain daemons "
                                              "that run as that account (UserName), never as root",
                                  epilog="apply and remove run as root, only in isolated mode, from the root-owned "
-                                        "copy: sudo %s apply --user ACCOUNT --label LABEL" % INSTALLED_COMMAND)
+                                        "copy: sudo %s apply --user ACCOUNT --label LABEL; replace runs the same way"
+                                        % INSTALLED_COMMAND)
     ap.add_argument("--version", action="store_true", help="the version and the sha256 of this file (information "
                                                               "only; verify the release's SHA256SUMS and signature)")
     sub = ap.add_subparsers(dest="command")
@@ -1416,11 +1676,19 @@ def parser():
     p.add_argument("--from", dest="source", choices=("background", "staged"), default="background")
     p.add_argument("--label", action="append")
     p.add_argument("--json", action="store_true")
-    a = sub.add_parser("apply", help="write and load the daemons (root, from the root-owned copy)")
+    a = sub.add_parser("apply", help="write and load the daemons; one of its own that is loaded and changed is "
+                                     "replaced, one unchanged is left alone (root, from the root-owned copy)")
     a.add_argument("--user", required=True)
     a.add_argument("--label", action="append")
     a.add_argument("--json", action="store_true")
-    r = sub.add_parser("remove", help="unload one daemon this tool wrote and delete it (root)")
+    x = sub.add_parser("replace", help="put the current definition of one label in place of the daemon that runs: "
+                                       "stop it, wait until launchd lets it go, load the new one, and put the "
+                                       "previous one back on a refusal (root)")
+    x.add_argument("--user", required=True)
+    x.add_argument("--label", required=True)
+    x.add_argument("--json", action="store_true")
+    r = sub.add_parser("remove", help="unload one daemon this tool wrote, wait until launchd lets it go, and "
+                                      "delete it (root)")
     r.add_argument("--user", required=True)
     r.add_argument("--label", required=True)
     r.add_argument("--json", action="store_true")
@@ -1440,9 +1708,14 @@ def parser():
     return ap
 
 
+def _render_steps(steps):
+    return ["    %s  %s%s" % (s["step"], s["outcome"], ": " + s["detail"] if s.get("detail") else "")
+            for s in steps or []]
+
+
 def _render(command, result):
     lines = []
-    for warning in (result.get("trust") or {}).get("warnings", []) if command in ("plan", "apply") else []:
+    for warning in (result.get("trust") or {}).get("warnings", []) if command in ("plan", "apply", "replace") else []:
         lines.append("warning: " + warning)
     if command == "plan":
         lines.append("%d definition(s) in %s" % (len(result["definitions"]), result["folder"]))
@@ -1453,15 +1726,19 @@ def _render(command, result):
             lines.append("  %s  %s%s" % (d["label"], verdict, notes))
         for label in result["not_found"]:
             lines.append("  %s  not found" % label)
-    elif command == "apply":
+    elif command in ("apply", "replace"):
         for r in result["results"]:
             detail = "; ".join(p["code"] + (" (%s)" % p["detail"] if p["detail"] else "")
                                for p in r.get("problems", []))
             lines.append("  %s  %s%s" % (r["label"], r["outcome"], ": " + detail if detail else ""))
+            lines.extend(_render_steps(r.get("steps")))
         if not result["results"]:
             lines.append("nothing to apply in %s" % result["folder"])
     elif command == "remove":
-        lines.append("  %s  %s" % (result["label"], result["outcome"]))
+        detail = "; ".join(p["code"] + (" (%s)" % p["detail"] if p["detail"] else "")
+                           for p in result.get("problems", []))
+        lines.append("  %s  %s%s" % (result["label"], result["outcome"], ": " + detail if detail else ""))
+        lines.extend(_render_steps(result.get("steps")))
         if result.get("note"):
             lines.append("  " + result["note"])
     elif command == "trust":
@@ -1503,6 +1780,9 @@ def main(argv=None, system=None):
             ok = all(d["verdict"] == "ok" for d in result["definitions"]) and not result["not_found"]
         elif args.command == "apply":
             result = apply(system, account, args.label)
+            ok = result["ok"]
+        elif args.command == "replace":
+            result = replace(system, account, args.label)
             ok = result["ok"]
         elif args.command == "remove":
             result = remove(system, account, args.label)

@@ -737,16 +737,20 @@ def _skill_name(declared, folder: str) -> str:
     return _text(folder)
 
 
-def _skill_rows(folder: Path, agent: str, scope: str, extra: dict, seen: set[str],
-                degraded: list[dict]) -> list[dict]:
+def _skill_rows(folder: Path, agent: str, scope: str, extra: dict, seen: set[tuple],
+                degraded: list[dict], owner: str = "") -> list[dict]:
+    """The skills in `folder`, one row each. A skill folder is listed once per listing (`scope` and `owner`: the
+    project's resolved folder, or the plugin), so two spellings of one folder in a listing are one row, while one
+    folder linked into two projects is a row in each, as each project loads it."""
     rows = []
     label = f"skills:{agent}:{scope}" + (f":{extra.get('project') or extra.get('plugin')}" if extra else "")
+    owner = owner or str(extra.get("plugin") or "")
     for skill in [f / "SKILL.md" for f in _folders(folder, label, degraded)
                   if _is_file(f / "SKILL.md", f"skill:{agent}:{scope}:{_text(f.name)}", degraded)]:
         real = str(skill.parent.resolve())
-        if real in seen:
+        if (scope, owner, real) in seen:
             continue
-        seen.add(real)
+        seen.add((scope, owner, real))
         try:
             # Only the front matter is read, so only the file's start: a skill file of any size costs the same.
             with open(skill, encoding="utf-8", errors="replace") as stream:
@@ -932,7 +936,7 @@ def _claude_plugins(claude: Path, degraded: list[dict]) -> tuple[list[dict], lis
     return rows, skills
 
 
-def _codex_plugins(home: Path, degraded: list[dict], skills: list[dict], seen: set[str]) -> list[dict]:
+def _codex_plugins(home: Path, degraded: list[dict], skills: list[dict], seen: set[tuple]) -> list[dict]:
     """The plugins Codex keeps in its cache (`~/.codex/plugins/cache/<marketplace>/<plugin>/<version>/`): the
     newest version folder present, and whether `config.toml` enables it (`[plugins."<plugin>@<marketplace>"]`
     `enabled`); None when the config does not say. Codex keeps no local copy of a marketplace's catalogue the
@@ -1009,7 +1013,7 @@ def inventory(home: Path, roots: list[Path]) -> dict:
         degraded.append({"source": "harness_root", "code": "not-found",
                          "reason": "the home folder the harness scan reads is not a folder (sources.harness_root); "
                                    "set it with `project-observatory full configure sources harness_root ~`"})
-    seen: set[str] = set()
+    seen: set[tuple] = set()
     skills = _skill_rows(claude / "skills", CLAUDE_CODE, "user", {}, seen, degraded)
     resolved = []
     for r in roots:
@@ -1019,15 +1023,24 @@ def inventory(home: Path, roots: list[Path]) -> dict:
             degraded.append({"source": "projects-folder", "code": "unreadable",
                              "reason": "a configured projects folder could not be resolved; its projects' skills are "
                                        "not in the inventory"})
+    listed: set[str] = set()
     for root in dict.fromkeys(resolved):
         for project in _folders(root, "projects-folder", degraded):
+            # One project reached under two names (a link beside its folder) is listed once, under the first name.
+            try:
+                real = str(project.resolve())
+            except (OSError, RuntimeError):
+                real = str(project)
+            if real in listed:
+                continue
+            listed.add(real)
             # Listed whatever it holds: a project without `.claude/skills` lists nothing, one whose folder cannot
             # be searched is named in `degraded`.
             skills += _skill_rows(project / ".claude" / "skills", CLAUDE_CODE, "project",
-                                  {"project": _text(project.name)}, seen, degraded)
+                                  {"project": _text(project.name)}, seen, degraded, owner=real)
     plugins, plugin_skills = _claude_plugins(claude, degraded)
     skills += plugin_skills
-    codex_seen: set[str] = set()
+    codex_seen: set[tuple] = set()
     for folder in (home / ".codex" / "skills", home / ".agents" / "skills"):
         skills += _skill_rows(folder, CODEX, "user", {}, codex_seen, degraded)
     plugins += _codex_plugins(home, degraded, skills, codex_seen)

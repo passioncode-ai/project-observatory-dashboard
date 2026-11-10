@@ -164,8 +164,10 @@ def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
     given = re.fullmatch(r"([0-9]{1,9})(?:@([0-9]{0,14}))?", str(cursor)) if cursor is not None else None
     if given and given.group(2) is not None and given.group(2) != stamp:
         degraded.append({"source": "cursor", "code": "invalid-cursor",
-                         "reason": "the inventory was scanned again since this cursor was given; the first page of "
-                                   "the new scan is shown"})
+                         "reason": ("the inventory was scanned again since this cursor was given; the first page of "
+                                    "the new scan is shown") if stamp else
+                                   ("the scan carries no time, so this cursor cannot be matched to it; the first "
+                                    "page is shown")})
         cursor = None
     elif given:
         cursor = given.group(1)
@@ -192,6 +194,11 @@ def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
                 end = at
                 break
     window = rows[start:end]
+    # `open` as the scan wrote it when it is a list of entries; anything else (an older or foreign scan) is this
+    # release's own list.
+    opened = inventory.get("open")
+    if not (isinstance(opened, list) and opened and all(isinstance(o, dict) for o in opened)):
+        opened = SKILLS_OPEN
     findings = [r for kind, _, r in window if kind == "finding"]
     spaces = [{**space, "plugins": [r for kind, i, r in window if kind == "plugin" and i == index],
                "skills": [r for kind, i, r in window if kind == "skill" and i == index]}
@@ -200,7 +207,7 @@ def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
             "total": total,
             "order": "findings, then each space's plugins, then its skills"}
     return {"measuredAt": doc.get("generated_at"), "spaces": spaces, "page": page, "counts": counts,
-            "findings": findings, "open": inventory.get("open") or SKILLS_OPEN, "degraded": degraded}
+            "findings": findings, "open": opened, "degraded": degraded}
 
 
 def summary(explain_pid: int | None = None) -> dict:

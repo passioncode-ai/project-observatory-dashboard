@@ -28,6 +28,25 @@ while the major version is 0, a minor release may change behaviour and says so h
   enabled in a person's own space is not reported yet: it waits on the space's context binding (OBS-359), and the
   answer's `open` says so.
 
+### Fixed
+
+- **A space's daemon is replaced in one step, and no longer left unloaded by `apply` right after `remove`** (OBS-475, OBS-395 part 2; space daemons 1.2.0,
+  `docs/COMPATIBILITY.md` "Space daemons: replacing a loaded daemon"). `launchctl bootout` returns before the
+  daemon's process has exited, so an `apply` right after `remove` was refused `label_taken` and the space's service
+  stayed unloaded until someone ran it again. `remove` now answers once launchd has let the label go (45 s, or the
+  daemon's own ExitTimeOut and 5 s when that is longer, at most 300 s); a stop that does not finish in time is
+  `still_loaded` (or `bootout_failed`), exit 1, and keeps the daemon file and its registry entry. The new
+  `sudo /usr/bin/python3 -I /usr/local/libexec/observatory-space-daemons replace --user ACCOUNT --label LABEL` does
+  the two steps in one: it checks the new definition first (one the rules refuse stops nothing), boots the old daemon
+  out, waits the same way, loads the new one (again while launchd answers 5, 37 or 125); when the new one does not
+  load it puts the previous daemon back and loads it, and when the old one does not stop in time it loads nothing
+  and puts the previous file back, saying which in `put_back`. `apply` over its own loaded daemon replaces it the same
+  way when the definition changed and leaves it running (`unchanged`) when it did not. Every result of `apply`,
+  `replace` and `remove` carries `steps`, one line per step. A `launchctl print` that does not answer is
+  `launchd_unknown` and changes nothing, and a label launchd reports loaded from another plist is never booted out. The root-owned copy changes: an administrator installs
+  it again from this release (the steps are unchanged; `--version` prints `space-daemons 1.2.0` and the file's
+  sha256). A listening port another process still holds (OBS-395 part 1) is not checked yet.
+
 ## 0.35.9 (2026-11-09)
 
 Organization onboarding, part one: `full org accounts` lists every provider account this space reaches under one

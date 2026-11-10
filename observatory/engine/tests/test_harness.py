@@ -888,6 +888,22 @@ class Inventory(unittest.TestCase):
         rows = {(s["agent"], s["scope"], s["name"]): s for s in self.inventory()["spaces"][0]["skills"]}
         self.assertEqual(rows[("codex", "plugin", "helper-skill")]["plugin"], "helper@family")
 
+    def test_a_skill_linked_into_two_projects_is_listed_in_each_and_a_linked_project_once(self):
+        """Each project loads a skill linked into it, so a skill folder linked into two projects is a row in each;
+        one project reached under a second name (a link beside it) is listed once, under the first name."""
+        versioned_skill(self.home / ".agents" / "skills", "shared-kit", "version: 1.0.0\n")
+        target = self.home / ".agents" / "skills" / "shared-kit"
+        for name in ("beta-api", "gamma-app"):
+            folder = self.projects / name / ".claude" / "skills"
+            folder.mkdir(parents=True)
+            (folder / "shared-kit").symlink_to(target, target_is_directory=True)
+        (self.projects / "zz-alpha-again").symlink_to(self.projects / "alpha-web", target_is_directory=True)
+        skills = self.inventory()["spaces"][0]["skills"]
+        shared = sorted(s["project"] for s in skills if s["scope"] == "project" and s["name"] == "shared-kit")
+        self.assertEqual(shared, ["beta-api", "gamma-app"])
+        deploys = [s["project"] for s in skills if s["scope"] == "project" and s["name"] == "deploy"]
+        self.assertEqual(deploys, ["alpha-web"], "a project linked under another name is one project")
+
     def test_odd_shapes_in_the_records_do_not_break_it(self):
         write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", {"plugins": {
             "tool@family": [{"scope": "user", "installPath": 7, "version": 1}, "not-a-record"],

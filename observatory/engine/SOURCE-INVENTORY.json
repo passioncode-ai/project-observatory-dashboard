@@ -430,8 +430,8 @@
       "path": "collectors/scan_harness.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "791fd53d1f682e180153437c6a43993e12bf8f0da85ffc1bb7ed077ecdd57a1c",
-      "bytes": 75058
+      "export_sha256": "effa7e9dfbed5f2c10e73b95278de442aa7e2a538b1de58eedf46e0df4c1a988",
+      "bytes": 75861
     },
     {
       "path": "collectors/scan_heroku.py",
@@ -954,22 +954,22 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "756f175fc52d04f9154783c68fae01b17a24da7ab79355ccc857e17f4b7fbdff",
-      "bytes": 127262,
+      "export_sha256": "b2a168358d91cc932b47dab6d3dad89f2c005ae9743ff57ab8cc87a1437971bb",
+      "bytes": 131722,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "febe873c22583074ad704c09057bb14870f3162f2fc56efd2a936f08d683590d",
-      "bytes": 316508,
+      "export_sha256": "434adf4dc61c45f148c40dd4e08667345ae8559ccc2f8c1e39f5f97637716ebd",
+      "bytes": 317849,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "ad90025ff502e20bcb0b6353100e218d6252b7dc90fd3b411e8f763f3608511b",
-      "bytes": 242377,
+      "export_sha256": "dcae535f62a3b576259fcd5a20cb44d314e246cf6b332f09e426cb75fac7055a",
+      "bytes": 242983,
       "upstream_modified": true
     },
     {
@@ -3167,8 +3167,8 @@
       "path": "machine_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ebaad3445f0c5c9217f75a0bd923e0f13ecd2e500c3b558e1c212243cbc39bba",
-      "bytes": 16188
+      "export_sha256": "20f9992317325e7c2a4ba2af4022723c35e962221983f81236494b58efd0e457",
+      "bytes": 16641
     },
     {
       "path": "maintenance.py",
@@ -4339,8 +4339,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "efeb2d79cec775602953ab827ead60d68a405c0830d9c7a06a0db9e874696b5a",
-      "bytes": 54671,
+      "export_sha256": "70af241431fab7e441daa5f4c7c62c14a0a4fea24aca646223619effa070792f",
+      "bytes": 54764,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -5136,8 +5136,8 @@
       "path": "tests/test_harness.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bc857628caac700975f0b27e8bd2203256445a7f233abf67934cf3943fc15fb9",
-      "bytes": 62250
+      "export_sha256": "a1a6bfade3a523a706f945f7d5bc0ce77321dd8d82bb29984e1f216e4f407ec9",
+      "bytes": 63502
     },
     {
       "path": "tests/test_heroku.py",
@@ -5408,8 +5408,8 @@
       "path": "tests/test_machine.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e085312d60c58e1efa61f823e4ace3c17dd24b29adf05f00a6b84a8c4f79d171",
-      "bytes": 74178
+      "export_sha256": "ae6a7c9b1e65d4bb42b0b38ad21593e8e2584616fb6b4f72336c9bf6eba3f937",
+      "bytes": 74844
     },
     {
       "path": "tests/test_machine_backup.py",
@@ -6311,8 +6311,8 @@
       "path": "tests/test_space_daemons.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1ba11d5360d563b48049a5b1dee0300427619bbb879a9494ee7db0da79ea2c5c",
-      "bytes": 68662
+      "export_sha256": "50cd6bf5e38b71fe9a5451fb0655a1eacba91f40df46efefcdca5ec0a5d8ca58",
+      "bytes": 89698
     },
     {
       "path": "tests/test_spend.py",
@@ -7512,8 +7512,8 @@
       "path": "tools/space_daemons.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2940909a471820f1c14e0abf4a9486e4f96d5ce2c9a40a90c4c50ad6db868b8e",
-      "bytes": 76845
+      "export_sha256": "747e472e066f426a87b5174e662889109d2637fb661d0b1f59e2943279f61af0",
+      "bytes": 95117
     },
     {
       "path": "tools/spend.py",

@@ -1150,6 +1150,15 @@ class Skills(Base):
         self.assertEqual(out["skills"]["counts"], {"skills": 0, "plugins": 0, "findings": 0})
         self.assertEqual(out["skills"]["page"]["total"], 0)
 
+    def test_a_foreign_open_is_this_releases_and_a_timeless_scan_says_why_a_cursor_misses(self):
+        self.harness({"generated_at": "not-a-time", "inventory": {**self.INVENTORY, "degraded": [], "open": "x"}})
+        out = self.server.observatory_machine(section="skills", cursor="1@20260101000000")
+        self.assertEqual(out["skills"]["open"][0]["waitsOn"], "OBS-359", "an `open` of another shape is not passed on")
+        [d] = [d for d in out["degraded"] if d["source"] == "cursor"]
+        self.assertEqual(d["code"], "invalid-cursor")
+        self.assertIn("carries no time", d["reason"])
+        self.assertEqual(out["skills"]["page"]["cursor"], "0@")
+
     def test_a_scan_before_the_inventory_is_named(self):
         self.harness({"generated_at": "2026-01-01T00:00:00Z", "skills": []})
         out = self.server.observatory_machine(section="skills")
