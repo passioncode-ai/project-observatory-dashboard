@@ -27,6 +27,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -426,8 +427,11 @@ class Frozen(Gate):
         self.write(run, {"goal": "answer the request"})
         self.write(run, packet())  # the packet repeated unchanged, after the handoff, is no change
         self.assertEqual(self.authorize(run)["slots"], ["alpha-web/prod/ALPHA_TOKEN"])
-        self.assertEqual(W.checkpoint_latest(self.conn, wf["workflowId"], credential_reader=lambda p: {
-            "vault": [], "env": []})["dispatch"]["keys"]["state"], "open")
+        # The view reads the workflow store's clock: pinned to NOW, or the fixed DEADLINE makes this a date
+        # bomb that turns `closed` once that day passes (it did, 2026-11-10 after 14:00 UTC).
+        with mock.patch.object(W, "_now", return_value=NOW):
+            self.assertEqual(W.checkpoint_latest(self.conn, wf["workflowId"], credential_reader=lambda p: {
+                "vault": [], "env": []})["dispatch"]["keys"]["state"], "open")
 
     def rewrite_first(self, wf, old, new):
         """A row written before this engine checked it: its first revision rewritten in place."""
