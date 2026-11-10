@@ -2066,8 +2066,8 @@ scope enable it (`enabledPlugins` of the user's settings, or the project's `.cla
 never a finding), and the
 newest version its marketplace publishes as the marketplace's local copy records it (`latest`, with
 `marketplaceUpdated`), in Claude Code's own order: the plugin's `.claude-plugin/plugin.json` inside the
-marketplace's folder, else its catalogue entry's `version` (a manifest that cannot be read, or names no release,
-a plugin folder missing from the local copy, and a catalogue that sets `metadata.pluginRoot`, which is not
+marketplace's folder, else its catalogue entry's `version` (a manifest that cannot be read, or whose `version` is
+not release-shaped, a plugin folder missing from the local copy, and a catalogue that sets `metadata.pluginRoot`, which is not
 followed yet, give no `latest`). A plugin from a Git repository or a URL has no `latest` (its manifest is not in the local
 copy); one from a marketplace that is a local folder is compared like any other (Claude Code installs a copy
 of it into its cache, which can fall behind the folder): nothing is fetched. A plugin
