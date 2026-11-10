@@ -431,6 +431,18 @@ class Harness(unittest.TestCase):
         self.assertFalse(marker.exists())
 
     def test_the_findings_say_it(self):
+        # A plugin behind its marketplace (OBS-477): installed at 1.0.0, the marketplace's local copy says 1.1.0.
+        market = self.home / ".claude/plugins/marketplaces/family"
+        (market / ".claude-plugin").mkdir(parents=True)
+        (market / "tool").mkdir()   # the plugin's folder, without a manifest: the entry's version is the newest
+        (market / ".claude-plugin/marketplace.json").write_text(json.dumps(
+            {"name": "family", "plugins": [{"name": "tool", "version": "1.1.0", "source": "./tool"}]}))
+        installed = json.loads((self.home / ".claude/plugins/installed_plugins.json").read_text())
+        installed["plugins"]["tool@family"][0].update(version="1.0.0", scope="user")
+        (self.home / ".claude/plugins/installed_plugins.json").write_text(json.dumps(installed))
+        (self.home / ".claude/plugins/known_marketplaces.json").write_text(json.dumps(
+            {"family": {"source": {"source": "github", "repo": "passioncode-ai/family"},
+                        "installLocation": str(market), "lastUpdated": "2026-01-02T00:00:00Z"}}))
         self.scan(budget=200)
         (self.home / ".claude/skills/tidy-notes/scripts/run.sh").write_text("#!/bin/sh\ngit log\n")
         self.scan(budget=200)   # tidy-notes now differs from its first digest: harness.skill_changed
@@ -446,7 +458,28 @@ class Harness(unittest.TestCase):
         found = json.loads(p.stdout)
         types = {f["type"] for f in found}
         self.assertTrue({"harness.listing_overflow", "harness.instruction_long", "harness.mcp_deferral_off",
-                         "harness.skill_risk", "harness.skill_changed", "harness.hook_risk"} <= types, types)
+                         "harness.skill_risk", "harness.skill_changed", "harness.hook_risk",
+                         "harness.plugin_behind"} <= types, types)
+        behind = next(f for f in found if f["type"] == "harness.plugin_behind")
+        self.assertEqual(behind["subject"], "harness:plugin-behind:claude-code:tool@family:user::1.0.0:1.1.0")
+        # A project install names its project and the short digest that tells two projects of one name apart.
+        sys.path.insert(0, str(ROOT / "tools"))
+        doc = json.loads((self.out / "harness.json").read_text())
+        finding = {**doc["inventory"]["findings"][0], "scope": "local", "project": "alpha-web",
+                   "projectKey": "0123abcd"}
+        doc["inventory"]["findings"] = [finding]
+        (self.out / "harness.json").write_text(json.dumps(doc))
+        p = subprocess.run([PY, "-c", code], cwd=ROOT, env={**os.environ, "OBSERVATORY_SCRATCH": str(self.out),
+                                                            "OBSERVATORY_HOME": str(self.ws), "OBSERVATORY_SYSTEM_SETUP": "0"},
+                           capture_output=True, text=True, timeout=900)
+        self.assertEqual(p.returncode, 0, p.stderr[-1500:])
+        local = next(f for f in json.loads(p.stdout) if f["type"] == "harness.plugin_behind")
+        self.assertEqual(local["subject"],
+                         "harness:plugin-behind:claude-code:tool@family:local:alpha-web.0123abcd:1.0.0:1.1.0")
+        self.assertIn("run in the alpha-web project's folder", local["action"])
+        self.assertEqual(behind["title_id"], "plugin {plugin} is at {installed}, its marketplace publishes {latest}")
+        self.assertIn("`claude plugin update tool@family --scope user`", behind["action"])
+        self.assertNotIn(json.dumps(str(self.home))[1:-1], json.dumps(behind), "no path in the finding")
         self.assertNotIn("SECRETVALUE", json.dumps(found))
         risk = {f["subject"].rsplit(":", 1)[0]: f["severity"] for f in found if f["type"] == "harness.skill_risk"}
         digests = {s["name"]: s["digest"][:12] for s in json.loads((self.out / "harness.json").read_text())["skills"]}
@@ -456,6 +489,431 @@ class Harness(unittest.TestCase):
         self.assertEqual(risk["harness:skill:stealer:credential-egress"], "critical")
         self.assertEqual(risk["harness:skill:installer:download-exec"], "info")
         self.assertEqual(next(f for f in found if f["type"] == "harness.instruction_long")["severity"], "warning")
+
+
+def write_json(path: Path, doc) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc) if not isinstance(doc, str) else doc, encoding="utf-8")
+
+
+def versioned_skill(base: Path, name: str, front: str) -> None:
+    folder = base / name
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "SKILL.md").write_text(f"---\nname: {name}\ndescription: d\n{front}---\n\nbody\n", encoding="utf-8")
+
+
+class Inventory(unittest.TestCase):
+    """The skills and plugins inventory of one space (OBS-477): versions, scopes, agents, the plugin behind its
+    marketplace's local copy, unreadable records named, and no path anywhere in the answer."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.base = Path(tmp.name).resolve()
+        self.home = self.base / "home"
+        self.projects = self.base / "projects"
+        claude = self.home / ".claude"
+        versioned_skill(claude / "skills", "notes", "version: 1.4.0\n")
+        versioned_skill(claude / "skills", "unversioned", "")
+        versioned_skill(claude / "skills", "oddly", "version: by-hand\n")
+        versioned_skill(self.projects / "alpha-web" / ".claude" / "skills", "deploy", "metadata:\n  version: \"0.2.1\"\n")
+        versioned_skill(self.home / ".codex" / "skills", "review", "version: 2.0.0\n")
+        versioned_skill(self.home / ".agents" / "skills", "shared", "")
+        # Plugins: one user install behind its marketplace's catalogue, one project install level with the plugin
+        # manifest its catalogue entry points at, one local install with no settings file, one disabled.
+        market = self.base / "markets" / "family"
+        write_json(market / ".claude-plugin" / "marketplace.json", {"name": "family", "plugins": [
+            {"name": "tool", "version": "1.2.0", "source": "./tool"},
+            {"name": "kit", "source": "./plugins/kit"},
+            {"name": "escape", "source": "../../outside"},
+            {"name": "far", "source": {"source": "github", "repo": "example-org/far"}}]})
+        write_json(market / "plugins" / "kit" / ".claude-plugin" / "plugin.json", {"name": "kit", "version": "2.0.0"})
+        (market / "tool").mkdir()   # in the local copy, with no manifest: the catalogue entry's version stands
+        write_json(self.base / "outside" / ".claude-plugin" / "plugin.json", {"name": "escape", "version": "9.0.0"})
+        installs = self.base / "cache"
+        tool = installs / "tool" / "1.0.0"
+        versioned_skill(tool / "skills", "tool-skill", "")
+        idle = installs / "idle" / "3.0.0"
+        versioned_skill(idle / "skills", "idle-skill", "")
+        alpha = self.projects / "alpha-web"
+        write_json(claude / "plugins" / "installed_plugins.json", {"version": 2, "plugins": {
+            "tool@family": [{"scope": "user", "installPath": str(tool), "version": "1.0.0"}],
+            "kit@family": [{"scope": "project", "projectPath": str(alpha), "installPath": str(installs / "kit"),
+                            "version": "2.0.0"}],
+            "escape@family": [{"scope": "local", "projectPath": str(alpha), "installPath": str(installs / "e"),
+                               "version": "1.0.0"}],
+            "far@family": [{"scope": "user", "installPath": str(installs / "far"), "version": "1.0.0"}],
+            "idle@family": [{"scope": "user", "installPath": str(idle), "version": "3.0.0"}]}})
+        write_json(claude / "plugins" / "known_marketplaces.json", {"family": {
+            "source": {"source": "github", "repo": "example-org/family"}, "installLocation": str(market),
+            "lastUpdated": "2026-01-02T00:00:00Z"}})
+        write_json(claude / "settings.json", {"enabledPlugins": {"tool@family": True, "far@family": True,
+                                                                 "idle@family": False}})
+        write_json(alpha / ".claude" / "settings.json", {"enabledPlugins": {"kit@family": True}})
+        # Codex: two cached versions of one plugin, enabled in config.toml.
+        for version in ("0.1.0", "0.10.0", "0.2.0"):
+            (self.home / ".codex" / "plugins" / "cache" / "family" / "helper" / version).mkdir(parents=True)
+        write_json(self.home / ".codex" / "config.toml", '[plugins."helper@family"]\nenabled = true\n')
+        sys.path.insert(0, str(ROOT / "collectors"))
+        import scan_harness
+        self.mod = scan_harness
+
+    def inventory(self) -> dict:
+        return self.mod.inventory(self.home, [self.projects])
+
+    def test_every_skill_with_its_version_scope_and_agent(self):
+        inv = self.inventory()
+        [space] = inv["spaces"]
+        self.assertEqual((space["space"], space["home"]), ("this-account", "~"))
+        rows = {(s["agent"], s["scope"], s["name"]): s for s in space["skills"]}
+        self.assertEqual(rows[("claude-code", "user", "notes")]["version"], "1.4.0")
+        self.assertIsNone(rows[("claude-code", "user", "unversioned")]["version"])
+        self.assertIsNone(rows[("claude-code", "user", "oddly")]["version"], "only a release-shaped version is kept")
+        self.assertEqual(rows[("claude-code", "project", "deploy")]["version"], "0.2.1")
+        self.assertEqual(rows[("claude-code", "project", "deploy")]["project"], "alpha-web")
+        self.assertEqual(rows[("claude-code", "plugin", "tool-skill")]["plugin"], "tool@family")
+        self.assertNotIn(("claude-code", "plugin", "idle-skill"), rows, "a disabled plugin's skills do not load")
+        self.assertEqual(rows[("codex", "user", "review")]["version"], "2.0.0")
+        self.assertIn(("codex", "user", "shared"), rows)
+
+    def test_every_plugin_install_with_scope_enabled_and_latest(self):
+        plugins = {(p["agent"], p["name"], p["scope"]): p for p in self.inventory()["spaces"][0]["plugins"]}
+        tool = plugins[("claude-code", "tool@family", "user")]
+        self.assertEqual((tool["version"], tool["latest"], tool["latestFrom"], tool["behind"], tool["enabled"]),
+                         ("1.0.0", "1.2.0", "marketplace-catalogue", True, True))
+        self.assertEqual(tool["marketplaceUpdated"], "2026-01-02T00:00:00Z")
+        kit = plugins[("claude-code", "kit@family", "project")]
+        self.assertEqual((kit["project"], kit["enabled"], kit["latest"], kit["latestFrom"], kit["behind"]),
+                         ("alpha-web", True, "2.0.0", "plugin-manifest", False))
+        escape = plugins[("claude-code", "escape@family", "local")]
+        self.assertEqual((escape["enabled"], escape["latest"], escape["behind"]), (False, None, None),
+                         "a source outside the marketplace's folder is never followed")
+        far = plugins[("claude-code", "far@family", "user")]
+        self.assertEqual((far["latest"], far["behind"]), (None, None), "a Git source is not fetched")
+        self.assertIs(plugins[("claude-code", "idle@family", "user")]["enabled"], False)
+        helper = plugins[("codex", "helper@family", "user")]
+        self.assertEqual((helper["version"], helper["enabled"], helper["latest"]), ("0.10.0", True, None))
+
+    def test_the_behind_plugin_is_the_one_finding_and_the_open_one_is_named(self):
+        inv = self.inventory()
+        self.assertEqual([(f["code"], f["plugin"], f["installed"], f["latest"]) for f in inv["findings"]],
+                         [("plugin-behind", "tool@family", "1.0.0", "1.2.0")])
+        self.assertEqual(inv["findings"][0]["action"], "claude plugin update tool@family --scope user")
+        self.assertEqual([(o["finding"], o["waitsOn"]) for o in inv["open"]],
+                         [("organization-plugin-in-personal-space", "OBS-359")])
+        self.assertEqual(inv["degraded"], [])
+
+    def test_no_path_reaches_the_answer(self):
+        text = json.dumps(self.inventory())
+        # As JSON spells a path (a Windows path's backslashes doubled), so the check holds on every platform.
+        self.assertNotIn(json.dumps(str(self.base))[1:-1], text)
+        self.assertNotIn(json.dumps(str(self.home))[1:-1], text)
+
+    def test_an_unreadable_record_is_named_never_read_as_empty(self):
+        claude = self.home / ".claude"
+        write_json(claude / "plugins" / "known_marketplaces.json", "{not json")
+        write_json(self.projects / "alpha-web" / ".claude" / "settings.json", "[1, 2]")
+        write_json(self.home / ".codex" / "config.toml", "[plugins\n")
+        inv = self.inventory()
+        sources = {(d["source"], d["code"]) for d in inv["degraded"]}
+        self.assertEqual(sources, {("claude:known_marketplaces.json", "unreadable"),
+                                   ("claude:project-settings:alpha-web", "unreadable"),
+                                   ("codex:config.toml", "unreadable")})
+        plugins = {(p["agent"], p["name"]): p for p in inv["spaces"][0]["plugins"]}
+        self.assertIsNone(plugins[("claude-code", "kit@family")]["enabled"], "unknown, not disabled")
+        self.assertIsNone(plugins[("codex", "helper@family")]["enabled"])
+        self.assertIsNone(plugins[("claude-code", "tool@family")]["latest"])
+        self.assertNotIn(json.dumps(str(self.base))[1:-1], json.dumps(inv["degraded"]))
+
+    def test_an_unreadable_install_record_lists_no_plugin_and_says_so(self):
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", "{")
+        inv = self.inventory()
+        self.assertEqual([p for p in inv["spaces"][0]["plugins"] if p["agent"] == "claude-code"], [])
+        self.assertIn(("claude:installed_plugins.json", "unreadable"),
+                      {(d["source"], d["code"]) for d in inv["degraded"]})
+
+    def test_the_scan_keeps_it_and_survives_its_failure(self):
+        self.assertIn('"inventory": _inventory_or_failure(home, roots)',
+                      (ROOT / "collectors" / "scan_harness.py").read_text())
+        from unittest.mock import patch
+        with patch.object(self.mod, "inventory", side_effect=RuntimeError("boom")):
+            out = self.mod._inventory_or_failure(self.home, [self.projects])
+        self.assertEqual((out["spaces"], out["degraded"][0]["source"], out["degraded"][0]["code"]),
+                         ([], "inventory", "failed"))
+
+    def test_a_disabled_install_behind_is_listed_but_not_a_finding_and_a_project_one_names_its_scope(self):
+        installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
+        installed["plugins"]["idle@family"][0]["version"] = "1.0.0"
+        installed["plugins"]["tool@family"] = [{"scope": "local", "projectPath": str(self.projects / "alpha-web"),
+                                                "installPath": str(self.base / "cache" / "tool" / "1.0.0"),
+                                                "version": "1.0.0"}]
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
+        catalogue = self.base / "markets" / "family" / ".claude-plugin" / "marketplace.json"
+        doc = json.loads(catalogue.read_text())
+        doc["plugins"].append({"name": "idle", "version": "3.1.0", "source": "./idle"})
+        write_json(catalogue, doc)
+        (self.base / "markets" / "family" / "idle").mkdir()
+        write_json(self.projects / "alpha-web" / ".claude" / "settings.local.json",
+                   {"enabledPlugins": {"tool@family": True}})
+        inv = self.inventory()
+        idle = next(p for p in inv["spaces"][0]["plugins"] if p["name"] == "idle@family")
+        self.assertEqual((idle["enabled"], idle["behind"]), (False, True))
+        self.assertEqual([(f["plugin"], f["scope"], f["project"], f["action"]) for f in inv["findings"]],
+                         [("tool@family", "local", "alpha-web", "claude plugin update tool@family --scope local")])
+        self.assertRegex(inv["findings"][0]["projectKey"], r"^[0-9a-f]{8}$")
+        self.assertNotIn(json.dumps(str(self.projects))[1:-1], json.dumps(inv))
+
+    def test_a_version_needs_its_dots_and_a_tie_picks_the_release(self):
+        self.assertIsNone(self.mod.version_key("123456789012"), "a sha of digits is no version")
+        self.assertEqual(self.mod.version_key("1.2"), (1, 2, 0, 0))
+        self.assertEqual(self.mod.version_key("1.2.0-rc.1"), self.mod.version_key("1.2.0"))
+        folder = self.home / ".codex" / "plugins" / "cache" / "family" / "helper"
+        (folder / "0.10.0-rc.1").mkdir()
+        (folder / "0.10.0").rename(folder / "0.10.0-keep")
+        (folder / "0.10.0-keep").rename(folder / "0.10.0")
+        helper = next(p for p in self.inventory()["spaces"][0]["plugins"] if p["agent"] == "codex")
+        self.assertEqual(helper["version"], "0.10.0")
+
+    def test_a_record_of_an_unknown_shape_is_named(self):
+        write_json(self.home / ".claude" / "settings.json", {"enabledPlugins": ["tool@family"]})
+        known = json.loads((self.home / ".claude" / "plugins" / "known_marketplaces.json").read_text())
+        known["other"] = "not-an-object"
+        write_json(self.home / ".claude" / "plugins" / "known_marketplaces.json", known)
+        installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
+        installed["plugins"]["stray@other"] = [{"scope": "user", "version": "1.0.0"}]
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
+        catalogue = self.base / "markets" / "family" / ".claude-plugin" / "marketplace.json"
+        write_json(catalogue, {"name": "family", "plugins": {"tool": {}}})
+        found = {(d["source"], d["code"]) for d in self.inventory()["degraded"]}
+        self.assertEqual(found, {("claude:settings.json", "unrecognised-shape"),
+                                 ("claude:known_marketplaces.json:other", "unrecognised-shape"),
+                                 ("claude:marketplace:family", "unrecognised-shape")})
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", {"version": 2, "plugins": []})
+        self.assertIn(("claude:installed_plugins.json", "unrecognised-shape"),
+                      {(d["source"], d["code"]) for d in self.inventory()["degraded"]})
+
+    def test_the_plugin_manifest_wins_over_the_catalogue_entry_as_in_claude_code(self):
+        write_json(self.base / "markets" / "family" / "tool" / ".claude-plugin" / "plugin.json",
+                   {"name": "tool", "version": "1.0.0"})
+        tool = next(p for p in self.inventory()["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertEqual((tool["latest"], tool["latestFrom"], tool["behind"]), ("1.0.0", "plugin-manifest", False))
+        write_json(self.base / "markets" / "family" / "tool" / ".claude-plugin" / "plugin.json",
+                   {"name": "tool", "version": "2.0.0"})
+        tool = next(p for p in self.inventory()["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertEqual((tool["latest"], tool["behind"]), ("2.0.0", True), "the entry's 1.2.0 is not what installs")
+
+    def test_a_folder_marketplace_is_compared_like_any_other_and_a_root_project_has_no_name(self):
+        """Claude Code copies a folder marketplace's plugin into its versioned cache, so the copy can fall behind
+        the folder's manifest like any other install."""
+        known = json.loads((self.home / ".claude" / "plugins" / "known_marketplaces.json").read_text())
+        known["family"]["source"] = {"source": "directory", "path": "/somewhere"}
+        write_json(self.home / ".claude" / "plugins" / "known_marketplaces.json", known)
+        installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
+        installed["plugins"]["kit@family"][0]["projectPath"] = "/"
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
+        inv = self.inventory()
+        plugins = {p["name"]: p for p in inv["spaces"][0]["plugins"] if p["agent"] == "claude-code"}
+        self.assertEqual((plugins["tool@family"]["latest"], plugins["tool@family"]["behind"]), ("1.2.0", True))
+        self.assertEqual([f["plugin"] for f in inv["findings"]], ["tool@family"])
+        self.assertEqual((plugins["kit@family"]["project"], plugins["kit@family"]["enabled"]), (None, None))
+
+    def test_a_skill_version_is_read_at_the_top_or_under_metadata_only(self):
+        self.assertEqual(self.mod.skill_version("---\nname: a\nversion: 1.0.0\n---\n"), "1.0.0")
+        self.assertEqual(self.mod.skill_version("---\nname: a\nmetadata:\n  version: 2.1.0\n---\n"), "2.1.0")
+        self.assertIsNone(self.mod.skill_version("---\nname: a\nrequires:\n  version: 3.0.0\n---\n"))
+
+    def test_a_folder_that_cannot_be_listed_is_named_not_read_as_empty(self):
+        from unittest.mock import patch
+        real = os.scandir
+        blocked = {str(self.home / ".claude" / "skills"), str(self.home / ".codex" / "plugins" / "cache")}
+
+        def scandir(path="."):
+            if str(path) in blocked:
+                raise PermissionError(13, "Permission denied")
+            return real(path)
+        with patch.object(self.mod.os, "scandir", side_effect=scandir):
+            inv = self.inventory()
+        found = {(d["source"], d["code"]) for d in inv["degraded"]}
+        self.assertIn(("skills:claude-code:user", "unreadable"), found)
+        self.assertIn(("codex:plugins-cache", "unreadable"), found)
+        self.assertNotIn(json.dumps(str(self.home))[1:-1], json.dumps(inv["degraded"]))
+
+    def test_enabled_is_unknown_when_the_setting_has_another_shape(self):
+        write_json(self.home / ".claude" / "settings.json", {"enabledPlugins": ["tool@family"]})
+        tool = next(p for p in self.inventory()["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertIsNone(tool["enabled"])
+
+    def test_a_manifest_that_cannot_be_read_or_names_no_release_gives_no_latest(self):
+        manifest = self.base / "markets" / "family" / "tool" / ".claude-plugin" / "plugin.json"
+        write_json(manifest, '{"name": "tool", "version": "1.0.0",}')
+        inv = self.inventory()
+        tool = next(p for p in inv["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertEqual((tool["latest"], tool["behind"]), (None, None), "the entry's 1.2.0 is not taken instead")
+        self.assertEqual(inv["findings"], [])
+        self.assertIn(("claude:marketplace:family:tool", "unreadable"), {(d["source"], d["code"]) for d in inv["degraded"]})
+        write_json(manifest, {"name": "tool", "version": "nightly"})
+        tool = next(p for p in self.inventory()["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertEqual((tool["latest"], tool["behind"]), (None, None))
+
+    def test_a_skill_folder_that_cannot_be_searched_is_named(self):
+        from unittest.mock import patch
+        real = os.stat
+        blocked = str(self.home / ".claude" / "skills" / "notes" / "SKILL.md")
+
+        def stat(path, *args, **kwargs):
+            if str(path) == blocked:
+                raise PermissionError(13, "Permission denied")
+            return real(path, *args, **kwargs)
+        with patch.object(self.mod.os, "stat", side_effect=stat):
+            inv = self.inventory()
+        self.assertNotIn("notes", {s["name"] for s in inv["spaces"][0]["skills"]})
+        self.assertIn(("skill:claude-code:user:notes", "unreadable"), {(d["source"], d["code"]) for d in inv["degraded"]})
+
+    def test_a_malformed_install_record_is_named_and_a_codex_build_folder_is_read(self):
+        installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
+        installed["plugins"]["tool@family"].append("not-a-record")
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
+        cache = self.home / ".codex" / "plugins" / "cache" / "family"
+        versioned_skill(cache / "local" / "build-7f3a" / "skills", "local-skill", "")
+        write_json(self.home / ".codex" / "config.toml",
+                   '[plugins."helper@family"]\nenabled = true\n[plugins."local@family"]\nenabled = true\n')
+        inv = self.inventory()
+        self.assertIn(("claude:installed_plugins.json:tool@family", "unrecognised-shape"),
+                      {(d["source"], d["code"]) for d in inv["degraded"]})
+        local = next(p for p in inv["spaces"][0]["plugins"] if p["name"] == "local@family")
+        self.assertIsNone(local["version"])
+        self.assertIn(("codex", "plugin", "local-skill"),
+                      {(s["agent"], s["scope"], s["name"]) for s in inv["spaces"][0]["skills"]})
+
+    def test_a_missing_plugin_folder_or_a_plugin_root_gives_no_latest(self):
+        (self.base / "markets" / "family" / "tool").rmdir()
+        tool = next(p for p in self.inventory()["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertEqual((tool["latest"], tool["behind"]), (None, None))
+        (self.base / "markets" / "family" / "tool").mkdir()
+        catalogue = self.base / "markets" / "family" / ".claude-plugin" / "marketplace.json"
+        doc = json.loads(catalogue.read_text())
+        doc["metadata"] = {"pluginRoot": "./plugins"}
+        write_json(catalogue, doc)
+        inv = self.inventory()
+        tool = next(p for p in inv["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertEqual((tool["latest"], tool["behind"]), (None, None), "a plugin root is not followed yet")
+        self.assertEqual(inv["findings"], [])
+
+    def test_a_home_that_is_no_folder_is_named(self):
+        inv = self.mod.inventory(self.base / "absent-home", [])
+        self.assertEqual([(d["source"], d["code"]) for d in inv["degraded"]], [("harness_root", "not-found")])
+
+    def test_codex_plugins_of_another_shape_are_named(self):
+        write_json(self.home / ".codex" / "config.toml", 'plugins = "all"\n')
+        inv = self.inventory()
+        self.assertIn(("codex:config.toml", "unrecognised-shape"), {(d["source"], d["code"]) for d in inv["degraded"]})
+        helper = next(p for p in inv["spaces"][0]["plugins"] if p["agent"] == "codex")
+        self.assertIsNone(helper["enabled"])
+
+    def test_codex_folders_sort_by_every_number_and_several_unnamed_ones_are_ambiguous(self):
+        cache = self.home / ".codex" / "plugins" / "cache" / "family"
+        for name in ("1", "0.9.0"):
+            (cache / "single" / name).mkdir(parents=True)
+        for name in ("build-a", "build-b"):
+            (cache / "twin" / name).mkdir(parents=True)
+        write_json(self.home / ".codex" / "config.toml", '[plugins."twin@family"]\nenabled = true\n')
+        inv = self.inventory()
+        plugins = {p["name"]: p for p in inv["spaces"][0]["plugins"] if p["agent"] == "codex"}
+        self.assertEqual(plugins["single@family"]["version"], "1")
+        self.assertIn(("codex:plugins-cache:family:twin", "ambiguous"), {(d["source"], d["code"]) for d in inv["degraded"]})
+
+    def test_a_project_install_of_no_known_project_is_no_finding(self):
+        installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
+        installed["plugins"]["tool@family"][0].update(scope="project", projectPath="relative/path")
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
+        inv = self.inventory()
+        tool = next(p for p in inv["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertEqual((tool["project"], tool["behind"]), (None, True))
+        self.assertEqual(inv["findings"], [])
+
+    def test_a_name_of_another_shape_is_the_folder_name_and_a_nul_path_is_ignored(self):
+        folder = self.home / ".claude" / "skills" / "big"
+        folder.mkdir(parents=True)
+        (folder / "SKILL.md").write_text("---\nname: first\n  " + "x" * 5000 + "\ndescription: d\n---\n")
+        installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
+        installed["plugins"]["tool@family"][0]["installPath"] = "/a\u0000b"
+        installed["plugins"]["x" * 300 + "@family"] = [{"scope": "user", "version": "1.0.0"}]
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
+        inv = self.inventory()
+        names = {s["name"] for s in inv["spaces"][0]["skills"]}
+        self.assertIn("big", names)
+        self.assertLess(max(len(json.dumps(r)) for r in inv["spaces"][0]["skills"]), 300)
+        self.assertNotIn("x" * 300 + "@family", {p["name"] for p in inv["spaces"][0]["plugins"]})
+        self.assertIn(("claude:installed_plugins.json", "unrecognised-shape"),
+                      {(d["source"], d["code"]) for d in inv["degraded"]})
+        self.assertNotEqual(inv["degraded"][:1], [{"source": "inventory", "code": "failed"}])
+
+    def test_a_field_a_third_party_wrote_is_bounded(self):
+        versioned_skill(self.home / ".claude" / "skills", "long-version", "version: 1." + "9" * 5000 + "\n")
+        known = json.loads((self.home / ".claude" / "plugins" / "known_marketplaces.json").read_text())
+        known["family"]["lastUpdated"] = "2026-01-02T00:00:00Z" + "x" * 100_000
+        write_json(self.home / ".claude" / "plugins" / "known_marketplaces.json", known)
+        installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
+        installed["plugins"]["tool@family"][0]["version"] = "1." + "0" * 5000
+        (self.home / ".codex" / "plugins" / "cache" / "family" / "helper" / ("1." + "1" * 60)).mkdir()
+        (self.projects / ("q" * 120) / ".claude" / "skills").mkdir(parents=True)
+        versioned_skill(self.projects / ("q" * 120) / ".claude" / "skills", "deep", "")
+        (self.home / ".codex" / "plugins" / "cache" / ("m" * 120) / "tool" / "1.0.0").mkdir(parents=True)
+        installed["plugins"]["kit@family"][0]["projectPath"] = str(self.base / ("p" * 120))
+        installed["plugins"]["stray@family"] = [{"scope": "local", "projectPath": "/x/\ud800", "version": "1.0.0"}]
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
+        inv = self.inventory()
+        self.assertNotEqual([d["source"] for d in inv["degraded"]][:1], ["inventory"], "the inventory did not fail")
+        json.dumps(inv, ensure_ascii=False).encode("utf-8")   # the scan's JSON can be written
+        self.assertIn(("codex:plugins-cache", "unrecognised-shape"), {(d["source"], d["code"]) for d in inv["degraded"]})
+        rows = inv["spaces"][0]["skills"] + inv["spaces"][0]["plugins"] + inv["findings"]
+        self.assertLess(max(len(json.dumps(r)) for r in rows), 600)
+        skill = next(r for r in inv["spaces"][0]["skills"] if r["name"] == "long-version")
+        self.assertIsNone(skill["version"])
+        tool = next(p for p in inv["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertEqual((tool["version"], tool["marketplaceUpdated"]), (None, None))
+
+    def test_an_unknown_scope_behind_is_no_finding(self):
+        installed = json.loads((self.home / ".claude" / "plugins" / "installed_plugins.json").read_text())
+        installed["plugins"]["tool@family"][0]["scope"] = "managed"
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", installed)
+        inv = self.inventory()
+        tool = next(p for p in inv["spaces"][0]["plugins"] if p["name"] == "tool@family")
+        self.assertEqual((tool["scope"], tool["enabled"], tool["behind"]), ("managed", None, True))
+        self.assertEqual(inv["findings"], [])
+
+    def test_an_enabled_codex_plugin_lists_its_skills(self):
+        versioned_skill(self.home / ".codex" / "plugins" / "cache" / "family" / "helper" / "0.10.0" / "skills",
+                        "helper-skill", "")
+        rows = {(s["agent"], s["scope"], s["name"]): s for s in self.inventory()["spaces"][0]["skills"]}
+        self.assertEqual(rows[("codex", "plugin", "helper-skill")]["plugin"], "helper@family")
+
+    def test_a_skill_linked_into_two_projects_is_listed_in_each_and_a_linked_project_once(self):
+        """Each project loads a skill linked into it, so a skill folder linked into two projects is a row in each;
+        one project reached under a second name (a link beside it) is listed once, under the first name."""
+        versioned_skill(self.home / ".agents" / "skills", "shared-kit", "version: 1.0.0\n")
+        target = self.home / ".agents" / "skills" / "shared-kit"
+        for name in ("beta-api", "gamma-app"):
+            folder = self.projects / name / ".claude" / "skills"
+            folder.mkdir(parents=True)
+            (folder / "shared-kit").symlink_to(target, target_is_directory=True)
+        (self.projects / "zz-alpha-again").symlink_to(self.projects / "alpha-web", target_is_directory=True)
+        skills = self.inventory()["spaces"][0]["skills"]
+        shared = sorted(s["project"] for s in skills if s["scope"] == "project" and s["name"] == "shared-kit")
+        self.assertEqual(shared, ["beta-api", "gamma-app"])
+        deploys = [s["project"] for s in skills if s["scope"] == "project" and s["name"] == "deploy"]
+        self.assertEqual(deploys, ["alpha-web"], "a project linked under another name is one project")
+
+    def test_odd_shapes_in_the_records_do_not_break_it(self):
+        write_json(self.home / ".claude" / "plugins" / "installed_plugins.json", {"plugins": {
+            "tool@family": [{"scope": "user", "installPath": 7, "version": 1}, "not-a-record"],
+            "bare": {"scope": "galaxy", "version": "1.0.0"}}})
+        write_json(self.home / ".claude" / "plugins" / "known_marketplaces.json", {"family": "not-an-object"})
+        plugins = {(p["name"], p["scope"]): p for p in self.inventory()["spaces"][0]["plugins"]
+                   if p["agent"] == "claude-code"}
+        self.assertEqual(plugins[("tool@family", "user")]["version"], None)
+        self.assertEqual((plugins[("bare", "galaxy")]["marketplace"], plugins[("bare", "galaxy")]["enabled"]),
+                         (None, None), "an unknown scope keeps its word and an unknown enabled state")
 
 
 if __name__ == "__main__":

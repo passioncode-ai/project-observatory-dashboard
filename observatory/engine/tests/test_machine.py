@@ -1104,5 +1104,173 @@ class Command(Base):
         self.assertEqual(page, str(paths.DASHBOARD_DIR / "machine.html"))
         self.assertNotIn("projects-dashboard.html", out.getvalue())
 
+
+class Skills(Base):
+    """The `skills` section (OBS-477): read from the harness scan's inventory, never scanned on request, and an
+    unread inventory named in `degraded` rather than shown as nothing installed."""
+
+    INVENTORY = {"spaces": [{"space": "this-account", "home": "~",
+                             "skills": [{"name": "notes", "agent": "claude-code", "scope": "user", "version": "1.0.0"}],
+                             "plugins": [{"name": "tool@family", "agent": "claude-code", "scope": "user",
+                                          "project": None, "version": "1.0.0", "enabled": True,
+                                          "marketplace": "family", "latest": "1.1.0",
+                                          "latestFrom": "marketplace-catalogue", "marketplaceUpdated": None,
+                                          "behind": True}]}],
+                 "findings": [{"code": "plugin-behind", "severity": "info", "plugin": "tool@family",
+                               "agent": "claude-code", "scope": "user", "project": None, "installed": "1.0.0",
+                               "latest": "1.1.0", "marketplaceUpdated": None,
+                               "action": "claude plugin update tool@family"}],
+                 "open": [{"finding": "organization-plugin-in-personal-space", "waitsOn": "OBS-359", "reason": "r"}],
+                 "degraded": [{"source": "codex:config.toml", "code": "unreadable", "reason": "r"}]}
+
+    def setUp(self):
+        super().setUp()
+        sys.path.insert(0, str(ROOT / "mcp"))
+        import server
+        self.server = importlib.reload(server)
+
+    def harness(self, doc) -> None:
+        (self.home / "store/raw").mkdir(parents=True, exist_ok=True)
+        (self.home / "store/raw/harness.json").write_text(json.dumps(doc) if not isinstance(doc, str) else doc)
+
+    def test_without_a_scan_the_section_says_how_to_fill_it(self):
+        out = self.server.observatory_machine(section="skills")
+        self.assertEqual(out["skills"]["spaces"], [])
+        [d] = out["degraded"]
+        self.assertEqual((d["source"], d["code"]), ("harness.json", "not-surveyed"))
+        self.assertIn("full scan-harness", d["reason"])
+        self.assertIn("configure integrations harness true", d["reason"])
+        self.assertEqual(out["skills"]["open"][0]["waitsOn"], "OBS-359")
+        self.assertEqual(out["skills"]["page"]["total"], 0)
+
+    def test_odd_rows_in_the_scan_do_not_break_the_section(self):
+        self.harness({"generated_at": self.now(), "inventory": {"spaces": [{"space": "this-account",
+                                                                            "skills": {"a": 1}, "plugins": ["x"]}]}})
+        out = self.server.observatory_machine(section="skills")
+        self.assertEqual(out["skills"]["counts"], {"skills": 0, "plugins": 0, "findings": 0})
+        self.assertEqual(out["skills"]["page"]["total"], 0)
+
+    def test_a_foreign_open_is_this_releases_and_a_timeless_scan_says_why_a_cursor_misses(self):
+        self.harness({"generated_at": "not-a-time", "inventory": {**self.INVENTORY, "degraded": [], "open": "x"}})
+        out = self.server.observatory_machine(section="skills", cursor="1@20260101000000")
+        self.assertEqual(out["skills"]["open"][0]["waitsOn"], "OBS-359", "an `open` of another shape is not passed on")
+        [d] = [d for d in out["degraded"] if d["source"] == "cursor"]
+        self.assertEqual(d["code"], "invalid-cursor")
+        self.assertIn("carries no time", d["reason"])
+        self.assertEqual(out["skills"]["page"]["cursor"], "0@")
+
+    def test_a_scan_before_the_inventory_is_named(self):
+        self.harness({"generated_at": "2026-01-01T00:00:00Z", "skills": []})
+        out = self.server.observatory_machine(section="skills")
+        self.assertEqual(out["measuredAt"], "2026-01-01T00:00:00Z")
+        self.assertNotIn("measuredAt", out["skills"], "said once, at the top")
+        self.assertIn("predates the skills inventory", out["degraded"][0]["reason"])
+
+    def test_an_unreadable_scan_is_named(self):
+        self.harness("{")
+        out = self.server.observatory_machine(section="skills")
+        self.assertEqual(out["degraded"][0]["code"], "unreadable")
+
+    def test_the_inventory_with_its_findings_counts_and_degraded(self):
+        self.harness({"generated_at": self.now(), "inventory": self.INVENTORY})
+        out = self.server.observatory_machine(section="skills")
+        skills = out["skills"]
+        self.assertEqual(skills["counts"], {"skills": 1, "plugins": 1, "findings": 1})
+        self.assertEqual(skills["findings"][0]["code"], "plugin-behind")
+        self.assertEqual(out["degraded"], self.INVENTORY["degraded"])
+        self.assertIn("skills", self.server.observatory_machine()["sections"])
+
+    @staticmethod
+    def now() -> str:
+        return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def test_the_skills_come_a_page_at_a_time(self):
+        rows = [{"name": f"s{i:03}", "agent": "claude-code", "scope": "user", "version": None} for i in range(450)]
+        inventory = {**self.INVENTORY, "spaces": [{**self.INVENTORY["spaces"][0], "skills": rows}]}
+        self.harness({"generated_at": self.now(), "inventory": inventory})
+        first = self.server.observatory_machine(section="skills")["skills"]
+        # One window: the finding, the plugin, then 98 skills.
+        self.assertEqual((len(first["findings"]), len(first["spaces"][0]["plugins"]), len(first["spaces"][0]["skills"])),
+                         (1, 1, 98))
+        self.assertEqual(first["page"]["total"], 452)
+        self.assertRegex(first["page"]["nextCursor"], r"^100@[0-9]{14}$")
+        self.assertEqual(first["counts"], {"skills": 450, "plugins": 1, "findings": 1})
+        last = self.server.observatory_machine(section="skills", cursor="402")["skills"]
+        self.assertEqual([r["name"] for r in last["spaces"][0]["skills"]][:1], ["s400"])
+        self.assertEqual((last["findings"], last["spaces"][0]["plugins"]), ([], []))
+        self.assertIsNone(last["page"]["nextCursor"])
+        for cursor in ("nope", "\u00b2", "9" * 5000):
+            bad = self.server.observatory_machine(section="skills", cursor=cursor)
+            self.assertIn("invalid-cursor", {d["code"] for d in bad["degraded"]})
+        stale = self.server.observatory_machine(section="skills", cursor="100@20000101000000")
+        self.assertIn("scanned again", " ".join(d["reason"] for d in stale["degraded"]))
+        self.assertEqual(stale["skills"]["page"]["cursor"].split("@")[0], "0")
+        follow = self.server.observatory_machine(section="skills", cursor=first["page"]["nextCursor"])
+        self.assertEqual(follow["skills"]["page"]["cursor"], first["page"]["nextCursor"])
+        past = self.server.observatory_machine(section="skills", cursor="9999")
+        self.assertEqual((past["skills"]["spaces"][0]["skills"], past["skills"]["page"]["nextCursor"]), ([], None),
+                         "a cursor past the end is the end, never the first page again")
+
+    def test_the_answer_stays_within_what_a_host_keeps(self):
+        """The largest page (100 skills) beside a machine's worth of plugin installs, serialised as the SDK serialises it (two-space
+        indentation), stays under 80,000 characters: about 20,000 tokens, below a host's 25,000-token limit."""
+        plugin = {"name": "some-plugin-name@some-marketplace", "agent": "claude-code", "scope": "local",
+                  "project": "a-project-folder", "projectKey": "0123abcd", "version": "1.22.333", "enabled": True,
+                  "marketplace": "some-marketplace", "latest": None, "latestFrom": None,
+                  "marketplaceUpdated": "2026-01-02T03:04:05.678Z", "behind": None}
+        skill = {"name": "a-skill-with-a-long-name", "agent": "claude-code", "scope": "plugin", "version": None,
+                 "plugin": "some-plugin-name@some-marketplace"}
+        finding = {**self.INVENTORY["findings"][0], "project": "a-project-folder", "projectKey": "0123abcd",
+                   "marketplaceUpdated": "2026-01-02T03:04:05.678Z",
+                   "action": "claude plugin update some-plugin-name@some-marketplace --scope local"}
+        inventory = {**self.INVENTORY, "findings": [finding] * 400,
+                     "spaces": [{"space": "this-account", "home": "~", "skills": [skill] * 1300,
+                                 "plugins": [plugin] * 400}]}
+        self.harness({"generated_at": self.now(), "inventory": inventory})
+        for cursor in ("0", "350", "500"):   # findings only, findings and plugins, plugins and skills
+            out = self.server.observatory_machine(section="skills", limit=100, cursor=cursor)
+            rows = (len(out["skills"]["findings"]) + len(out["skills"]["spaces"][0]["plugins"])
+                    + len(out["skills"]["spaces"][0]["skills"]))
+            self.assertEqual(rows, 100)
+            self.assertNotIn("degraded", out["skills"], "said once, at the top")
+            self.assertLess(len(json.dumps(out, indent=2)), 80_000, cursor)
+        self.assertNotIn("latest", out["skills"]["spaces"][0]["plugins"][0], "a null field is left out")
+
+    def test_a_page_of_long_rows_ends_early_and_a_cursor_without_a_stamp_still_walks(self):
+        long_row = {"name": "n" * 64, "agent": "claude-code", "scope": "user", "version": "1." * 19 + "1",
+                    "plugin": "p" * 129}
+        inventory = {**self.INVENTORY, "findings": [], "degraded": [],
+                     "spaces": [{"space": "this-account", "home": "~", "skills": [long_row] * 400, "plugins": []}]}
+        self.harness({"generated_at": "not-a-time", "inventory": inventory})
+        seen, cursor, pages = 0, None, 0
+        while True:
+            out = self.server.observatory_machine(section="skills", cursor=cursor)["skills"]
+            seen += len(out["spaces"][0]["skills"])
+            pages += 1
+            self.assertLessEqual(len(json.dumps(out["spaces"][0]["skills"])), 40_000 + 400)
+            cursor = out["page"]["nextCursor"]
+            if cursor is None or pages > 50:
+                break
+        self.assertEqual(seen, 400, "every row reached, the walk ended")
+
+    def test_an_old_scan_is_named_stale(self):
+        self.harness({"generated_at": "2026-01-03T00:00:00Z", "inventory": {**self.INVENTORY, "degraded": []}})
+        out = self.server.observatory_machine(section="skills")
+        self.assertEqual([(d["source"], d["code"]) for d in out["degraded"]], [("harness.json", "stale")])
+        self.assertEqual(out["skills"]["counts"]["plugins"], 1, "the lists stay, named as old")
+
+    def test_full_machine_skills_prints_the_same_section(self):
+        self.harness({"generated_at": "2026-01-03T00:00:00Z", "inventory": self.INVENTORY})
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(workspace.machine_command("machine", ["--skills"]), 0)
+        printed = json.loads(out.getvalue())
+        self.assertEqual(printed["counts"], {"skills": 1, "plugins": 1, "findings": 1})
+        for other in (["--disk"], ["--root", str(self.base)]):
+            with self.assertRaises(SystemExit):
+                with contextlib.redirect_stderr(io.StringIO()):
+                    workspace.machine_command("machine", ["--skills", *other])
+
+
 if __name__ == "__main__":
     unittest.main()

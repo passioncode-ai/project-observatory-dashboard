@@ -738,11 +738,19 @@ def observatory_machine(
                                             description="A process id to explain: its origin, ancestry, and "
                                                         "witr's service/port detail when witr is installed. "
                                                         "The answer is then that explanation alone.")] = None,
-    section: Annotated[Literal["overview", "memory", "processes", "disk", "git", "cleanup", "guard", "coverage", "move"],
+    section: Annotated[Literal["overview", "memory", "processes", "disk", "git", "cleanup", "guard", "coverage", "move",
+                               "skills"],
                        Field(description="overview = totals and the top few of each (default); "
                                          "a named section = that section in full, except coverage which always stays bounded; "
                                          "move = the checklist of a move between machines, as "
-                                         "`full machine-move status --json` gives it.")] = "overview",
+                                         "`full machine-move status --json` gives it; skills = every skill and plugin "
+                                         "each agent loads, with version, scope and findings, as `full machine --skills` "
+                                         "gives it.")] = "overview",
+    limit: Annotated[int | None, Field(ge=1, le=100, description="skills only: rows per page, findings, then plugins, "
+                                                                  "then skills (at most and by default 100); counts "
+                                                                  "are always whole")] = None,
+    cursor: Annotated[str | None, Field(description="skills only: the `skills.page.nextCursor` of the previous "
+                                                    "answer")] = None,
 ) -> dict[str, Any]:
     """The machine this estate runs on: processes grouped by ORIGIN (agent
     session, launchd job, simulator, app, detached), memory and swap, free disk
@@ -771,7 +779,21 @@ def observatory_machine(
     from this machine and the other machine's facts in the data folder's peers folder:
     the same function `full machine-move status` runs. It writes nothing and makes no
     machine id; every step it names is a CLI verb a person or an agent runs.
+
+    `section="skills"`: every skill and plugin here with version, scope and agent, a plugin's
+    enabled state and its marketplace's newest LOCAL version, findings (`plugin-behind`), `open`
+    (OBS-359) and `degraded`; from the last harness scan; 100 rows a page (`cursor`).
     """
+    if section == "skills" and explainPid is None:
+        import machine_view
+        skills = machine_view.skills_section(limit=limit or SKILLS_PAGE, cursor=cursor)
+        # Bounded for the host: `degraded` and `measuredAt` once, at the top; rows without their empty fields.
+        degraded = skills.pop("degraded")
+        skills["spaces"] = [{**space, "skills": [_present_fields(r) for r in space.get("skills") or []],
+                             "plugins": [_present_fields(r) for r in space.get("plugins") or []]}
+                            for space in skills["spaces"]]
+        skills["findings"] = [_present_fields(r) for r in skills.get("findings") or []]
+        return {"measuredAt": skills.pop("measuredAt"), "degraded": degraded, "skills": skills}
     if section == "move" and explainPid is None:
         # The agent's path to the checklist (decision D13): the CLI's own function and peers.
         import machine_backup
@@ -797,7 +819,7 @@ def observatory_machine(
         return {**base, section: full.get(section)}
     out = {**base, "memory": full.get("memory"), "witr": full.get("witr", False),
            "coverage": full.get("coverage"),
-           "sections": ["memory", "processes", "disk", "git", "cleanup", "guard", "coverage"]}
+           "sections": ["memory", "processes", "disk", "git", "cleanup", "guard", "coverage", "skills"]}
     if full.get("processes"):
         procs = full["processes"]
         out["processes"] = {**{key: procs.get(key) for key in
@@ -860,6 +882,18 @@ def observatory_ssh_keys(
 
 
 MACHINE_TOP = 10
+#: Skills per page of `observatory_machine(section="skills")`: a machine measured holding 1,269 skills made an
+#: unpaged answer of 151,536 characters, past what a host keeps of one tool result, and 200 skills beside its 116
+#: plugin installs still made 85,918 characters as the SDK serialises it.
+SKILLS_PAGE = 100
+
+
+def _present_fields(row: Any) -> Any:
+    """A row without its null fields (`project: null`, `latest: null`): the reader learns the same in fewer
+    characters; `false` stays, it says something."""
+    if not isinstance(row, dict):
+        return row
+    return {k: v for k, v in row.items() if v is not None}
 
 
 # Publish the additive bounded coverage contract on the actual tool, not only prose.

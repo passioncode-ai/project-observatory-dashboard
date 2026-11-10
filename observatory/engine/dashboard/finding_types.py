@@ -145,6 +145,7 @@ LABELS: dict[str, str] = {
     "harness.listing_overflow": "Skill descriptions over the listing budget",
     "harness.mcp_deferral_off": "MCP tool schemas load upfront",
     "harness.skill_changed": "Skill changed since first seen",
+    "harness.plugin_behind": "Plugin behind its marketplace's newest version",
     "harness.skill_risk": "Skill matches a security rule",
     "mcp.key_in_url": "MCP key in a URL",
     "mcp.needs_auth": "MCP server needs sign-in",

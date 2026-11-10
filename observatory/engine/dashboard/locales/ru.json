@@ -2473,5 +2473,7 @@
   "many": "{n} новых элементов могут относиться к {organization}",
   "one": "{n} новый элемент может относиться к {organization}",
   "other": "{n} новых элемента могут относиться к {organization}"
- }
+ },
+ "Plugin behind its marketplace's newest version": "Плагин отстаёт от новейшей версии своего маркетплейса",
+ "plugin {plugin} is at {installed}, its marketplace publishes {latest}": "плагин {plugin} на версии {installed}, его маркетплейс публикует {latest}"
 }

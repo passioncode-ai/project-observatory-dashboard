@@ -6,6 +6,7 @@ nothing heavy itself. `explain` is the one live call: why a single process runs.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import datetime, timedelta, timezone
 
@@ -84,6 +85,129 @@ def carried(hygiene: dict) -> dict | None:
         return None
     stamps = [c["measured_at"] for c in stale if c.get("measured_at")]
     return {"checkouts": len(stale), "measured_at": min(stamps) if stamps else None}
+
+
+#: Past this many characters of rows (compact JSON) a page of the skills section ends early.
+PAGE_CHARS = 40_000
+#: The page of an answer that has no skills to page.
+EMPTY_PAGE = {"limit": None, "cursor": "0", "nextCursor": None, "total": 0,
+              "order": "findings, then each space's plugins, then its skills"}
+#: Past this age the skills section says its scan is stale.
+SKILLS_STALE_HOURS = 24
+#: What the skills section always answers, so a reader can tell an empty inventory from an unread one.
+SKILLS_OPEN = [{"finding": "organization-plugin-in-personal-space", "waitsOn": "OBS-359",
+                "reason": "which space is a person's own needs the space's context binding (OBS-359); until then an "
+                          "organization's plugin enabled here is not reported"}]
+
+
+def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
+    """The `skills` section (OBS-477): every skill and plugin each agent of this space loads or has installed, with
+    its version, scope and agent, and the findings the records support (a plugin behind the newest version its
+    marketplace's local copy publishes). Read from the harness scan's `inventory` (collectors/scan_harness.py), which
+    the tick refreshes when `integrations.harness` is on and `full scan-harness` refreshes on request; nothing is
+    scanned here. A scan that is missing, unreadable or older than the inventory is named in `degraded` with the
+    command that fills it, and the lists are then empty, never a claim that nothing is installed.
+
+    `limit` pages every row (a machine can hold over a thousand skills and a plugin row per project install; the MCP
+    tool answers 100 rows at a time): one window over the findings, then each space's plugins, then its skills;
+    `cursor` is what `page.nextCursor` gave (`offset@stamp`); `counts` are always whole. `degraded` code
+    `invalid-cursor` answers a cursor of an earlier scan or a malformed one (with the first page) and one past the end
+    (with an empty last page)."""
+    doc, problem = _load("harness.json", "scan-harness")
+    if problem:
+        if problem["code"] == "not-surveyed":
+            problem = {**problem, "reason": "not surveyed yet: turn on the harness scan "
+                                            "(`project-observatory full configure integrations harness true` and "
+                                            "`project-observatory full configure sources harness_root ~`), then run "
+                                            "`project-observatory full scan-harness`"}
+        return {"measuredAt": None, "spaces": [], "page": EMPTY_PAGE,
+                "counts": {"skills": 0, "plugins": 0, "findings": 0},
+                "findings": [], "open": SKILLS_OPEN, "degraded": [problem]}
+    inventory = doc.get("inventory") if isinstance(doc, dict) else None
+    if not isinstance(inventory, dict):
+        return {"measuredAt": doc.get("generated_at") if isinstance(doc, dict) else None, "spaces": [],
+                "page": EMPTY_PAGE,
+                "counts": {"skills": 0, "plugins": 0, "findings": 0}, "findings": [], "open": SKILLS_OPEN,
+                "degraded": [{"source": "harness.json", "code": "not-surveyed",
+                              "reason": "the last harness scan predates the skills inventory; run "
+                                        "`project-observatory full scan-harness`"}]}
+    spaces = [{**s, "skills": [r for r in s.get("skills") or [] if isinstance(r, dict)]
+                  if isinstance(s.get("skills"), list) else [],
+               "plugins": [r for r in s.get("plugins") or [] if isinstance(r, dict)]
+                  if isinstance(s.get("plugins"), list) else []}
+              for s in (inventory.get("spaces") if isinstance(inventory.get("spaces"), list) else [])
+              if isinstance(s, dict)]
+    findings = [f for f in inventory.get("findings") or [] if isinstance(f, dict)]
+    degraded = [d for d in inventory.get("degraded") or [] if isinstance(d, dict)]
+    try:
+        measured = datetime.strptime(str(doc.get("generated_at")), "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        measured = None
+    # The tick refreshes the scan every half hour while the harness integration is on; a day without one means it
+    # stopped (the integration turned off, the tick not running), and the lists describe that day, not today.
+    if measured is None or datetime.now(timezone.utc) - measured > timedelta(hours=SKILLS_STALE_HOURS):
+        degraded.append({"source": "harness.json", "code": "stale",
+                         "reason": f"the harness scan is older than {SKILLS_STALE_HOURS} hours or carries no time; "
+                                   f"run `project-observatory full scan-harness`"})
+    counts = {"skills": sum(len(sp["skills"]) for sp in spaces),
+              "plugins": sum(len(sp["plugins"]) for sp in spaces), "findings": len(findings)}
+    # One window over every row, in one order: the findings, then each space's plugins, then its skills. A page of
+    # `limit` rows is bounded whatever a machine holds (a project install is a plugin row per project).
+    rows: list[tuple[str, int, dict]] = [("finding", -1, f) for f in findings]
+    for index, space in enumerate(spaces):
+        rows += [("plugin", index, r) for r in space["plugins"]] + [("skill", index, r) for r in space["skills"]]
+    total = len(rows)
+    start = 0
+    # A cursor carries the scan it was given for (`offset@stamp`): the tick rewrites the scan every half hour, and a
+    # walk that spans a rescan would skip or repeat rows without saying so. A bare offset is taken as it is.
+    stamp = re.sub(r"[^0-9]", "", str(doc.get("generated_at") or ""))[:14]
+    given = re.fullmatch(r"([0-9]{1,9})(?:@([0-9]{0,14}))?", str(cursor)) if cursor is not None else None
+    if given and given.group(2) is not None and given.group(2) != stamp:
+        degraded.append({"source": "cursor", "code": "invalid-cursor",
+                         "reason": ("the inventory was scanned again since this cursor was given; the first page of "
+                                    "the new scan is shown") if stamp else
+                                   ("the scan carries no time, so this cursor cannot be matched to it; the first "
+                                    "page is shown")})
+        cursor = None
+    elif given:
+        cursor = given.group(1)
+    if cursor is not None:
+        if re.fullmatch(r"[0-9]{1,9}", str(cursor)) and int(cursor) <= total:
+            start = int(cursor)
+        elif re.fullmatch(r"[0-9]{1,9}", str(cursor)):
+            # Past the end (the inventory shrank between two scans): an empty last page, never the first page
+            # again, or a reader following `nextCursor` would read from the start without end.
+            start = total
+            degraded.append({"source": "cursor", "code": "invalid-cursor",
+                             "reason": "the cursor is past the end of the current inventory; nothing follows it"})
+        else:
+            degraded.append({"source": "cursor", "code": "invalid-cursor",
+                             "reason": "the cursor is not one this answer gave; the first page is shown"})
+    end = total if limit is None else min(total, start + max(1, int(limit)))
+    if limit is not None:
+        # Bounded by size as well as by count: a page stops once its rows pass PAGE_CHARS characters, so rows whose
+        # every field is at its longest still make a page a host keeps. At least one row, so a walk always moves.
+        used = 0
+        for at in range(start, end):
+            used += len(json.dumps(rows[at][2]))
+            if used > PAGE_CHARS and at > start:
+                end = at
+                break
+    window = rows[start:end]
+    # `open` as the scan wrote it when it is a list of entries; anything else (an older or foreign scan) is this
+    # release's own list.
+    opened = inventory.get("open")
+    if not (isinstance(opened, list) and opened and all(isinstance(o, dict) for o in opened)):
+        opened = SKILLS_OPEN
+    findings = [r for kind, _, r in window if kind == "finding"]
+    spaces = [{**space, "plugins": [r for kind, i, r in window if kind == "plugin" and i == index],
+               "skills": [r for kind, i, r in window if kind == "skill" and i == index]}
+              for index, space in enumerate(spaces)]
+    page = {"limit": limit, "cursor": f"{start}@{stamp}", "nextCursor": f"{end}@{stamp}" if end < total else None,
+            "total": total,
+            "order": "findings, then each space's plugins, then its skills"}
+    return {"measuredAt": doc.get("generated_at"), "spaces": spaces, "page": page, "counts": counts,
+            "findings": findings, "open": opened, "degraded": degraded}
 
 
 def summary(explain_pid: int | None = None) -> dict:

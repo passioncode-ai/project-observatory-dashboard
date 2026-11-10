@@ -5,6 +5,29 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **A key copied into another store on this machine** (OBS-476; `docs/ONBOARDING.md`, scenario OSS-111).
+  `tools/vault.py copy PROJECT ENV NAME --to-store PATH [--to-slot SLOT] [--replace] [--json]` copies one slot into
+  another secret store this account owns (a space being prepared, another workspace's store), reading and writing the value inside
+  one process: never printed, never in an argument, a file outside the two stores or a log. The source stays; both
+  stores' movement journals record `copied`, each naming the other store and slot (nothing when the target already
+  held the value, `unchanged`); both stores' locks are held. A
+  filled target slot is refused unless `--replace` (the old value is archived there). The receipt (`vault-copy/1`)
+  names the slot, both stores and two keyed digests, under the source's estate key when it has one (comparable with
+  `full vault-digests`), else under a one-time key. Refusals name their code: `target-other-account` (a store
+  another account owns), `target-not-writable`, `target-slot-filled`, `source-has-open-leak`, `same-store`,
+  `nested-stores`, `target-in-repository`, `target-too-broad`, `target-not-a-vault` and the path checks; a refusal writes no value, metadata or journal line into the target. Across
+  machines this stays OBS-194.
+- **Skills and plugins in the machine view** (OBS-477; `docs/ONBOARDING.md`, scenario OSS-112).
+  `observatory_machine(section="skills")` and `full machine --skills` list every skill and plugin of this space with
+  its version, scope (user, project, plugin; a plugin install user, project or local) and agent (Claude Code,
+  Codex), 100 rows a page over MCP, whether a plugin is enabled, and the newest version its marketplace's local copy publishes; a plugin
+  behind it is the finding `plugin-behind` (board: `harness.plugin_behind`). Read from the harness scan, which now
+  keeps this inventory; nothing is fetched. Unreadable records are named in `degraded`. An organization's plugin
+  enabled in a person's own space is not reported yet: it waits on the space's context binding (OBS-359), and the
+  answer's `open` says so.
+
 ### Security
 
 - **The desktop app's updater no longer carries the `zip` crate's archive-parsing flaws** (GHSA-m665-v7pm-7grj,

@@ -2051,6 +2051,44 @@ project/simulator attribution still belongs to the full survey and is not inferr
 Native Windows has no new memory adapter in this slice and reports unsupported sources.
 Proof: `tests/test_memory_freshness.py` in the engine.
 
+### Skills and plugins each agent loads
+
+`project-observatory full machine --skills` prints every skill and plugin of this space, read from the last
+harness scan (`integrations.harness` on, `sources.harness_root` set; `full scan-harness` refreshes it), and
+scans nothing itself (OBS-477). Each skill has its name, version (from its `SKILL.md` front matter, only
+when it is release-shaped), scope (`user`, `project` with the project's folder name, or `plugin` with the
+plugin's `name@marketplace`) and the agent that loads it (`claude-code`, `codex`; Codex's bundled `.system`
+skills are not read yet, OBS-491). Each plugin install has
+its version, its scope as the agent records it (`user`, `project` or `local`), whether the settings of that
+scope enable it (`enabledPlugins` of the user's settings, or the project's `.claude/settings.json` or
+`settings.local.json` for a project or local install; an override in another scope's settings is not read;
+`null` when they could not be read, and for a scope the inventory does not know, such as `managed`, which is
+never a finding), and the
+newest version its marketplace publishes as the marketplace's local copy records it (`latest`, with
+`marketplaceUpdated`), in Claude Code's own order: the plugin's `.claude-plugin/plugin.json` inside the
+marketplace's folder, else its catalogue entry's `version` (a manifest that cannot be read, or whose `version` is
+not release-shaped, a plugin folder missing from the local copy, and a catalogue that sets `metadata.pluginRoot`, which is not
+followed yet, give no `latest`). A plugin from a Git repository or a URL has no `latest` (its manifest is not in the local
+copy); one from a marketplace that is a local folder is compared like any other (Claude Code installs a copy
+of it into its cache, which can fall behind the folder): nothing is fetched. A plugin
+behind that version, not known to be disabled (`enabled` true, or null) and, for a project or local install,
+of a known project, is a finding (`plugin-behind`, with `claude plugin update NAME --scope SCOPE` as the step, run
+in the project's folder for a project or local install), and the board shows it as `harness.plugin_behind`;
+a disabled install behind is listed (`behind: true`) but loads nothing and is not a finding. A project or
+local install carries `projectKey`, a short digest of the project's path that tells two projects of one
+folder name apart without the path. An enabled Codex plugin's skills are listed with scope `plugin`. Codex plugins are read from its plugin cache; their newest
+version is not known (`latest` null). One finding waits and says so under `open`: an organization's plugin
+enabled in a person's own space needs the space's context binding (OBS-359). A record that cannot be read
+or has another shape, or is ambiguous (`installed_plugins.json`, a settings file, a marketplace catalogue, a skill's
+`SKILL.md`, Codex's plugin cache or `config.toml`) is named in `degraded`, never read as empty (`unreadable`, or `unrecognised-shape` for a record of another shape; `harness_root`
+`not-found` when the home folder the scan reads is not a folder); no
+scan yet, one older than the inventory, or one older than 24 hours (`stale`) is named there with the command
+that fills it. Agents read the same answer with `observatory_machine(section="skills")`, 100 rows a page, the
+findings first, then each space's plugins, then its skills (`limit` up to 100, and `cursor` from
+`skills.page.nextCursor`, which names the scan it belongs to, so a walk across a rescan starts again rather
+than skipping rows; `counts` always whole;
+rows there leave out their null fields, and `degraded` comes once, at the top).
+
 ### The disk guard
 
 The tick is long on a busy machine, and its cleanup step comes late: on a loaded
@@ -3442,6 +3480,62 @@ second machine's name, for example `machine-b.json`. A slot meant to differ is m
 `full vault-digests keep-here PROJECT ENV NAME --why "..."`; a `vault.py rotate` makes the other
 machines' copies read as stale. `observatory_credentials` names, for each vault row, the machines
 that hold it. The design: [docs/design/VAULT-DIGESTS.md](design/VAULT-DIGESTS.md).
+
+### Copy a key into another store on this machine
+
+Another store of yours on this machine (a space you are preparing, another workspace's store) gets a key
+from your store with one command, without the value ever being printed, put in an argument, a file outside the
+two stores, or a log (OBS-476):
+
+```sh
+T="$(project-observatory full-path)/tools"
+python "$T/vault.py" copy alpha-web prod API_TOKEN --to-store /path/to/space/secrets
+python "$T/vault.py" copy alpha-web prod API_TOKEN --to-store /path/to/space/secrets \
+    --to-slot beta-api/stage/SERVICE_TOKEN --replace --json
+```
+
+`--to-store` names the other store: the folder that holds its `projects/` vault, as
+`sources.secret_store` names yours, by its plain absolute path (no `.` or `..`); it is created (0700) when
+missing, under a parent folder that exists, and an existing one of yours is set to 0700 before anything
+goes in.
+The value is read and written inside the one process. Your slot stays. Both stores' movement journals
+record `copied`, each naming the other store and slot (`vault.py movements` shows it), and the copy
+holds both stores' locks. `--to-slot` takes `NAME` or `PROJECT/ENV/NAME` (default: the same slot; the target's
+PROJECT is used as typed, not normalised through this workspace's registry). A
+target slot that holds another value is refused (`target-slot-filled`) unless `--replace`, which archives
+the old value there as `rotate` does; one that already holds this value is left alone (`unchanged`). The
+value's expiry and provenance travel with it, and its metadata gains `copied_from` (the source store, slot and
+time); a header binding does not, and a metadata file left in the target without its slot is not inherited.
+
+The receipt names the slot, both stores and two keyed digests (HMAC-SHA-256): of what was read here and
+of what the target holds after the write. They are made under your store's estate key when it has one,
+so they compare with `full vault-digests` (the journal keeps that digest too), else under a key made for
+this copy and forgotten (the journal then keeps none). A refusal writes no value, metadata or journal line
+and removes the store and vault folders the copy had made (on Windows, where a lock file in use cannot be
+removed, a new store stays, empty but for it; an existing vault keeps a lock file the copy made in it, which
+is harmless, and an existing store and vault folder of yours stay at the 0700 the copy
+set them to). Its codes: `invalid-slot` (the source slot's names), `source-empty`,
+`source-unreadable` (the slot, its metadata, the estate key or the leak register cannot be read as private
+files, or the slot does not hold one single-line value),
+`source-has-open-leak` (rotate and settle first), `target-not-absolute`, `target-not-plain` (`.` or `..`
+in the path), `target-link` (the store or its `projects/` is a link, a Windows junction included), `target-parent-missing`,
+`target-not-folder`, `target-is-vault-folder` (name the store that holds the vault),
+`target-in-repository` (the store, or the folder below `projects/` the slot goes into, would sit in a Git
+working tree, or git did not answer in time; asked of git, so it is not checked where git cannot run),
+`target-too-broad` (the home folder, or a folder holding it), `target-not-a-vault` (an existing `projects/`
+that holds files but no movement journal, leak register or lock: a folder of code, not a vault), `same-store` (another spelling of this
+store included), `nested-stores` (one store inside the other, your store or its vault folder included),
+`target-other-account` (a store another
+account owns: a value written from here would be unreadable there, so another OS account's store is not
+served yet, OBS-489; on Windows by the folder's owner), `target-not-writable`,
+`target-unsafe` (a file or folder in the target fails the vault's own checks: a link below `projects/`, a
+folder where the slot should be, a slot or metadata file that is not owner-only, does not parse or is not
+UTF-8), `target-slot-invalid`,
+`target-slot-filled`, `filesystem-refused` (the file system refused before anything was written).
+With `--json` it prints `{"schema": "vault-copy/1", "outcome": "refused", "code", "reason"}`; either way it
+exits 2. A read or a write that fails midway exits 1 with `outcome: failed`, code `filesystem-failed`: read
+both journals and the target slot before copying again. Two digests that differ print the receipt with
+`match: false` and exit 1. A copy to another machine is OBS-194's sealed envelope, not this command.
 
 ## Anonymous usage and error data
 

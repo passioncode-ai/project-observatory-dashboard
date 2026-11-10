@@ -2957,6 +2957,28 @@ def collect() -> list[dict]:
                            "the reason; a skill that changes after review is also how a trusted one turns hostile."),
                 "action": f"read the change, then `project-observatory full harness --accept {_c.get('key')}`",
                 "evidence": ["store/raw/harness.json#changed", "store/harness-pins.json"]})
+        # A PLUGIN BEHIND the newest version its marketplace's local copy publishes (OBS-477). The subject names
+        # both versions, so an ack holds for this gap and the row speaks again when the marketplace moves on.
+        _inv = _h.get("inventory") if isinstance(_h.get("inventory"), dict) else {}
+        for _b in _inv.get("findings") if isinstance(_inv.get("findings"), list) else []:
+            if not isinstance(_b, dict) or _b.get("code") != "plugin-behind":
+                continue
+            out.append({
+                "type": "harness.plugin_behind", "severity": "info",
+                "subject": (f"harness:plugin-behind:{_b.get('agent')}:{_b.get('plugin')}:{_b.get('scope')}:"
+                            f"{_b.get('project') or ''}{'.' + str(_b.get('projectKey')) if _b.get('projectKey') else ''}:"
+                            f"{_b.get('installed')}:{_b.get('latest')}"),
+                **titled("plugin {plugin} is at {installed}, its marketplace publishes {latest}",
+                         plugin=_b.get("plugin"), installed=_b.get("installed"), latest=_b.get("latest")),
+                "detail": ("Read from the marketplace's local copy"
+                           + (f", refreshed {_b.get('marketplaceUpdated')}" if _b.get("marketplaceUpdated") else "")
+                           + f"; the {_b.get('scope')} install"
+                           + (f" in {_b.get('project')}" if _b.get("project") else "")
+                           + " is at the older version. Nothing was fetched to say this."),
+                "action": (f"`{_b.get('action')}`"
+                           + (f", run in the {_b.get('project')} project's folder" if _b.get("project") else "")
+                           + ", then restart the agent's sessions"),
+                "evidence": ["store/raw/harness.json#inventory"]})
 
     # THE MCP SERVERS THE AGENTS ARE TOLD TO REACH. The gateway
     # that held them is off; each agent's own config holds them now, and these

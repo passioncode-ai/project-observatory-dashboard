@@ -626,6 +626,93 @@ plan and keys for the request queue and the rotation (OBS-191, OBS-416). Both sc
 gain fields; a field is never renamed without a new schema name. Downgrade: an older engine has no `org select`, no
 tool and no finding, and leaves `store/org-selection/` untouched.
 
+## Vault: a slot copied into another store; machine view: the skills section (OBS-476, OBS-477, the release after 0.35.9)
+
+Additive; nothing migrates. `tools/vault.py copy PROJECT ENV NAME --to-store PATH [--to-slot SLOT] [--replace]
+[--json]` is a new subcommand (OBS-476): `PATH` is a store, the folder that holds a `projects/` vault, named by a
+plain absolute path (`.` and `..` refused as `target-not-plain`), created 0700 when missing; an existing one of this
+account, and its vault folder, are set to 0700 before anything goes in. Its receipt is `vault-copy/1` (`outcome` `copied`, `replaced` or `unchanged`; `from` and `to` with
+`store` in display form (the resolved path, `~/...` inside the home) and `slot`; `from.kept`, `to.storeCreated`,
+`to.archived`; `carried`; `digest` with `algorithm`
+`HMAC-SHA-256`, `key` `estate` or `one-time`, `keyId`, `from`, `to`, `match`); a refusal is
+`{"schema": "vault-copy/1", "outcome": "refused", "code", "reason"}` with `--json`, exit 2, the target left as it
+was (a lock file the copy made in an existing vault is kept); a failed read or write is `outcome: failed`, code
+`filesystem-failed`, exit 1; a digest mismatch prints the receipt with `digest.match: false` and exits 1. The codes:
+`invalid-slot` (the source's names), `source-empty`, `source-unreadable`, `source-has-open-leak`,
+`target-not-absolute`, `target-not-plain`, `target-link`, `target-parent-missing`, `target-not-folder`,
+`target-is-vault-folder`, `target-in-repository` (also for a working tree below `projects/`), `target-too-broad`,
+`target-not-a-vault`, `same-store`, `nested-stores`, `target-other-account` (the folder's uid against the
+effective uid on POSIX; on Windows its owner SID must be this account, SYSTEM or Administrators, so an
+administrator's copy does not rewrite another person's store to owner-only, a store an elevated process created
+counting as this account's), `target-not-writable`, `target-unsafe`, `target-slot-invalid`, `target-slot-filled`,
+`filesystem-refused`; with `--json` a refusal of the source's names is JSON too, and the `project:` sentence goes to
+stderr; a command line argparse refuses (a missing `--to-store`) stays argparse's usage text and exit 2.
+`target-in-repository` is asked of git and skipped where git cannot run; a git that does not answer within 60 s
+is a refusal under that code. An undo after a refusal under the locks
+happens while both are held; on Windows a held lock file cannot be removed, so a new store a refused copy made
+stays there, empty but for its lock file. A refused copy may leave an existing store and vault folder of this account at 0700 and a lock file in an
+existing vault. Unless the outcome is `unchanged`, both
+stores' `movements.jsonl` gain a `copied` row (`to_store`, `to_slot` in the source's; `from_store`, `from_slot`,
+`archived` after a replace in the target's; `outcome` and `digest_key` in both, and `key_id` and `digest` only
+under the estate key), which an older
+`vault.py movements` prints as any other row. A copied slot's metadata gains `copied_from` (`store`, `slot`, `at`)
+and carries the source's `expires_at`, `expiry_reason`, `expiry_recorded`, `expiry_by` and `provenance`. Module
+interface: `vault.copy_slot`, `vault.CopyRefused` (a `VaultBoundaryError` with `code`); `vault._mutation_lock`,
+`vault._private_dirs`, `vault._atomic_write`, `vault._append_private` take an optional store and `vault.journal` an
+optional `_store`, each defaulting to this machine's vault, so every existing call behaves as before. One change
+for every writer: `vault._mutation_lock` now checks, once it holds the lock, that the lock file is still the file
+at the lock's path (device and file id, both read from open descriptors) and locks the new one when it is not, so a
+lock file removed while a writer waited never lets two writers in; a lock file that changes 20 times in a row is a
+refusal, never a wait without end. A store another OS account owns is refused (`target-other-account`); OBS-489
+holds that case. An estate key in the source store that cannot be read is `source-unreadable`. The source store
+is named as its vault folder's parent when the vault folder is `projects/`, else as the vault folder.
+
+The harness scan (`store/raw/harness.json`) gains `inventory` (OBS-477): `spaces` (one, `this-account`, home `~`)
+with `skills` (`name`, `agent` `claude-code` or `codex`, `scope` `user`, `project` or `plugin`, `version`, and
+`project` or `plugin`; an enabled Codex plugin's skills included) and `plugins` (`name`, `agent`, `scope` `user`,
+`project` or `local`, `project`, `projectKey` (8 hex digits of the project path's SHA-256, never the path; a pseudonym, which a guessed path
+confirms, OBS-491), `version`,
+`enabled` true, false or null, `marketplace`, `latest`, `latestFrom` `marketplace-catalogue` or `plugin-manifest`,
+`marketplaceUpdated`, `behind`), `findings` (`plugin-behind`), `open` and its own `degraded` (`source`
+`claude:installed_plugins.json`, `claude:settings.json`, `claude:known_marketplaces.json`,
+`claude:marketplace:<name>`, `claude:marketplace:<name>:<plugin>`, `claude:project-settings:<project>`,
+`claude:local-settings:<project>`, `skill:<agent>:<scope>:<folder>`, `skills:<agent>:<scope>[:<project or plugin>]`,
+`projects-folder`, `codex:config.toml`, `codex:plugins-cache`, `codex:plugins-cache:<marketplace>[:<plugin>]`, code
+`unreadable`; `claude:installed_plugins.json`, `claude:installed_plugins.json:<plugin>`, `claude:settings.json`, a
+settings label above,
+`claude:known_marketplaces.json:<name>` and `claude:marketplace:<name>`, code `unrecognised-shape`;
+`codex:plugins-cache:<marketplace>`, code `unrecognised-shape` too; `codex:plugins-cache:<marketplace>:<plugin>`, code
+`ambiguous` (several unnamed folders, so the loaded copy is not
+known); `inventory`,
+code `failed`, when the inventory itself failed and the rest of the scan was kept). A plugin's `scope` is the word
+Claude Code recorded (`user`, `project`, `local`, or another such as `managed`, whose `enabled` is null; `other` for a recorded scope of another shape). `latest`
+is read from the plugin's manifest inside the marketplace's folder first, then the catalogue entry; a plugin from
+another source, whose folder is missing from the marketplace's local copy, or whose
+catalogue sets `metadata.pluginRoot`, has none. A home folder that is not a folder adds `harness_root` `not-found`;
+Codex's `config.toml` whose `plugins` is not a table adds `codex:config.toml` `unrecognised-shape`. Every answer of
+the section carries `page`. The section adds `stale` (source
+`harness.json`) to its `degraded` for a scan older than 24 hours. No path is recorded. An older reader ignores the key; the machine view
+reads a scan without it as `not-surveyed` until the next scan. `observatory_machine` takes `section: "skills"`
+(answer `{measuredAt, degraded, skills}`, `skills` holding `spaces`, `page` (`limit`, `cursor`, `nextCursor`, `order`,
+`total`), `counts`, `findings`, `open`; `full machine --skills` prints the same section with its own `degraded` and
+every row) with two new optional arguments for that section, `limit`
+(1 to 100, default 100 rows of one window over the findings, then each space's plugins, then its skills; `total`
+counts those rows; a page also ends once its rows pass 40,000 characters of JSON as `json.dumps` writes them, at least one row a page;
+`counts` stay whole; a cursor is `offset@stamp` (the scan's time as digits), and one given for an
+earlier scan answers the first page of this one with `invalid-cursor`; a bare offset is accepted; a cursor past the
+end answers an empty last page; a skill's `name` is its
+front matter's only when it has a name's shape, else its folder's, at most 64 characters, and a plugin recorded
+under a name of another shape is left out with `unrecognised-shape`; a version is kept only when release-shaped, at most 40 characters and 9 digits a number,
+`marketplaceUpdated` only when ISO-shaped, a project or folder name at most 64 characters with anything that is not
+UTF-8 replaced, a Codex cache folder of another name shape left out (`codex:plugins-cache`, `unrecognised-shape`),
+and a SKILL.md is read up to its first 64 KiB, so no field a third party wrote makes a row long; the MCP answer's rows leave out their null fields and its `degraded` is at the top
+only, not repeated under `skills`) and `cursor` (an invalid one answers the first page and `degraded` code
+`invalid-cursor`), and
+its overview's `sections` lists `skills`; the tool's other answers are unchanged. `full machine --skills` prints the
+same section and cannot be combined with another mode. The board gains the finding type `harness.plugin_behind`
+(severity info; subject `harness:plugin-behind:<agent>:<plugin>:<scope>:<project>[.<projectKey>]:<installed>:<latest>`,
+`<project>` empty for a user install).
+
 ## Space daemons: replacing a loaded daemon (OBS-475, OBS-395 part 2, space daemons 1.2.0, the release after 0.35.9)
 
 No migration: the registry (`observatory-space-daemons/1`), the daemon plists and the log folders keep their format,

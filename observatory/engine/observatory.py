@@ -535,6 +535,9 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                integrations, features, language, models, policy files;
                                never sources, secrets or the registry
   machine [--disk] [--explain PID]   processes by origin, memory, disk; why one process runs
+  machine --skills             every skill and plugin each agent loads: version, scope (user, project,
+                               plugin), agent, and a plugin behind its marketplace's newest version;
+                               from the last harness scan, nothing fetched
   cleanup [--apply [--include manual]]  plan, or remove what loses nothing; manual tier archives first, skips ignored files
   disk-guard [--apply] [--level L]  keep free space by pressure: temp, browser clones, Trash, cache
                                tools, build output of idle checkouts; never what a process holds.
