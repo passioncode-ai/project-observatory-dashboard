@@ -6,12 +6,10 @@ and provenance through the OpenRouter and Cloudflare doors (PR #484); then tag, 
 
 ## State now
 
-- Open: tag `v0.35.9` once this release PR is merged and its `observatory-release-check` is green; verify the
-  published files (`SHA256SUMS`, its signature, the wheel's attestation), install on the release manager's machine
-  and hand the second Mac's install to its host agent; fill the Receipts below.
-- Waits: this release PR's review and release check; no watcher of this record runs, the release manager tags.
-- Next task: tag, verify and install 0.35.9, then OBS-416 (hand a key over by rotation) once OBS-454 brings the
-  organization's replacement over the check-in.
+- Open: nothing in this release; its receipts are below.
+- Waits: none.
+- Next task: release 0.35.10 ([record](../2026-11-10-release-0.35.10/README.md)); PRs #486, #489, #490 and #488
+  merged after this record was written and ship there.
 
 ## What it releases
 
@@ -76,9 +74,23 @@ Merged to `main` since `v0.35.8`, in order:
   `test_engine_doc_copies`, `test_release_boundaries`, `test_licensing`, `test_analytics_catalogue` and
   `test_update_inventory`. No engine code changes here, so no portable suite was rerun.
 
-## Receipts pending
+## Receipts
 
-- Release PR: number, merge commit and its `observatory-release-check` run.
-- Tag `v0.35.9`: tag object, release run, published files and time.
-- Verification: `SHA256SUMS`, the `gpg` signature, `gh attestation verify` of the wheel.
-- Installs: the release manager's machine (`full update --version 0.35.9 --apply`) and the second Mac.
+- Release PR #487 merged as `c8907e20` on 2026-11-09T20:54:58Z. Its `observatory-release-check` run on `c8907e20`
+  ([42697484506](https://github.com/passioncode-ai/project-observatory-dashboard/actions/runs/42697484506)) succeeded.
+- Tag `v0.35.9` (tag object `6825c61c`) on `c8907e20`. Release run
+  [42705759236](https://github.com/passioncode-ai/project-observatory-dashboard/actions/runs/42705759236) needed
+  four attempts:
+  - The guard first failed on the Windows suite of `check.yml` timing out; the rerun was green.
+  - Windows x64 signing then failed with "Invoke-ArtifactSigning is not recognized": the floating tag `v1` of the
+    shared action `passioncode-ai/.github` still pointed at v1.3.1 after v1.4.0 was released, and v1.4.0 is the
+    release that stops restoring the Azure signing action's dependency cache across architectures, so the x64 job
+    restored a cache entry made on arm64. On 2026-11-10 `v1` was moved to v1.4.0 (commit `b5b97e1`), as that
+    repository's `AGENTS.md` requires after a release, and the arm64-made cache entry was deleted.
+  - The fourth attempt succeeded and published 19 files on 2026-11-10T01:41:32Z.
+- Verified by the release manager: `SHA256SUMS` all OK, `gpg` `VALIDSIG 63B30DC324BD697487AA31944FAFB8AEC803B6A7`,
+  `gh attestation verify` exited 0 for the wheel, the Windows x64 installer and the macOS app.
+- Installed unattended by the engine's maintenance job, which picked up 0.35.9 by itself.
+- Merged after this record was written, all in 0.35.10: PR #486 (`dabe3825`, OBS-475, space daemons 1.2.0), PR #489
+  (`290fddda`, the `dispatch_packet` documentation), PR #490 (`897065d3`, `zip` 9.5.0 in the desktop updater) and
+  PR #488 (`e1f2fb74`, OBS-476 and OBS-477).

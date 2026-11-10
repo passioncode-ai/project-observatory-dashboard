@@ -17,6 +17,15 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-11-10: release 0.35.10](runs/2026-11-10-release-0.35.10/README.md): engine 0.35.10 (`observatory-log` stays
+0.35.9): a vault slot copied into another store on this machine with `vault.py copy` (OBS-476, #488), the skills
+section of the machine view with the finding `plugin-behind` (OBS-477, #488), space daemons 1.2.0 with a one-step
+`replace` (OBS-475, OBS-395 part 2, #486; the root-owned copy is installed again, sha256
+`747e472e066f426a87b5174e662889109d2637fb661d0b1f59e2943279f61af0`), and the desktop updater on `zip` 9.5.0 (#490).
+OBS-481 closed as not needed; new rows OBS-492 and OBS-493.
+
+Next: tag `v0.35.10`, verify and install it (receipts in the record); then OBS-480, OBS-492 and OBS-493.
+
 [2026-11-09: release 0.35.9](runs/2026-11-09-release-0.35.9/README.md): engine 0.35.9 and `observatory-log`
 0.35.9: organization onboarding part one, `full org accounts` and `full org keys` with the account rules
 `github_owners` and `openrouter_accounts` (OBS-411, OBS-412 part 2, OBS-415, #481) and the local selection record
@@ -24,7 +33,9 @@ expectation. It changes test evidence and documentation, not the published engin
 through the OpenRouter and Cloudflare doors into the requested slot, with provenance and revocation with proof
 (OBS-191 parts 2 and 3, OBS-360, #484).
 
-Next: tag `v0.35.9`, verify and install it on both Macs (receipts in the record).
+Released 2026-11-10 (tag `v0.35.9` on `c8907e20`; the release run needed four attempts, the last after the shared
+signing action's `v1` tag was moved to v1.4.0), verified, and installed unattended by the maintenance job; receipts
+in the record.
 
 [2026-11-09: release 0.35.8](runs/2026-11-09-release-0.35.8/README.md): engine 0.35.8 (`observatory-log` stays
 0.35.6): a readable `inventory/agents.md` in the wiki (OBS-317, first half), DigitalOcean onboarding signals in doctor

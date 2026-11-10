@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The application release is **0.35.9**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
+The application release is **0.35.10**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
 
 ## SQLite runtime prerequisite
 
@@ -626,7 +626,7 @@ plan and keys for the request queue and the rotation (OBS-191, OBS-416). Both sc
 gain fields; a field is never renamed without a new schema name. Downgrade: an older engine has no `org select`, no
 tool and no finding, and leaves `store/org-selection/` untouched.
 
-## Vault: a slot copied into another store; machine view: the skills section (OBS-476, OBS-477, the release after 0.35.9)
+## Vault: a slot copied into another store; machine view: the skills section (OBS-476, OBS-477, 0.35.10)
 
 Additive; nothing migrates. `tools/vault.py copy PROJECT ENV NAME --to-store PATH [--to-slot SLOT] [--replace]
 [--json]` is a new subcommand (OBS-476): `PATH` is a store, the folder that holds a `projects/` vault, named by a
@@ -713,7 +713,7 @@ same section and cannot be combined with another mode. The board gains the findi
 (severity info; subject `harness:plugin-behind:<agent>:<plugin>:<scope>:<project>[.<projectKey>]:<installed>:<latest>`,
 `<project>` empty for a user install).
 
-## Space daemons: replacing a loaded daemon (OBS-475, OBS-395 part 2, space daemons 1.2.0, the release after 0.35.9)
+## Space daemons: replacing a loaded daemon (OBS-475, OBS-395 part 2, space daemons 1.2.0, 0.35.10)
 
 No migration: the registry (`observatory-space-daemons/1`), the daemon plists and the log folders keep their format,
 and a 1.1.0 copy reads what 1.2.0 writes. The root-owned copy changes (`SPACE_DAEMONS_VERSION` 1.2.0), so an
