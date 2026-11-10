@@ -17,8 +17,8 @@ while the major version is 0, a minor release may change behaviour and says so h
   instead of off; older readers ignore both fields. A forward you set up by hand for the same port and destination
   is adopted, not installed twice. A forward of that port to another destination, or a port held by anything else,
   is refused by name, and the move itself stays done. The new `full machine-move return LABEL` removes the forward
-  the engine installed when the job comes back; an adopted one is left running unless `--remove-adopted`, which
-  unloads it and sets its plist aside. `cutover` now refuses while a forward is recorded for the label and names
+  the engine installed when the job comes back; an adopted one is left running and recorded (so `cutover` keeps
+  refusing) until `return --remove-adopted`, which unloads it and sets its plist aside. `cutover` now refuses while a forward is recorded for the label and names
   `return`. Off macOS, `--via` and `return` are refused before anything moves.
 
 ## 0.35.10 (2026-11-10)

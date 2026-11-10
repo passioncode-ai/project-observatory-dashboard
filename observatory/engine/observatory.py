@@ -513,8 +513,8 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                one sudo command that runs it as a system daemon of that account; --via
                                (macOS) also forwards the service's local port to that account there
   machine-move return LABEL [--remove-adopted]
-                               the move back, first step here: remove the port forward leave set up, so
-                               the service can take its port again at cutover
+                               the move back, first step here: remove the port forward leave set up (one set
+                               up by hand only with --remove-adopted) before cutover
   machine-move status [--peer FILE] [--json] | facts [--out FILE]
                                the checklist of a move, M1 to M4 (one release, the restore complete,
                                its own SSH key and device id, the vault the same, no job on both),

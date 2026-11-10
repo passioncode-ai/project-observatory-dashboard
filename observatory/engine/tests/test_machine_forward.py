@@ -5,7 +5,7 @@
 descriptor's origin is a local port, installs one launchd job that forwards that port to the space on the
 other machine where the service now runs; the `elsewhere` entry names that job in `forward`. A hand-made
 forward of the same port to the same space is adopted, never installed twice. `full machine-move return
-LABEL` removes the forward this engine installed, and only clears the record of an adopted one.
+LABEL` removes the forward this engine installed; an adopted one stays loaded and recorded unless --remove-adopted.
 
 Hermetic: a temporary HOME, a fake launchctl (no launchd is asked), no ssh, no network; whether the
 port is free is the test's answer, never a socket of this machine.
@@ -329,6 +329,14 @@ class Return(Base):
         self.assertTrue(path.is_file())
         self.assertIn(HAND, run.loaded)
         self.assertEqual(run.verbs('bootout'), [['launchctl', 'bootout', f'gui/{UID}/{JOB}']])
+        self.assertEqual((self.entry()['forward'], self.entry()['forwardAdopted']), (HAND, True),
+                         'it still holds the port, so its record stays')
+        with self.assertRaisesRegex(MM.MachineMoveError, f'machine-move return {JOB}'):
+            MM.cutover(JOB, self.home, runner=run, platform='darwin', uid=UID, confirm=lambda *a: True)
+        # The hint's next step works: the rerun with --remove-adopted finds the forward and unloads it.
+        again = MM.return_job(JOB, self.home, runner=run, platform='darwin', uid=UID, remove_adopted=True)
+        self.assertEqual(again['forward']['state'], 'adopted-removed')
+        self.assertNotIn(HAND, run.loaded)
         self.assertNotIn('forward', self.entry())
 
     def test_return_with_remove_adopted_unloads_it_and_sets_its_plist_aside(self):

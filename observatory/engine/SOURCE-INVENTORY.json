@@ -954,15 +954,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "684a30d14cf25316d0a627395e2aa7f6c6c16a8408a44dd0f5c93ef6f8c8672c",
-      "bytes": 135192,
+      "export_sha256": "67e452dc3f7f1e911989f4d67430cf3387b90b01635320b5b8158357a6c6d52e",
+      "bytes": 135237,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "984ca978549abc522309c3dcc79dcbc7df85424a3b495dcba1ab0865644440c7",
-      "bytes": 321425,
+      "export_sha256": "1528a45a19c8f2836d966618bc3875eedabb41199715f2492ca4e71d63f20e07",
+      "bytes": 321492,
       "upstream_modified": true
     },
     {
@@ -3167,8 +3167,8 @@
       "path": "machine_move.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f382dcf193da04b4a3b02565a0d69bb1e179971bf00b1adff4854f7a13d7ea29",
-      "bytes": 83458
+      "export_sha256": "32ad2879354f19c717a2a34ad6c964cf793158320b73e9cc0364abc5eca0c7f8",
+      "bytes": 83686
     },
     {
       "path": "machine_view.py",
@@ -3505,8 +3505,8 @@
     {
       "path": "observatory.py",
       "source_sha256": "62ad1eb73adff9a9d741314ddde1da9390a4e4b32fa9be94d5858a98f1f5aa58",
-      "export_sha256": "fa8c4e25d8213f0e7ae5ae679af0c98f5940e7c23eb8fe166e7aa3cd4f08e3b1",
-      "bytes": 107465,
+      "export_sha256": "a191b22b368096b9964878b4eca746a907fa59ba5f04d4b1bfc4c55dbbf3c48d",
+      "bytes": 107477,
       "python_comments_removed": 234,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -5436,8 +5436,8 @@
       "path": "tests/test_machine_forward.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b77a6c4d2d252bcfb0bdf4158f4814e828348128798001ee3a4797ae784eb65a",
-      "bytes": 24140
+      "export_sha256": "4513d159e7bcf918b7648d6b72bbd415e7f3874b76335089d3dfca31530db69d",
+      "bytes": 24848
     },
     {
       "path": "tests/test_machine_mcp_inventory.py",
