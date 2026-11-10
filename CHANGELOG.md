@@ -28,6 +28,13 @@ while the major version is 0, a minor release may change behaviour and says so h
   enabled in a person's own space is not reported yet: it waits on the space's context binding (OBS-359), and the
   answer's `open` says so.
 
+### Security
+
+- **The desktop app's updater no longer carries the `zip` crate's archive-parsing flaws** (GHSA-m665-v7pm-7grj,
+  critical; GHSA-q7v9-x93c-xqv3, high; GHSA-8hxf-qr8p-62x4, medium). `tauri-plugin-updater` 2.13.3 pulled `zip`
+  4.6.1; 2.14.1 pulls `zip` 9.5.0, which the advisories name as fixed (9.0.5 and later). The updater uses `zip` on
+  Windows only, to unpack an update after its signature is checked. Only the lock file changes.
+
 ### Fixed
 
 - **A space's daemon is replaced in one step, and no longer left unloaded by `apply` right after `remove`** (OBS-475, OBS-395 part 2; space daemons 1.2.0,
