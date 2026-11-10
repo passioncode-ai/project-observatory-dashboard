@@ -6,10 +6,8 @@ install it.
 
 ## State now
 
-- Open: tag `v0.35.11` once this release PR is merged and its `observatory-release-check` is green; verify the
-  published files (`SHA256SUMS`, its signature, the attestations), install on the release manager's machine and let
-  the maintenance job install it elsewhere; fill the Receipts below.
-- Waits: this release PR's review and release check; no watcher of this record runs, the release manager tags.
+- Open: none for the release; the maintenance job installs 0.35.11 on the other machines.
+- Waits: none.
 - Next task: the rows from the reviews, by priority: OBS-495 (`leave --via` records the forward this engine's own job
   still holds after a failed replacement), then OBS-498 (`port_free` checks every local address family), then
   OBS-492 (the desktop app's true minimum Rust version) and OBS-493 (`vault.py copy` keeps `target-other-account`
@@ -85,10 +83,19 @@ Merged to `main` since `v0.35.10`:
   `observatory/engine/tools/check_paths.py`, and every root suite `tests/test_*.py`, one at a time. No engine code
   changes here, so no portable suite was rerun.
 
-## Receipts pending
+## Receipts
 
-- Release PR: number, merge commit and its `observatory-release-check` run.
-- Tag `v0.35.11`: tag object, release run, published files and time.
-- Verification: `SHA256SUMS`, the `gpg` signature, `gh attestation verify` of the wheel and the installers.
-- Installs: the release manager's machine (`full update --version 0.35.11 --apply`) and the maintenance job
-  elsewhere.
+- Release PR #493: merged as `1e7497cb` at head `82cfff2b` after ten checks passed (Ubuntu 3.11 and 3.14, macOS,
+  Windows, the desktop builds), with PR #494 (`3ad2178e`) and PR #495 (`b75f41f4`) merged into it first.
+- Tag `v0.35.11`: annotated tag object `3cbf42fc` on `1e7497cb`, pushed 2026-11-10 20:34 UTC. Release run 42896787447
+  succeeded (wheel, manifest, guard, macOS, Windows x64 and arm64, Linux x64 and arm64, feed, publish); the tag's
+  `observatory-release-check` run 42896786734 succeeded. Published 2026-11-10 21:24:21 UTC with 19 assets.
+- Verification: the wheel `project_observatory-0.35.11-py3-none-any.whl` matches `SHA256SUMS`
+  (`shasum -a 256 -c`); `gpg --verify SHA256SUMS.asc SHA256SUMS` reads a good signature from key
+  `63B30DC324BD697487AA31944FAFB8AEC803B6A7` (PassionCode.ai releases); `gh attestation verify -o passioncode-ai`
+  passes for the wheel, its certificate naming this repository at `refs/tags/v0.35.11` and the signer
+  `passioncode-ai/.github/.github/workflows/release-publish.yml@refs/tags/v1` (a check pinned with `-R` to this
+  repository's own workflows refuses it for that reason).
+- Installs: the release manager's machine, `full update --version 0.35.11 --apply` (exit 0, `--version` reads
+  0.35.11, the Fabric service `project-observatory.default` reports 0.35.11); other machines through the
+  maintenance job.
