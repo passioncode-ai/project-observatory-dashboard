@@ -507,10 +507,14 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                writes only what is missing; --overwrite moves a conflict aside first;
                                a bundle from another machine writes no private SSH key and stages its
                                jobs; --only/--skip limit it by category, --projects limits --clone
-  machine-move show|cutover LABEL|leave LABEL --to MACHINE_ID
+  machine-move show|cutover LABEL|leave LABEL --to MACHINE_ID [--via USER@HOST]
                                move one background job between two machines, so it never runs on both;
                                in a macOS account with no GUI session, cutover names the administrator's
-                               one sudo command that runs it as a system daemon of that account
+                               one sudo command that runs it as a system daemon of that account; --via
+                               (macOS) also forwards the service's local port to that account there
+  machine-move return LABEL [--remove-adopted]
+                               the move back, first step here: remove the port forward leave set up, so
+                               the service can take its port again at cutover
   machine-move status [--peer FILE] [--json] | facts [--out FILE]
                                the checklist of a move, M1 to M4 (one release, the restore complete,
                                its own SSH key and device id, the vault the same, no job on both),

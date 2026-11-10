@@ -33,6 +33,14 @@ and writes the placement file but never calls launchctl or systemctl.
     on the other machine:           project-observatory full machine-move facts --out FILE
         the public facts `status` compares this machine with (see "the checklist of a move")
 
+A PORT FORWARD (OBS-480, machine_forward.py). `leave LABEL --to MACHINE_ID --via USER@HOST` (macOS) also
+forwards the local port of the Fabric service LABEL names to the account USER on HOST, through one launchd ssh
+job the placement entry names in `forward`; a hand-made forward of that port to that space is adopted.
+
+    on the machine the job comes back to:  project-observatory full machine-move return LABEL [--remove-adopted]
+        removes the forward this engine installed (an adopted one only with --remove-adopted) and clears
+        `forward`, before `cutover`, which refuses while a forward is recorded
+
 AN ACCOUNT NOBODY LOGS IN TO (OBS-361 part 1). On macOS an account with no graphical login has no
 `gui/<uid>` domain, and `launchctl bootstrap user/<uid>` refuses agents even as root, so a job staged in
 such a "space" could never start as an agent. When `launchctl print gui/<uid>` answers that the domain does
@@ -65,6 +73,7 @@ import sys
 import tempfile
 import xml.parsers.expat
 
+import machine_forward as mf
 import machine_identity as mi
 import osprivacy
 
@@ -353,6 +362,11 @@ def cutover(label: str, home: Path, *, runner=subprocess.run, platform: str = sy
     if staged is not None and system == "launchd":
         # OBS-390: a staged copy can be days old; one naming a path gone from here never moves.
         _refuse_stale(label, staged, staging)
+    held = next((mf.recorded(e)[0] for e in mi.read_placement(home)["elsewhere"] if e["label"] == label), None)
+    if held is not None:
+        # OBS-480: the forward of its port still holds the port here, so the service could not take it.
+        raise MachineMoveError(f"a port forward ({held}) of {label} is recorded here and holds its port: run "
+                               f"`{PROG} machine-move return {label}` first; nothing moved")
     if headless:
         default = home / ".local" / "share" / mi.FOLDER
         if mi.data_dir(home) != default:
@@ -488,8 +502,9 @@ def _cutover_to_background(label: str, home: Path, runner, uid: int, me: str, so
 
 
 def leave(label: str, to: str, home: Path, *, runner=subprocess.run, platform: str = sys.platform,
-          uid: int | None = None) -> dict:
-    """Stop one job here, stage its definition and name it as running on machine `to`."""
+          uid: int | None = None, via: str | None = None, port_free=None) -> dict:
+    """Stop one job here, stage its definition and name it as running on machine `to`. With `via`
+    (USER@HOST, OBS-480) also forward the service's local port to that space (machine_forward.py)."""
     if not mi.LABEL_SHAPE.fullmatch(label or ""):
         raise MachineMoveError("a label is letters, digits or . _ @ : -")
     if not mi.valid_id(to):
@@ -499,6 +514,23 @@ def leave(label: str, to: str, home: Path, *, runner=subprocess.run, platform: s
     me = mi.machine_id(home)
     if to == me:
         raise MachineMoveError("--to names this machine; run `leave` on the machine the job leaves")
+    service = mf.service_of(home, label)
+    user = host = None
+    if via is not None:
+        # Every check of the forward runs before anything moves: a refused --via leaves the job as it was.
+        if system != "launchd":
+            raise MachineMoveError(f"--via: {mf.macos_only()}; nothing moved")
+        try:
+            user, host = mf.parse_via(via)
+        except mf.ForwardError as exc:
+            raise MachineMoveError(f"{exc}; nothing moved") from None
+        if service is None:
+            raise MachineMoveError(f"--via: no Fabric service descriptor names the launchd label {label}, so there "
+                                   "is no port to forward; leave without --via moves the job alone; nothing moved")
+        if service["port"] is None:
+            raise MachineMoveError(f"--via: the service {service['serviceId']} has no local origin "
+                                   "(http://127.0.0.1:PORT, 1024 to 65535), so there is no port here to forward; "
+                                   "nothing moved")
     staging, folder = mi.staging_dir(home, system), job_folder(home, system)
     if system == "launchd" and _space_entry(label, uid) is not None:
         # Root registered it as a system daemon of this account (OBS-361), loaded or not: only root's `remove`
@@ -522,11 +554,90 @@ def leave(label: str, to: str, home: Path, *, runner=subprocess.run, platform: s
         raise MachineMoveError(f"no job {label} is defined here ({folder}) or staged here ({staging})")
     else:
         stopped = "already staged"
-    path = mi.place_elsewhere([{"label": label, "serviceId": _services(home).get(label), "placedOn": to,
-                                "by": "machine-move leave"}], home, machine=me)
+    entry = {"label": label, "serviceId": _services(home).get(label), "placedOn": to, "by": "machine-move leave"}
+    if via is not None:
+        try:
+            forward = mf.install(label, service, user, host, home, runner=runner, uid=uid,
+                                 free=port_free or mf.port_free)
+        except (OSError, subprocess.SubprocessError, mf.ForwardError) as exc:
+            # The job has moved: the placement entry is written whatever happens to the forward.
+            forward = {"state": "failed", "reason": "error", "port": service["port"], "via": via,
+                       "message": f"the forward could not be set up ({type(exc).__name__}); run leave again "
+                                  "with --via to retry"}
+        if forward["state"] in ("installed", "unchanged", "adopted"):
+            entry.update({"forward": forward["label"], "forwardAdopted": forward["adopted"]})
+        elif not _recorded_forward_present(label, home):
+            entry["forward"] = None
+        # else: a refused or failed forward leaves a recorded forward that still has its plist here as it was
+        # (an unload that failed keeps the old job loaded; a rerun to another space leaves an adopted one
+        # holding the port), so `cutover` still refuses and `return` still finds it.
+    else:
+        forward = _forward_without_via(label, home, system, service)
+    path = mi.place_elsewhere([entry], home, machine=me)
     return {"label": label, "machine": me, "placed_on": to, "stop": stopped, "staging": str(staging),
-            "placement": str(path),
+            "placement": str(path), "forward": forward,
             "next": [f"on {to}: project-observatory full machine-move cutover {label}"]}
+
+
+def _recorded_forward_present(label: str, home: Path) -> bool:
+    """Whether the placement entry of LABEL records a forward whose plist is still in this account's
+    LaunchAgents (OBS-480): such a forward still holds the port, so a refused or failed rerun keeps its record."""
+    entry = next((e for e in mi.read_placement(home)["elsewhere"] if e["label"] == label), None)
+    recorded, _ = mf.recorded(entry or {})
+    if recorded is None:
+        return False
+    if mf.plist_path(home, recorded).is_file():
+        return True
+    # A hand-made forward that was adopted may sit in a file not named after its label.
+    agents = home / "Library/LaunchAgents"
+    return agents.is_dir() and any(p.is_file() and mi.job_label(p) == recorded for p in agents.glob("*.plist"))
+
+
+def _forward_without_via(label: str, home: Path, system: str, service: dict | None) -> dict:
+    """What `leave` without --via says of the forward (OBS-480): the one already recorded is kept; else the port
+    a forward would carry and how to ask for it, or why there is none."""
+    try:
+        doc = mi.read_placement(home)
+    except mi.MachineIdentityError:
+        doc = {"elsewhere": []}
+    kept = next((mf.recorded(e) for e in doc["elsewhere"] if e["label"] == label), (None, False))
+    if kept[0] is not None:
+        return {"state": "kept", "label": kept[0], "adopted": kept[1]}
+    if service is None or service["port"] is None:
+        return {"state": "not-applicable",
+                "reason": "no Fabric service descriptor with a local origin names this label"}
+    if system != "launchd":
+        return {"state": "not-applicable", "port": service["port"], "reason": mf.macos_only()}
+    return {"state": "not-requested", "port": service["port"],
+            "hint": f"{service['serviceId']} answers at 127.0.0.1:{service['port']} here: run leave again with "
+                    "--via USER@HOST (the account and machine it now runs on) to forward that port there"}
+
+
+def return_job(label: str, home: Path, *, runner=subprocess.run, platform: str = sys.platform,
+               uid: int | None = None, remove_adopted: bool = False) -> dict:
+    """The move back of a job `leave` placed elsewhere (OBS-480), its first step on this machine: remove the
+    forward of its port, so the service can take the port again at `cutover`. The job stays placed on the other
+    machine until `leave` runs there and `cutover` here."""
+    if not mi.LABEL_SHAPE.fullmatch(label or ""):
+        raise MachineMoveError("a label is letters, digits or . _ @ : -")
+    if _system(platform) != "launchd":
+        raise MachineMoveError(f"{mf.macos_only()}; nothing to remove on this system")
+    uid = int(osprivacy.account()) if uid is None else uid
+    me = mi.machine_id(home)
+    entry = next((e for e in mi.read_placement(home)["elsewhere"] if e["label"] == label), None)
+    if entry is None:
+        raise MachineMoveError(f"{label} is not placed elsewhere here ({mi.placement_path(home)}); nothing to "
+                               "return. `full machine-move show` lists what is")
+    try:
+        forward = mf.remove(entry, home, runner=runner, uid=uid, remove_adopted=remove_adopted)
+    except mf.ForwardError as exc:
+        raise MachineMoveFailed(str(exc)) from None
+    mi.set_forward(label, home, forward=None, machine=me)
+    there = entry.get("placedOn") if mi.valid_id(entry.get("placedOn")) else "the machine it runs on"
+    return {"label": label, "machine": me, "placed_on": entry.get("placedOn"), "forward": forward,
+            "placement": str(mi.placement_path(home)),
+            "next": [f"on {there}: project-observatory full machine-move leave {label} --to {me}",
+                     f"here: project-observatory full machine-move cutover {label}"]}
 
 
 # --- the checklist of a move (OBS-286) ----------------------------------------------------------
@@ -1269,6 +1380,14 @@ def parser() -> argparse.ArgumentParser:
     out = sub.add_parser("leave", help="stop a job here, stage it, and name it as running on another machine")
     out.add_argument("label")
     out.add_argument("--to", required=True, metavar="MACHINE_ID", help="the id `machine-move show` prints there")
+    out.add_argument("--via", metavar="USER@HOST",
+                     help="macOS: also forward the service's local port (its descriptor's http://127.0.0.1:PORT) to "
+                          "this account on the other machine, through one launchd ssh job (OBS-480)")
+    back = sub.add_parser("return", help="the move back, first step here: remove the forward `leave --via` set up "
+                                         "for a job, so the service can take its port again at cutover")
+    back.add_argument("label")
+    back.add_argument("--remove-adopted", action="store_true",
+                      help="also unload a forward set up by hand that leave adopted, and set its plist aside")
     st = sub.add_parser("status", help="the checklist of a move, M1 to M4: one release, the restore complete, "
                                        "its own SSH key and device id, the vault the same, no job on both")
     st.add_argument("--json", action="store_true", help="the checklist as JSON")
@@ -1326,12 +1445,19 @@ def main(argv: list[str]) -> int:
             result = show(home)
         elif a.action == "cutover":
             result = cutover(a.label, home)
+        elif a.action == "return":
+            result = return_job(a.label, home, platform=sys.platform, remove_adopted=a.remove_adopted)
         else:
-            result = leave(a.label, a.to, home)
+            result = leave(a.label, a.to, home, platform=sys.platform, via=a.via)
     except (MachineMoveError, mi.MachineIdentityError, OSError, EOFError) as exc:
         print(f"Observatory: {exc}", file=sys.stderr)
         return 1 if isinstance(exc, (OSError, MachineMoveFailed)) else 2
     print(json.dumps(result, indent=2, ensure_ascii=False))
+    forward = result.get("forward") if isinstance(result.get("forward"), dict) else {}
+    if forward.get("state") in ("refused", "failed"):
+        # The job moved; the forward did not: exit 1 (something changed), its reason on stderr too.
+        print(f"Observatory: the job moved, the forward did not: {forward.get('message')}", file=sys.stderr)
+        return 1
     return 0
 
 
