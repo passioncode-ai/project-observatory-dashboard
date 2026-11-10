@@ -385,10 +385,12 @@ def remove(entry: dict, home: Path, *, runner, uid: int, remove_adopted: bool = 
             held = f"port {port}" if port else "its port"
             now = (f"still holds {held} here" if running is not False
                    else f"is not loaded now, but its plist loads it again at the next login and it takes {held}")
+            step = ("Run return again with --remove-adopted to unload it and set its plist aside" if still else
+                    f"Its plist is no longer an ssh forward, so unload it (launchctl bootout gui/{uid}/{label}) "
+                    "and run return again")
             return {"state": "adopted-left", "label": label, "definition": str(path) if path.is_file() else None,
                     "hint": f"{label} was set up by hand and adopted, so it is left as it is and {now}: the "
-                            "service cannot start here while it does. Run return again with --remove-adopted to "
-                            "unload it and set its plist aside"}
+                            f"service cannot start here while it does. {step}"}
         if still is None:
             raise ForwardError(f"{label} is no longer an ssh forward of a local port (its plist changed or is "
                                f"gone) and is still loaded; nothing was unloaded or moved, and the forward stays "

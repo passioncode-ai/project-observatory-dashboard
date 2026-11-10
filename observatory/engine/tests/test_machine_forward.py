@@ -356,6 +356,8 @@ class Return(Base):
         run = Launchctl(loaded={JOB, HAND})
         self.leave(run)
         path.write_bytes(plistlib.dumps({'Label': HAND, 'ProgramArguments': ['/bin/sleep', '60']}))
+        plain = MM.return_job(JOB, self.home, runner=run, platform='darwin', uid=UID)
+        self.assertIn(f'launchctl bootout gui/{UID}/{HAND}', plain['forward']['hint'], 'the step that works here')
         with self.assertRaisesRegex(MM.MachineMoveFailed, 'no longer an ssh forward'):
             MM.return_job(JOB, self.home, runner=run, platform='darwin', uid=UID, remove_adopted=True)
         self.assertIn(HAND, run.loaded)

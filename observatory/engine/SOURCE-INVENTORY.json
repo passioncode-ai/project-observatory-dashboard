@@ -3153,8 +3153,8 @@
       "path": "machine_forward.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5e1744079fad03e32cbf3bacceb40010c5671effe5c5079878ab57043bab0f7c",
-      "bytes": 21070
+      "export_sha256": "2b1b86b4ba9b001949f941a910cbbf29c01819f14362a1b3cbe7a6059fd1753d",
+      "bytes": 21241
     },
     {
       "path": "machine_identity.py",
@@ -5436,8 +5436,8 @@
       "path": "tests/test_machine_forward.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "264ea0b189d825731f569f123c0699c56479123403672de85c8e0862bbddc843",
-      "bytes": 28768
+      "export_sha256": "521dd268063e63c7771c452095800f11889df1c004d825f4efa80c7234594003",
+      "bytes": 28969
     },
     {
       "path": "tests/test_machine_mcp_inventory.py",
