@@ -45,10 +45,11 @@ UID = 501
 class Launchctl:
     """A stand-in for subprocess.run that keeps launchd's loaded labels: `print gui/UID/LABEL` answers 0 for a
     loaded one and 113 otherwise, `bootstrap` loads the plist's Label (or answers `fail_bootstrap`), `bootout`
-    unloads. Every other command answers 0. Nothing outside the test is run."""
+    unloads (or answers `fail_bootout` and keeps it loaded). Every other command answers 0. Nothing outside the
+    test is run."""
 
-    def __init__(self, loaded=(), fail_bootstrap=0):
-        self.calls, self.loaded, self.fail_bootstrap = [], set(loaded), fail_bootstrap
+    def __init__(self, loaded=(), fail_bootstrap=0, fail_bootout=0):
+        self.calls, self.loaded, self.fail_bootstrap, self.fail_bootout = [], set(loaded), fail_bootstrap, fail_bootout
 
     def __call__(self, argv, **kw):
         self.calls.append(list(argv))
@@ -62,7 +63,10 @@ class Launchctl:
             else:
                 self.loaded.add(plistlib.loads(Path(argv[3]).read_bytes())['Label'])
         elif argv[:2] == ['launchctl', 'bootout']:
-            self.loaded.discard(argv[2].split('/')[-1])
+            if self.fail_bootout:
+                code = self.fail_bootout
+            else:
+                self.loaded.discard(argv[2].split('/')[-1])
         return subprocess.CompletedProcess(argv, code, '', 'synthetic refusal' if code else '')
 
     def verbs(self, verb):
@@ -248,8 +252,27 @@ class Leave(Base):
         self.assertEqual(plistlib.loads(self.own_plist().read_bytes())['ProgramArguments'][-1],
                          'svc@other-studio.example')
 
+    def test_a_replacement_that_cannot_unload_the_old_forward_keeps_its_record(self):
+        run = Launchctl(loaded={JOB})
+        self.leave(run)
+        run.fail_bootout = 5
+        result = self.leave(run, via='svc@other-studio.example')
+        self.assertEqual(result['forward']['state'], 'failed')
+        self.assertIn(OWN, run.loaded, 'the old forward is still loaded')
+        self.assertEqual(self.entry()['forward'], OWN, 'so its record stays and cutover still refuses')
+
+    def test_a_rerun_to_another_space_keeps_an_adopted_forward_recorded(self):
+        self.hand_forward(['/usr/bin/ssh', '-N', '-L', f'127.0.0.1:{PORT}:127.0.0.1:{PORT}', VIA])
+        run = Launchctl(loaded={JOB, HAND})
+        self.leave(run)
+        result = self.leave(run, via='other@studio.example')
+        self.assertEqual((result['forward']['state'], result['forward']['reason']), ('refused', 'forward-elsewhere'))
+        self.assertEqual((self.entry()['forward'], self.entry()['forwardAdopted']), (HAND, True),
+                         'the adopted forward still holds the port')
+
     def test_a_malformed_via_is_refused_before_anything_moves(self):
         for bad in ('-oProxyCommand=x@studio.example', 'svc@-oProxyCommand=x', 'svc@studio.example;true',
+                    '-x@studio.example', 'svc@-x',
                     'studio.example', 'svc@studio.example:22', 'sv c@studio.example', 'svc@', '@studio.example',
                     'svc@studio..example', 'svc@studio.example\n', 'svc@[::1]'):
             with self.subTest(via=bad), self.assertRaisesRegex(MM.MachineMoveError, 'nothing moved'):
@@ -318,6 +341,17 @@ class Return(Base):
         aside = Path(result['forward']['set_aside'])
         self.assertEqual(plistlib.loads(aside.read_bytes())['Label'], HAND, 'set aside, never deleted')
         self.assertNotIn('forward', self.entry())
+
+    def test_remove_adopted_refuses_a_plist_that_is_no_longer_a_forward(self):
+        path = self.hand_forward(['/usr/bin/ssh', '-N', '-L', f'127.0.0.1:{PORT}:127.0.0.1:{PORT}', VIA])
+        run = Launchctl(loaded={JOB, HAND})
+        self.leave(run)
+        path.write_bytes(plistlib.dumps({'Label': HAND, 'ProgramArguments': ['/bin/sleep', '60']}))
+        with self.assertRaisesRegex(MM.MachineMoveFailed, 'no longer an ssh forward'):
+            MM.return_job(JOB, self.home, runner=run, platform='darwin', uid=UID, remove_adopted=True)
+        self.assertIn(HAND, run.loaded)
+        self.assertTrue(path.is_file(), 'nothing moved')
+        self.assertEqual(self.entry()['forward'], HAND)
 
     def test_return_of_a_label_not_placed_elsewhere_is_refused_and_changes_nothing(self):
         self.leave(Launchctl(loaded={JOB}))

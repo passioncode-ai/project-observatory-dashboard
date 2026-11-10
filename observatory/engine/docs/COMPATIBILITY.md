@@ -851,15 +851,17 @@ service now runs, and records its label in the `elsewhere` entry as `forward` wi
 `~/Library/LaunchAgents` that already runs `ssh` with `-L [127.0.0.1:|localhost:]PORT:...` to the same USER and HOST
 is adopted instead (`forwardAdopted: true`) and never installed a second time. The answer gains `forward`:
 `state` `installed`, `unchanged`, `adopted`, `refused` (`reason` `forward-elsewhere` or `port-held`, with
-`message`), `failed` (`load-failed`), or without `--via` `kept`, `not-requested` (with `port` and `hint`) or
-`not-applicable`. A refused or failed forward leaves the move itself done and exits 1. `--via` that is malformed,
+`message`), `failed` (`load-failed`, `unload-failed` or `error`), or without `--via` `kept`, `not-requested` (with
+`port` and `hint`) or `not-applicable`. A refused or failed forward leaves the move itself done and exits 1, and
+keeps a forward already recorded whose plist is still here (it still holds the port). `--via` that is malformed,
 names a label no descriptor with a local origin names, or is given off macOS, is refused before anything moves
 (exit 2). Without `--via`, leave moves the job as before and keeps a forward already recorded.
 
 `full machine-move return LABEL [--remove-adopted]` is new: the first step here of the move back. It unloads and
 removes the forward this engine installed and clears `forward` and `forwardAdopted` from the entry; the entry
 itself stays until `cutover`. An adopted forward is left loaded and only its record is cleared, unless
-`--remove-adopted`, which unloads it and moves its plist into `machine-move/forwards-set-aside/`. A label not placed
+`--remove-adopted`, which unloads it and moves its plist into `machine-move/forwards-set-aside/` after checking
+it is still an ssh forward of a local port (otherwise nothing is unloaded or moved, exit 1). A label not placed
 elsewhere is refused (exit 2); off macOS it is refused. `cutover LABEL` now refuses (exit 2, nothing moved) while
 the label's entry records a `forward`, naming `machine-move return LABEL`. A placement file without the new fields
 reads as before, the schema stays `observatory-placement/1`, and every command line without `--via` or `return`

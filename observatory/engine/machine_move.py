@@ -566,14 +566,31 @@ def leave(label: str, to: str, home: Path, *, runner=subprocess.run, platform: s
                                   "with --via to retry"}
         if forward["state"] in ("installed", "unchanged", "adopted"):
             entry.update({"forward": forward["label"], "forwardAdopted": forward["adopted"]})
-        else:
+        elif not _recorded_forward_present(label, home):
             entry["forward"] = None
+        # else: a refused or failed forward leaves a recorded forward that still has its plist here as it was
+        # (an unload that failed keeps the old job loaded; a rerun to another space leaves an adopted one
+        # holding the port), so `cutover` still refuses and `return` still finds it.
     else:
         forward = _forward_without_via(label, home, system, service)
     path = mi.place_elsewhere([entry], home, machine=me)
     return {"label": label, "machine": me, "placed_on": to, "stop": stopped, "staging": str(staging),
             "placement": str(path), "forward": forward,
             "next": [f"on {to}: project-observatory full machine-move cutover {label}"]}
+
+
+def _recorded_forward_present(label: str, home: Path) -> bool:
+    """Whether the placement entry of LABEL records a forward whose plist is still in this account's
+    LaunchAgents (OBS-480): such a forward still holds the port, so a refused or failed rerun keeps its record."""
+    entry = next((e for e in mi.read_placement(home)["elsewhere"] if e["label"] == label), None)
+    recorded, _ = mf.recorded(entry or {})
+    if recorded is None:
+        return False
+    if mf.plist_path(home, recorded).is_file():
+        return True
+    # A hand-made forward that was adopted may sit in a file not named after its label.
+    agents = home / "Library/LaunchAgents"
+    return agents.is_dir() and any(p.is_file() and mi.job_label(p) == recorded for p in agents.glob("*.plist"))
 
 
 def _forward_without_via(label: str, home: Path, system: str, service: dict | None) -> dict:

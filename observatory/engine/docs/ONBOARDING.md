@@ -3198,7 +3198,9 @@ A forward you already set up by hand for that port (a job in `~/Library/LaunchAg
 second time: `forward.state` reads `adopted` and the entry `forwardAdopted: true`. A job that
 forwards the port to another destination refuses the forward (`forward-elsewhere`), and so does a
 port held by anything that is not such a job (`port-held`, with the `lsof` line that finds it); the
-job itself has moved by then, and leave exits 1. A malformed `--via`, a label no service
+job itself has moved by then, and leave exits 1. A forward that does not load (`load-failed`), an
+old forward that does not unload (`unload-failed`) or any other error (`error`) also exits 1. A
+refused or failed forward keeps the record of a forward still set up here, so `cutover` still refuses. A malformed `--via`, a label no service
 descriptor with a local origin names, and `--via` on Linux are refused before anything moves.
 Without `--via`, `leave` moves the job as before, keeps a forward already recorded, and for a
 service with a local port says so in `forward.hint`.
@@ -3208,7 +3210,7 @@ removes the forward this engine installed and clears `forward`; the job stays pl
 machine until `leave` there and `cutover` here. A forward set up by hand is left loaded (it still
 holds the port, and the answer says so) unless you add `--remove-adopted`, which unloads it and sets
 its plist aside in `${XDG_DATA_HOME:-~/.local/share}/project-observatory/machine-move/forwards-set-aside/`, never
-deleting it. `cutover` refuses while a forward is recorded for the label and names `return`.
+deleting it, and only while that plist still runs an ssh forward of a local port. `cutover` refuses while a forward is recorded for the label and names `return`.
 
 A staged plist can be days old: the restore staged it, and a service released anew since then lives
 in a new release folder. Before it moves anything or asks you, `cutover` checks that the staged plist's

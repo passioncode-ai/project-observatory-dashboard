@@ -954,15 +954,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "fa279f58c64fce6519afdabb4f17a86a40398d72e8f0628efc1d82fea0e9ecd5",
-      "bytes": 134967,
+      "export_sha256": "684a30d14cf25316d0a627395e2aa7f6c6c16a8408a44dd0f5c93ef6f8c8672c",
+      "bytes": 135192,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "36f6f1a6f9a7a80850c9bac27cdb6befed09f9e323feffad1c051e5a90e31dd2",
-      "bytes": 321108,
+      "export_sha256": "984ca978549abc522309c3dcc79dcbc7df85424a3b495dcba1ab0865644440c7",
+      "bytes": 321425,
       "upstream_modified": true
     },
     {
@@ -3153,8 +3153,8 @@
       "path": "machine_forward.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c0aa3cc7ee0a13463640eaac33d53c31abd30cb930c7f0121bfca7377bd7deb6",
-      "bytes": 19847
+      "export_sha256": "57bfc2297fb6507e9c47f036f0b54df8b0b58d13636173892c522aebdf46c5b6",
+      "bytes": 20511
     },
     {
       "path": "machine_identity.py",
@@ -3167,8 +3167,8 @@
       "path": "machine_move.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ba2c46ac9770ebf97753dbaa6409e90acfa3a04489ea3a6ee994e59bce4e0754",
-      "bytes": 82336
+      "export_sha256": "f382dcf193da04b4a3b02565a0d69bb1e179971bf00b1adff4854f7a13d7ea29",
+      "bytes": 83458
     },
     {
       "path": "machine_view.py",
@@ -5436,8 +5436,8 @@
       "path": "tests/test_machine_forward.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "eba6e3746a0230f598afe4c76e6756df5bfa0d16644489896bd29915512e2517",
-      "bytes": 21885
+      "export_sha256": "1218287bd488ead7916a8d56db42baa8f29c4faa988e0c28e03ca29bffd22ab0",
+      "bytes": 23908
     },
     {
       "path": "tests/test_machine_mcp_inventory.py",

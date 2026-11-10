@@ -379,6 +379,16 @@ def remove(entry: dict, home: Path, *, runner, uid: int, remove_adopted: bool = 
                         "here: the service cannot start here while it does. Run return again with "
                         f"--remove-adopted to unload it and set its plist aside, or launchctl bootout "
                         f"gui/{uid}/{label} yourself"}
+    if not ours:
+        # Unload and move only what is still an ssh forward of a local port: the record names a label, and the
+        # file under it may have changed since it was adopted.
+        try:
+            still = ssh_forward(plistlib.loads(path.read_bytes())) if path.is_file() else None
+        except (OSError, ValueError, plistlib.InvalidFileException, xml.parsers.expat.ExpatError):
+            still = None
+        if still is None:
+            raise ForwardError(f"{label} is no longer an ssh forward of a local port (its plist changed or is "
+                               "gone); nothing was unloaded or moved, and the forward stays recorded")
     if _commands_allowed() and loaded(runner, label, uid):
         p = _run(runner, ["launchctl", "bootout", f"gui/{uid}/{label}"])
         if p.returncode != 0 and loaded(runner, label, uid):
