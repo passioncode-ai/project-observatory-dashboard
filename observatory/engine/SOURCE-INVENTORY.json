@@ -3201,8 +3201,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "970577637b19c0d78264e9b5a5668a1e4c200a773e14614ec81ac78444284f60",
-      "bytes": 132174,
+      "export_sha256": "c7420ee5b1aeef8681624725ef4169c577eb5ff832031eb50afa93cb37fec6fc",
+      "bytes": 132195,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -5408,8 +5408,8 @@
       "path": "tests/test_machine.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ae6a7c9b1e65d4bb42b0b38ad21593e8e2584616fb6b4f72336c9bf6eba3f937",
-      "bytes": 74844
+      "export_sha256": "77053248bc2b7b2d7d59d18379389f8039d33f06c2e7682c61720c668d24c210",
+      "bytes": 74923
     },
     {
       "path": "tests/test_machine_backup.py",

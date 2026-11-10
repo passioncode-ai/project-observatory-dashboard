@@ -787,13 +787,13 @@ def observatory_machine(
     if section == "skills" and explainPid is None:
         import machine_view
         skills = machine_view.skills_section(limit=limit or SKILLS_PAGE, cursor=cursor)
-        # Bounded for the host: `degraded` once, at the top; rows without their empty fields.
+        # Bounded for the host: `degraded` and `measuredAt` once, at the top; rows without their empty fields.
         degraded = skills.pop("degraded")
         skills["spaces"] = [{**space, "skills": [_present_fields(r) for r in space.get("skills") or []],
                              "plugins": [_present_fields(r) for r in space.get("plugins") or []]}
                             for space in skills["spaces"]]
         skills["findings"] = [_present_fields(r) for r in skills.get("findings") or []]
-        return {"measuredAt": skills["measuredAt"], "degraded": degraded, "skills": skills}
+        return {"measuredAt": skills.pop("measuredAt"), "degraded": degraded, "skills": skills}
     if section == "move" and explainPid is None:
         # The agent's path to the checklist (decision D13): the CLI's own function and peers.
         import machine_backup

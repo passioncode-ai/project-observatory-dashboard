@@ -1163,6 +1163,7 @@ class Skills(Base):
         self.harness({"generated_at": "2026-01-01T00:00:00Z", "skills": []})
         out = self.server.observatory_machine(section="skills")
         self.assertEqual(out["measuredAt"], "2026-01-01T00:00:00Z")
+        self.assertNotIn("measuredAt", out["skills"], "said once, at the top")
         self.assertIn("predates the skills inventory", out["degraded"][0]["reason"])
 
     def test_an_unreadable_scan_is_named(self):
