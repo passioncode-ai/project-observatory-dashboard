@@ -9,7 +9,8 @@ references only, each `{kind: "other", ref}`:
     board-thread:<uuid>       its thread
     capability:<name>         the capability it asks for
     fabric-project:<uuid>     Fabric's id of the project (required for keys)
-    deadline:<ISO 8601 UTC>   the board's deadline   (required for keys)
+    deadline:<ISO 8601 UTC>   the key window's end: the board's deadline, cut by the dispatcher to this
+                              horizon (required for keys)
     run-ends-at:<ISO 8601 UTC>  on each dispatch's own checkpoint: when that run must end
 
 No message body and no absolute folder travels in the packet, and no secret: keys are reached by name through
@@ -41,7 +42,10 @@ later checkpoint that brings a frozen ref into a workflow whose first carried no
 (`packet-not-first`), and a row written before that check, whose packet first appears in a later revision, is no
 packet: the views show no `dispatch`, and the gate refuses with `packet-not-first`. A plain workflow's own
 `credentials`, without the refs, are no packet and are not touched. The deadline the dispatcher writes is at
-most seven days after that write (`deadline-too-far`), the board's own limit on a request. `run-ends-at` stays per
+most seven days after that write (`deadline-too-far`), the board's own limit on a request. A dispatcher may cut
+a later board deadline to that horizon (Fabric 0.3.18, CO-554: the opening write plus seven days less a minute),
+so the key window can close before the board's deadline; only the opening write names the ref, and later writes
+that leave it out keep the frozen packet. `run-ends-at` stays per
 dispatch: the last one written is shown, and nothing reads it as a permission, so it cannot widen the deadline.
 
 `validate` runs inside `store.workflow.checkpoint_body`, so a malformed packet is refused on the way in; `view`
