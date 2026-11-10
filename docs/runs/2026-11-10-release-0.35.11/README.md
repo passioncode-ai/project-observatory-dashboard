@@ -36,6 +36,10 @@ Merged to `main` since `v0.35.10`:
   `--remove-adopted` finds it and `cutover` keeps refusing; an adopted forward no longer loaded, with no forward left
   under its label, is cleared. Tests in `observatory/engine/tests/test_machine_forward.py`. This release PR was rebased
   onto it and `observatory/engine/SOURCE-INVENTORY.json` regenerated.
+- PR #495 (`b75f41f4`), test only: `tests/test_dispatch_packet.py` read the dispatch view through the workflow
+  store's real clock against its fixed `DEADLINE` of 2026-11-10T14:00:00Z, so after that hour the release check of
+  `main` and of this PR failed on every platform (`'closed' != 'open'`); the call is pinned to `NOW` like the suite's
+  other key-window checks.
 - The `observatory-log` plugin stays at 0.35.9: `git diff v0.35.10 HEAD -- observatory/engine/skill .claude-plugin`
   printed nothing.
 
