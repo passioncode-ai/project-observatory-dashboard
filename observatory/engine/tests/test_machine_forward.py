@@ -73,7 +73,6 @@ class Launchctl:
         return [c for c in self.calls if c[:2] == ['launchctl', verb]]
 
 
-@unittest.skipIf(sys.platform == 'win32', 'no launchd jobs on Windows')
 class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix='observatory-forward-')
@@ -125,6 +124,7 @@ class Base(unittest.TestCase):
         return self.agents / f'{OWN}.plist'
 
 
+@unittest.skipIf(sys.platform == 'win32', 'no launchd jobs on Windows')
 class Leave(Base):
     def test_leave_installs_one_forward_job_toward_the_space_where_the_service_now_runs(self):
         run = Launchctl(loaded={JOB})
@@ -301,6 +301,7 @@ class Leave(Base):
             MM.return_job(JOB, self.home, runner=Launchctl(), platform='linux', uid=UID)
 
 
+@unittest.skipIf(sys.platform == 'win32', 'no launchd jobs on Windows')
 class Return(Base):
     def test_return_removes_the_forward_this_engine_installed_and_clears_the_field(self):
         run = Launchctl(loaded={JOB})
@@ -377,6 +378,7 @@ class Return(Base):
         self.assertTrue((MI.staging_dir(self.home) / f'{JOB}.plist').is_file())
 
 
+@unittest.skipIf(sys.platform == 'win32', 'no launchd jobs on Windows')
 class PlacementCompatibility(Base):
     def test_an_old_record_without_forward_still_loads_and_keeps_its_shape(self):
         path = MI.placement_path(self.home)
@@ -425,6 +427,7 @@ class CommandLine(Base):
         self.assertEqual(cli.refusal(['machine-move', 'leave', JOB, '--to', BETA, '--via', VIA]), '')
         self.assertIn('machine-move return LABEL', cli.PUBLIC_HELP)
 
+    @unittest.skipIf(sys.platform == 'win32', 'return reads a POSIX uid; launchd only')
     def test_return_of_an_unknown_label_exits_2_with_its_reason(self):
         err = io.StringIO()
         with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()), \

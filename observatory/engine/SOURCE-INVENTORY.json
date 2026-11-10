@@ -5436,8 +5436,8 @@
       "path": "tests/test_machine_forward.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1218287bd488ead7916a8d56db42baa8f29c4faa988e0c28e03ca29bffd22ab0",
-      "bytes": 23908
+      "export_sha256": "b77a6c4d2d252bcfb0bdf4158f4814e828348128798001ee3a4797ae784eb65a",
+      "bytes": 24140
     },
     {
       "path": "tests/test_machine_mcp_inventory.py",
