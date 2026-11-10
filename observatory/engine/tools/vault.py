@@ -964,8 +964,9 @@ def _writable_by_this_account(store: pathlib.Path) -> None:
         # own store. The decision is osprivacy's alone (tests/test_osprivacy.py, Boundary).
         if not osprivacy.owned_by_me(folder):
             raise CopyRefused(
-                f"{shown_path(folder)} belongs to another account; a slot written from this account would be "
-                f"owned by it and unreadable there. Another OS account's store is not served yet (OBS-489)",
+                f"{shown_path(folder)} belongs to another account ({osprivacy.explain(folder)}); a slot written from "
+                f"this account would be owned by it and unreadable there. Another OS account's store is not served "
+                f"yet (OBS-489)",
                 "target-other-account")
         if not os.access(folder, os.W_OK | os.X_OK):
             raise CopyRefused(f"this account cannot write into {shown_path(folder)}", "target-not-writable")

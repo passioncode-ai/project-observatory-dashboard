@@ -7645,8 +7645,8 @@
     {
       "path": "tools/vault.py",
       "source_sha256": "1df9030175654ff330cee02d22de11b3b515188918216509cadbbc4f8a510f49",
-      "export_sha256": "c77f0e72f9b68b3c2791d7df388557932e2178c8567f78b92282077c9d4263c7",
-      "bytes": 88752,
+      "export_sha256": "99cdbd7f94a588e532f571d2c0d950e03b19203e34dcc480a1c54ed9edc07001",
+      "bytes": 88802,
       "python_comments_removed": 19,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
