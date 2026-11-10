@@ -24,7 +24,13 @@ estate record carries placement:
 
     {"schema": "observatory-placement/1", "machine": "<this machine's id>", "updatedAt": "<UTC>",
      "elsewhere": [{"label": "<launchd label or systemd unit>", "serviceId": "<id.instance>" | null,
-                    "placedOn": "<the machine id it runs on>", "since": "<UTC>", "by": "<command>"}]}
+                    "placedOn": "<the machine id it runs on>", "since": "<UTC>", "by": "<command>",
+                    "forward": "<launchd label>", "forwardAdopted": false}]}
+
+`forward` and `forwardAdopted` (OBS-480, optional, absent when no forward is set up) name the launchd job that
+forwards the service's local port to the space where it now runs (machine_forward.py), and whether it was
+set up by hand and adopted. The schema id stays `observatory-placement/1`: a reader that knows only the
+first five keys reads every entry as before.
 
 Owner-only (0600 in a 0700 folder), written atomically. Fabric Dashboards (FD-132) reads it to show
 an agent as placed on another machine and hide its start. `full machine-restore` on a second machine
@@ -244,11 +250,40 @@ def _place_elsewhere(entries: list[dict], home: Path | None, machine: str | None
     for entry in entries:
         if not LABEL_SHAPE.fullmatch(str(entry.get("label", ""))):
             raise MachineIdentityError("a label must be letters, digits or . _ @ : -")
-        by_label[entry["label"]] = {"label": entry["label"], "serviceId": entry.get("serviceId"),
-                                    "placedOn": entry.get("placedOn"), "since": entry.get("since") or now(),
-                                    "by": entry.get("by")}
+        kept = by_label.get(entry["label"]) or {}
+        row = {"label": entry["label"], "serviceId": entry.get("serviceId"),
+               "placedOn": entry.get("placedOn"), "since": entry.get("since") or now(), "by": entry.get("by")}
+        # OBS-480: an entry that does not name `forward` keeps the forward already recorded for its label (a
+        # restore placing it again must not forget the job that forwards its port); `forward: None` clears it.
+        forward = entry["forward"] if "forward" in entry else kept.get("forward")
+        if forward is not None:
+            row["forward"] = forward
+            row["forwardAdopted"] = (entry.get("forwardAdopted") if "forward" in entry
+                                     else kept.get("forwardAdopted")) is True
+        by_label[entry["label"]] = row
     doc["elsewhere"] = list(by_label.values())
     return write_placement(doc, home, machine=machine)
+
+
+def set_forward(label: str, home: Path | None = None, *, forward: str | None, adopted: bool = False,
+                machine: str | None = None) -> bool:
+    """Record (or with `forward=None` clear) the launchd job that forwards LABEL's port to where it runs
+    (OBS-480) in its `elsewhere` entry, keeping every other field; whether LABEL is placed elsewhere."""
+    if forward is not None and not LABEL_SHAPE.fullmatch(forward):
+        raise MachineIdentityError("a forward is a launchd label: letters, digits or . _ @ : -")
+    with _placement_lock(home):
+        doc = read_placement(home)
+        found = False
+        for entry in doc["elsewhere"]:
+            if entry["label"] == label:
+                found = True
+                entry.pop("forward", None)
+                entry.pop("forwardAdopted", None)
+                if forward is not None:
+                    entry["forward"], entry["forwardAdopted"] = forward, bool(adopted)
+        if found:
+            write_placement(doc, home, machine=machine)
+        return found
 
 
 def remove_elsewhere(label: str, home: Path | None = None, *, machine: str | None = None) -> bool:

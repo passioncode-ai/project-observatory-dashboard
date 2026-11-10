@@ -3172,6 +3172,44 @@ second machine's `elsewhere`; a load that fails puts the plist back in staging. 
 on the old machine needs nothing: on the second machine it stays staged and named as running
 elsewhere.
 
+**A port forward for a service that moved** (OBS-480, macOS). A Fabric service whose descriptor's
+origin is a local port (`http://127.0.0.1:PORT`) is still read at that port here after it moved:
+Fabric Dashboards, the agents that call it and its descriptor name this machine's port. Name the
+account and machine it now runs on, and `leave` also forwards that port there:
+
+```sh
+project-observatory full machine-move leave LABEL --to MACHINE_ID --via USER@HOST   # on the old machine
+project-observatory full machine-move return LABEL                                  # the move back, first step on the old machine
+```
+
+`--via` installs one launchd job per service, `org.project-observatory.forward.<id>.<instance>`
+in `~/Library/LaunchAgents` (owner-only), that runs `/usr/bin/ssh -N -o BatchMode=yes -o
+ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L
+127.0.0.1:PORT:127.0.0.1:PORT -- USER@HOST` with KeepAlive, as an argument list and never through a
+shell. The data model has no ssh destination for a machine (one machine may hold several spaces),
+so `--via` names it on each `leave`: USER is the account the service runs as there, HOST a DNS
+name, an IPv4 address or a `Host` alias of `~/.ssh/config`; nothing else is accepted. BatchMode
+means it never prompts: ssh to USER@HOST once by hand first, so its host key is known and a key
+signs in. The placement entry names the job in `forward` (`forwardAdopted: false`), and the answer's
+`forward.state` reads `installed` (or `unchanged` on a second `leave`).
+
+A forward you already set up by hand for that port (a job in `~/Library/LaunchAgents` running
+`ssh -L [127.0.0.1:|localhost:]PORT:...` to the same USER and HOST) is adopted, never installed a
+second time: `forward.state` reads `adopted` and the entry `forwardAdopted: true`. A job that
+forwards the port to another destination refuses the forward (`forward-elsewhere`), and so does a
+port held by anything that is not such a job (`port-held`, with the `lsof` line that finds it); the
+job itself has moved by then, and leave exits 1. A malformed `--via`, a label no service
+descriptor with a local origin names, and `--via` on Linux are refused before anything moves.
+Without `--via`, `leave` moves the job as before, keeps a forward already recorded, and for a
+service with a local port says so in `forward.hint`.
+
+When the job comes back, run `return LABEL` on this machine before `cutover`: it unloads and
+removes the forward this engine installed and clears `forward`; the job stays placed on the other
+machine until `leave` there and `cutover` here. A forward set up by hand is left loaded (it still
+holds the port, and the answer says so) unless you add `--remove-adopted`, which unloads it and sets
+its plist aside in `${XDG_DATA_HOME:-~/.local/share}/project-observatory/machine-move/forwards-set-aside/`, never
+deleting it. `cutover` refuses while a forward is recorded for the label and names `return`.
+
 A staged plist can be days old: the restore staged it, and a service released anew since then lives
 in a new release folder. Before it moves anything or asks you, `cutover` checks that the staged plist's
 `Program`, `ProgramArguments[0]` and `WorkingDirectory` exist on this machine; when one does not, it
@@ -3336,7 +3374,10 @@ estate record carries placement:
                 "placedOn": "m-…", "since": "2026-10-30T09:00:00Z", "by": "machine-restore"}]}
 ```
 
-`serviceId` is the Fabric service whose descriptor names that launchd label, or `null`. Fabric
+`serviceId` is the Fabric service whose descriptor names that launchd label, or `null`. An entry
+whose port is forwarded to where the service runs (above) also carries `forward`, the forward
+job's launchd label, and `forwardAdopted`; Fabric Dashboards (FD-196) reads them to say the forward
+is not running rather than the service being off. An older reader ignores both. Fabric
 Dashboards reads the file to show such an agent as placed on another machine and to hide its
 start.
 

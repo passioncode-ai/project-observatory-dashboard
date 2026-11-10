@@ -344,8 +344,10 @@ platform, so neither a machine bundle nor a workspace snapshot carries them:
 
 | Path | Since | What | Older engines, removal |
 |---|---|---|---|
-| `placement.json` | 0.30.1 | schema `observatory-placement/1`: `machine` (this machine's id), `updatedAt`, `elsewhere[]` of `label` (launchd label or systemd unit), `serviceId` (`<id>.<instance>` of the Fabric service whose descriptor names that label, or null), `placedOn` (the machine id it runs on, `unknown` for a bundle that named none), `since`, `by` (`machine-restore` or `machine-move leave`); owner-only, written atomically; read by Fabric Dashboards (FD-132) until the estate record carries placement | an older engine neither reads nor writes it; a file that is not this schema is refused by name, never replaced; deleting it forgets which jobs run elsewhere, it moves no job |
+| `placement.json` | 0.30.1 | schema `observatory-placement/1`: `machine` (this machine's id), `updatedAt`, `elsewhere[]` of `label` (launchd label or systemd unit), `serviceId` (`<id>.<instance>` of the Fabric service whose descriptor names that label, or null), `placedOn` (the machine id it runs on, `unknown` for a bundle that named none), `since`, `by` (`machine-restore` or `machine-move leave`), and since the release after 0.35.10 (OBS-480), when a forward is set up, `forward` (the launchd label of the job that forwards the service's local port to where it runs) and `forwardAdopted` (true for a forward set up by hand and adopted); owner-only, written atomically; read by Fabric Dashboards (FD-132) until the estate record carries placement | an older engine neither reads nor writes it; a file that is not this schema is refused by name, never replaced; deleting it forgets which jobs run elsewhere, it moves no job |
 | `machine-move/LaunchAgents/`, `machine-move/systemd-user/` | 0.30.1 | the jobs a second-machine restore or `full machine-move leave` staged, byte for byte; nothing loads this folder at login | `full machine-move cutover LABEL` moves one into the job folder and loads it; deleting a file deletes that staged copy only |
+| `~/Library/LaunchAgents/org.project-observatory.forward.<id>.<instance>.plist` | release after 0.35.10 | the port forward `full machine-move leave LABEL --to ID --via USER@HOST` installs (OBS-480): `/usr/bin/ssh -N` with `BatchMode=yes`, `ExitOnForwardFailure=yes`, `ServerAliveInterval=30` and `-L 127.0.0.1:PORT:127.0.0.1:PORT -- USER@HOST` as an argument array, `RunAtLoad`, `KeepAlive`, `ThrottleInterval` 30; mode 0600 | an older engine neither writes nor removes it; `full machine-move return LABEL` unloads and removes it; the engine's prefix keeps it out of a machine bundle and of `machine-move status` M4 |
+| `machine-move/forwards-set-aside/` | release after 0.35.10 | the plist of a hand-made forward that `machine-move return LABEL --remove-adopted` unloaded, moved here (owner-only folder), never deleted | delete a file once you no longer need that job |
 | `machine-move/restore.json` | 0.31.0 | schema `observatory-machine-restore/1`: `machine`, `updatedAt` and one part per step that wrote (`apply`, `packages`, `clone`), each with its `at`, the bundle's name, counts and failures; `apply` adds `mode`, `taken_on`, `this_machine`, `only`, `skip`, `left_out` and `other_keys[]` of `key`, `fingerprint` and `in_ssh` (the public fingerprints of the keys a second-machine restore withheld; `in_ssh`, added after 0.31.0, is true when the key sat directly in `~/.ssh`, and only such an entry gets a `rekey` step in status, so an entry written by 0.31.0, without it, gets none); owner-only, written atomically; written by `full machine-restore`, read by `full machine-move status` (OBS-282, OBS-286) | an older engine neither reads nor writes it; one that is not this schema reads as `unknown` in status; deleting it makes the restore item `unknown` |
 | `machine-move/peers/` | 0.31.0 | the other machine's facts (`full machine-move facts --out FILE`, schema `observatory-machine-facts/1`: `machine`, `generated_at`, `engine_version`, `platform`, `ssh[]` of `file` and `fingerprint`, `device`, `jobs[]`, `elsewhere[]`, `restore`, `omitted`), placed by the person; written whole through a temporary file and a link, never over an existing name; `full machine-move status` reads every `*.json` here | never written by the engine; a file that does not read is named in `degraded`; deleting one forgets that machine |
 | `machine-id` | 0.30.1 | a random machine id, written only where the platform has no machine identifier of its own (macOS, most Linux and Windows have one) | deleting it gives the machine a new id: bundles and snapshots it took before then read as another machine's |
@@ -839,6 +841,29 @@ Known limits of the Linux listener fallback, each failing closed or left as it w
 - A systemd system socket unit creates its listener as root and hands it to the `User=` service: before `accept()` the
   connection reads as root's (`system`), so even a client of the service's own account refuses it until the service
   accepts; once accepted, the row carries the service's uid.
+
+## Machine move: a port forward for a service moved to another machine (OBS-480, release after 0.35.10)
+
+`full machine-move leave LABEL --to MACHINE_ID` takes `--via USER@HOST` (macOS): when a Fabric service descriptor
+names LABEL and its origin is `http://127.0.0.1:PORT` (1024 to 65535), leave also installs the launchd job
+`org.project-observatory.forward.<id>.<instance>` that forwards that port to the account USER on HOST, where the
+service now runs, and records its label in the `elsewhere` entry as `forward` with `forwardAdopted: false`. A job in
+`~/Library/LaunchAgents` that already runs `ssh` with `-L [127.0.0.1:|localhost:]PORT:...` to the same USER and HOST
+is adopted instead (`forwardAdopted: true`) and never installed a second time. The answer gains `forward`:
+`state` `installed`, `unchanged`, `adopted`, `refused` (`reason` `forward-elsewhere` or `port-held`, with
+`message`), `failed` (`load-failed`), or without `--via` `kept`, `not-requested` (with `port` and `hint`) or
+`not-applicable`. A refused or failed forward leaves the move itself done and exits 1. `--via` that is malformed,
+names a label no descriptor with a local origin names, or is given off macOS, is refused before anything moves
+(exit 2). Without `--via`, leave moves the job as before and keeps a forward already recorded.
+
+`full machine-move return LABEL [--remove-adopted]` is new: the first step here of the move back. It unloads and
+removes the forward this engine installed and clears `forward` and `forwardAdopted` from the entry; the entry
+itself stays until `cutover`. An adopted forward is left loaded and only its record is cleared, unless
+`--remove-adopted`, which unloads it and moves its plist into `machine-move/forwards-set-aside/`. A label not placed
+elsewhere is refused (exit 2); off macOS it is refused. `cutover LABEL` now refuses (exit 2, nothing moved) while
+the label's entry records a `forward`, naming `machine-move return LABEL`. A placement file without the new fields
+reads as before, the schema stays `observatory-placement/1`, and every command line without `--via` or `return`
+answers as before, with one new key `forward` in leave's answer.
 
 ## Machine move: a space with nobody logged in (OBS-361 part 1, 0.35.0)
 

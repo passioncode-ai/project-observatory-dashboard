@@ -275,6 +275,8 @@ BOUNDARY += ('ask_why', 'ask_why_reach')
 BOUNDARY += ('folder_attribution', 'fabric_attribution')
 # The machine bundle and its restore onto an empty home (OBS-157).
 BOUNDARY += ('machine_backup',)
+# OBS-480: the port forward of a service moved to another machine, and `machine-move return`.
+BOUNDARY += ('machine_forward',)
 # A session MCP server moving itself onto the installed release over real pipes (OBS-159).
 BOUNDARY += ('session_reload',)
 # OBS-161, OBS-199, OBS-201, OBS-204: organization enrollment against the fake organization server. The suite
@@ -373,7 +375,7 @@ ROOT_FILES = (
     # The machine's agent setup in one encrypted bundle, and its restore (OBS-157).
     'machine_backup.py',
     # The machine id, the placement file and a job's move between two machines (OBS-283, OBS-284).
-    'machine_identity.py', 'machine_move.py',
+    'machine_identity.py', 'machine_move.py', 'machine_forward.py',
     # The native secret prompt's node queue and the agent's job (OBS-260): serverd and the job runner import them.
     'secret_prompt.py', 'secret_client.py',
     # Who owns each end of a loopback connection, the account count, and the servers' peer check (OBS-355).
