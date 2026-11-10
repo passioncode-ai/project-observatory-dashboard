@@ -280,19 +280,17 @@ class Copy(unittest.TestCase):
         self.assertFalse(self.target.exists())
 
     def test_a_store_of_another_account_is_refused_with_its_reason(self):
-        """Ownership is read from the folder; the check is the one `copy_slot` runs, with the owner check forced by
-        a fake euid, since a test cannot make a folder another account's."""
+        """Ownership is read from the folder; the check is the one `copy_slot` runs, with `osprivacy.owned_by_me`
+        forced to refuse, since a test cannot make a folder another account's."""
         self.put()
         self.target.mkdir()
         sys.path.insert(0, str(TOOLS))
         code = ("import os, sys; sys.path.insert(0, %r); import vault\n"
-                "os.geteuid = lambda: os.stat(%r).st_uid + 1\n"
+                "import osprivacy; osprivacy.owned_by_me = lambda target: os.path.realpath(target) != os.path.realpath(%r)\n"
                 "try:\n"
                 "    vault.copy_slot('alpha-web', 'prod', 'API_TOKEN', %r)\n"
                 "except vault.CopyRefused as exc:\n"
                 "    print(exc.code)\n" % (str(TOOLS), str(self.target), str(self.target)))
-        if not hasattr(os, "geteuid"):
-            self.skipTest("no account ids on this platform")
         p = subprocess.run([sys.executable, "-c", code], env=self.env, capture_output=True, text=True, timeout=60)
         self.outputs.append(p.stdout + p.stderr)
         self.assertEqual(p.stdout.strip(), "target-other-account", p.stderr)

@@ -959,14 +959,12 @@ def _writable_by_this_account(store: pathlib.Path) -> None:
         if stat.S_ISLNK(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
             raise CopyRefused(f"{shown_path(folder)} is a link (a symbolic link or a junction); name the folder it "
                               f"points at", "target-link")
-        # POSIX: the folder's uid against this process's effective uid. Windows keeps no uid: the folder's owner
-        # SID must be this account (or SYSTEM or Administrators, `osprivacy.owned_by_me`), or the owner-only list set
-        # below would lock that account out of its own store.
-        other = (info.st_uid != os.geteuid()) if hasattr(os, "geteuid") else not osprivacy.owned_by_me(folder)
-        if other:
-            whose = f" (uid {info.st_uid})" if hasattr(os, "geteuid") else ""
+        # The folder's owner must be this account (`osprivacy.owned_by_me`: the uid on POSIX; on Windows the owner
+        # SID, or SYSTEM or Administrators), or the owner-only list set below would lock that account out of its
+        # own store. The decision is osprivacy's alone (tests/test_osprivacy.py, Boundary).
+        if not osprivacy.owned_by_me(folder):
             raise CopyRefused(
-                f"{shown_path(folder)} belongs to another account{whose}; a slot written from this account would be "
+                f"{shown_path(folder)} belongs to another account; a slot written from this account would be "
                 f"owned by it and unreadable there. Another OS account's store is not served yet (OBS-489)",
                 "target-other-account")
         if not os.access(folder, os.W_OK | os.X_OK):
