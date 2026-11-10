@@ -367,35 +367,32 @@ def remove(entry: dict, home: Path, *, runner, uid: int, remove_adopted: bool = 
         found = [p for p in (home / "Library/LaunchAgents").glob("*.plist")
                  if p.is_file() and mi.job_label(p) == label] if (home / "Library/LaunchAgents").is_dir() else []
         path = found[0] if found else path
-    if not ours and loaded(runner, label, uid) is False:
-        # Unloaded since it was adopted (a launchctl bootout by hand): it holds no port any more, so its record is
-        # cleared and its plist, if any, is left where it is. A sandbox (None) is read as still loaded.
-        return {"state": "not-running", "label": label, "definition": str(path) if path.is_file() else None,
-                "hint": f"{label} is not loaded, so it holds no port here: its record is cleared and its plist is "
-                        "left as it is"}
-    if not ours and not remove_adopted:
-        port = None
-        try:
-            parsed = ssh_forward(plistlib.loads(path.read_bytes())) if path.is_file() else None
-            port = parsed["ports"][0] if parsed else None
-        except (OSError, ValueError, plistlib.InvalidFileException, xml.parsers.expat.ExpatError):
-            pass
-        held = f"port {port}" if port else "its port"
-        return {"state": "adopted-left", "label": label, "definition": str(path) if path.is_file() else None,
-                "hint": f"{label} was set up by hand and adopted, so it is left running and still holds {held} "
-                        "here: the service cannot start here while it does. Run return again with "
-                        f"--remove-adopted to unload it and set its plist aside, or launchctl bootout "
-                        f"gui/{uid}/{label} yourself and run return again to clear its record"}
     if not ours:
-        # Unload and move only what is still an ssh forward of a local port: the record names a label, and the
-        # file under it may have changed since it was adopted.
+        # What is under the label now: the record names a label, and the file may have changed since it was adopted.
         try:
             still = ssh_forward(plistlib.loads(path.read_bytes())) if path.is_file() else None
         except (OSError, ValueError, plistlib.InvalidFileException, xml.parsers.expat.ExpatError):
             still = None
+        running = loaded(runner, label, uid)   # None in a sandbox, read as still loaded
+        if running is False and still is None:
+            # Not loaded and no forward left to load again at login: it holds no port, so the record is cleared
+            # and whatever file is there is left as it is.
+            return {"state": "not-running", "label": label, "definition": str(path) if path.is_file() else None,
+                    "hint": f"{label} is not loaded and no ssh forward is left under it, so it holds no port here: "
+                            "its record is cleared"}
+        if not remove_adopted:
+            port = still["ports"][0] if still else None
+            held = f"port {port}" if port else "its port"
+            now = (f"still holds {held} here" if running is not False
+                   else f"is not loaded now, but its plist loads it again at the next login and it takes {held}")
+            return {"state": "adopted-left", "label": label, "definition": str(path) if path.is_file() else None,
+                    "hint": f"{label} was set up by hand and adopted, so it is left as it is and {now}: the "
+                            "service cannot start here while it does. Run return again with --remove-adopted to "
+                            "unload it and set its plist aside"}
         if still is None:
             raise ForwardError(f"{label} is no longer an ssh forward of a local port (its plist changed or is "
-                               "gone); nothing was unloaded or moved, and the forward stays recorded")
+                               f"gone) and is still loaded; nothing was unloaded or moved, and the forward stays "
+                               f"recorded. Unload it (launchctl bootout gui/{uid}/{label}) and run return again")
     if _commands_allowed() and loaded(runner, label, uid):
         p = _run(runner, ["launchctl", "bootout", f"gui/{uid}/{label}"])
         if p.returncode != 0 and loaded(runner, label, uid):

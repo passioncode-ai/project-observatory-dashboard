@@ -954,15 +954,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "ccc7e62cdc839e1444c4f51dea8163fa7d329e351d391471c4622a5220158f6e",
-      "bytes": 135404,
+      "export_sha256": "74cd4d9c24a3b27efba60bab63beb554fe2a4e245c77ec1b7920b7778be72788",
+      "bytes": 135592,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "002afc7c9d71d65ca53a1c9eff66aba30f2665268cad971ca4218adeef1b9ec2",
-      "bytes": 321649,
+      "export_sha256": "2b6ab780e650365be41ca1920fe2a1819fcc4e7a56443896765fbcc6437e2c6e",
+      "bytes": 321788,
       "upstream_modified": true
     },
     {
@@ -3153,8 +3153,8 @@
       "path": "machine_forward.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6844ebad934b599bfde6e68aebebad5f9a64b5eaf958b13066a247394cc811b6",
-      "bytes": 21141
+      "export_sha256": "5e1744079fad03e32cbf3bacceb40010c5671effe5c5079878ab57043bab0f7c",
+      "bytes": 21070
     },
     {
       "path": "machine_identity.py",
@@ -5436,8 +5436,8 @@
       "path": "tests/test_machine_forward.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "cf42ec0d387c60c668073da1c57ecbfc98593bb6cf201324a93566f29c6f64c1",
-      "bytes": 26560
+      "export_sha256": "264ea0b189d825731f569f123c0699c56479123403672de85c8e0862bbddc843",
+      "bytes": 28768
     },
     {
       "path": "tests/test_machine_mcp_inventory.py",

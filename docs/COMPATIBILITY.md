@@ -862,8 +862,9 @@ removes the forward this engine installed and clears `forward` and `forwardAdopt
 itself stays until `cutover`. An adopted forward is left loaded and keeps its record (it still holds the port, so
 `cutover` keeps refusing), unless `--remove-adopted`, which unloads it and moves its plist into `machine-move/forwards-set-aside/` after checking
 it is still an ssh forward of a local port (otherwise nothing is unloaded or moved, exit 1). An adopted forward that
-is no longer loaded holds no port: `return`, with or without the flag, answers `not-running`, clears its record and
-leaves its plist as it is. A label not placed
+is not loaded and has no ssh forward left under its label holds no port: `return`, with or without the flag, answers
+`not-running` and clears its record. One that is not loaded but whose plist is still a forward would load again at
+the next login: it stays recorded (`adopted-left`) until `--remove-adopted` sets that plist aside. A label not placed
 elsewhere is refused (exit 2); off macOS it is refused. `cutover LABEL` now refuses (exit 2, nothing moved) while
 the label's entry records a `forward`, naming `machine-move return LABEL`. A placement file without the new fields
 reads as before, the schema stays `observatory-placement/1`, and every command line without `--via` or `return`
