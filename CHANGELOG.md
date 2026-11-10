@@ -5,6 +5,13 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Security
+
+- **The desktop app's updater no longer carries the `zip` crate's archive-parsing flaws** (GHSA-m665-v7pm-7grj,
+  critical; GHSA-q7v9-x93c-xqv3, high; GHSA-8hxf-qr8p-62x4, moderate). `tauri-plugin-updater` 2.13.3 pulled `zip`
+  4.6.1; 2.14.1 pulls `zip` 9.5.0, which the advisories name as fixed (9.0.5 and later). Only the lock file changes;
+  `cargo check --locked` and the app's 33 Rust tests pass.
+
 ### Fixed
 
 - **A space's daemon is replaced in one step, and no longer left unloaded by `apply` right after `remove`** (OBS-475, OBS-395 part 2; space daemons 1.2.0,
