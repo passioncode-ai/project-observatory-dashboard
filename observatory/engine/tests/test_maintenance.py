@@ -1560,6 +1560,14 @@ class CheckJob(Base):
         systemd = M.SystemdSchedule(self.home, runner=run, which=lambda name: "/usr/bin/systemctl", job="check")
         self.assertTrue(systemd.name.endswith("-check"))
         self.assertIn('maintain.py" check', systemd.service_text())
+        # OBS-503: systemd does not unquote WorkingDirectory=, so the path goes in bare.
+        work = [line for line in systemd.service_text().splitlines() if line.startswith("WorkingDirectory=")]
+        self.assertEqual(len(work), 1)
+        self.assertTrue(work[0].startswith("WorkingDirectory=/"), work[0])
+        self.assertEqual(M.SystemdSchedule.directory("/srv/Project Observatory"), "/srv/Project Observatory")
+        for bad in ("relative", "/srv/100%", "/srv/x "):
+            with self.assertRaises(M.config.ConfigurationError):
+                M.SystemdSchedule.directory(bad)
         self.assertIn(f"TimeoutStartSec={M.CHECK_TIME_LIMIT}", systemd.service_text().splitlines())
         self.assertIn("OnUnitActiveSec=5min", systemd.timer_text().splitlines())
         self.assertIn(f"OnStartupSec={M.CHECK_FIRST_DELAY}s", systemd.timer_text().splitlines())

@@ -267,6 +267,17 @@ class SystemdJob:
             raise ScheduleError("A path with a quote, backslash, newline, % or $ cannot go in a systemd unit")
         return f'"{value}"'
 
+    @classmethod
+    def directory(cls, value: str) -> str:
+        # systemd reads the rest of a WorkingDirectory= line as the path and does not unquote it, so
+        # `WorkingDirectory="/x"` names a folder whose name holds the quotes and the unit fails with
+        # `bad-setting` (OBS-503). A space needs no escaping there; what `quote` refuses is refused
+        # here too, and so is a path that is not absolute or that ends in white space.
+        cls.quote(value)
+        if not value.startswith("/") or value != value.rstrip():
+            raise ScheduleError("A WorkingDirectory must be an absolute path with no trailing white space")
+        return value
+
     @property
     def unit(self) -> str:
         return f"{self.name}.service"
@@ -276,7 +287,7 @@ class SystemdJob:
         lines = ["[Unit]", f"Description=Project Observatory {j.name} for {j.workspace}", "",
                  "[Service]", f"Type={'simple' if j.service else 'oneshot'}",
                  "ExecStart=" + " ".join(self.quote(a) for a in j.argv),
-                 f"WorkingDirectory={self.quote(str(j.cwd))}"]
+                 f"WorkingDirectory={self.directory(str(j.cwd))}"]
         lines += [f"Environment={self.quote(f'{k}={v}')}" for k, v in j.env]
         lines += [f"StandardOutput=append:{j.stdout}", f"StandardError=append:{j.stderr}", "UMask=0077",
                   f"Nice={10 if j.background else 0}"]

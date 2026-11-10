@@ -179,6 +179,17 @@ class SystemdUnits(Workspace):
         with self.assertRaises(osschedule.ScheduleError):
             self.unit("tick", **TICK, cwd=Path("/tmp/100%"), ).service_text()
 
+    def test_the_working_folder_is_written_without_quotes_even_with_a_space(self):
+        # systemd does not unquote WorkingDirectory=: a quoted path is refused as `bad-setting`
+        # and the timer never runs (OBS-503, a Linux VM from 2026-11-08).
+        lines = self.unit("tick", **TICK, cwd=Path("/srv/Project Observatory")).service_text().splitlines()
+        self.assertIn("WorkingDirectory=/srv/Project Observatory", lines)
+        self.assertFalse([line for line in lines if line.startswith('WorkingDirectory="')])
+
+    def test_a_relative_working_folder_is_refused(self):
+        with self.assertRaises(osschedule.ScheduleError):
+            self.unit("tick", **TICK, cwd=Path("relative/folder")).service_text()
+
     def test_install_enables_the_right_unit(self):
         os.environ["XDG_CONFIG_HOME"] = str(self.ws / "config")
         self.addCleanup(os.environ.pop, "XDG_CONFIG_HOME", None)
