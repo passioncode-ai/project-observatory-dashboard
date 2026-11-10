@@ -17,6 +17,13 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-11-10: release 0.35.11](runs/2026-11-10-release-0.35.11/README.md): engine 0.35.11 (`observatory-log` stays
+0.35.9): a port forward for a service moved to another machine, installed or adopted by `full machine-move leave
+--via USER@HOST` and recorded in `placement.json`, removed by the new `full machine-move return`, with `cutover`
+refused while one is recorded (OBS-480, #492). New rows OBS-494 to OBS-499 from the reviews of #491 and #492.
+
+Next: tag `v0.35.11`, verify and install it (receipts in the record); then OBS-495, OBS-498, OBS-492 and OBS-493.
+
 [2026-11-10: release 0.35.10](runs/2026-11-10-release-0.35.10/README.md): engine 0.35.10 (`observatory-log` stays
 0.35.9): a vault slot copied into another store on this machine with `vault.py copy` (OBS-476, #488), the skills
 section of the machine view with the finding `plugin-behind` (OBS-477, #488), space daemons 1.2.0 with a one-step
@@ -24,7 +31,8 @@ section of the machine view with the finding `plugin-behind` (OBS-477, #488), sp
 `747e472e066f426a87b5174e662889109d2637fb661d0b1f59e2943279f61af0`), and the desktop updater on `zip` 9.5.0 (#490).
 OBS-481 closed as not needed; new rows OBS-492 and OBS-493.
 
-Next: tag `v0.35.10`, verify and install it (receipts in the record); then OBS-480, OBS-492 and OBS-493.
+Released 2026-11-10 (tag `v0.35.10` on `9256a331`, the release run green on its first attempt), verified, and
+installed on the release manager's machine with `full update --version 0.35.10 --apply`; receipts in the record.
 
 [2026-11-09: release 0.35.9](runs/2026-11-09-release-0.35.9/README.md): engine 0.35.9 and `observatory-log`
 0.35.9: organization onboarding part one, `full org accounts` and `full org keys` with the account rules

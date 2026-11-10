@@ -6,14 +6,11 @@ updater on `zip` 9.5.0 (PR #490); then tag, verify and install it.
 
 ## State now
 
-- Open: tag `v0.35.10` once this release PR is merged and its `observatory-release-check` is green; verify the
-  published files (`SHA256SUMS`, its signature, the attestations), install on the release manager's machine and let
-  the maintenance job install it elsewhere; an administrator installs the root-owned space daemons copy again from
-  this release (below); fill the Receipts below.
-- Waits: this release PR's review and release check; no watcher of this record runs, the release manager tags.
-- Next task: OBS-480 (the port forward `full machine-move leave` installs for a service with a local origin), then
-  OBS-492 (the desktop app's true minimum Rust version) and OBS-493 (`vault.py copy` keeps `target-other-account`
-  when the owner cannot be explained).
+- Open: only the administrator's step of installing the root-owned space daemons copy 1.2.0 again where a space runs
+  one (below); this record holds no receipt of it. Everything else in this release is done; its receipts are below.
+- Waits: none.
+- Next task: release 0.35.11 ([record](../2026-11-10-release-0.35.11/README.md)); PR #492 (OBS-480) merged after this
+  record was written and ships there.
 
 ## What it releases
 
@@ -77,10 +74,18 @@ holds for the published wheel.
   `test_version_consistency`, `test_backlog_board` and `test_docs_drift`. No engine code changes here, so no
   portable suite was rerun.
 
-## Receipts pending
+## Receipts
 
-- Release PR: number, merge commit and its `observatory-release-check` run.
-- Tag `v0.35.10`: tag object, release run, published files and time.
-- Verification: `SHA256SUMS`, the `gpg` signature, `gh attestation verify` of the wheel and the installers.
-- Installs: the release manager's machine (`full update --version 0.35.10 --apply`), the maintenance job elsewhere,
-  and the root-owned space daemons copy where a space runs one.
+- Release PR #491 merged as `9256a331` on 2026-11-10T04:52:36Z. Its `observatory-release-check` run on `9256a331`
+  ([42758589545](https://github.com/passioncode-ai/project-observatory-dashboard/actions/runs/42758589545)) succeeded.
+- Tag `v0.35.10` (tag object `75a203cd`) on `9256a331`. Release run
+  [42763411101](https://github.com/passioncode-ai/project-observatory-dashboard/actions/runs/42763411101) succeeded on
+  its first attempt and published 19 files on 2026-11-10T06:45:23Z. Windows x64 signing passed the first time, after
+  the shared action's `v1` tag was moved to v1.4.0 during the 0.35.9 release.
+- Verified by the release manager: `SHA256SUMS` OK for all 19 files, `gpg` `VALIDSIG
+  63B30DC324BD697487AA31944FAFB8AEC803B6A7`, `gh attestation verify` exited 0 for the wheel, the Windows x64 installer
+  and the macOS app.
+- Installed on the release manager's machine with `full update --version 0.35.10 --apply`; the maintenance job
+  installs it elsewhere.
+- Merged after this record was written, in 0.35.11: PR #492 (`59360f84`, OBS-480, a port forward for a service moved
+  to another machine).
