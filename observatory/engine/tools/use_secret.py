@@ -341,17 +341,25 @@ def resolve(project: str, name: str, env: str | None = None,
 
     `vault_only` refuses the `.env` fallback: a name held only in a project's
     env file is an error that says how to move it into the vault."""
-    slot, got_env = vault_slot(project, name, env)
-    if slot is None:
-        # The project's other vault folder: `put` files new slots under the project's
-        # own folder, while older slots stay under the name they were filed by, and a
-        # read that looked in one folder missed a key in the other (2026-10-06).
-        for other in project_vault_folders(project):
-            if other != project:
-                found, found_env = vault_slot(other, name, env)
-                if found is not None:
-                    slot, got_env, project = found, found_env, other
-                    break
+    # Every folder of the project, its own folder FIRST: `put` files a new value there, while
+    # an older copy stays under the name it was filed by. Reading the typed folder first
+    # found a missed key (2026-10-06) but also served the older copy after a `put` by the
+    # same old name, a revoked key on 2026-11-11 (a peer agent's report).
+    slot = got_env = None
+    shadowed = []
+    for folder in _read_order(project):
+        found, found_env = vault_slot(folder, name, env)
+        if found is None:
+            continue
+        if slot is None:
+            slot, got_env, chosen = found, found_env, folder
+        else:
+            shadowed.append(f"{folder}/{found_env}")
+    if slot is not None:
+        if shadowed:
+            print(f"note: {name} is also filed under {', '.join(shadowed)}, an older copy; the project's "
+                  f"folder {chosen}/{got_env} is read, where `vault.py put` writes", file=sys.stderr)
+        project = chosen
     files = env_candidates(project, name, env)
     if slot is None and vault_only:
         held = f" It is in {files[0].relative_to(paths.DATA)}, which is not the vault." \
@@ -450,6 +458,20 @@ def project_for_reading(text: str) -> str:
             "folder name, or the id of a project the registry holds")
     private_files.validate_names(folder)
     return folder
+
+
+def _read_order(project: str) -> list[str]:
+    """The folders a read looks in, in order: the registry project's own folder (where
+    `vault.py put` files a new value), the folder as typed, then any other folder of the
+    same project (vault_project.folders_of)."""
+    import vault_project
+    r = vault_project.resolve(project)
+    own = r.folder if r.project_id and r.how not in ("ambiguous", "unreadable") and r.folder else None
+    order: list[str] = []
+    for folder in (own, project, *project_vault_folders(project)):
+        if folder and folder not in order:
+            order.append(folder)
+    return order
 
 
 def project_vault_folders(folder: str) -> list[str]:

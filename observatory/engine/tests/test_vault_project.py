@@ -211,6 +211,23 @@ class DoorTests(unittest.TestCase):
         self.assertIn("local-beta-api/prod/OLDER_KEY", p.stdout)
         self.assertIn("beta-api/prod/NEWER_KEY", p.stdout)
 
+    def test_a_key_put_again_by_the_old_name_is_the_one_read(self):
+        # 2026-11-11 (a peer agent's report): `put` by the old name filed the new value under
+        # the project's folder, and `run` by that name still read the older copy, revoked by then,
+        # from the folder it was typed as. The project's folder is read first, as `put` writes it.
+        plant_slot("local-beta-api", "prod", "SAME_KEY")
+        p = run("vault.py", "put", "local-beta-api", "prod", "SAME_KEY", stdin="synthetic-newest-value")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        for typed in ("local-beta-api", "beta-api", "project:local-beta-api"):
+            with self.subTest(typed=typed):
+                p = run("use_secret.py", "run", "--env", "prod", typed, "SAME_KEY",
+                        "--", sys.executable, "-c", "import os; print(len(os.environ['SAME_KEY']))")
+                self.assertEqual(p.returncode, 0, p.stderr)
+                self.assertEqual(p.stdout.strip(), str(len("synthetic-newest-value")))
+        p = run("use_secret.py", "run", "--env", "prod", "local-beta-api", "SAME_KEY",
+                "--", sys.executable, "-c", "pass")
+        self.assertIn("local-beta-api/prod", p.stderr, "the older copy is named, so it can be removed")
+
     def test_keyserver_mint_destination_uses_the_same_rule(self):
         import keyserver
         self.assertEqual(keyserver.check_destination("vault:local-beta-api/prod/OPENROUTER_API_KEY"),
