@@ -212,7 +212,7 @@ class DoorTests(unittest.TestCase):
         self.assertIn("beta-api/prod/NEWER_KEY", p.stdout)
 
     def test_a_key_put_again_by_the_old_name_is_the_one_read(self):
-        # 2026-11-11 (a Frame Agent's report): `put` by the old name filed the new value under
+        # 2026-11-11 (a peer agent's report): `put` by the old name filed the new value under
         # the project's folder, and `run` by that name still read the older copy, revoked by then,
         # from the folder it was typed as. The project's folder is read first, as `put` writes it.
         plant_slot("local-beta-api", "prod", "SAME_KEY")

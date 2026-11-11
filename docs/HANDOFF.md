@@ -17,6 +17,12 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-11-11: release 0.35.13](runs/2026-11-11-release-0.35.13/README.md): engine and observatory-log 0.35.13: the
+Cloudflare `zone-settings` preset (OBS-509), a key read from the folder `vault.py put` writes (OBS-510), week-old
+Docker images pruned at critical (OBS-511).
+
+Next: OBS-504, then OBS-506, OBS-505, OBS-507 and OBS-508.
+
 [2026-11-11: release 0.35.12](runs/2026-11-11-release-0.35.12/README.md): engine 0.35.12 and observatory-log
 0.35.12: fixes from a walk of every shipped scenario (#497): cleanup and the disk guard remove what nobody holds
 again (OBS-173, OBS-327, OBS-397, OBS-500), the daily snapshot no longer fails on the update check's record, the

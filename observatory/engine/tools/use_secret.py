@@ -344,7 +344,7 @@ def resolve(project: str, name: str, env: str | None = None,
     # Every folder of the project, its own folder FIRST: `put` files a new value there, while
     # an older copy stays under the name it was filed by. Reading the typed folder first
     # found a missed key (2026-10-06) but also served the older copy after a `put` by the
-    # same old name, a revoked key on 2026-11-11 (a Frame Agent's report).
+    # same old name, a revoked key on 2026-11-11 (a peer agent's report).
     slot = got_env = None
     shadowed = []
     for folder in _read_order(project):

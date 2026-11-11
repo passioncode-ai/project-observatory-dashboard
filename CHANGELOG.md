@@ -3,7 +3,11 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.35.13 (2026-11-11)
+
+A Cloudflare preset for one zone's settings, a key read from the folder `vault.py put` writes, and week-old Docker images
+pruned by the disk guard at critical. No setting or migration changes. The observatory-log plugin moves to 0.35.13: the
+handling-secrets skill names the new preset.
 
 ### Added
 
