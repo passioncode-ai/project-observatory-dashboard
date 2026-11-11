@@ -261,38 +261,33 @@ class SmokeOutcome(unittest.TestCase):
     """OBS-513: only a smoke that failed says the page is blank and builds the findings again; one stopped at its
     time limit, or not started for want of time, measured nothing and says so."""
 
-    def run_smoke(self, outcome, node="/usr/bin/node"):
-        tick = load_tick()
-        called, lines = [], []
-
-        def step(name, *argv):
-            called.append(name)
-            return outcome if name == "smoke" else "ran"
-        with mock.patch.object(tick.shutil, "which", return_value=node), \
-                mock.patch.object(tick, "log", side_effect=lines.append):
-            tick.smoke(step, Path("page.html"))
-        return called, "\n".join(lines)
-
     def test_a_failed_smoke_says_blank_and_builds_the_findings_again(self):
-        called, said = self.run_smoke("failed")
-        self.assertEqual(called, ["smoke", "findings-recheck"])
+        recheck, said = load_tick().smoke_verdict("failed")
+        self.assertTrue(recheck)
         self.assertIn("SMOKE FAILED", said)
 
     def test_a_smoke_stopped_or_not_started_measured_nothing(self):
+        tick = load_tick()
         for outcome, words in (("stopped", "stopped at its time limit"),
                                ("not_started", "not started for want of time")):
-            called, said = self.run_smoke(outcome)
-            self.assertEqual(called, ["smoke"], outcome)
+            recheck, said = tick.smoke_verdict(outcome)
+            self.assertFalse(recheck, outcome)
             self.assertNotIn("SMOKE FAILED", said, outcome)
             self.assertNotIn("blank", said, outcome)
             self.assertIn(words, said, outcome)
             self.assertIn("not measured", said, outcome)
 
-    def test_a_clean_smoke_says_nothing_and_without_node_nothing_runs(self):
-        self.assertEqual(self.run_smoke("ran"), (["smoke"], ""))
-        called, said = self.run_smoke("ran", node=None)
-        self.assertEqual(called, [])
-        self.assertIn("node is absent", said)
+    def test_a_clean_smoke_says_nothing(self):
+        self.assertEqual(load_tick().smoke_verdict("ran"), (False, ""))
+
+    def test_the_tail_acts_on_the_verdict_where_it_runs_smoke(self):
+        """The verdict is read at the smoke step itself, between the dashboard and the notifier, so the step order
+        the budget and the pipeline read from this file is unchanged."""
+        src = (ROOT / "tools/tick.py").read_text(encoding="utf-8")
+        at = src.index('smoke_verdict(step("smoke", "node", "dashboard/smoke.js", DASHBOARD))')
+        recheck = src.index('step("findings-recheck"', at)
+        self.assertLess(src.index('step("dashboard", PY'), at)
+        self.assertLess(recheck, src.index('step("notify"'))
 
 
 class BoundedRotation(unittest.TestCase):
