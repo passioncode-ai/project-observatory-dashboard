@@ -804,6 +804,10 @@ class Views(Base):
         (self.home / "config" / "organizations.json").write_text("{broken", encoding="utf-8")
         v = self.view.accounts()
         self.assertIn("config/organizations.json: not JSON (line 1)", v["problems"])
+        # OSS-102: an unread file is a gap in the answer, not a complete one.
+        self.assertIn({"source": "config/organizations.json", "code": "unreadable", "reason": "not JSON (line 1)",
+                       "effect": "every account is placed as if no organization were configured"}, v["degraded"])
+        self.assertEqual(v["state"], "partial")
         self.assertIn("is read as if absent", self.view.accounts_text(v))
         with self.assertRaises(self.view.Refusal) as caught:
             self.view.keys("company")

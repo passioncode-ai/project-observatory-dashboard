@@ -380,6 +380,10 @@ def accounts() -> dict:
     a = organizations.Assigner(doc=doc)
     problems = ([f"config/organizations.json: {problem}"] if problem else []) + (
         organizations.validate(doc) if doc.get("organizations") else [])
+    if problem:
+        # OSS-102: the file exists and is not read, so the placement below is a guess, not the answer.
+        degraded.append({"source": "config/organizations.json", "code": "unreadable", "reason": problem,
+                         "effect": "every account is placed as if no organization were configured"})
     default = a.default if a.active else IMPLICIT_DEFAULT
     estate = organizations._estate_owners()
     acc = _Accounts()

@@ -23,6 +23,10 @@ while the major version is 0, a minor release may change behaviour and says so h
   nothing. The live view now shows a banner while the rebuild works and the reason when it fails.
 - **The desktop workflow cites a rule that exists.** Its header pointed at `docs/CI-BATCHING.md`, a file this
   repository does not have; it now names the CI section of the org-index `RULES.md`.
+- **`full org accounts` reads `partial` when `organizations.json` cannot be read** (OSS-102). The file's problem was
+  listed under `problems` only, so the answer said `complete` with an empty `degraded` while every account was
+  placed as if no organization were configured. It is now also a `degraded` row (`config/organizations.json`,
+  `unreadable`, the reason).
 
 ## 0.35.11 (2026-11-10)
 
