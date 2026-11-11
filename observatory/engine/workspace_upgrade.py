@@ -249,14 +249,24 @@ SESSION_RECEIPTS = frozenset({'store/raw/record-turn.json', 'store/raw/sessions-
 #: with the server down meanwhile (seen live 2026-11-10 and 11; the last daily was 11-09).
 JOB_RECEIPTS = frozenset({'store/update-check.json', 'store/update-check.lock'})
 
+#: What the usage analytics of every running process writes (`usage_analytics`): the event queue,
+#: the counters and their lock, the notice record. An MCP server a coding session runs is not stopped
+#: for an update or the daily snapshot and records each call, so the 0.35.13 update on a machine with
+#: live sessions failed with "Workspace changed during snapshot (store/analytics/queue.jsonl)" and
+#: rolled back (2026-11-11). Copied, never required to hold still; an event appended after the copy
+#: is lost if the snapshot is restored, which a usage count can afford.
+ANALYTICS_RECEIPTS = frozenset({'store/analytics/queue.jsonl', 'store/analytics/counters.json',
+                                'store/analytics/.counters.lock', 'store/analytics/notice.json'})
+
 
 def volatile(name: str, databases: set[str]) -> bool:
     """A path the snapshot copies without requiring it to hold still: a database and its
     WAL companions, an append-only log (with its rotated generations) under store/logs,
-    a receipt the session hooks write (SESSION_RECEIPTS) or the check job's (JOB_RECEIPTS)."""
+    a receipt the session hooks write (SESSION_RECEIPTS), the check job's (JOB_RECEIPTS) or the
+    usage analytics' (ANALYTICS_RECEIPTS)."""
     if name in databases or (name.endswith(('-wal', '-journal', '-shm')) and name.rsplit('-', 1)[0] in databases):
         return True
-    if name in SESSION_RECEIPTS or name in JOB_RECEIPTS:
+    if name in SESSION_RECEIPTS or name in JOB_RECEIPTS or name in ANALYTICS_RECEIPTS:
         return True
     path = PurePosixPath(name)
     if path.parts[:2] != ('store', 'logs'):

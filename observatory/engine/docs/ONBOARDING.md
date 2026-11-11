@@ -2523,15 +2523,24 @@ space or one space a kept key waits to move out or for its context (OBS-426,
 OBS-359). Nothing that has not happened reads `done`. `show`
 counts each kind's items as done, failed, waiting, planned or undone, and names
 what each waits on. `undo` restores the revision before as a new revision (the
-first one undone leaves nothing chosen, and the defaults apply again; undoing
-an undo restores what it removed; a draft not yet applied is dropped with it); it is
+first one undone leaves nothing chosen, and the defaults apply again; a draft
+not yet applied is dropped with it). Undoing an undo is a new plan, not an
+apply: it drafts the revision the undo removed (each item with its decision,
+label and who decided it, the layout and the space) and answers that plan's
+preview and digest, which `apply --digest` then applies like any other plan,
+so nothing is applied that was not previewed in its current form. `undo` is
 refused once a project's entry is signed in Fabric, where a take-back is a new
 estate revision (OBS-419). In the separate-space layout `confirm-replacement
 KEY` records that the organization's replacement works, so the revocation may
 follow once the rotation door exists; until the replacement has arrived and the
 key's consumers have switched to it, it is refused (`replacement-not-received`),
-which today is always, since apply files no request yet and the rotation is OBS-416. From the terminal each change is the
-person's own act; an agent passes the operator's words with `--decision JSON`
+which today is always, since apply files no request yet and the rotation is OBS-416. `show` of an
+organization with nothing applied is refused as `plan` refuses it (`unknown-organization`,
+`no-organizations`, `default-organization`); a record already applied reads
+without its rule. From an interactive terminal (standard input is one) each change is the
+person's own act, recorded `{by: person, via: cli}`. Without one (a script, an
+agent's shell) a change, apply, undo or confirmation without the operator's words is
+refused (`operator-decision-required`) exactly as the MCP tool refuses it. An agent passes the operator's words with `--decision JSON`
 (contract DEC-0121's shape, its `target` the organization, or
 `ORG:vault:FOLDER/ENV/NAME` for a confirmation; words carrying something shaped like a credential are refused) and calls `observatory_org_selection` with the same answers,
 which refuses a change, apply, undo or confirmation without them

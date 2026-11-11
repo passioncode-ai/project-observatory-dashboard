@@ -206,6 +206,40 @@ final class AppUpdateTests: XCTestCase {
         XCTAssertThrowsError(try RestartHelper.spawnDetached(["sh"], env: [:]), "a relative program is refused")
     }
 
+    // MARK: the install lock (OBS-508)
+
+    func testTheInstallLockLivesAsLongAsTheHelperThatHoldsIt() throws {
+        let dir = try temp("obs-lock")
+        let file = UpdateLock.file(log: dir.appendingPathComponent("logs/app.log"))
+        XCTAssertEqual(file.lastPathComponent, "update-helper.lock")
+        guard case .acquired(let mine) = UpdateLock.acquire(file, mode: .restart, version: "0.19.0") else { return XCTFail("free at first") }
+        XCTAssertEqual(((try FileManager.default.attributesOfItem(atPath: file.path))[.posixPermissions] as? NSNumber)?.intValue, 0o600)
+        guard case .held(let holder) = UpdateLock.acquire(file, mode: .restart, version: "0.19.0") else { return XCTFail("held by this process") }
+        XCTAssertEqual(holder, UpdateLock.Holder(mode: .restart, version: "0.19.0"))
+        // The helper gets a copy as descriptor 3, and the app's own copy closes when the app quits.
+        let seen = dir.appendingPathComponent("fd3")
+        let helper = try RestartHelper.spawnDetached(["/bin/sh", "-c", #"[ -e /dev/fd/3 ] && echo yes > "$1"; sleep 1"#, "x", seen.path],
+                                                     env: [:], inherit: mine.fd)
+        mine.release()
+        guard case .held = UpdateLock.acquire(file, mode: .background, version: "0.19.0") else { return XCTFail("the helper holds it") }
+        var status: Int32 = 0
+        XCTAssertEqual(waitpid(helper, &status, 0), helper)
+        XCTAssertEqual(try String(contentsOf: seen, encoding: .utf8), "yes\n")
+        guard case .acquired(let next) = UpdateLock.acquire(file, mode: .quit, version: "0.20.0") else { return XCTFail("free once the helper is gone") }
+        next.release()
+        guard case .unavailable = UpdateLock.acquire(URL(fileURLWithPath: "/dev/null/update-helper.lock"), mode: .quit, version: "0.19.0") else {
+            return XCTFail("a lock that cannot be opened is said so")
+        }
+    }
+
+    func testTheHelperKeepsTheLockFromTheProgramsItStarts() {
+        // The engine and `open` run with descriptor 3 closed: a server the engine leaves
+        // running, or the reopened app, must not hold the lock after the helper ends.
+        XCTAssertTrue(RestartHelper.script.contains(#"full maintain app >"$out" 2>/dev/null 3>&- &"#))
+        XCTAssertTrue(RestartHelper.script.contains(#"restart) "$opener" "$bundle" >/dev/null 2>&1 3>&- ;;"#))
+        XCTAssertTrue(RestartHelper.script.contains(#"--args --background >/dev/null 2>&1 3>&- ;;"#))
+    }
+
     // MARK: the log
 
     func testTheLogHoldsCodesOnlyInUTC() throws {
@@ -236,8 +270,9 @@ final class AppUpdateTests: XCTestCase {
 
 /// The app's update watch, with the spawn and the quit replaced by recorders.
 @MainActor final class UpdatesTests: XCTestCase {
-    private var spawned: [[String]] = [], quits = 0, badges: [String?] = []
-    private func setUp(pending: String?, spawn: (([String], [String: String]) throws -> pid_t)? = nil) throws -> (Updates, AppLog) {
+    private var spawned: [[String]] = [], quits = 0, badges: [String?] = [], inherited: [Int32?] = []
+    private var defaults: UserDefaults?
+    private func setUp(pending: String?, spawn: (([String], [String: String], Int32?) throws -> pid_t)? = nil) throws -> (Updates, AppLog) {
         let ws = URL(fileURLWithPath: Model.resolved(FileManager.default.temporaryDirectory.appendingPathComponent("obs-updates-\(UUID().uuidString)").path))
         try FileManager.default.createDirectory(at: ws.appendingPathComponent("store"), withIntermediateDirectories: true)
         addTeardownBlock { try? FileManager.default.removeItem(at: ws) }
@@ -248,11 +283,11 @@ final class AppUpdateTests: XCTestCase {
         let d = scratchDefaults()
         d.set(ws.path, forKey: "workspace"); d.set("/opt/po/bin/project-observatory", forKey: "executable")
         let log = AppLog(file: ws.appendingPathComponent("logs/app.log"))
-        spawned = []; quits = 0; badges = []
+        spawned = []; quits = 0; badges = []; inherited = []; defaults = d
         let u = Updates(defaults: d, log: log, running: "0.18.0", bundlePath: "/srv/apps/Project Observatory.app",
-                        spawn: spawn ?? { [unowned self] argv, env in
+                        spawn: spawn ?? { [unowned self] argv, env, fd in
                             XCTAssertEqual(env["OBSERVATORY_HOME"], ws.path)
-                            self.spawned.append(argv); return 4242 },
+                            self.spawned.append(argv); self.inherited.append(fd); return 4242 },
                         terminate: { [unowned self] in self.quits += 1 },
                         badge: { [unowned self] in self.badges.append($0) })
         workspace = ws
@@ -272,7 +307,8 @@ final class AppUpdateTests: XCTestCase {
         XCTAssertNil(badges.last ?? "unset", "no update staged: no badge")
     }
 
-    /// The engine stages an app hourly; reading its local record every 6 h meant the
+    /// The engine's maintenance pass stages an app (every 15 minutes, its update check every
+    /// 5); reading its local record every 6 h meant the
     /// prompt could appear hours after the update was ready.
     func testTheRecordIsReadOftenEnoughToShowAnUpdateWithinTheHour() {
         XCTAssertLessThanOrEqual(Updates.checkEvery, 15 * 60)
@@ -308,7 +344,7 @@ final class AppUpdateTests: XCTestCase {
     }
 
     func testAHelperThatCannotStartKeepsTheAppRunning() throws {
-        let (u, log) = try setUp(pending: "0.19.0", spawn: { _, _ in throw BridgeError.failed("EAGAIN") })
+        let (u, log) = try setUp(pending: "0.19.0", spawn: { _, _, _ in throw BridgeError.failed("EAGAIN") })
         u.restartToUpdate()
         XCTAssertEqual(quits, 0, "no helper, no quit"); XCTAssertFalse(u.helperStarted)
         XCTAssertEqual(u.refusal, "spawn-failed")
@@ -326,8 +362,66 @@ final class AppUpdateTests: XCTestCase {
     func testABuildWithoutAnAppBundleRefusesToRestart() throws {
         let (_, log) = try setUp(pending: "0.19.0")
         let d = scratchDefaults(); d.set("/srv/example-ws", forKey: "workspace"); d.set("/opt/po/bin/project-observatory", forKey: "executable")
-        let dev = Updates(defaults: d, log: log, running: "0.18.0", bundlePath: "/build/debug", spawn: { _, _ in 1 }, terminate: {})
+        let dev = Updates(defaults: d, log: log, running: "0.18.0", bundlePath: "/build/debug", spawn: { _, _, _ in 1 }, terminate: {})
         XCTAssertEqual(dev.startHelper(.restart, version: "0.19.0"), "not-a-bundle")
         XCTAssertNil(dev.startHelper(.quit, version: "0.19.0"))
     }
+    // MARK: one helper on the account (OBS-508)
+
+    /// Another process of the app, with the same log folder and so the same lock.
+    private func secondProcess(_ log: AppLog, spawned: @escaping () -> Void, quit: @escaping () -> Void) -> Updates {
+        Updates(defaults: defaults!, log: log, running: "0.18.0", bundlePath: "/srv/apps/Project Observatory.app",
+                spawn: { _, _, _ in spawned(); return 4343 }, terminate: quit, badge: { _ in })
+    }
+
+    /// 2026-11-08: a second *Restart to update* 22 s after the first, from the app opened again
+    /// meanwhile, started a second helper and the version was installed twice.
+    func testASecondRestartWhileAHelperRunsStartsNoSecondHelperAndStepsAside() throws {
+        var first: Updates?
+        let log: AppLog
+        do { let (made, madeLog) = try setUp(pending: "0.19.0"); first = made; log = madeLog }
+        first!.restartToUpdate()
+        XCTAssertEqual(spawned.count, 1); XCTAssertEqual(quits, 1)
+        XCTAssertNotNil(inherited[0] ?? nil, "the helper is handed the lock")
+        var secondSpawns = 0, secondQuits = 0
+        let second = secondProcess(log, spawned: { secondSpawns += 1 }, quit: { secondQuits += 1 })
+        second.restartToUpdate()
+        XCTAssertEqual(secondSpawns, 0, "no second helper")
+        XCTAssertEqual(secondQuits, 1, "the running helper reopens the app: this one quits so its swap can happen")
+        XCTAssertEqual(second.inProgress, UpdateLock.Holder(mode: .restart, version: "0.19.0"))
+        XCTAssertNil(second.refusal)
+        second.installOnQuit()
+        XCTAssertEqual(secondSpawns, 0, "the quit that follows starts none either")
+        XCTAssertEqual(events(log), ["update_restart requested person", "update_restart requested person",
+                                     "update_restart refused install-in-progress"])
+        // The helper ended (here: the only copy of the lock, the first process's, is gone).
+        first = nil
+        let third = secondProcess(log, spawned: { secondSpawns += 1 }, quit: {})
+        third.restartToUpdate()
+        XCTAssertEqual(secondSpawns, 1, "once nothing holds the lock a restart starts a helper again")
+    }
+
+    func testAHelperThatReopensNothingIsNotJoinedAndTheAppKeepsRunning() throws {
+        let (first, log) = try setUp(pending: "0.19.0")
+        first.installOnQuit()
+        XCTAssertEqual(spawned.count, 1)
+        var secondSpawns = 0, secondQuits = 0
+        let second = secondProcess(log, spawned: { secondSpawns += 1 }, quit: { secondQuits += 1 })
+        second.restartToUpdate()
+        XCTAssertEqual(secondSpawns, 0); XCTAssertEqual(secondQuits, 0, "a quit's helper opens nothing: quitting would leave no app")
+        XCTAssertEqual(second.refusal, Updates.installInProgress)
+        XCTAssertEqual(second.inProgress?.mode, .quit)
+        withExtendedLifetime(first) {}
+    }
+
+    func testALockThatCannotBeOpenedNeverKeepsTheUpdateFromInstalling() throws {
+        let (_, log) = try setUp(pending: "0.19.0")
+        var fds: [Int32?] = []
+        let u = Updates(defaults: defaults!, log: log, running: "0.18.0", bundlePath: "/srv/apps/Project Observatory.app",
+                        spawn: { _, _, fd in fds.append(fd); return 4242 }, terminate: {}, badge: { _ in },
+                        lockFile: URL(fileURLWithPath: "/dev/null/update-helper.lock"))
+        u.restartToUpdate()
+        XCTAssertEqual(fds.count, 1, "the helper starts"); XCTAssertNil(fds[0] ?? nil, "with no lock to hand over")
+    }
 }
+

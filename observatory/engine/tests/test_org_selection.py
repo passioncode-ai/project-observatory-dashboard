@@ -1615,10 +1615,74 @@ class UndoAndConfirm(Base):
         rec = self.sel.current("acme")
         self.assertEqual(rec["selectionDigest"], first["selectionDigest"])
         self.assertEqual(rec["kind"], "undo")
+        # OBS-505, ORG-R14: undoing an undo is a new plan, never applied unseen. It drafts the form the undo removed
+        # and answers its preview and digest; nothing is written as a revision until that digest is applied.
         redo = self.sel.undo("acme")
-        self.assertEqual(redo["restored"]["revision"], 2, "undoing an undo restores what it removed")
-        self.assertEqual(self.sel.current("acme")["predecessor"], u["digest"])
-        self.assertEqual([r["revision"] for r in self.sel.history("acme")], [1, 2, 3, 4])
+        self.assertEqual((redo["answer"], redo["outcome"]), ("plan", "planned"))
+        self.assertEqual(redo["restores"]["revision"], 2, "the plan restores what the undo removed")
+        self.assertFalse(redo["applied"])
+        self.assertEqual(redo["command"], f"project-observatory full org select --org acme apply --digest "
+                                          f"{redo['digest']}")
+        self.assertEqual([r["revision"] for r in self.sel.history("acme")], [1, 2, 3], "nothing applied unseen")
+        self.assertEqual(self.sel.plan("acme")["digest"], redo["digest"], "the plan reads the same form")
+        again = self.sel.apply("acme", redo["digest"])
+        self.assertEqual(again["outcome"], "applied")
+        rec = self.sel.current("acme")
+        self.assertEqual((rec["revision"], rec["kind"], rec["predecessor"]), (4, "select", u["digest"]))
+        self.assertEqual(rec["selectionDigest"], self.sel.history("acme")[1]["selectionDigest"],
+                         "the form applied is the one the undo removed")
+        self.assertFalse((self.sel._folder("acme") / "draft.json").exists())
+
+    def test_an_undo_of_an_undo_needs_its_own_preview(self):
+        """OBS-505: the second undo is a plan; an apply of any other digest is refused, and a change on top of it
+        changes the digest like any plan."""
+        self.sel.apply("acme", self.ready()["digest"])
+        self.sel.apply("acme", self.sel.plan("acme", {"exclude": ["project:beta-api"]})["digest"])
+        self.sel.undo("acme")
+        redo = self.sel.undo("acme")
+        undone = self.sel.current("acme")
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.apply("acme", undone["selectionDigest"])
+        self.assertEqual(caught.exception.code, "changed-since-preview")
+        changed = self.sel.plan("acme", {"include": ["project:notes"]})
+        self.assertNotEqual(changed["digest"], redo["digest"])
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.apply("acme", redo["digest"])
+        self.assertEqual(caught.exception.code, "changed-since-preview")
+        self.assertEqual(len(self.sel.history("acme")), 3)
+        # A third undo with the plan still pending drafts the same form again, in place of the change.
+        third = self.sel.undo("acme")
+        self.assertEqual((third["digest"], third["draftReplaced"]), (redo["digest"], True))
+
+    def test_an_undo_of_an_undo_is_gated_like_any_undo(self):
+        self.sel.apply("acme", self.ready()["digest"])
+        self.sel.undo("acme")
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.undo("acme", caller="agent:mcp")
+        self.assertEqual(caught.exception.code, "operator-decision-required")
+        self.assertFalse((self.sel._folder("acme") / "draft.json").exists(), "the gate comes before the draft")
+        redo = self.sel.undo("acme", caller="agent:mcp", decision=self.decision("org.select.undo", "acme"))
+        self.assertEqual((redo["answer"], redo["restores"]["revision"]), ("plan", 1))
+        self.assertEqual(len(self.sel.history("acme")), 2)
+
+    def test_show_refuses_an_organization_nobody_configured(self):
+        """OBS-505: `show` of an unknown organization is refused as `plan` refuses it, never `empty` with a `plan`
+        that then refuses; a configured one never selected is empty, and a record outlives its rule."""
+        for org, code in (("nobody", "unknown-organization"), ("person", "default-organization")):
+            with self.assertRaises(self.sel.Refusal) as caught:
+                self.sel.show(org)
+            self.assertEqual(caught.exception.code, code)
+            with self.assertRaises(self.sel.Refusal) as planned:
+                self.sel.plan(org)
+            self.assertEqual(planned.exception.code, code, "the same refusal as the plan it would suggest")
+        self.assertEqual(self.sel.show("quiet")["state"], "empty")
+        self.sel.apply("acme", self.ready()["digest"])
+        (self.home / "config" / "organizations.json").unlink()
+        shown = self.sel.show("acme")
+        self.assertEqual(shown["record"]["revision"], 1, "an applied record still reads without its rule")
+        with self.assertRaises(self.sel.Refusal) as caught:
+            self.sel.show("quiet")
+        self.assertEqual(caught.exception.code, "no-organizations")
 
     def test_undo_of_the_first_revision_leaves_nothing_chosen(self):
         v = self.ready()
@@ -1810,11 +1874,15 @@ class McpTool(Base):
 class Cli(Base):
     """`full org select`: the same answers as the functions, text or JSON, refusals on stderr with their command."""
 
-    def run_cli(self, *argv):
+    def run_cli(self, *argv, terminal=True):
+        """The CLI as a person at an interactive terminal runs it (`terminal`), or as a script or an agent's shell
+        runs it, with standard input not a terminal (OBS-505)."""
         import org as org_cli
+        import osprivacy
         importlib.reload(org_cli)
         out, err = io.StringIO(), io.StringIO()
-        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err), \
+                patch.object(osprivacy, "is_terminal", lambda stream=None: terminal):
             code = org_cli.main(list(argv))
         return code, out.getvalue(), err.getvalue()
 
@@ -1848,6 +1916,46 @@ class Cli(Base):
         code, _, err = self.run_cli("select", "--org", "nobody", "plan")
         self.assertEqual(code, 1)
         self.assertIn("refused", err)
+
+    def test_without_a_terminal_a_relayed_act_needs_the_words_as_the_tool_does(self):
+        """OBS-505, ORG-R23: with no person at the terminal (standard input not a terminal: a script, an agent's
+        shell) the CLI refuses a change, apply, undo and confirmation without the operator's words, with the same
+        code, message and fields as `observatory_org_selection`; reading needs nothing."""
+        m = McpTool.server(self)
+        acts = ((("plan", "--layout", "one-space"), dict(action="plan", changes={"layout": "one-space"})),
+                (("apply", "--digest", "sha256:" + "0" * 64), dict(action="apply", digest="sha256:" + "0" * 64)),
+                (("undo",), dict(action="undo")),
+                (("confirm-replacement", ORG_SLOT), dict(action="confirm-replacement", key=ORG_SLOT)))
+        self.sel.apply("acme", self.ready()["digest"])
+        before = self.files()
+        for argv, tool in acts:
+            code, out, err = self.run_cli("select", "--org", "acme", *argv, "--json", terminal=False)
+            self.assertEqual((code, out), (1, ""), argv)
+            refusal = json.loads(err)
+            self.assertEqual(refusal["error"], "operator-decision-required", argv)
+            self.assertEqual(refusal, m.observatory_org_selection(org="acme", **tool), argv)
+        self.assertEqual(self.files(), before, "a refused act writes nothing")
+        code, out, _ = self.run_cli("select", "--org", "acme", "plan", "--json", terminal=False)
+        self.assertEqual((code, json.loads(out)["answer"]), (0, "plan"), "reading needs no words")
+        code, out, _ = self.run_cli("select", "--org", "acme", "show", "--json", terminal=False)
+        self.assertEqual(code, 0)
+        words = json.dumps(self.decision("org.select.undo", "acme"))
+        code, out, _ = self.run_cli("select", "--org", "acme", "undo", "--decision", words, "--json", terminal=False)
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out)["decidedBy"]["caller"], "agent:cli")
+        self.assertEqual(self.sel.current("acme")["decidedBy"]["via"], "relayed-instruction")
+
+    def test_at_a_terminal_the_act_is_the_persons_own(self):
+        code, out, _ = self.run_cli("select", "--org", "acme", "plan", "--layout", "one-space", "--json")
+        self.assertEqual(code, 0)
+        code, out, _ = self.run_cli("select", "--org", "acme", "apply", "--digest", json.loads(out)["digest"],
+                                    "--json")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.sel.current("acme")["decidedBy"], {"by": "person", "via": "cli"})
+
+    def test_show_of_an_unknown_organization_is_refused_on_the_command_line(self):
+        code, out, err = self.run_cli("select", "--org", "nobody", "show", "--json")
+        self.assertEqual((code, out, json.loads(err)["error"]), (1, "", "unknown-organization"))
 
     def test_an_agent_carries_the_words_on_the_command_line(self):
         decision = json.dumps(self.decision("org.select.plan", "acme"))

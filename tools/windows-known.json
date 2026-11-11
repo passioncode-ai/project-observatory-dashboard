@@ -1954,6 +1954,7 @@
         "WorkspaceUpgrade.test_snapshot_retains_committed_wal_data",
         "WorkspaceUpgrade.test_snapshot_symlink_target_refused",
         "WorkspaceUpgrade.test_staging_failure_leaves_original_unchanged",
+        "WorkspaceUpgrade.test_the_analytics_queue_may_grow_during_a_snapshot",
         "WorkspaceUpgrade.test_the_check_jobs_record_may_change_during_a_snapshot",
         "WorkspaceUpgrade.test_the_cli_refuses_and_takes_the_opt_in",
         "WorkspaceUpgrade.test_the_mailbox_and_always_on_apps_stay_with_their_machine",

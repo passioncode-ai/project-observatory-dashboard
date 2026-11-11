@@ -3,14 +3,16 @@ import Darwin
 
 /// The app's side of an update (lifecycle LC-16, "Install vs activation").
 ///
-/// The engine's hourly maintenance pass downloads and verifies a new app into the
+/// The engine's maintenance pass (every 15 minutes, `maintenance.INTERVAL_SECONDS` = 900 s;
+/// it checks for a release every 5 minutes) downloads and verifies a new app into the
 /// workspace and swaps `/Applications/Project Observatory.app` only while the app is not
 /// running; with the app open it records `app.result = "waiting-for-quit"` and the
 /// `pending` version in `<workspace>/store/maintenance.json`. The app reads that record and
 /// activates the update at a safe point: the person's *Restart to update*, the person's
 /// quit, or a long idle with no window on screen. Activation is one detached helper
 /// (`RestartHelper`) that waits for the app to exit, runs `project-observatory full
-/// maintain app` — the engine's app step alone — and opens the app again.
+/// maintain app` (the engine's app step alone) and opens the app again. One helper runs
+/// at a time on the account, whichever process of the app started it (`UpdateLock`).
 public enum AppVersion {
     /// `X.Y.Z`, all three numeric — the only shape the engine's releases carry
     /// (`configuration.version_tuple`). Anything else is not comparable.
@@ -190,10 +192,12 @@ public enum RestartHelper {
       printf '{"at":"%s","code":"%s","event":"%s","reason":"%s","trigger":"%s","version":"%s"}\n' \
         "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$2" "$1" "${3:-}" "$mode" "$version" >> "$log" 2>/dev/null
     }
+    # Descriptor 3 is the install lock (`UpdateLock`), held while this shell runs: the
+    # programs it starts get no copy, so none of them can keep it after the helper ends.
     reopen() {
       case "$mode" in
-        restart) "$opener" "$bundle" >/dev/null 2>&1 ;;
-        background) "$opener" -g "$bundle" --args --background >/dev/null 2>&1 ;;
+        restart) "$opener" "$bundle" >/dev/null 2>&1 3>&- ;;
+        background) "$opener" -g "$bundle" --args --background >/dev/null 2>&1 3>&- ;;
       esac
     }
     n=0
@@ -206,7 +210,7 @@ public enum RestartHelper {
     out=$(mktemp "${TMPDIR:-/tmp}/observatory-update.XXXXXX") || { note update_install failed no-temp-file; reopen; exit 1; }
     tries=0 rc=0 timedout=0
     while :; do
-      OBSERVATORY_HOME="$home" "$engine" full maintain app >"$out" 2>/dev/null &
+      OBSERVATORY_HOME="$home" "$engine" full maintain app >"$out" 2>/dev/null 3>&- &
       child=$!
       t=0
       while kill -0 "$child" 2>/dev/null; do
@@ -234,11 +238,18 @@ public enum RestartHelper {
 
     /// Starts `argv` in a session of its own, detached from this app: it outlives the
     /// app, a quit's signals do not reach it, and it inherits no descriptor but
-    /// /dev/null on 0, 1 and 2.
-    public static func spawnDetached(_ argv: [String], env: [String: String]) throws -> pid_t {
+    /// /dev/null on 0, 1 and 2, and `inherit`, when given, as descriptor 3 (the install
+    /// lock, `UpdateLock.helperDescriptor`).
+    public static func spawnDetached(_ argv: [String], env: [String: String], inherit: Int32? = nil) throws -> pid_t {
         guard let path = argv.first, path.hasPrefix("/") else { throw BridgeError.configuration }
         var actions: posix_spawn_file_actions_t? = nil
         posix_spawn_file_actions_init(&actions); defer { posix_spawn_file_actions_destroy(&actions) }
+        // First, before 0, 1 and 2 are reopened: a descriptor below 3 would be closed by them.
+        if let fd = inherit {
+            let target = UpdateLock.helperDescriptor
+            if fd == target { posix_spawn_file_actions_addinherit_np(&actions, target) }
+            else { posix_spawn_file_actions_adddup2(&actions, fd, target) }
+        }
         posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
         posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0)
         posix_spawn_file_actions_addopen(&actions, 2, "/dev/null", O_WRONLY, 0)
@@ -260,6 +271,82 @@ public enum RestartHelper {
         let rc = posix_spawn(&pid, path, &actions, &attr, cArgs, cEnv)
         guard rc == 0 else { throw BridgeError.failed(String(cString: strerror(rc))) }
         return pid
+    }
+}
+
+/// One update helper at a time on this account (OBS-508). On 2026-11-08 a person's
+/// *Restart to update* started a helper, the app was opened again while it was still
+/// waiting for the engine, and a second *Restart to update* 22 s later started a second
+/// helper: two `full maintain app` runs, two `installed` lines for one version. Each
+/// process of the app kept its own `helperStarted` flag; nothing was shared.
+///
+/// The lock is an exclusive `flock` on a file beside the app's log. The app takes it before
+/// spawning the helper and hands the helper a copy of the descriptor (as 3), so the lock
+/// lives exactly as long as the helper: the kernel drops it when the last copy closes,
+/// after a crash too, so there is no stale record, no pid that could be reused and no
+/// clock to trust. The file only says who holds it (mode and version), for the next process.
+public final class UpdateLock {
+    /// What the holder wrote: the helper's mode and the version it installs.
+    public struct Holder: Equatable, Sendable {
+        public let mode: RestartHelper.Mode
+        public let version: String
+        public init(mode: RestartHelper.Mode, version: String) { self.mode = mode; self.version = version }
+        /// The helper opens the app again when it is done (a restart or an idle restart).
+        public var reopens: Bool { mode != .quit }
+    }
+    public enum Outcome {
+        /// This process holds it now.
+        case acquired(UpdateLock)
+        /// A helper (or the process starting one) holds it; nil when its record cannot be read.
+        case held(Holder?)
+        /// The file cannot be opened or locked: the guard cannot be checked.
+        case unavailable
+    }
+    /// The descriptor number the helper finds the lock on.
+    public static let helperDescriptor: Int32 = 3
+    /// Beside the app's log: one per account, as the app is (`AppLog`).
+    public static func file(log: URL) -> URL { log.deletingLastPathComponent().appendingPathComponent("update-helper.lock") }
+
+    public let fd: Int32
+    private var isOpen = true
+    private init(fd: Int32) { self.fd = fd }
+    deinit { release() }
+
+    /// Takes the lock without waiting and records the holder; never blocks.
+    public static func acquire(_ url: URL, mode: RestartHelper.Mode, version: String) -> Outcome {
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                                 attributes: [.posixPermissions: 0o700])
+        let fd = Darwin.open(url.path, O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC, 0o600)
+        guard fd >= 0 else { return .unavailable }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+            let busy = errno == EWOULDBLOCK
+            let holder = busy ? Self.holder(fd) : nil
+            close(fd)
+            return busy ? .held(holder) : .unavailable
+        }
+        let doc = ["mode": mode.rawValue, "version": version]
+        if let data = try? JSONSerialization.data(withJSONObject: doc, options: [.sortedKeys]) {
+            _ = ftruncate(fd, 0)
+            _ = data.withUnsafeBytes { pwrite(fd, $0.baseAddress, $0.count, 0) }
+        }
+        return .acquired(UpdateLock(fd: fd))
+    }
+
+    /// The holder's record, read through a descriptor that does not hold the lock.
+    static func holder(_ fd: Int32) -> Holder? {
+        var buffer = [UInt8](repeating: 0, count: 512)
+        let n = buffer.withUnsafeMutableBytes { pread(fd, $0.baseAddress, $0.count, 0) }
+        guard n > 0, let doc = try? JSONSerialization.jsonObject(with: Data(buffer.prefix(n))) as? [String: String],
+              let mode = doc["mode"].flatMap(RestartHelper.Mode.init(rawValue:)),
+              let version = doc["version"], AppVersion.parse(version) != nil else { return nil }
+        return Holder(mode: mode, version: version)
+    }
+
+    /// Closes this process's descriptor. The lock stays held while the helper's copy is open.
+    public func release() {
+        guard isOpen else { return }
+        isOpen = false
+        close(fd)
     }
 }
 

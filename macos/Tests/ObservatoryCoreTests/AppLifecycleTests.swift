@@ -104,7 +104,7 @@ final class AppLifecycleTests: XCTestCase {
         d.set(ws.path, forKey: "workspace"); d.set("/opt/po/bin/project-observatory", forKey: "executable")
         var asked: [String] = [], spawned = 0, quits = 0
         let u = Updates(defaults: d, log: AppLog(file: ws.appendingPathComponent("logs/app.log")), running: "0.18.0",
-                        bundlePath: "/srv/apps/Project Observatory.app", spawn: { _, _ in spawned += 1; return 4242 },
+                        bundlePath: "/srv/apps/Project Observatory.app", spawn: { _, _, _ in spawned += 1; return 4242 },
                         terminate: { quits += 1 }, badge: { _ in })
         u.windowOnScreen = { false }
         u.prompt = { version, restart in asked.append(version); restart(false) }

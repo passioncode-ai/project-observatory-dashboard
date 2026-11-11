@@ -157,6 +157,22 @@ def test_every_route_answers_and_none_serves_a_value() -> None:
         code, agents_bad = get("/agents?locale=xx")
         check("an unknown language falls back to English, not an error",
               code == 200 and b"Needs you" in agents_bad, str(agents_bad)[:120])
+        # OBS-504: a page served here asks whether it was built from the registry as it stands.
+        code, fresh = get("/dashboard-freshness")
+        check("/dashboard-freshness names the registry now by its fingerprint",
+              code == 200 and isinstance(fresh, dict) and isinstance((fresh.get("registry") or {}).get("fingerprint"), str),
+              str(fresh)[:160])
+        check("and pages with no record of their registry are unknown, never current",
+              isinstance(fresh, dict) and fresh.get("current") is None and fresh.get("built_from") is None,
+              str(fresh)[:160])
+        (work / "pages" / "built-from.json").write_text(json.dumps(
+            {"schema": 1, "built_at": "2026-11-11T00:05:00Z", "registry": {"fingerprint": "0" * 16, "projects": 301}}),
+            encoding="utf-8")
+        code, fresh = get("/dashboard-freshness")
+        check("pages built from another registry are older than it",
+              code == 200 and fresh.get("current") is False and fresh.get("built_at") == "2026-11-11T00:05:00Z",
+              str(fresh)[:160])
+        (work / "pages" / "built-from.json").unlink()
         code, page = get("/")
         check("/ falls back to the single page when the split is not built",
               code == 200 and b"fixture page" in page,

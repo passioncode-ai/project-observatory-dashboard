@@ -18,6 +18,7 @@ import paths
 import i18n
 import finding_types
 import subject_links
+import dashboard_stamp
 # `paths`, not `ROOT / "registry"`. The third tool found with the path inlined —
 # after the validator — and the consequence is the same: it is the
 # one file `OBSERVATORY_REGISTRY` cannot redirect, so a test that points it at a
@@ -761,6 +762,10 @@ def runtime_paths() -> dict:
 
 
 def build():
+    # WHICH REGISTRY THESE PAGES SHOW (OBS-504): read before the files themselves, so a registry that
+    # moves while the build runs is named as the older one, never the newer.
+    built_from = {**dashboard_stamp.registry_stamp(INV),
+                  "built_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")}
     pdoc, rdoc = load("projects.json"), load("repositories.json")
     projects, repos = pdoc["projects"], {r["id"]: r for r in rdoc["repositories"]}
     relations = load("relations.json")["relations"]
@@ -1183,7 +1188,12 @@ def build():
                           "products": PRODUCTS,
                           "domains": DOMAIN_ROWS,
                           "updated": pdoc.get("updated_on", ""),
-                          "measured": store["health"].get("last_scan", "")}
+                          "measured": store["health"].get("last_scan", ""),
+                          # When this build read the registry (OBS-504): a page served by the local
+                          # server asks whether the registry is still the one recorded for this build.
+                          # Its fingerprint stays in built-from.json and the server's answer: a page
+                          # carries no value-shaped payload (test_env_page).
+                          "built_from": {k: built_from[k] for k in ("built_at", "projects")}}
     # THE MACHINE, read from what the tick's machine/git-hygiene/cleanup steps
     # wrote; only the Machine page carries it (shell.slice_for).
     try:
@@ -1212,7 +1222,8 @@ def build():
         PAYLOAD["agents"] = agents_view.summary()
     except Exception as exc:  # noqa: BLE001 — a page, not a crash
         PAYLOAD["agents"] = {"degraded": [{"source": "agents", "reason": f"{type(exc).__name__}: {exc}"[:200]}]}
-    build.last_payload = PAYLOAD                                                  
+    build.last_payload = PAYLOAD
+    build.last_stamp = built_from
     payload = json.dumps(PAYLOAD, ensure_ascii=False)
     locale = build_locale()
     t = i18n.Translator(locale)
@@ -1399,6 +1410,8 @@ header {
 }
 h1 { margin: 0 0 var(--space-1); font: 700 var(--t-page)/1.2 var(--font-ui); letter-spacing: -.01em; }
 .sub { color: var(--muted); max-width: 74ch; }
+/* OBS-504: the pages are older than the registry. Words and colour together, never colour alone. */
+.stale-note { color: var(--warn); max-width: 74ch; margin: 0; }
 
 /* TILES and the review queue rows */
 .tiles { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-4); }
@@ -1832,6 +1845,7 @@ __NAV__
   __H1__
   <p class="sub">__SUB__ <span id="upd-label" data-t>Measured</span><span class="mono" id="upd"></span><span data-t>; registry content last changed</span>
   <span class="mono" id="content-stamp"></span>.</p>
+  <p class="stale-note" id="stale-note" role="status" hidden></p>
 <div class="tiles" id="tiles"></div>
   <h3 id="work-h" data-t>Activity</h3>
   <div class="tiles work" id="work"></div>
@@ -2147,6 +2161,25 @@ if (D.measured) {
 }
 const cs = document.getElementById("content-stamp");
 if (cs) cs.textContent = DATE(D.updated || "—");
+// OLDER THAN THE REGISTRY (OBS-504). A page cannot know the registry moved after it was written; the
+// local server can. Served by it, the page asks whether the registry it was built from is the one
+// now, and says so when it is not. Opened as a file, it asks nothing and says nothing.
+(() => {
+  const from = D.built_from || {};
+  if (!from.built_at || typeof fetch !== "function"
+      || typeof location === "undefined" || !String(location.protocol || "").startsWith("http")) return;
+  fetch("/dashboard-freshness", {cache: "no-store"})
+    .then(r => r.ok ? r.json() : null)
+    .then(answer => {
+      const el = document.getElementById("stale-note");
+      // Only the build the record names: pages written by a build stopped before its record are not it.
+      if (!el || !answer || answer.current !== false || answer.built_at !== from.built_at) return;
+      el.textContent = T("These pages are older than the registry: they were built at {at}, and the registry has changed since. The next dashboard build replaces them.",
+                         {at: DATE(String(from.built_at || "").replace("T", " ").replace("Z", " UTC"))});
+      el.hidden = false;
+    })
+    .catch(() => {});
+})();
 const S = D.stats;
 // A TILE'S CAPTION AGREES WITH ITS NUMBER. A counted noun is a plural id
 // (`tile@@{n} …`): the catalog picks the form for the number ("1 inactive
@@ -4808,3 +4841,7 @@ if __name__ == "__main__":
     sizes = build_pages(build.last_payload)
     print(f"wrote {len(sizes)} page(s) under {paths.DASHBOARD_DIR}: "
           + ", ".join(f"{k} {v // 1024} KB" for k, v in sizes.items()))
+    # Last, once every page is written (OBS-504): a build stopped before this line leaves the record
+    # of the build before it, so the pages are never said to be newer than they are.
+    _from = dict(build.last_stamp)
+    dashboard_stamp.record({k: v for k, v in _from.items() if k != "built_at"}, built_at=_from["built_at"])

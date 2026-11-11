@@ -28,17 +28,25 @@ permissions:
 jobs:
   # Approval by checks (passioncode-ai/.github docs/release-signing/DESIGN.md, operator 2026-10-11):
   # every job that holds the release environment's keys needs this one, which passes a publishing
-  # run only when main contains the tagged commit and CI passed on that exact commit.
+  # run only when main contains the tagged commit and CI passed on that exact commit. Both suites
+  # count (OBS-506): check.yml (the engine) and desktop.yml (the app's Rust tests and a build of
+  # every package this release ships, arm64 included). The tag starts desktop.yml beside this run;
+  # the guard waits for the newest run of each, one after the other, under one deadline, and
+  # dispatches one on the tag only when none ran. 90 minutes covers the desktop builds' 60-minute
+  # limit plus a queue for the arm64 runners.
   guard:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 105
     permissions:
       contents: read
       actions: write   # starts CI on the tag when none ran on the commit
     steps:
       - uses: passioncode-ai/.github/actions/release-guard@v1
         with:
-          workflows: check.yml
+          workflows: |
+            check.yml
+            desktop.yml
+          timeout-minutes: "90"
           publish: ${{ github.event_name == 'push' || inputs.publish }}
 
   wheel:

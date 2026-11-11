@@ -156,6 +156,32 @@ class WorkspaceUpgrade(unittest.TestCase):
             source = self.snapshot()
         self.assertTrue((source / 'manifest.json').exists())
 
+    def test_the_analytics_queue_may_grow_during_a_snapshot(self):
+        """An MCP server a coding session runs records every call and is not stopped for an update:
+        its queue growing mid-copy rolled the 0.35.13 update back on 2026-11-11."""
+        real = workspace.copy_private
+        def copy_while_a_session_records(source, dest):
+            real(source, dest)
+            for name in upgrade.ANALYTICS_RECEIPTS:
+                path = self.home / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with open(path, 'a') as receipt:
+                    receipt.write('{"n": "tool_called"}\n')
+        for name in upgrade.ANALYTICS_RECEIPTS:
+            path = self.home / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('{}\n')
+        with patch.object(workspace, 'copy_private', side_effect=copy_while_a_session_records):
+            source = self.snapshot()
+        self.assertTrue((source / 'manifest.json').exists())
+
+    def test_the_analytics_receipts_are_the_files_usage_analytics_writes(self):
+        import usage_analytics
+        text = Path(usage_analytics.__file__).read_text(encoding='utf-8')
+        for name in upgrade.ANALYTICS_RECEIPTS:
+            self.assertIn(PurePosixPath(name).name, text, name)
+        self.assertTrue(all(name.startswith('store/analytics/') for name in upgrade.ANALYTICS_RECEIPTS))
+
     def test_a_steady_file_that_moves_still_refuses_and_is_named(self):
         real = workspace.copy_private
         def copy_while_settings_change(source, dest):

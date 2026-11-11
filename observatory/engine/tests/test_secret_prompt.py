@@ -312,6 +312,29 @@ def stamp(at: float) -> str:
     return SP._stamp(at)
 
 
+@contextlib.contextmanager
+def tools_node_shadows_the_package():
+    """What a process leaves behind once `tools/` went first on the path and something imported `node`: the name is
+    bound to `tools/node.py`, a module, so `from node import actions` raises ImportError (OBS-507)."""
+    import importlib.util
+    saved = {k: sys.modules[k] for k in list(sys.modules) if k == "node" or k.startswith("node.")}
+    path = list(sys.path)
+    try:
+        for k in saved:
+            del sys.modules[k]
+        sys.path.insert(0, str(ROOT / "tools"))
+        spec = importlib.util.spec_from_file_location("node", ROOT / "tools" / "node.py")
+        shadow = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(shadow)
+        sys.modules["node"] = shadow
+        yield shadow
+    finally:
+        for k in [k for k in sys.modules if k == "node" or k.startswith("node.")]:
+            del sys.modules[k]
+        sys.modules.update(saved)
+        sys.path[:] = path
+
+
 class TheDeclineTwin(Base):
     def setUp(self) -> None:
         super().setUp()
@@ -363,6 +386,16 @@ class TheDeclineTwin(Base):
             self.assertEqual(stat.S_IMODE((SP.state_dir() / "decisions.jsonl").stat().st_mode), 0o600)
         # The window's late "Store" is not an answer: the first answer stands (SP-5).
         self.assertEqual(SP.answer(rid, "stored")["outcome"], "declined")
+
+    def test_the_operator_declines_although_tools_node_shadows_the_package(self):
+        """OBS-507: a process with `tools/` first on the path binds `node` to `tools/node.py`; the decline still reads
+        the engine's own `node.actions`, and leaves the name `node` as it found it."""
+        rid = ask("alpha", "TWIN_SHADOW_KEY")["request"]["requestId"]
+        with tools_node_shadows_the_package() as shadow:
+            out = twin("beta", "secret.decline", {"requestId": rid}, self.decision(rid))
+            self.assertIs(sys.modules["node"], shadow, "the name `node` is never rebound by the decline")
+        self.assertNotIn("error", out, out)
+        self.assertEqual((out["request"]["outcome"], out["request"]["declinedBy"]), ("declined", "operator"))
 
     def test_another_agents_request_is_declined_without_its_details(self):
         """The decliner learns the outcome, never the asking agent's name, slot or words (the review of #407)."""
@@ -495,6 +528,15 @@ class TheOpenAShareTwin(Base):
         self.assertEqual(twin("beta", "share.open", {"link": LINK}, words), first)
         audit = (SP.state_dir() / "decisions.jsonl").read_text(encoding="utf-8").splitlines()
         self.assertEqual(len(audit), 1)
+
+    def test_a_share_opens_although_tools_node_shadows_the_package(self):
+        """OBS-507: `node.actions` and `node.peer_share` are the engine's own wherever `tools/node.py` took the name."""
+        with tools_node_shadows_the_package() as shadow:
+            out = twin("beta", "share.open", {"link": LINK}, self.decision(f"Open this share: {LINK}"))
+            self.assertIs(sys.modules["node"], shadow)
+        self.assertNotIn("error", out, out)
+        self.assertEqual((out["shareId"], out["state"]), (LINK_SHARE, "handed-over"))
+        self.assertEqual(self.store.handed, [(LINK, True)])
 
     def test_a_decision_for_another_share_or_a_bad_link(self):
         out = twin("beta", "share.open", {"link": LINK}, self.decision(f"Open {LINK}", target="0" * 32))

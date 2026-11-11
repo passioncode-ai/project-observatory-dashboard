@@ -20,6 +20,10 @@ import ObservatoryCore
     /// reopen): start and do the startup work, but show no window and take no focus
     /// until the person opens the app.
     static let launchedInBackground = CommandLine.arguments.contains("--background")
+    /// While a `--background` launch keeps its windows away; the person's first open ends it.
+    static var backgroundHold = BackgroundHold(holding: false)
+    /// The window notifications the hold watches while it lasts.
+    private var backgroundObservers: [NSObjectProtocol] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Belt and braces beside the bridge's per-descriptor F_SETNOSIGPIPE: a pipe
@@ -34,12 +38,22 @@ import ObservatoryCore
         loginItem.apply()
         updates.start()
         if Self.launchedInBackground {
-            // SwiftUI opens the first scene's window by itself; put it away unseen. A Dock
-            // click (applicationShouldHandleReopen) brings it back as usual.
-            for delay in [0.0, 0.5] {
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-                    NSApp.windows.filter { DashboardReopen.isDashboard($0.identifier?.rawValue) }.forEach { $0.orderOut(nil) }
+            // SwiftUI opens the first scene's window by itself, and may do it later than any
+            // fixed delay: hiding at 0 and 0.5 s let a window created after that appear
+            // (OBS-508). So every window that comes on screen, becomes key or becomes main is
+            // looked at as it does, by its identity, until the person opens the app (a Dock
+            // click, applicationShouldHandleReopen, or bringing the app to the front).
+            Self.backgroundHold = BackgroundHold(holding: true)
+            backgroundObservers = [NSWindow.didChangeOcclusionStateNotification, NSWindow.didBecomeKeyNotification,
+                                   NSWindow.didBecomeMainNotification].map { name in
+                NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { note in
+                    let window = note.object as? NSWindow
+                    MainActor.assumeIsolated { if let window { Self.keepAway(window) } }
                 }
+            }
+            // The windows that already exist, now and once SwiftUI's first pass has run.
+            for delay in [0.0, 0.5] {
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { NSApp.windows.forEach(Self.keepAway) }
             }
             return
         }
@@ -57,8 +71,24 @@ import ObservatoryCore
     /// the dashboard is handled here, and AppKit's default (un-minimising some other
     /// window when none is visible) must not add a window beside it.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        endBackgroundHold()
         Self.showDashboard()
         return false
+    }
+    /// The person brought the app to the front (⌘-Tab, a click on its menu bar): the
+    /// background launch is over and its windows may be seen again.
+    func applicationDidBecomeActive(_ notification: Notification) { endBackgroundHold() }
+
+    private func endBackgroundHold() {
+        guard Self.backgroundHold.holding else { return }
+        Self.backgroundHold.personOpened()
+        backgroundObservers.forEach(NotificationCenter.default.removeObserver)
+        backgroundObservers = []
+    }
+
+    /// Puts a window away unseen while the background hold lasts, by its identity.
+    static func keepAway(_ window: NSWindow) {
+        if backgroundHold.hides(DashboardReopen.Seen(window)) { window.orderOut(nil) }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { Self.terminatesAfterLastWindowClosed }
     /// A quit is a safe point (LC-16): a staged update is swapped in once the app is gone.
@@ -108,6 +138,27 @@ enum DashboardReopen: Equatable {
         if dashboards.contains(where: { $0.miniaturized }) { return .restore }
         return .open
     }
+}
+
+/// What a `--background` launch keeps off screen (SCN-010's idle restart, the organization's
+/// background launch): the windows SwiftUI opens or restores by itself, the dashboard and the
+/// Assistant, recognised by their identifiers, for as long as the hold lasts. A window the app
+/// brings forward on purpose (an agent's key request, OBS-260) is not one of them.
+struct BackgroundHold: Equatable {
+    private(set) var holding: Bool
+    init(holding: Bool) { self.holding = holding }
+
+    func hides(_ window: DashboardReopen.Seen) -> Bool {
+        holding && window.visible && Self.keptAway(window.identifier)
+    }
+
+    /// The dashboard (`DashboardReopen.isDashboard`) and the Assistant, in either spelling SwiftUI uses.
+    static func keptAway(_ identifier: String?) -> Bool {
+        guard let id = identifier else { return false }
+        return DashboardReopen.isDashboard(id) || id == WindowID.assistant || id.hasPrefix(WindowID.assistant + "-")
+    }
+
+    mutating func personOpened() { holding = false }
 }
 
 extension DashboardReopen.Seen {

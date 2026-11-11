@@ -382,6 +382,10 @@ class Tick:
         #: The steps that ran out of time when the tick went on over the registry as it stood.
         self.registry_went_on: list[str] = []
         self._went_on_said: list[str] = []
+        #: Whether the dashboard pages were built from the registry as it stands after the dashboard
+        #: step (OBS-504): None when the pages carry no record or it could not be read.
+        self.dashboard_current: bool | None = None
+        self.dashboard_note = ""
         from tick_progress import Progress
         self.progress = Progress(scratch, log)
 
@@ -469,6 +473,22 @@ class Tick:
         log(f"{name}: out of time; {what}; the findings and the dashboard are built over it, and the steps "
             f"that read a fresh registry wait for the next tick")
 
+    def check_pages(self) -> None:
+        """After the dashboard step: were the pages built from the registry as it stands (OBS-504)?
+
+        A dashboard stopped at its limit leaves the build before it, which says nothing of the registry
+        the emit has just rewritten; the report and the log say so instead. Never fails the tick."""
+        try:
+            import dashboard_stamp
+            answer = dashboard_stamp.compare()
+        except Exception as exc:  # noqa: BLE001 - optional evidence, never a failed tick
+            log(f"dashboard: whether the pages show the registry now could not be read ({type(exc).__name__})")
+            return
+        self.dashboard_current = answer.get("current")
+        self.dashboard_note = dashboard_stamp.note(answer)
+        if self.dashboard_note:
+            log(f"dashboard: {self.dashboard_note}")
+
     def write_report(self) -> None:
         try:
             import atomic
@@ -485,6 +505,9 @@ class Tick:
                 "registry_refreshed": self.registry_refreshed,
                 **({"registry_note": self.registry_note} if self.registry_note else {}),
                 **({"registry_went_on": self.registry_went_on} if self.registry_went_on else {}),
+                # OBS-504: False when the pages were built from an older registry than the one now.
+                **({"dashboard_current": self.dashboard_current} if self.dashboard_current is not None else {}),
+                **({"dashboard_note": self.dashboard_note} if self.dashboard_note else {}),
                 "progress": self.progress.document(),
             })
         except Exception:  # noqa: BLE001 — the report is best effort; the log says it is missing
@@ -723,6 +746,9 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
             step("findings-recheck", PY, "tools/build_findings.py")
     else:
         log("smoke: node is absent, so whether the page renders was not measured")
+    # OBS-504: a dashboard stopped at its limit keeps the pages of the build before it. Say so here,
+    # in the log and the report, rather than let the pages pass for the registry as it stands.
+    t.check_pages()
     step("notify", PY, "tools/notify_findings.py")
 
     if t.registry_refreshed:

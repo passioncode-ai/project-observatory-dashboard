@@ -98,10 +98,30 @@ enum UpdateAlert {
         alert.informativeText = m.t("Version {version} is downloaded and verified. Restart Project Observatory now to finish updating, or later: it also installs when you quit.", ["version": version])
         alert.addButton(withTitle: m.t("Restart now"))
         alert.addButton(withTitle: m.t("Later"))
-        if let window = NSApp.keyWindow ?? NSApp.windows.first(where: { $0.isVisible && $0.styleMask.contains(.titled) }) {
-            alert.beginSheetModal(for: window) { answer($0 == .alertFirstButtonReturn) }
+        let windows = NSApp.windows
+        if let i = sheetWindow(windows.map { Candidate(identifier: $0.identifier?.rawValue, visible: $0.isVisible,
+                                                       titled: $0.styleMask.contains(.titled), key: $0.isKeyWindow) }) {
+            alert.beginSheetModal(for: windows[i]) { answer($0 == .alertFirstButtonReturn) }
         } else {
             answer(alert.runModal() == .alertFirstButtonReturn)
         }
+    }
+
+    struct Candidate: Equatable {
+        var identifier: String?
+        var visible: Bool
+        var titled: Bool
+        var key: Bool
+    }
+
+    /// The window the sheet attaches to (SCN-010): the dashboard's, found by its identifier,
+    /// whatever window is key; the key window only when no dashboard is on screen (the
+    /// Assistant alone), then any titled window on screen; nil runs the alert on its own.
+    /// It used to be `NSApp.keyWindow` first, which put the sheet on the Assistant whenever
+    /// that was the window in front (OBS-508).
+    static func sheetWindow(_ windows: [Candidate]) -> Int? {
+        windows.firstIndex { DashboardReopen.isDashboard($0.identifier) && $0.visible }
+            ?? windows.firstIndex { $0.key && $0.visible }
+            ?? windows.firstIndex { $0.visible && $0.titled }
     }
 }

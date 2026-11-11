@@ -1,4 +1,8 @@
 name: observatory-release-check
+# check.yml stays on pull requests (and pushes): main's branch protection requires its `test` checks
+# on every pull request, so moving it to the nightly cadence would block every merge. The nightly
+# cadence (RULES.md, CI section) applies to the heavy suites, not to these required checks.
+# release.yml's guard requires this workflow and desktop.yml green on a release tag's commit.
 on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read

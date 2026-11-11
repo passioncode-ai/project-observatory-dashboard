@@ -36,6 +36,13 @@ load. So the tail's time is now what the tail has measured (`needs`, from `store
   stopped at a fixed few seconds when it has needed more. When `merge` or `emit` is stopped,
   `tools/tick.py` runs `findings` and the dashboard on the previous registry instead of stopping.
 
+WHY THE DASHBOARD HAS A FLOOR (OBS-504, 2026-11-11). A step that must finish could take its own
+measured time out of what was left, and `findings`, measured near 100 s under load, took the seconds
+reserved for the dashboard: three ticks of one night stopped the dashboard at 20 to 22 s and the
+pages stayed hours behind the registry. The dashboard now keeps `PROTECTED_FLOOR` seconds that no
+step before it may spend (`protected_after`); the build records the registry it was built from, so
+a page and the tick's receipt say when the pages are older than the registry (`dashboard_stamp.py`).
+
 `ALERT_FRACTION`, `ALERT_WINDOW` and `ALERT_MIN` say when one step's runs are reported
 (`tick.step_over_share`, tools/tick_findings.py), and `STARVED_TICKS` is also where `tick.collector_starved` begins. The
 ceiling itself is read here too (`ceiling_seconds`), so the watchdog and the receipt that the
@@ -156,6 +163,15 @@ NEED_MARGIN = 1.25
 #: after a 270 s emit). A step not named here gets MUST_FINISH_MIN_DEFAULT.
 MUST_FINISH_MIN: dict[str, float] = {"validate": 10.0, "findings": 30.0, "dashboard": 20.0}
 MUST_FINISH_MIN_DEFAULT = 5.0
+#: THE DASHBOARD'S FLOOR (OBS-504, 2026-11-11). Seconds a step is kept out of any tail, which no
+#: step before it may spend, not even a step that must finish and takes its own measured time out
+#: of what is left. On one loaded machine the 00:05Z, 01:01Z and 06:47Z ticks stopped the dashboard
+#: at 20 to 22 s: `findings` (90th percentile near 100 s that night) took its measured time out of
+#: the seconds reserved for the dashboard, whose own measure (about 18 s, mostly quiet runs) was
+#: below what it needed under that load (stopped at 26 and 28 s), and the pages showed 301
+#: projects while the registry held 302 for hours. The page is what a person reads, so a step
+#: before it is stopped, or not started, rather than leave it less than this.
+PROTECTED_FLOOR: dict[str, float] = {"dashboard": 60.0}
 #: The most of the ceiling the collectors leave the tail, so a slow history cannot starve them.
 RESERVE_CAP = 0.4
 
@@ -195,11 +211,12 @@ def needs(runs, *, defaults: bool = True) -> dict[str, float]:
 
 def given(name: str, need: dict[str, float]) -> float:
     """Seconds step `name` is reserved and, if it must finish, always given: its need times
-    NEED_MARGIN, and for a MUST_FINISH step at least its minimum (MUST_FINISH_MIN)."""
+    NEED_MARGIN, for a MUST_FINISH step at least its minimum (MUST_FINISH_MIN), and never less than
+    its floor (PROTECTED_FLOOR)."""
     seconds = NEED_MARGIN * need.get(name, DEFAULT_NEED.get(name, 5))
     if name in MUST_FINISH:
         seconds = max(seconds, MUST_FINISH_MIN.get(name, MUST_FINISH_MIN_DEFAULT))
-    return seconds
+    return max(seconds, PROTECTED_FLOOR.get(name, 0.0))
 
 
 def collector_reserve(measured_need: dict[str, float], ceiling: float, floor: float) -> float:
@@ -219,6 +236,15 @@ def reserve_after(name: str, need: dict[str, float]) -> float:
     return sum(given(later, need) for later in TAIL_ORDER[at + 1:] if later in MUST_FINISH)
 
 
+def protected_after(name: str) -> float:
+    """Seconds tail step `name` may never spend: the floors (PROTECTED_FLOOR) of the steps after it."""
+    try:
+        at = TAIL_ORDER.index(name)
+    except ValueError:
+        return 0.0
+    return sum(PROTECTED_FLOOR.get(later, 0.0) for later in TAIL_ORDER[at + 1:])
+
+
 def tail_limit(name: str, left: float, need: dict[str, float], floor: float = 0.0) -> float:
     """Seconds tail step `name` may run with `left` seconds before the ceiling.
 
@@ -226,9 +252,10 @@ def tail_limit(name: str, left: float, need: dict[str, float], floor: float = 0.
     (the optional steps' old flat reserve for the core). A MUST_FINISH step may still take its own
     measured time out of what is left, so it is never stopped at a few seconds it has never been
     enough: the reserve before it was meant for it, and it is never less than the step's minimum
-    (MUST_FINISH_MIN) while that much is left."""
+    (MUST_FINISH_MIN) while that much is left. What it takes never reaches into the floors of the
+    steps after it (`protected_after`, OBS-504): with less than those left, it does not start."""
     limit = left - max(reserve_after(name, need), float(floor))
     if name in MUST_FINISH:
-        limit = max(limit, min(left, given(name, need)))
+        limit = max(limit, min(left - protected_after(name), given(name, need)))
     return limit
 # endregion tail

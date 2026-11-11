@@ -219,6 +219,17 @@ case "$3" in
 esac
 "#).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // A test that forks while this file is open for writing keeps that descriptor until it execs,
+        // and Linux refuses to run the script meanwhile (ETXTBSY, read as `backend-failed`; seen on
+        // the arm64 runner, 2026-11-11). Run it once until it starts, so every test gets a runnable file.
+        for attempt in 0.. {
+            match std::process::Command::new(&path).stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status() {
+                Err(e) if e.raw_os_error() == Some(26) && attempt < 200 =>
+                    std::thread::sleep(std::time::Duration::from_millis(10)),
+                _ => break,
+            }
+        }
         path.to_string_lossy().to_string()
     }
 

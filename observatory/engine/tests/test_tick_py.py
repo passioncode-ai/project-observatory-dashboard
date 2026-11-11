@@ -627,6 +627,62 @@ class OutOfTimeGoesOn(unittest.TestCase):
             self.assertIn(name, ran)
 
 
+class PagesOlderThanTheRegistry(unittest.TestCase):
+    """OBS-504: three ticks of one night stopped the dashboard at its limit after the emit had rewritten
+    the registry; the pages kept the build before it (301 projects, the registry 302) and the tick said
+    nothing of it. After the dashboard step the tick asks whether the pages were built from the registry
+    as it stands, and the log and the report say so when they were not."""
+
+    def run_tick(self, prepare):
+        tick = load_tick()
+        import paths
+        import dashboard_stamp
+        lines = []
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            registry, pages = base / "registry", base / "pages"
+            registry.mkdir()
+            (registry / "projects.json").write_text(json.dumps(
+                {"projects": [{"id": "project:a"}], "updated_on": "2026-11-11"}), encoding="utf-8")
+            with mock.patch.object(paths, "REGISTRY", registry), mock.patch.object(paths, "DASHBOARD_DIR", pages):
+                prepare(dashboard_stamp, registry, pages)
+                t = tick.Tick(base)
+                t.step = lambda name, *argv: "ran"
+                t.bounded = lambda name, *argv: (0, "nothing moved\n" if name == "diff" else "")
+                t.probe = lambda *a, **k: False
+                with mock.patch.object(paths, "STATE", base), mock.patch.object(tick, "log", lines.append):
+                    tick.steps(t, base, base / "page.html")
+                    t.write_report()
+            report = json.loads((base / "tick.json").read_text(encoding="utf-8"))
+        return report, lines
+
+    def test_a_stopped_dashboard_leaves_pages_the_report_calls_older(self):
+        def older(stamp, registry, pages):
+            stamp.record(stamp.registry_stamp(registry), built_at="2026-11-11T00:05:00Z", directory=pages)
+            # The emit then added a project; the dashboard step (stopped) wrote nothing.
+            (registry / "projects.json").write_text(json.dumps(
+                {"projects": [{"id": "project:a"}, {"id": "project:b"}], "updated_on": "2026-11-11"}),
+                encoding="utf-8")
+        report, lines = self.run_tick(older)
+        self.assertIs(report["dashboard_current"], False)
+        self.assertIn("older registry (1 projects then, 2 now)", report["dashboard_note"])
+        self.assertIn("2026-11-11T00:05:00Z", report["dashboard_note"])
+        self.assertTrue(any(line.startswith("dashboard: the dashboard pages were built from an older registry")
+                            for line in lines), lines)
+
+    def test_pages_built_from_the_registry_now_are_current_and_quiet(self):
+        report, lines = self.run_tick(lambda stamp, registry, pages: stamp.record(
+            stamp.registry_stamp(registry), directory=pages))
+        self.assertIs(report["dashboard_current"], True)
+        self.assertNotIn("dashboard_note", report)
+        self.assertFalse(any("older registry" in line for line in lines), lines)
+
+    def test_pages_with_no_record_are_not_called_current(self):
+        report, _ = self.run_tick(lambda stamp, registry, pages: None)
+        self.assertNotIn("dashboard_current", report)
+        self.assertNotIn("dashboard_note", report)
+
+
 class TailOrder(unittest.TestCase):
     """2026-10-09/10: `plugins` (92–497 s) and `agent` (135–244 s) ran first among the tail's
     optional steps and used the window every tick, so `index`, `retention` — the erasure —
