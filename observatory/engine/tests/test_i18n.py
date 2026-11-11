@@ -636,6 +636,15 @@ class Formats(unittest.TestCase):
         self.assertEqual(i18n.translate("newest {date}, taken before the last update", "ru", date="2026-01-02"),
                          "последняя 02.01.2026, сделана перед последним обновлением")
 
+    def test_numbers_the_reader_sees_are_never_fixed_point_strings(self):
+        # OSS-19: `toFixed` writes an English decimal point and hands `T()` a string, which `ARGNUM`
+        # leaves as it is, so a Russian page read "12.5 MB" and "$0.0051". Only the sparkline's
+        # SVG coordinates may use it: a point there is geometry, not text.
+        template = _template_source()
+        shown = [line.strip() for line in template.splitlines()
+                 if "toFixed(" in line and "* step" not in line]
+        self.assertEqual(shown, [], "use a number argument or toLocaleString(LOCALE, ...)")
+
     def test_the_page_script_formats_as_the_builder_does(self):
         template = _template_source()
         date_js = template[template.index("const DATE_RE"):template.index("// A number argument")]
