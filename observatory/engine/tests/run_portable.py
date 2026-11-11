@@ -586,7 +586,10 @@ SUITE_SECONDS = {'credential_doors': 600, 'maintenance': 480, 'tick_py': 300, 'c
                  'org_selection': 600,
                  # 229 cases over the guard with real trees and git: 107 s alone on a Mac at a load average
                  # near 40 and past 120 s beside other suites there (2026-11-11).
-                 'disk_guard': 300}
+                 'disk_guard': 300,
+                 # 150 cases with real snapshots, restores and encryption: 99.85 s alone on a Mac, past
+                 # 120 s under load in the 2026-11-11 scenario sweep.
+                 'workspace_upgrade': 300}
 
 
 def suite_timeout(name: str, timeout: int) -> int:

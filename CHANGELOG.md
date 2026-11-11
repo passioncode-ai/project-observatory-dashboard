@@ -20,6 +20,11 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **observatory-log skill descriptions fit the host's listing budget.** The three descriptions were 2,243 characters
   and the host truncated two of them to a bare name; they are now 1,046, with the full trigger lists in each skill's
   body.
+- **The daily snapshot no longer fails on the update check's record** (OSS-43). The five-minute check job, which the
+  snapshot does not stop, rewrites `store/update-check.json`; a snapshot longer than five minutes always met that
+  write, failed with "Workspace changed during snapshot" three times in a row and kept the server and the tick stopped
+  for about twenty minutes each pass (the last daily before this fix was 2026-11-09). The check job's record and lock
+  are now copied without having to hold still, and a snapshot that does fail names the files that moved.
 - **systemd units name their working folder without quotes** (OBS-503). systemd does not unquote `WorkingDirectory=`,
   so the quoted path the Linux installer wrote was refused as `bad-setting` and the `-check` and `-maintain` timers
   never ran. Both unit writers now write the path bare (a space needs no escaping there); a path with a quote,
@@ -61,6 +66,30 @@ while the major version is 0, a minor release may change behaviour and says so h
   script's commands do, so one copied from a non-default workspace runs against it.
 - **A README that opens with HTML gives its prose as the project's description** (OSS-14). A line of HTML (a logo, a
   badge row) is skipped like a heading; before, its markup was shown escaped as the description.
+
+- **An automatic update no longer keeps an external secret store out of the daily backup** (OSS-100). The snapshot
+  an update takes never carries a store kept outside the workspace, yet it reset the daily snapshot's clock, so with
+  an update a day the store was never carried and doctor warned that the newest carry was over 48 hours old. With
+  such a store the daily snapshot is now due a day after the last one that recorded the store, whatever the update
+  did; without one the cadence is unchanged.
+
+- **Doctor's machine-backup rows name their step** (OSS-99). The attention rows for a missing, stale, failed or
+  refused machine backup, items it did not carry and refused settings showed no step although the sentence named
+  a command; each now carries one (`project-observatory full machine-backup`, `... machine-backup status`, or the
+  setting to correct).
+
+- **`full ssh-keys create NAME --no-passphrase` says the findings will list the key** (OSS-63). The note was only in
+  the help and the refusal; the success output now says the key has no passphrase, that `ssh-keys findings` lists it,
+  and that `ssh-keygen -p -f` gives it one.
+
+- **A short `.env` value no longer corrupts the portable scan's snapshot** (scenarios O4, O8, O9). Every non-empty
+  value joined the redaction set, so `FLAG=1` or `MODE=a` rewrote each "1" or "a" in `latest.json` as `[REDACTED]`,
+  and `status`, `export` and `dashboard` then refused the snapshot with exit 2. A scan now redacts only values of
+  at least 8 bytes, the length `leaks scan` already uses.
+
+- **The portable `doctor` agrees with `scan` about a registered folder replaced by a symlink** (scenario O7). Doctor
+  followed the link and reported the folder available while `scan` refused it; both now use one check, and doctor
+  reports the folder not available.
 
 ## 0.35.11 (2026-11-10)
 

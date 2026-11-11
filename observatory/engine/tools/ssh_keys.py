@@ -1181,6 +1181,10 @@ def cmd_create(args) -> int:
     print(f"Created {tilde(target)} (ed25519)")
     print(parsed["line"])
     print(parsed["fingerprint"])
+    if args.no_passphrase:
+        # Said where the key is made, not only in the help and the refusal (OSS-63).
+        print(f"The key has no passphrase: `{CMD} findings` lists it as a key without a passphrase until "
+              f"`ssh-keygen -p -f {tilde(target)}` gives it one.")
     notes = []
     if passphrase and not args.no_keychain:
         if sys.platform == "darwin":

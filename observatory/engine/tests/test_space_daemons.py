@@ -237,6 +237,11 @@ class Base(unittest.TestCase):
         self.tmpdir = tempfile.TemporaryDirectory(prefix="observatory-space-daemons-")
         self.base = Path(os.path.realpath(self.tmpdir.name))
         self.addCleanup(self.tmpdir.cleanup)
+        if hasattr(os, "chown"):
+            # A new file takes its folder's group on macOS, and a temporary folder under /private/tmp is
+            # wheel's (gid 0), which `validate` trusts: a group-writable program would pass there. The
+            # fixture's files take the process's own group instead, as they would under a home folder.
+            os.chown(self.base, -1, os.getgid())
         self.home = self.base / "home"
         self.home.mkdir(mode=0o700)
         self.account = sd.Account("space", os.getuid(), os.getgid(), "staff", str(self.home))

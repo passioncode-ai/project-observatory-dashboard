@@ -1405,26 +1405,32 @@ def status(base: Path, at: datetime.datetime | None = None) -> dict:
            "not_carried": success.get("not_carried") or [], "settings": str(settings_path(base))}
     items = []
 
-    def warn(code: str, text: str, **params) -> None:
-        items.append({"code": code, "text": text, **params})
+    def warn(code: str, text: str, step: str, **params) -> None:
+        # `step` is what doctor's attention row tells a person to do (OSS-99).
+        items.append({"code": code, "text": text, "step": step, **params})
 
+    take = "project-observatory full machine-backup"
     try:
         load_settings(base)
     except config.ConfigurationError as exc:
-        warn("machine-backup-settings", f"config/{CONFIG_NAME} is refused: {exc}", detail=str(exc)[:200])
+        warn("machine-backup-settings", f"config/{CONFIG_NAME} is refused: {exc}",
+             f"correct config/{CONFIG_NAME} in the workspace; `{take} status` reads it again",
+             detail=str(exc)[:200])
     if not out["enabled"]:
         pass
     elif last.get("result") == "refused-disk" and (not when or (_parse(last.get("at")) or at) >= when):
         warn("machine-backup-refused-disk", f"the last machine backup was not written: {last.get('detail', '')[:200]}",
+             f"free disk space (or lower limits.min_free_gb in config/{CONFIG_NAME}), then `{take}`",
              detail=str(last.get("detail", ""))[:200])
     elif last.get("result") == "failed" and (not when or (_parse(last.get("at")) or at) >= when):
         warn("machine-backup-failed", f"the last machine backup failed: {last.get('detail', '')[:200]}; "
-                                      "it is tried again within the hour", detail=str(last.get("detail", ""))[:200])
+                                      "it is tried again within the hour",
+             f"`{take}` takes one now and says why it fails", detail=str(last.get("detail", ""))[:200])
     if out["enabled"] and when is None:
         warn("machine-backup-missing", "no machine backup yet: the maintenance job takes one a day; "
-                                       "`project-observatory full machine-backup` takes one now")
+                                       "`project-observatory full machine-backup` takes one now", take)
     elif out["enabled"] and at - when > STALE:
-        warn("machine-backup-stale", f"the newest machine backup is {out['age_hours']:.0f} hours old",
+        warn("machine-backup-stale", f"the newest machine backup is {out['age_hours']:.0f} hours old", take,
              hours=out["age_hours"])
     if file and out["not_carried_count"]:
         names = ", ".join(i["source"] for i in out["not_carried"][:5])
@@ -1433,7 +1439,7 @@ def status(base: Path, at: datetime.datetime | None = None) -> dict:
         warn("machine-backup-not-carried", f"{out['not_carried_count']} item(s) were not carried in the newest "
                                            f"machine backup{lost} ({names}…); `full machine-backup status` names "
                                            "each with how to carry it",
-             count=out["not_carried_count"], commits=commits)
+             f"{take} status", count=out["not_carried_count"], commits=commits)
     out["warnings"] = [i["text"] for i in items]
     out["warning_items"] = items
     return out

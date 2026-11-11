@@ -779,6 +779,58 @@ class Pass(Base):
         self.assertEqual(state["snapshot"]["result"], "before-upgrade", "the update's own snapshot counts")
         self.assertNotIn("app", report, "the new release's code handles the app on the next pass")
 
+    def external_store(self):
+        store = self.base / "external-store"
+        store.mkdir()
+        (store / "demo-slot").write_text(SECRET_MARK)
+        file = self.home / "config" / "settings.json"
+        doc = config.read_json(file)
+        doc.setdefault("sources", {})["secret_store"] = str(store)
+        workspace.write_json(file, doc)
+        return store
+
+    def carry_record(self, at):
+        file = self.home.joinpath(*vault.CARRY_RECORD)
+        file.parent.mkdir(parents=True, exist_ok=True)
+        file.write_text(json.dumps({"at": M.iso(at), "kind": "daily", "state": "carried"}))
+
+    def test_the_update_snapshot_stands_in_for_the_daily_without_an_external_store(self):
+        # OSS-100: the cadence is unchanged where no store is kept outside the workspace.
+        state = {"snapshot": {"at": M.iso(AT), "result": "before-upgrade"}}
+        self.assertFalse(M.snapshot_due(self.home, state, AT + datetime.timedelta(hours=1)))
+        self.assertEqual(M.step_snapshot(self.home, state, AT + datetime.timedelta(hours=1))["result"], "not-due")
+        self.assertTrue(M.snapshot_due(self.home, state, AT + datetime.timedelta(hours=24)))
+        taken = {"snapshot": {"at": M.iso(AT), "result": "taken"}}
+        self.external_store()
+        self.assertFalse(M.snapshot_due(self.home, taken, AT + datetime.timedelta(hours=1)),
+                         "a daily snapshot keeps its own cadence with a store outside")
+
+    def test_with_an_external_store_an_update_a_day_still_lets_the_daily_carry_it(self):
+        # OSS-100: an update's snapshot never carries the store (`update-snapshot`), so with an update
+        # a day the daily one was never taken and doctor's 48-hour warning fired.
+        self.external_store()
+        state = {"snapshot": {"at": M.iso(AT), "result": "before-upgrade"}}
+        self.assertTrue(M.snapshot_due(self.home, state, AT + datetime.timedelta(minutes=15)),
+                        "no snapshot has carried the store yet")
+        self.carry_record(AT - datetime.timedelta(hours=25))
+        self.assertTrue(M.snapshot_due(self.home, state, AT + datetime.timedelta(minutes=15)))
+        self.carry_record(AT - datetime.timedelta(hours=2))
+        self.assertFalse(M.snapshot_due(self.home, state, AT + datetime.timedelta(minutes=15)),
+                         "a daily that wrote its carry record within the day still counts")
+        self.assertTrue(M.snapshot_due(self.home, state, AT + datetime.timedelta(hours=22)))
+
+    def test_the_pass_after_an_update_takes_the_daily_that_carries_the_store(self):
+        self.external_store()
+        commands = FakeCommands(check=10, apply=0, latest="9.9.9")
+        self.assertEqual(self.run_pass(commands)["update"]["result"], "updated")
+        self.assertEqual(M.read_state(self.home)["snapshot"]["result"], "before-upgrade")
+        later = self.run_pass(FakeCommands(check=0), at=AT + datetime.timedelta(minutes=15),
+                              services=FakeServices())
+        self.assertEqual(later["snapshot"]["result"], "taken", later["snapshot"])
+        state = M.read_state(self.home)
+        self.assertEqual(state["snapshot"]["secret_store"]["state"], "carried")
+        self.assertEqual(vault._last_carry(self.home)["state"], "carried")
+
     def test_without_launchd_the_update_is_told_there_is_nothing_to_stop(self):
         # Audit A02: on Linux `--apply` alone refuses ("launchd is absent") every day.
         commands = FakeCommands(check=10, apply=0)
