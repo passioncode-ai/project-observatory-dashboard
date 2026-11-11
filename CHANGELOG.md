@@ -19,6 +19,11 @@ while the major version is 0, a minor release may change behaviour and says so h
   such a store the daily snapshot is now due a day after the last one that recorded the store, whatever the update
   did; without one the cadence is unchanged.
 
+- **Doctor's machine-backup rows name their step** (OSS-99). The attention rows for a missing, stale, failed or
+  refused machine backup, items it did not carry and refused settings showed no step although the sentence named
+  a command; each now carries one (`project-observatory full machine-backup`, `... machine-backup status`, or the
+  setting to correct).
+
 ## 0.35.11 (2026-11-10)
 
 A service moved to another machine stays reachable at its old local address: on macOS, `full machine-move leave

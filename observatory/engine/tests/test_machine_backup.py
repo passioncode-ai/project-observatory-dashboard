@@ -2621,6 +2621,35 @@ class Schedule(Base):
         self.assertEqual(MB.before_update(self.ws, take_fn=broken, at=AT + datetime.timedelta(hours=2))['result'],
                          'failed')
 
+    def test_every_warning_names_its_step(self):
+        # OSS-99: doctor's attention rows read `step`; a machine-backup row had none.
+        seen = {}
+
+        def collect(at):
+            for item in MB.status(self.ws, at)['warning_items']:
+                self.assertTrue(isinstance(item.get('step'), str) and item['step'].strip(), item)
+                seen[item['code']] = item['step']
+        self.settings({'includes': []})
+        collect(AT)
+        self.settings({})
+        self.fake(self.ws, trigger='daily', at=AT)
+        collect(AT + datetime.timedelta(hours=40))
+        for result in ('failed', 'refused-disk'):
+            MB._record(self.ws, {'at': MB.iso(AT + datetime.timedelta(hours=1)), 'result': result,
+                                 'detail': 'synthetic'})
+            collect(AT + datetime.timedelta(hours=2))
+        state = MB.read_state(self.ws)
+        state['success'] = {'items': 2, 'not_carried_count': 1,
+                            'not_carried': [{'source': '~/example', 'reason': 'too large'}]}
+        MB._write_json(MB.state_path(self.ws), state)
+        collect(AT + datetime.timedelta(hours=2))
+        self.assertEqual(set(seen), {'machine-backup-settings', 'machine-backup-missing', 'machine-backup-stale',
+                                     'machine-backup-failed', 'machine-backup-refused-disk',
+                                     'machine-backup-not-carried'})
+        self.assertEqual(seen['machine-backup-not-carried'], 'project-observatory full machine-backup status')
+        for code in ('machine-backup-missing', 'machine-backup-stale'):
+            self.assertEqual(seen[code], 'project-observatory full machine-backup')
+
     def test_status_warns_when_missing_and_when_stale(self):
         self.assertEqual([w['code'] for w in MB.status(self.ws, AT)['warning_items']], ['machine-backup-missing'])
         self.fake(self.ws, trigger='daily', at=AT)
