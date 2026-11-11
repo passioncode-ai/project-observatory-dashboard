@@ -230,6 +230,14 @@ def summary(explain_pid: int | None = None) -> dict:
         degraded += (machine.get("disk") or {}).get("degraded") or []
     import memory_snapshot
     fresh = memory_snapshot.read_sources(machine)
+    # The light snapshot is the newer sample for memory, but its processes name executables only
+    # (`attribution: executable-only`): taken whole it hid the full survey's origins (agent session,
+    # launchd job, app) and projects (OSS-21). Processes keep the full survey unless the light sample
+    # attributes better; each part keeps its own measurement time.
+    light = fresh["processes"]
+    if (light.get("source") == "machine-memory.json" and light.get("attribution") == "executable-only"
+            and isinstance((machine or {}).get("processes"), dict) and machine["processes"]):
+        fresh["processes"] = memory_snapshot.select_sources(machine, None)["processes"]
     for section in ("memory", "processes"):
         out[section] = fresh[section]
         degraded += fresh[section]["degraded"]

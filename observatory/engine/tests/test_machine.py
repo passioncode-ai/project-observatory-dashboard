@@ -976,6 +976,33 @@ class LightSample(Base):
         self.assertNotIn("No process runs inside a project folder.", en)
         self.assertIn("Not measured yet", en)
 
+    def test_the_full_survey_keeps_origins_and_projects_while_memory_comes_from_the_light_sample(self):
+        import machine_view, machine_page
+        from i18n import Translator
+        full_at = self.stamp(20)
+        (self.home / "store/raw/machine.json").write_text(json.dumps({
+            "measured_at": full_at, "memory": {"total_mb": 8192, "free_mb": 512, "swap_used_mb": 4096},
+            "processes": {"count": 3, "groups": [{"origin": "app:Editor", "processes": 3, "sessions": 1,
+                                                 "rss_mb": 2048, "cpu": 1.0}],
+                          "top": [{"pid": 7, "name": "Editor", "origin": "app:Editor", "rss_mb": 2048,
+                                   "cpu": 1.0, "project": "project:alpha"}],
+                          "projects": [{"project": "project:alpha", "processes": 3, "rss_mb": 2048}]},
+            "disk": {}}))
+        light_at = self.stamp()
+        (self.home / "store/raw/machine-memory.json").write_text(json.dumps(self.light(light_at)))
+        summary = machine_view.summary()
+        self.assertEqual(summary["memory"]["source"], "machine-memory.json")
+        self.assertEqual(summary["memory"]["measured_at"], light_at)
+        self.assertEqual(summary["memory"]["swap_used_mb"], 0)
+        procs = summary["processes"]
+        self.assertEqual(procs["source"], "machine.json")
+        self.assertEqual(procs["measured_at"], full_at)
+        self.assertEqual([g["origin"] for g in procs["groups"]], ["app:Editor"])
+        self.assertEqual([p["project"] for p in procs["projects"]], ["project:alpha"])
+        en = machine_page.machine_html({"machine": summary}, Translator("en"))
+        self.assertIn("app:Editor", en)
+        self.assertNotIn("executable:node", en)
+
     def test_the_light_sample_stands_alone_when_no_full_survey_ran(self):
         import machine_view
         (self.home / "store/raw/machine-memory.json").write_text(json.dumps(self.light(self.stamp())))
