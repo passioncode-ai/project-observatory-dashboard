@@ -455,8 +455,40 @@ class Resolver:
             if code in TERMINAL:
                 return {"ok": False, "refusal": code}
             raise HubUnavailable("hub-error", "the hub answered with an error that is not one of the contract's refusals")
+        if "outcome" in answer:
+            return _contract_answer(answer)
         pid = answer.get("projectId")
         if not isinstance(pid, str) or not re.fullmatch(r"[0-9A-Za-z-]{8,64}", pid):
             raise HubUnavailable("hub-error", "the hub's answer names no project id")
         return {"ok": True, "projectId": pid, "name": answer.get("name"), "root": answer.get("root"),
                 "how": answer.get("how"), "remoteKey": answer.get("remoteKey")}
+
+
+#: The folder-attribution contract's refusal reasons (DEC-0089, folder_attribution.py) in the refusal
+#: words this module has always recorded, so the alias rules in fabric_attribution.py read them unchanged:
+#: a tombstoned folder was detached from its project; a container is too broad to be one; a transient or
+#: tool folder belongs to no project.
+CONTRACT_REFUSALS = {"tombstoned": "detached", "container": "too-broad", "transient": "no-project",
+                     "tool": "no-project"}
+
+
+def _contract_answer(answer: dict) -> dict:
+    """A hub that answers in the folder-attribution contract's own shape (`{"outcome": "attached", "project",
+    "rule"}`, `ambiguous`, `new`, `refused` with a `reason`) rather than `{"projectId", ...}`. Fabric moved to
+    it in 2026-11; read as a hub-error, every alias of the estate stopped being recorded. An outcome or a
+    reason the contract does not name is still a hub-error, never a guess."""
+    outcome = answer.get("outcome")
+    if outcome == "attached":
+        pid = answer.get("project")
+        if not isinstance(pid, str) or not re.fullmatch(r"[0-9A-Za-z-]{8,64}", pid):
+            raise HubUnavailable("hub-error", "the hub's answer names no project id")
+        rule = answer.get("rule")
+        return {"ok": True, "projectId": pid, "name": answer.get("name"), "root": answer.get("root"),
+                "how": rule if isinstance(rule, str) else None, "remoteKey": answer.get("remoteKey")}
+    if outcome == "ambiguous":
+        return {"ok": False, "refusal": "ambiguous"}
+    if outcome == "new":
+        return {"ok": False, "refusal": "no-project"}
+    if outcome == "refused" and answer.get("reason") in CONTRACT_REFUSALS:
+        return {"ok": False, "refusal": CONTRACT_REFUSALS[answer["reason"]]}
+    raise HubUnavailable("hub-error", "the hub answered an outcome the folder-attribution contract does not name")

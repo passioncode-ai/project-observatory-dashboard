@@ -286,6 +286,35 @@ class Pull(_HubCase):
             doc = self.pull()
             self.assertEqual(doc["folders"][self.a]["refusal"], code)
 
+    def test_the_contract_shaped_answer_is_read(self) -> None:
+        # A Fabric hub that answers in the folder-attribution contract's own shape (DEC-0089:
+        # outcome attached|ambiguous|new|refused) instead of {projectId, ...}. Read as a hub-error,
+        # every project of the estate lost its fabric:<uuid> alias at once (2026-11-11).
+        self.hub.answers[self.a] = {"outcome": "attached", "project": UUID_A, "rule": "folder"}
+        doc = self.pull()
+        self.assertEqual(doc["degraded"], [])
+        rec = doc["aliases"]["project:alpha-web"]
+        self.assertEqual(rec["alias"], "fabric:" + UUID_A)
+        self.assertEqual(rec["how"], "folder")
+        for answer, refusal in (({"outcome": "new", "root": self.a}, "no-project"),
+                                ({"outcome": "refused", "reason": "tombstoned"}, "detached"),
+                                ({"outcome": "refused", "reason": "container"}, "too-broad"),
+                                ({"outcome": "refused", "reason": "transient"}, "no-project"),
+                                ({"outcome": "refused", "reason": "tool"}, "no-project"),
+                                ({"outcome": "ambiguous", "rule": "folder", "projects": [UUID_A, UUID_B]}, "ambiguous")):
+            self.hub.answers[self.a] = answer
+            later = self.pull()
+            self.assertEqual(later["degraded"], [], answer)
+            self.assertEqual(later["folders"][self.a]["refusal"], refusal, answer)
+
+    def test_a_contract_shaped_answer_outside_the_contract_is_a_hub_error(self) -> None:
+        for answer in ({"outcome": "attached"}, {"outcome": "attached", "project": "../x"},
+                       {"outcome": "refused", "reason": "elsewhere"}, {"outcome": "merged", "project": UUID_A}):
+            self.hub.answers[self.a] = answer
+            doc = self.pull()
+            self.assertEqual([d["reason"] for d in doc["degraded"]], ["hub-error"], answer)
+            self.assertNotIn(self.a, doc["folders"], answer)
+
 
 @unittest.skipUnless(VERIFIABLE, "the hub's listener is verified with lsof and ps")
 class PullMore(_HubCase):
