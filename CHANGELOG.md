@@ -12,6 +12,9 @@ while the major version is 0, a minor release may change behaviour and says so h
   never ran. Both unit writers now write the path bare (a space needs no escaping there); a path with a quote,
   backslash, newline, `%` or `$`, a relative path, or one ending in white space is refused. Reinstalling the jobs
   rewrites the units.
+- **A failed «Start server» or «Build the dashboard» is said on every page** (Windows and Linux app, SCN-008). The
+  failure went to a banner that exists only over the saved pages, so on the live dashboard, the setup page or the
+  empty page it vanished. Off the saved pages it is now a warning dialog, as a failed update install is.
 
 ## 0.35.11 (2026-11-10)
 
