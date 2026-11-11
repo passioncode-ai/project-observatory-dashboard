@@ -3066,8 +3066,8 @@
       "path": "fabric_hub.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "252f4a5ec31563d74cb251dbdb55bb14bff3b92495d555f16d6c94ca6918e46f",
-      "bytes": 24443
+      "export_sha256": "a750a5859dc84468fc2f51e8a5c74f919f49351f16c2d94dd44f7577befaef72",
+      "bytes": 26408
     },
     {
       "path": "fabric_service.py",
@@ -5007,8 +5007,8 @@
       "path": "tests/test_fabric_attribution.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4698d0cf25c673e8c3a90d51de06952fa61089680be0e18d66d84ed333692d34",
-      "bytes": 26957
+      "export_sha256": "702749e13f91b59ad775627aa5800ae714b4e4042642256c12a37a1d16200541",
+      "bytes": 28952
     },
     {
       "path": "tests/test_fabric_service.py",
