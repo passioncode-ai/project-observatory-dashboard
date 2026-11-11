@@ -177,6 +177,7 @@ class CheapHolderAdmission(Base):
         self.assertEqual(observed.names, [])
         self.assertTrue(observed.busy(self.t1))
 
+    @unittest.skipIf(os.name == "nt", "the complete listing is POSIX; Windows holders stay unknown")
     def test_preliminary_cleanup_check_takes_one_complete_listing_and_caches_it(self):
         """OBS-397: the preliminary check asks for the complete scoped listing once and reuses
         it for RECHECK_FRESH_SECONDS; an unknown listing still refuses."""
@@ -2397,6 +2398,7 @@ class FreshTargetProbe(Base):
             self.assertIsNone(self.real_fresh_busy(str(self.t1), 5))
 
 
+@unittest.skipIf(os.name == "nt", "POSIX lsof and ps listings; Windows holders stay unknown")
 class CompleteListing(Base):
     """OBS-173, OBS-327, OBS-397: a complete listing proves a path free; anything less refuses."""
 
@@ -2460,6 +2462,7 @@ class FullDisk(Base):
                 self.g.journal([{"a": 1}])
 
 
+@unittest.skipIf(os.name == "nt", "launchd and systemd job definitions")
 class ScheduledJobs(Base):
     """A checkout a launchd or systemd job runs from is kept: between runs the job holds
     nothing open, so no holder listing can see it (app.okolos.feed, 2026-11-11)."""
