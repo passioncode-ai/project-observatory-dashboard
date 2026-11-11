@@ -2310,6 +2310,7 @@
  "Disk guard measurement incomplete": "Очистка диска измерена не полностью",
  "Git cleanup stopped in three consecutive disk guard runs": "Очистка Git остановилась в трёх последовательных проходах",
  "the disk guard could not measure {source}": "Очистка диска не смогла проверить источник {source}",
+ "the disk guard could not tell which processes hold paths, so it removed none": "Очистка диска не смогла узнать, какие процессы держат пути, и ничего не удалила",
  "RSS totals may count shared pages more than once.": "Сумма RSS может учитывать общие страницы памяти несколько раз.",
  "stale": "устарело",
  "SSH folder open to other accounts": "Папка SSH открыта другим аккаунтам",
