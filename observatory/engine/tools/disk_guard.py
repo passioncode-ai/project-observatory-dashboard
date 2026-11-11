@@ -642,11 +642,16 @@ def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget
     # directories are dead the moment their run ends, but the base that holds them is never
     # older than the newest run, so swept as one entry of the temporary root it never went
     # (7 runs, 2.5 GB, on 2026-10-12 with 1.2 GB free).
+    # A root may also name where its entries' transcripts live (`transcripts`): a coding agent's
+    # session folder (`/private/tmp/claude-UID/PROJECT/SESSION`) is dead when its session ended,
+    # which its transcript `TRANSCRIPTS/*/SESSION.jsonl` going quiet tells; one whose transcript
+    # moved within the root's hours belongs to a live session and keeps the days' age (OBS-500).
     roots = [(expand(r["path"]), int(r.get("depth", 1)),
-              at - by_level(r, "hours", level, days * 24) * 3600 if isinstance(r.get("hours"), dict) else cutoff)
+              at - by_level(r, "hours", level, days * 24) * 3600 if isinstance(r.get("hours"), dict) else cutoff,
+              expand(r["transcripts"]) if isinstance(r.get("transcripts"), str) else "")
              for r in every if LEVELS.index(r.get("level", "normal")) <= LEVELS.index(level)]
     out = []
-    for root, depth, cutoff in roots:
+    for root, depth, cutoff, transcripts in roots:
         if guarded(root, degraded):
             continue
         level_dirs = [root]
@@ -672,13 +677,40 @@ def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget
                 if why:
                     _note_kept(kept, "temp", full, why)
                     continue
-                r = inspect(full, cutoff, time.monotonic() + max(1.0, budget.left()) if budget else None)
+                entry_cutoff = cutoff
+                if transcripts:
+                    spoken = _transcript_time(transcripts, e.name)
+                    if spoken is None or spoken >= cutoff:
+                        # A live or unreadable session: only the root-wide age in days applies.
+                        entry_cutoff = min(cutoff, at - days * 86400)
+                        if top >= entry_cutoff:
+                            continue
+                r = inspect(full, entry_cutoff, time.monotonic() + max(1.0, budget.left()) if budget else None)
                 if r["reason"] == KEEP_REASON:          # a marker deeper inside
                     _note_kept(kept, "temp", full, KEEP_REASON)
                 if r["complete"] and not holders.busy(full):
-                    out.append({"class": "temp", "target": full, "bytes": r["size"], "cutoff": cutoff, "identity": r["identity"],
+                    out.append({"class": "temp", "target": full, "bytes": r["size"], "cutoff": entry_cutoff, "identity": r["identity"],
                                 "why": f"untouched {(at - r['newest']) / 86400:.1f} days, nobody holds it"})
     return out
+
+
+def _transcript_time(transcripts: str, session: str) -> float | None:
+    """When the transcript of `session` last changed (0.0 when there is none), or None when
+    the transcripts folder cannot be read. A session id is a plain name; anything else is None."""
+    if not session or "/" in session or session.startswith("."):
+        return None
+    try:
+        newest = 0.0
+        with os.scandir(transcripts) as listing:
+            projects = list(listing)
+        for project in projects:
+            if not project.is_dir(follow_symlinks=False):
+                continue
+            with contextlib.suppress(FileNotFoundError):
+                newest = max(newest, os.stat(os.path.join(project.path, session + ".jsonl")).st_mtime)
+        return newest
+    except OSError:
+        return None
 
 
 def clone_root() -> pathlib.Path | None:
@@ -1139,9 +1171,12 @@ def plan_builds(cfg: dict, level: str, holders: Holders, at: float, names: list[
         try:
             _build_attempt(root)
         except OSError:
-            if degraded is not None:
-                degraded.append({"source": "build-output", "reason": "attempt cursor could not be saved; scan skipped"})
-            break
+            # A full disk is when this matters most: scan on without the cursor (the next pass
+            # starts from the beginning again) rather than give up the whole class.
+            if degraded is not None and not any(d.get("reason", "").startswith("attempt cursor")
+                                                for d in degraded if d.get("source") == "build-output"):
+                degraded.append({"source": "build-output",
+                                 "reason": "attempt cursor could not be saved; scanned without it"})
         root_end = time.monotonic() + min(quantum, max(0.0, phase_left()))
         left = lambda: min(root_end - time.monotonic(), phase_left())
         if guarded(root, degraded) or left() <= 0:
@@ -1467,7 +1502,7 @@ def act(a: dict, holders: Holders, state: dict | None = None) -> dict:
             return {**rec, "result": "skipped", "reason": f"changed since the plan: {r['reason']}"}
         if r.get("identity") != identity:
             return {**rec, "result": "skipped", "reason": "target identity changed during revalidation; replan"}
-        held = fresh_busy(a.get("checkout", target), min(5.0, deadline - time.monotonic()))
+        held = fresh_busy(a.get("checkout", target), min(15.0, deadline - time.monotonic()))
         if held is not False:
             return {**rec, "result": "skipped", "reason": "a process holds it now" if held
                     else "fresh target holders could not be read; nothing removed"}
@@ -1493,7 +1528,17 @@ def journal_file() -> pathlib.Path:
     return paths.STATE / "logs" / "disk-guard.jsonl"
 
 
-def journal(rows: list[dict]) -> None:
+def journal(rows: list[dict], degraded: list | None = None) -> None:
+    """Append rows to the journal. With `degraded`, a write that fails (a full disk) is said
+    there and the run goes on: the guard runs exactly when the disk may be full."""
+    if degraded is not None:
+        try:
+            journal(rows)
+        except OSError as exc:
+            if not any(d.get("source") == "journal" for d in degraded):
+                degraded.append({"source": "journal", "reason": f"the journal could not be written ({type(exc).__name__}); "
+                                                                "the run went on without it"})
+        return
     if not rows:
         return
     log = journal_file()
@@ -1690,13 +1735,14 @@ def run(argv: list[str]) -> dict:
                                                                     f"the rest is looked at next pass"})
                     break
                 mark = time.monotonic()
-                # Current holder observations cannot prove non-use. Path admission
-                # stays unknown without repeatedly buffering a full process listing.
+                # One complete listing per class, cut to the home and temporary roots (OBS-173):
+                # a capped or partial one admitted nothing, so the guard freed nothing at zero.
                 holders = (Holders([], "none") if name == "cache-command"
-                           else Holders.take(collect_hints=False))
+                           else Holders.take(max(1.0, min(60.0, share / 4)), complete=True))
                 holders_by_phase[name] = {"mode": holders.mode, "known": holders.known,
                                           "observation": holders.observation,
-                                          "measured_at": now() if holders.observation == "partial" else None}
+                                          "measured_at": now() if holders.observation in ("partial", "complete")
+                                          else None}
                 if name != "cache-command":
                     holders_mode = "unavailable" if not holders.known or holders_mode == "unavailable" else holders.mode
                 if not holders.known and name != "cache-command":
@@ -1736,7 +1782,7 @@ def run(argv: list[str]) -> dict:
                             row = {"at": now(), "class": a["class"], "target": a["target"], "mode": "guard",
                                    "result": "failed", "reason": f"{type(exc).__name__}: {exc}"[:200]}
                         rows.append(row)
-                        journal([row])           # as it happens: a run stopped from outside keeps its record
+                        journal([row], degraded)  # as it happens: a run stopped from outside keeps its record
                         if a["class"] == "cache-command" and row["result"] == "removed":
                             last_commands[a["target"]] = row["at"]
                 phases[name] = round(time.monotonic() - mark)
@@ -1779,8 +1825,12 @@ def run(argv: list[str]) -> dict:
             if acting:
                 journal([{"at": doc["at"], "kind": "summary", "mode": "guard", "level": level, **results,
                           "freed_mb": round((free1 - free0) / 1048576), "seconds": doc["seconds"],
-                          "git": surveys.get("git-cleanup")}])
-            _write_report(doc)
+                          "git": surveys.get("git-cleanup")}], degraded)
+            try:
+                _write_report(doc)
+            except OSError as exc:
+                doc["degraded"].append({"source": "report", "reason": f"the report could not be written "
+                                                                      f"({type(exc).__name__})"})
     return doc
 
 

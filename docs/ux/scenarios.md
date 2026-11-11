@@ -120,14 +120,9 @@ it free. Rename success never changes that result. Native shared-delete handles
 are covered by a Windows-only control; other hosts report that control skipped.
 `WindowsHolderUnknown` in engine `tests/test_disk_guard.py` owns this contract.
 
-POSIX cleanup argv coverage: a closed script with spaces, relative arguments or a
-symlink alias can evade rendered process text. The system keeps positive holds but
-refuses to turn absent matches into deletion or cache busy-tool admission. See
-[the full-engine scenario](../../observatory/engine/docs/ux/portable-scenarios.md#posix-cleanup-rendered-argv-does-not-prove-absence).
-
-Cleanup admission without collection: when current process observations cannot
-prove non-use, preliminary path admission stays unknown without reading the
-process table. Per-phase evidence marks `not-attempted` and no measurement time;
-there is no claim of zero holders or freed RAM. Explicit positive-hint readers
-and final refusal boundaries retain their behavior. `CheapHolderAdmission` in
-engine `tests/test_disk_guard.py` verifies these outcomes.
+POSIX cleanup proof of non-use: a whole `lsof` and `ps` listing, cut to the paths a
+class may touch, proves a path free when nothing in it names the path; a failed,
+partial or diagnosed listing, a path outside its scope and Windows still keep the
+target. Until 0.35.12 every path was refused because argv coverage is never complete,
+so cleanup and the disk guard freed nothing (OBS-173, OBS-397). See
+[the full-engine scenario](../../observatory/engine/docs/ux/portable-scenarios.md#posix-cleanup-a-complete-listing-proves-a-path-free).

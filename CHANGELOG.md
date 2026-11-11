@@ -7,6 +7,15 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Fixed
 
+- **Cleanup and the disk guard remove what nobody holds again** (OBS-173, OBS-327, OBS-397). Since 0.25.0 every
+  holder snapshot was declared incomplete, so `full cleanup --apply` skipped every worktree with "holders could not be
+  checked; nothing removed" and the guard removed no path, even with the disk at zero; on a working Mac the capped
+  listing (3.5 MB, 9,647 names) was past its own limits too. Each path class and each final check now reads one whole
+  `lsof` and `ps` listing cut to the paths it may touch: a path nothing names is free. A failed, partial or diagnosed
+  listing, a path outside the listing's scope, and Windows still keep every target.
+- **observatory-log skill descriptions fit the host's listing budget.** The three descriptions were 2,243 characters
+  and the host truncated two of them to a bare name; they are now 1,046, with the full trigger lists in each skill's
+  body.
 - **systemd units name their working folder without quotes** (OBS-503). systemd does not unquote `WorkingDirectory=`,
   so the quoted path the Linux installer wrote was refused as `bad-setting` and the `-check` and `-maintain` timers
   never ran. Both unit writers now write the path bare (a space needs no escaping there); a path with a quote,

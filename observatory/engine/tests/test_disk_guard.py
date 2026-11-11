@@ -177,11 +177,21 @@ class CheapHolderAdmission(Base):
         self.assertEqual(observed.names, [])
         self.assertTrue(observed.busy(self.t1))
 
-    def test_cached_preliminary_cleanup_refusal_has_no_inventory_io(self):
+    def test_preliminary_cleanup_check_takes_one_complete_listing_and_caches_it(self):
+        """OBS-397: the preliminary check asks for the complete scoped listing once and reuses
+        it for RECHECK_FRESH_SECONDS; an unknown listing still refuses."""
         import cleanup
-        with patch.object(cleanup, "_LISTING", (0.0, None)), self.no_inventory():
+        import holders
+        free = holders.Holders([], "lsof", scope=[str(self.base)])
+        with patch.object(cleanup, "_LISTING", (0.0, None)), self.no_inventory(), \
+                patch.object(holders.Holders, "take", return_value=free) as take:
+            self.assertFalse(cleanup.busy_now(str(self.t1)))
+            self.assertFalse(cleanup.busy_now(str(self.t1)))
+        self.assertEqual(take.call_count, 1)
+        self.assertIs(take.call_args.kwargs.get("complete"), True)
+        with patch.object(cleanup, "_LISTING", (0.0, None)), self.no_inventory(), \
+                patch.object(holders.Holders, "take", return_value=holders.Holders(None)):
             self.assertTrue(cleanup.busy_now(str(self.t1)))
-            self.assertEqual(cleanup._LISTING[1].observation, "not-attempted")
 
     def test_cleanup_plan_uses_unknown_without_collecting(self):
         import cleanup
@@ -197,18 +207,25 @@ class CheapHolderAdmission(Base):
         self.assertFalse(seen[0].known)
         self.assertEqual(seen[0].observation, "not-attempted")
 
-    def test_guard_phases_have_no_inventory_or_measurement_claim(self):
+    def test_guard_phases_ask_for_a_complete_listing_and_record_when_it_was_taken(self):
+        """OBS-173: each path class asks for the complete scoped listing, and its phase row
+        says it was observed and when; the capped hint inventory is never read."""
+        import holders
+        complete = holders.Holders([], "lsof", scope=[str(self.base)])
+        complete.observation = "complete"
         with self.no_inventory(), patch.object(self.g, "load_config", return_value=self.cfg()), \
                 patch.object(self.g, "refresh", return_value="fresh"), \
                 patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g.Holders, "take", return_value=complete) as take, \
                 patch.object(self.g, "planners", return_value=[(n, lambda b: []) for n in self.g.CLASSES]):
             doc = self.g.run([])
         phases = [v for k, v in doc["holders_by_phase"].items() if k != "cache-command"]
         self.assertTrue(phases)
         for row in phases:
-            self.assertFalse(row["known"])
-            self.assertEqual(row["observation"], "not-attempted")
-            self.assertIsNone(row["measured_at"])
+            self.assertTrue(row["known"])
+            self.assertEqual(row["observation"], "complete")
+            self.assertIsNotNone(row["measured_at"])
+        self.assertTrue(all(c.kwargs.get("complete") is True for c in take.call_args_list))
         self.assertTrue(self.t1.exists())
 
     def test_default_positive_hint_contract_remains_incomplete(self):
@@ -277,6 +294,28 @@ class Temp(Base):
         self.assertEqual(names("normal"), [])
         self.assertEqual(names("low"), ["pytest-1"])
         self.assertEqual(names("critical"), ["pytest-1", "pytest-2"])
+
+    def test_an_ended_coding_session_folder_goes_by_hours_and_a_live_one_stays(self):
+        """OBS-500: `/private/tmp/claude-UID/PROJECT/SESSION` of a session whose transcript is
+        quiet goes by the root's hours; one whose transcript moved stays for the days' age."""
+        root, talk = self.t1 / "claude-501", self.base / "transcripts"
+        for session, folder_hours, talk_hours in (("ended", 9, 9), ("live", 9, 0), ("no-talk", 9, None)):
+            (root / "-proj" / session).mkdir(parents=True)
+            (root / "-proj" / session / "scratch").write_text("x" * 10)
+            age(root / "-proj" / session, folder_hours / 24)
+            if talk_hours is not None:
+                (talk / "-proj").mkdir(parents=True, exist_ok=True)
+                (talk / "-proj" / f"{session}.jsonl").write_text("{}")
+                age(talk / "-proj" / f"{session}.jsonl", talk_hours / 24)
+        cfg = self.cfg(temp_roots=[{"path": str(root), "depth": 2, "transcripts": str(talk),
+                                    "hours": {"normal": 24, "low": 6, "critical": 2}}])
+        names = lambda level: sorted(Path(a["target"]).name
+                                     for a in self.g.plan_temp(cfg, level, self.free(), time.time()))
+        self.assertEqual(names("normal"), [])
+        self.assertEqual(names("critical"), ["ended", "no-talk"])
+        unreadable = self.cfg(temp_roots=[{"path": str(root), "depth": 2, "transcripts": str(self.base / "absent"),
+                                           "hours": {"normal": 24, "low": 6, "critical": 2}}])
+        self.assertEqual(self.g.plan_temp(unreadable, "critical", self.free(), time.time()), [])
 
     def test_the_user_placeholder_is_the_login(self):
         import getpass
@@ -1013,6 +1052,18 @@ class Builds(Base):
         plan = self.g.plan_builds(self.g.load_config(), "critical", self.free(), time.time(), ["build", "node_modules"])
         self.assertEqual([Path(a["target"]).name for a in plan], ["node_modules"])
 
+    def test_a_cursor_that_cannot_be_saved_still_plans_the_output(self):
+        """B-2: at zero bytes free the attempt cursor cannot be written; the scan goes on."""
+        r = self.repo("full-disk", 20)
+        age(r, 20)
+        self.hygiene(r)
+        degraded = []
+        with patch.object(self.g, "_build_attempt", side_effect=OSError(28, "No space left on device")):
+            plan = self.g.plan_builds(self.g.load_config(), "critical", self.free(), time.time(),
+                                      ["node_modules"], None, degraded)
+        self.assertEqual([Path(a["target"]).name for a in plan], ["node_modules"])
+        self.assertEqual(sum(d["source"] == "build-output" for d in degraded), 1)
+
     def test_git_at_work_holds_the_checkout(self):
         r = self.repo("locked", 20)
         gitdir = r / ".git"
@@ -1632,7 +1683,7 @@ class HoldersCompleteness(unittest.TestCase):
                 [], 0, "/usr/bin/node /srv/active-worktree/script.js\n", "")):
             self.assertIn("/srv/active-worktree/script.js", holders.argument_paths())
             self.assertTrue(holders.running(["node"]))
-            self.assertIsNone(holders.running(["npm"]))
+            self.assertIs(holders.running(["npm"]), False)
         with patch.object(holders.shutil, "which", return_value="lsof"), \
                 captured_commands(return_value=subprocess.CompletedProcess(
                     [], 0, "p123\nn/srv/active-worktree/open\n", "")), \
@@ -1690,18 +1741,28 @@ class LossyArgvEvidence(unittest.TestCase):
 
     def test_native_file_positive_and_lexical_positive_remain_held(self):
         import holders
-        for results in ([subprocess.CompletedProcess([], 0, "n/srv/target/file\n", "")],
-                        [subprocess.CompletedProcess([], 1, "", ""),
-                         subprocess.CompletedProcess([], 0, "python /srv/target/app.py\n", "")]):
+        for results in ([subprocess.CompletedProcess([], 0, "p1\nn/srv/target/file\n", ""),
+                         subprocess.CompletedProcess([], 0, "editor\n", "")],
+                        [subprocess.CompletedProcess([], 0, "p1\nn/usr/lib/dyld\n", ""),
+                         subprocess.CompletedProcess([], 0, "python /srv/target/app.py\n", "")],
+                        [subprocess.CompletedProcess([], 0, "p1\nn/usr/lib/dyld\n", ""),
+                         subprocess.CompletedProcess([], 0, "node /srv/my folder/../target/x.js /srv/target with space\n", "")]):
             with self.subTest(results=len(results)), patch.object(holders.shutil, "which", return_value="lsof"), \
                     captured_commands(side_effect=results):
                 self.assertTrue(holders.fresh_busy("/srv/target"))
 
-    def test_unmatched_cache_tool_is_unknown_and_empty_request_is_vacuous(self):
+    def test_cache_tool_from_a_whole_listing_and_empty_request_is_vacuous(self):
+        """OBS-173: a whole `ps` listing that names no such tool means none runs; one that
+        cannot be read stays unknown."""
         import holders
         with patch.object(holders, "_run", return_value="/usr/bin/editor\n"):
-            self.assertIsNone(holders.running(["npm"]))
+            self.assertIs(holders.running(["npm"]), False)
             self.assertTrue(holders.running(["editor"]))
+        with patch.object(holders, "_run", return_value="node /opt/lib/pnpm.cjs store prune\nnpx yarn\n"):
+            self.assertTrue(holders.running(["pnpm"]))
+            self.assertTrue(holders.running(["yarn"]))
+        with patch.object(holders, "_run", return_value=None):
+            self.assertIsNone(holders.running(["npm"]))
         with patch.object(holders, "_run", side_effect=AssertionError("must not inspect")):
             self.assertFalse(holders.running([]))
 
@@ -1758,15 +1819,20 @@ class LossyArgvAdmission(Base):
                 if dirty:
                     self.assertIn("only copy edit", (Path(result["archive"]) / "tracked.patch").read_text())
 
-    def test_cache_busy_if_unknown_executes_no_cache_command(self):
+    def test_cache_busy_if_absent_from_a_whole_listing_runs_and_present_skips(self):
+        """OBS-173: a whole `ps` listing without the tool lets its cache command run; one
+        with it holds the command back."""
         import holders
-        with patch.object(self.g, "running", holders.running), \
-                patch.object(holders, "_run", return_value="/usr/bin/editor\n"), \
-                patch.object(self.g.subprocess, "run") as run:
-            result = self.g.act({"class": "cache-command", "target": "synthetic cache",
-                                 "argv": ["synthetic-cache", "prune"], "busy_if": ["npm"]}, self.free())
-        self.assertEqual(result["result"], "skipped", result)
-        run.assert_not_called()
+        for listing, ran in (("/usr/bin/editor\n", True), ("/usr/local/bin/npm install\n", False)):
+            with self.subTest(listing=listing), patch.object(self.g, "running", holders.running), \
+                    patch.object(holders, "_run", return_value=listing), \
+                    patch.object(self.g.subprocess, "run",
+                                 return_value=subprocess.CompletedProcess([], 0, "", "")) as run:
+                result = self.g.act({"class": "cache-command", "target": "synthetic cache",
+                                     "argv": ["synthetic-cache", "prune"], "busy_if": ["npm"]}, self.free())
+            self.assertEqual(run.called, ran, result)
+            if not ran:
+                self.assertEqual(result["result"], "skipped", result)
 
 
     def test_cache_busy_if_capped_capture_executes_no_cache_command(self):
@@ -1807,7 +1873,7 @@ class WorktreeFinalHolders(Base):
                                            "_deadline": time.monotonic() + 10}, self.base / "archive")
                     self.assertEqual(fresh.call_count, 1)
                     self.assertGreater(fresh.call_args.args[1], 0)
-                    self.assertLessEqual(fresh.call_args.args[1], 5)
+                    self.assertLessEqual(fresh.call_args.args[1], cleanup.FRESH_SECONDS)
                     self.assertEqual(rec["result"], "removed" if outcome is False else "skipped", rec)
                     self.assertEqual(wt.exists(), outcome is not False)
                     if dirty:
@@ -2317,7 +2383,8 @@ class FreshTargetProbe(Base):
         with patch.object(self.g.shutil, "which", return_value="/usr/sbin/lsof"), \
                 captured_commands(side_effect=command_results) as call:
             self.assertIsNone(self.real_fresh_busy(str(self.t1), 5))
-        self.assertTrue(any(str(self.t1) in c.args[0] for c in call.call_args_list))
+        # One whole listing (no +D walk of the target's tree), within the caller's budget.
+        self.assertTrue(all("+D" not in c.args[0] for c in call.call_args_list))
         self.assertTrue(all(started < c.kwargs["deadline"] <= started + 5.05 for c in call.call_args_list))
         with patch.object(self.g.shutil, "which", return_value="/usr/sbin/lsof"), \
                 captured_commands(side_effect=subprocess.TimeoutExpired("lsof", 5)):
@@ -2328,6 +2395,69 @@ class FreshTargetProbe(Base):
         with patch.object(self.g.shutil, "which", return_value="/usr/sbin/lsof"), \
                 captured_commands(return_value=subprocess.CompletedProcess([], 1, "", "permission denied")):
             self.assertIsNone(self.real_fresh_busy(str(self.t1), 5))
+
+
+class CompleteListing(Base):
+    """OBS-173, OBS-327, OBS-397: a complete listing proves a path free; anything less refuses."""
+
+    def probe(self, lsof, ps, target=None):
+        import holders
+        with patch.object(holders.shutil, "which", return_value="/usr/sbin/lsof"), \
+                captured_commands(side_effect=[lsof, ps]):
+            return holders.fresh_busy(str(target or self.t1), 5)
+
+    def ok(self, out, rc=0, err=""):
+        return subprocess.CompletedProcess([], rc, out, err)
+
+    def test_a_target_nothing_names_is_free(self):
+        self.assertIs(self.probe(self.ok("p1\nfcwd\nn/usr/lib/dyld\n"), self.ok("python /srv/other.py\n")), False)
+
+    def test_an_open_file_or_working_directory_inside_holds_it(self):
+        for name in (str(self.t1), str(self.t1 / "a" / "file")):
+            with self.subTest(name=name):
+                self.assertIs(self.probe(self.ok(f"p1\nfcwd\nn{name}\n"), self.ok("zsh\n")), True)
+
+    def test_a_sibling_with_a_longer_name_does_not_hold_it_through_lsof(self):
+        self.assertIs(self.probe(self.ok(f"p1\nn{self.t1}-other/file\n"), self.ok("zsh\n")), False)
+
+    def test_a_listing_past_the_old_two_megabyte_cap_is_still_complete(self):
+        import holders
+        big = "".join(f"p{i}\nn/usr/lib/lib{i:07d}.dylib\n" for i in range(80000))
+        self.assertGreater(len(big), holders.MAX_BYTES)
+        self.assertIs(self.probe(self.ok(big), self.ok("zsh\n")), False)
+
+    def test_diagnostics_failure_empty_output_or_no_ps_refuse(self):
+        for lsof, ps in ((self.ok("p1\nn/usr/lib/dyld\n", err="lsof: WARNING"), self.ok("zsh\n")),
+                         (self.ok("", rc=1), self.ok("zsh\n")),
+                         (self.ok("p1\n"), self.ok("zsh\n")),
+                         (self.ok("p1\nn/usr/lib/dyld\n"), self.ok("", rc=1))):
+            with self.subTest(lsof=lsof.stdout[:20], err=lsof.stderr):
+                self.assertIsNone(self.probe(lsof, ps))
+
+    def test_a_scoped_snapshot_holds_every_path_outside_its_scope(self):
+        import holders
+        snap = holders.Holders([], "lsof", scope=[str(self.t1)])
+        self.assertFalse(snap.busy(self.t1))
+        self.assertTrue(snap.busy(self.base / "elsewhere"))
+
+
+class FullDisk(Base):
+    """B-2, B-3: the guard runs when the disk may be full; a failed write never ends its work."""
+
+    def test_a_journal_write_that_fails_is_said_and_the_run_goes_on(self):
+        degraded = []
+        with patch.object(self.g, "journal_file", return_value=self.base / "no" / "such" / "log"), \
+                patch.object(self.g.os, "chmod", side_effect=OSError(28, "No space left on device")), \
+                patch("builtins.open", side_effect=OSError(28, "No space left on device")):
+            self.g.journal([{"a": 1}], degraded)
+            self.g.journal([{"a": 2}], degraded)
+        self.assertEqual([d["source"] for d in degraded], ["journal"])
+
+    def test_without_degraded_the_journal_still_raises(self):
+        with patch("builtins.open", side_effect=OSError(28, "No space left on device")), \
+                patch.object(self.g, "journal_file", return_value=self.base / "log"):
+            with self.assertRaises(OSError):
+                self.g.journal([{"a": 1}])
 
 
 class CoverageTruth(Base):
@@ -2769,7 +2899,7 @@ class VmCacheAtCritical(Base):
                         captured_commands(return_value=subprocess.CompletedProcess([], 0, listing, "")):
                     self.assertTrue(holders.running(need))
         with captured_commands(return_value=subprocess.CompletedProcess([], 0, "/usr/bin/login -fp someone\n", "")):
-            self.assertIsNone(holders.running(needs[0]), "absence stays unknown: the command is skipped")
+            self.assertIs(holders.running(needs[0]), False, "a whole listing without a daemon: none runs, nothing starts")
 
     def test_the_trim_runs_in_each_running_vm_and_the_host_disk_counts_it(self):
         listing = "\n".join(json.dumps(r) for r in (

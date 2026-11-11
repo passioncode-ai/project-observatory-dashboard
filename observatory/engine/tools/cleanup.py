@@ -54,7 +54,7 @@ import paths  # noqa: E402
 import osprivacy  # noqa: E402
 import safe_git  # noqa: E402
 from cleanup_safety import protected_tree_reason, worktree_presence  # noqa: E402
-from holders import fresh_busy  # noqa: E402
+from holders import FRESH_SECONDS, fresh_busy  # noqa: E402
 
 AUTO_CLASSES = ("branch-merged", "branch-pushed", "worktree-missing", "worktree-clean", "build-artifacts")
 MANUAL_CLASSES = ("branch-unique", "worktree-dirty")
@@ -523,14 +523,13 @@ def still_safe_branch(a: dict, expected: str | None = None) -> str:
 
 
 def busy_now(path: str) -> bool:
-    """Preliminary cached refusal; unknown coverage never grants removal."""
+    """Preliminary cached refusal from one complete scoped listing (OBS-397); unknown
+    coverage never grants removal, and `fresh_busy` decides again right before it."""
     import holders
     global _LISTING
-    # Current process observations cannot prove a path unused. Cache explicit
-    # non-observation without collecting hints that cannot alter this refusal.
     taken, listing = _LISTING
     if listing is None or time.monotonic() - taken > RECHECK_FRESH_SECONDS:
-        listing = holders.Holders.take(60, collect_hints=False)
+        listing = holders.Holders.take(60, complete=True)
         _LISTING = (time.monotonic(), listing)
     return listing.busy(path)
 
@@ -832,7 +831,7 @@ def act(a: dict, archive: pathlib.Path) -> dict:
         # Do not let the preliminary cache or time spent verifying an archive
         # grant deletion. This shared target probe is the final external check.
         end = deadline if cls == "worktree-dirty" else a.get("_deadline")
-        left = min(5.0, end - time.monotonic()) if end is not None else 5.0
+        left = min(FRESH_SECONDS, end - time.monotonic()) if end is not None else FRESH_SECONDS
         if left <= 0:
             return {**rec, "result": "skipped", "reason": "holder recheck budget exhausted; nothing removed"}
         held = fresh_busy(target, left)
