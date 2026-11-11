@@ -668,13 +668,19 @@ def _digitalocean(doc: dict) -> dict:
     (a symbolic link, an unreadable record) is named, never raised."""
     on = (doc.get("integrations") or {}).get("digitalocean") is True
     tools = str(config.SOURCE / "tools")
-    if tools not in sys.path:
+    added = tools not in sys.path
+    if added:
         sys.path.insert(0, tools)
     try:
         import digitalocean
         teams = len(digitalocean.stashes())
     except Exception as exc:  # noqa: BLE001: doctor reports, it does not stop
         return {"integration": on, "teams_stashed": None, "reason": type(exc).__name__}
+    finally:
+        # OBS-507: never left first. `tools/` holds `node.py`, which shadows the engine's `node` package for every
+        # later import of a long-lived process (the doctor of a server answers many times).
+        if added and tools in sys.path:
+            sys.path.remove(tools)
     return {"integration": on, "teams_stashed": teams}
 
 
@@ -713,7 +719,8 @@ def _organizations(base: Path) -> list[dict] | dict:
     """`full org status`'s notices, read-only: the certificate's expiry date and state per enrollment."""
     sys.path.insert(0, str(config.SOURCE))
     try:
-        from node import org
+        import engine_node
+        org = engine_node.module("org")                         # OBS-507: the engine's package, never tools/node.py
     except (ImportError, RuntimeError) as exc:                  # the engine's `full` extra
         return {"state": "unknown", "reason": type(exc).__name__}
     try:

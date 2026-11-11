@@ -244,6 +244,26 @@ class WorkspaceTests(unittest.TestCase):
         self.assertEqual(doc['digitalocean'], {'integration': True, 'teams_stashed': 1})
         self.assertNotIn('digitalocean-off', [r['code'] for r in doc['attention']])
 
+    def test_the_digitalocean_count_leaves_the_path_as_it_found_it(self):
+        # OBS-507: doctor put `tools/` first on sys.path and left it there; in a long-lived process every
+        # later `import node` then found `tools/node.py` instead of the engine's package.
+        from unittest import mock
+        sys.path.insert(0, str(ROOT))
+        import workspace
+        tools = str(ROOT / "tools")
+        sys.path.insert(0, tools)
+        import digitalocean                       # already imported: the cached module, as in a long-lived process
+        saved = list(sys.path)
+        try:
+            while tools in sys.path:
+                sys.path.remove(tools)
+            before = list(sys.path)
+            with mock.patch.object(digitalocean, "stashes", return_value=[]):
+                self.assertEqual(workspace._digitalocean({}), {"integration": False, "teams_stashed": 0})
+            self.assertEqual(sys.path, before)
+        finally:
+            sys.path[:] = saved
+
     def test_a_dead_or_stuck_tick_is_a_warning_and_a_fresh_one_is_not(self):
         import sys
         sys.path.insert(0, str(ROOT))

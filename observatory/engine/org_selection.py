@@ -318,32 +318,10 @@ def _space_here() -> dict:
 
 def _node_actions():
     """The engine's `node.actions` (the contract's `actionDecision`), whatever else this process imported as `node`:
-    `tools/node.py` is a module of that name, and a door that put `tools/` first on the path shadows the package.
-    Then the package is loaded under a private name from its own folder, so its relative imports still resolve."""
-    import importlib
-    import importlib.util
-    engine = pathlib.Path(__file__).resolve().parent / "node"
-    loaded = sys.modules.get("node")
-    if loaded is not None and getattr(loaded, "__path__", None) and \
-            pathlib.Path(list(loaded.__path__)[0]).resolve() == engine:
-        from node import actions                       # the engine's package is the one imported
-        return actions
-    if loaded is None:
-        spec = importlib.util.find_spec("node")
-        if spec is not None and spec.submodule_search_locations and \
-                pathlib.Path(list(spec.submodule_search_locations)[0]).resolve() == engine:
-            from node import actions                   # importing `node` now finds the engine's package
-            return actions
-    # Otherwise never import the name `node` (that would leave tools/node.py behind for every later import):
-    name = "_observatory_engine_node"
-    if name not in sys.modules:
-        folder = engine
-        spec = importlib.util.spec_from_file_location(name, folder / "__init__.py",
-                                                      submodule_search_locations=[str(folder)])
-        package = importlib.util.module_from_spec(spec)
-        sys.modules[name] = package
-        spec.loader.exec_module(package)
-    return importlib.import_module(name + ".actions")
+    `tools/node.py` is a module of that name, and a door that put `tools/` first on the path shadows the package
+    (`engine_node`, OBS-507)."""
+    import engine_node
+    return engine_node.module("actions")
 
 
 def decided(action: str, target: str, decision: Any = None, *, caller: str) -> dict:

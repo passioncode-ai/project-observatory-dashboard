@@ -86,6 +86,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+import engine_node
 import paths
 import private_io
 
@@ -845,7 +846,7 @@ def _decided(action: dict, agent: str, decision: Any, target: str) -> dict:
     """The relayed action's check (`node/actions.py`, the contract's `actionDecision`): a local agent binding on this
     machine's loopback is T0 (DL-25); no decision, or one that is not the operator's for this action and object,
     refuses."""
-    from node import actions
+    actions = engine_node.module("actions")              # the engine's own, wherever tools/node.py took the name
     kwargs = {} if decision is _NO_DECISION else {"decision": decision}
     answer = actions.action_decision(action=action, tier="T0", caller="agent:" + agent, target=target,
                                      now=_stamp(CLOCK()), **kwargs)
@@ -865,7 +866,7 @@ def decline(agent: str, request_id: Any, decision: Any = _NO_DECISION) -> dict:
     decision for any request it names."""
     if not isinstance(request_id, str) or not REQUEST_ID.match(request_id):
         raise Refused("unknown-request")
-    from node import actions
+    actions = engine_node.module("actions")              # OBS-507: never `from node import`, tools/node.py shadows it
     record_as = _decided(actions.SECRET_DECLINE, agent, decision, request_id)
     with _locked():
         known = any(r["id"] == request_id for r in _read_queue()["requests"])
@@ -888,7 +889,7 @@ def decline(agent: str, request_id: Any, decision: Any = _NO_DECISION) -> dict:
 
 def _share_store():
     """The node's share store (`node/shares.py`) under `OBSERVATORY_NODE`, as `full share` opens it."""
-    from node import shares as SH
+    SH = engine_node.module("shares")
     root = paths.setting_path("OBSERVATORY_NODE", paths.HOME / "node") / "shares"
     if any(p.is_symlink() for p in (root, *root.parents)):
         raise Refused("unavailable")
@@ -905,7 +906,7 @@ def share_open(agent: str, link: Any, decision: Any = _NO_DECISION) -> dict:
     the share id and the person's step. The sender's key is pinned only when the link is in the operator's decision
     unchanged. The answer and the journal name the share id only; the audit record keeps the decision with the
     link's fragment replaced by the share id."""
-    from node import actions, peer_share
+    actions, peer_share = engine_node.module("actions"), engine_node.module("peer_share")
     parsed = peer_share.parse_share_link(link)
     if not isinstance(link, str) or not parsed["ok"]:
         raise Refused("invalid-argument", field="link")
