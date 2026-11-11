@@ -193,7 +193,8 @@ def _workflow(w: dict, t: Translator, names: dict | None = None) -> str:
     if git:
         body.append(f'{t.mark("Checkouts", tag="h3")}<ul>{git}</ul>')
     wid = w["workflowId"]
-    body.append(f'<p class="machine-hint">{_cmd(f"project-observatory full workflow show {wid}")}</p>')
+    import paths  # a copied command runs against the workspace that built the page (OSS-26)
+    body.append(f'<p class="machine-hint">{_cmd(paths.in_workspace(f"project-observatory full workflow show {wid}"))}</p>')
     is_open = " open" if w.get("stalled") or w.get("pendingHandoff") or w.get("credentialsMissing") else ""
     return f'<details class="card panel agents-wf"{is_open}>{head}{"".join(body)}</details>'
 

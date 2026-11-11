@@ -135,6 +135,7 @@ fn show_dashboard(app: &AppHandle) {
                 }
             }
         }
+        refresh_menus(&app); // «Start server» follows what is shown now
     });
 }
 
@@ -149,13 +150,37 @@ fn run_action(app: &AppHandle, action: &str, busy: &str, failed: &str) {
         match backend(&app).call(&action, &json!({}), Duration::from_secs(120)) {
             Ok(_) => show_dashboard(&app),
             Err(e) => {
-                if let Some(w) = app.get_webview_window("main") {
-                    let text = format!("{} ({})", l10n::t(l, &failed, &[]), e.code);
-                    let _ = w.eval(&format!("window.__obsBanner && window.__obsBanner({})", json!(text)));
+                let text = format!("{} ({})", l10n::t(l, &failed, &[]), e.code);
+                match app.get_webview_window("main") {
+                    Some(w) if shows_saved_pages(&w) => {
+                        let _ = w.eval(&format!("window.__obsBanner && window.__obsBanner({})", json!(text)));
+                    }
+                    // The banner hook lives only on the saved pages; anywhere else the failure
+                    // would vanish, so it is a dialog, as a failed install is (SCN-008).
+                    _ => action_failed(&app, text),
                 }
             }
         }
     });
+}
+
+/// Whether the window shows the saved pages, the only page the banner hook is injected into.
+fn shows_saved_pages(window: &WebviewWindow) -> bool {
+    window
+        .url()
+        .map(|url| format!("{}://{}", url.scheme(), url.host_str().unwrap_or("")) == pages::origin())
+        .unwrap_or(false)
+}
+
+/// A failed «Start server» or «Build the dashboard», said to the person off the saved pages.
+fn action_failed(app: &AppHandle, text: String) {
+    let l = lang(app);
+    app.dialog()
+        .message(text)
+        .title("Project Observatory")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCustom(l10n::t(l, "OK", &[])))
+        .show(|_| {});
 }
 
 /// The banner over the saved pages: their build time and «Start server», or why it is disabled.
@@ -266,8 +291,16 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .separator()
         .item(&MenuItem::with_id(app, "assistant", t("Assistant"), true, Some("CmdOrCtrl+Shift+A"))?)
         .build()?;
+    // «Start server» is offered only while no server runs and the port is not another
+    // workspace's (SCN-008), as macOS does with `canStartServer`.
+    let can_start = {
+        let shown = app.state::<State>();
+        let shown = shown.shown.lock().unwrap();
+        let can_start = !shown.port_busy && shown.live.is_none();
+        can_start
+    };
     let server = SubmenuBuilder::new(app, t("Server"))
-        .item(&MenuItem::with_id(app, "start", t("Start server"), true, None::<&str>)?)
+        .item(&MenuItem::with_id(app, "start", t("Start server"), can_start, None::<&str>)?)
         .item(&MenuItem::with_id(app, "build", t("Build the dashboard"), true, None::<&str>)?)
         .build()?;
     let help = SubmenuBuilder::new(app, t("Help"))

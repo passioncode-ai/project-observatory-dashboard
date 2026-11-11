@@ -1,7 +1,8 @@
 # The Windows and Linux app (desktop/, W8): its Rust tests and an unsigned build of each package, on
 # the systems that ship it — an NSIS installer on windows-latest, an AppImage and a .deb on Ubuntu. The
 # installer is then installed silently and its program found. Signed builds are release.yml's (W9).
-# Runs on pull requests that touch desktop/ and by hand; never on every push (docs/CI-BATCHING.md).
+# Runs on pull requests that touch desktop/ and by hand; never on every push (the CI section of
+# https://github.com/passioncode-ai/org-index/blob/main/RULES.md).
 name: desktop
 
 on:

@@ -25,6 +25,42 @@ while the major version is 0, a minor release may change behaviour and says so h
   never ran. Both unit writers now write the path bare (a space needs no escaping there); a path with a quote,
   backslash, newline, `%` or `$`, a relative path, or one ending in white space is refused. Reinstalling the jobs
   rewrites the units.
+- **A failed «Start server» or «Build the dashboard» is said on every page** (Windows and Linux app, SCN-008). The
+  failure went to a banner that exists only over the saved pages, so on the live dashboard, the setup page or the
+  empty page it vanished. Off the saved pages it is now a warning dialog, as a failed update install is.
+- **«Start server» is greyed out while it cannot work** (Windows and Linux app, SCN-008). The Server menu offered it
+  even when this workspace's server already ran or another workspace's server held the port. The menu is now rebuilt
+  each time the dashboard is shown, and the item is enabled only when neither holds, as on macOS.
+- **A failed Dashboard → Rebuild Pages over the live dashboard is said** (macOS app, SCN-007, SCN-008). The error was
+  drawn only over the saved pages and the empty or unavailable views, so over the live pages a failed rebuild said
+  nothing. The live view now shows a banner while the rebuild works and the reason when it fails.
+- **The desktop workflow cites a rule that exists.** Its header pointed at `docs/CI-BATCHING.md`, a file this
+  repository does not have; it now names the CI section of the org-index `RULES.md`.
+- **`full org accounts` reads `partial` when `organizations.json` cannot be read** (OSS-102). The file's problem was
+  listed under `problems` only, so the answer said `complete` with an empty `degraded` while every account was
+  placed as if no organization were configured. It is now also a `degraded` row (`config/organizations.json`,
+  `unreadable`, the reason).
+- **A provider's reason keeps the repair command it ends with** (OSS-102, OSS-106). `full org accounts` cut a scan's
+  own reason at 200 characters, so a reason ending in `--account <account>` lost the command that repairs it. The
+  bound is now 400 characters.
+- **`org select plan` previews only the projects apply can move** (ORG-R14). The preview counted a chosen project
+  that apply always refuses (another organization's, or Not ours), so it told the organization it would receive
+  projects it never would. Those projects stay listed under `conflicts` and are left out of
+  `preview.organization.projects`.
+- **The Machine page no longer says no process runs inside a project folder when nobody measured it** (OSS-21).
+  The light memory snapshot names executables only (`projects_measured: false`); the page now shows its unmeasured
+  state for that sample instead of an empty result.
+- **The Machine page keeps the grouping by origin and by project** (OSS-21). The light memory snapshot, written more
+  often, replaced the whole process section; memory still comes from the newest sample, while processes keep the full
+  survey unless the light sample attributes better than executable-only, each with its own measurement time.
+- **Backup size and spend figures follow the reader's locale** (OSS-19). The machine backup size, the project's spend
+  and a key's "spent" figure were fixed-point strings with an English decimal point; they are now formatted in the
+  reader's language.
+- **Commands rendered on the server name their workspace** (OSS-26). The Agents view's commands, the DigitalOcean
+  and Cloudflare pages' commands and the Machine page's disk-guard hint now carry `OBSERVATORY_HOME=…`, as the page
+  script's commands do, so one copied from a non-default workspace runs against it.
+- **A README that opens with HTML gives its prose as the project's description** (OSS-14). A line of HTML (a logo, a
+  badge row) is skipped like a heading; before, its markup was shown escaped as the description.
 
 ## 0.35.11 (2026-11-10)
 
