@@ -3,7 +3,13 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.35.12 (2026-11-11)
+
+Fixes from a walk of every shipped scenario on the installed 0.35.11 (OSS, ORG, the Mac, Windows and Linux apps and the
+portable CLI). The largest: since 0.25.0 cleanup and the disk guard could not prove any path unused, so they removed
+nothing even with the disk at zero; and the daily snapshot failed on the update check's record, keeping the server and
+the tick stopped for about twenty minutes a pass. No setting or migration changes. The observatory-log plugin moves to
+0.35.12: its three skill descriptions are shorter.
 
 ### Fixed
 
