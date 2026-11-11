@@ -575,6 +575,26 @@ def run(t: Tick, scratch: Path, dashboard: Path) -> int:
     return 0
 
 
+def smoke(step, DASHBOARD: Path) -> None:
+    """Smoke renders the page the way a browser would; a blank page is recorded, and findings are built again so
+    the notifier carries `dashboard.blank` THIS tick, not the next.
+
+    Only a smoke that FAILED says the page is blank. One the watchdog stopped at its limit, or did not start for
+    want of time, measured nothing: it stays in the report's `failed_steps` with its outcome (read as "stopped at
+    its time limit", a warning), the log says the render was not measured, and nothing is rebuilt for it (OBS-513:
+    the 2026-11-11 06:47Z tick stopped smoke at its 6 s limit on a loaded machine and logged a blank page)."""
+    if not shutil.which("node"):
+        log("smoke: node is absent, so whether the page renders was not measured")
+        return
+    outcome = step("smoke", "node", "dashboard/smoke.js", DASHBOARD)
+    if outcome == "failed":
+        log("dashboard SMOKE FAILED — the page would render blank")
+        step("findings-recheck", PY, "tools/build_findings.py")
+    elif outcome in ("stopped", "not_started"):
+        log(f"smoke: {'stopped at its time limit' if outcome == 'stopped' else 'not started for want of time'}, "
+            f"so whether the page renders was not measured this tick; the findings are not built again for it")
+
+
 def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     """Every step of one tick, in order."""
     step, bounded = t.step, t.bounded
@@ -736,16 +756,7 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     step("findings", PY, "tools/build_findings.py")
     step("dashboard", PY, "dashboard/build_dashboard.py")
 
-    # Smoke renders the page the way a browser would; a blank page is recorded, and findings
-    # are built again so the notifier carries `dashboard.blank` THIS tick, not the next.
-    if shutil.which("node"):
-        before = list(t.failed)
-        step("smoke", "node", "dashboard/smoke.js", DASHBOARD)
-        if t.failed != before:
-            log("dashboard SMOKE FAILED — the page would render blank")
-            step("findings-recheck", PY, "tools/build_findings.py")
-    else:
-        log("smoke: node is absent, so whether the page renders was not measured")
+    smoke(step, DASHBOARD)
     # OBS-504: a dashboard stopped at its limit keeps the pages of the build before it. Say so here,
     # in the log and the report, rather than let the pages pass for the registry as it stands.
     t.check_pages()
