@@ -225,7 +225,7 @@ class WorkspaceRedesignTests(unittest.TestCase):
         self.assertIn("$100", out)
         self.assertIn("ежемесячно", out)
         self.assertNotIn(">monthly<", out)
-        self.assertIn("$1.500", out)
+        self.assertIn("$1,500", out)  # three places, the reader's decimal comma (OSS-19)
         mcp = {"mcp": {"servers": [{"name": "docs", "agent": "example-agent", "scope": "user",
                                     "liveness": "needs-auth", "liveness_detail": "Needs authentication"}],
                        "totals": {}}}

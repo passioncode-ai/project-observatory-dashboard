@@ -620,8 +620,8 @@
     {
       "path": "dashboard/build_dashboard.py",
       "source_sha256": "9169551d891a47eb7e9d96011b07f6b0a621338884beeba4c868c10d3f84724a",
-      "export_sha256": "a37608c7ee9d222a46fce0372cf877c03b3e885a76bce90b8830dfaaa4ec02b6",
-      "bytes": 291939,
+      "export_sha256": "fc53abbc26c0fee7275888484556ccbca34d6c516a60595dee0cc8aab93246cd",
+      "bytes": 292146,
       "python_comments_removed": 235,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,
@@ -6675,8 +6675,8 @@
       "path": "tests/test_workspace_redesign.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6a8b8be8b51c6edab002ff1c4c1211201598c908845cca280baa2cc47830e873",
-      "bytes": 20461
+      "export_sha256": "e01a9835e50807e4b824a1cd4ce4b5a05445c41a70d28b8bd3be06beb25a30ac",
+      "bytes": 20514
     },
     {
       "path": "tests/test_workspace_scheduler.py",

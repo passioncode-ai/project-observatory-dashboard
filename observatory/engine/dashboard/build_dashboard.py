@@ -3713,11 +3713,13 @@ function renderCreds() {
   // and so is its spend; the reset period is a word the reader's language has.
   const RESET_LABEL = {daily: T("reset@@daily"), weekly: T("reset@@weekly"), monthly: T("reset@@monthly")};
   const usd = v => "$" + Number(v).toLocaleString(LOCALE, {maximumFractionDigits: 3});
+  // Spend keeps its three places (a tenth of a cent counts), in the reader's own digits.
+  const spent = v => "$" + Number(v).toLocaleString(LOCALE, {minimumFractionDigits: 3, maximumFractionDigits: 3});
   const cap = c => c.limit == null ? NONE
     : `<span class="mono">${E(usd(c.limit))}</span>` +
       `<div class="tier">${E(c.limit_reset ? labelOf(RESET_LABEL, c.limit_reset) : T("no reset"))}` +
       (c.limit_reset ? "" : " " + chip(T("lifetime"), "warn")) +
-      `</div><div class="anchor">${T("spent {value}", {value: usd(+c.usage || 0)})}</div>`;
+      `</div><div class="anchor">${T("spent {value}", {value: spent(+c.usage || 0)})}</div>`;
   const who = c => (c.used_by || []).length
     ? (c.used_by || []).map(p =>
         `<a class="plink" href="#${E(p)}">${E(projLabel(p))}</a>`).join(", ") +
