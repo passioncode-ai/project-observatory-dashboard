@@ -1,18 +1,11 @@
 ---
 name: explaining-changes
 description: >-
-  Use when a change to a watched project needs the one thing its diff cannot
-  contain — why it was made. Triggers - the Observatory asks for a `why` at the
-  end of a turn, "record why" / "запиши почему", "explain this change" /
-  "объясни это изменение", "log what we did" / "залогируй что сделали", "why did
-  we do it this way" / "почему мы сделали так", or reviewing a project's recorded
-  history and finding an entry with an empty reason. The facts — files, lines,
-  branch, unpushed commits — are already measured from git and need no help; this
-  skill supplies only the reasoning, and writes it through the observatory's MCP
-  server as a proposal that nobody self-approves. NOT for writing a commit
-  message, a PR description or a changelog, and NOT for changing the typed
-  registry — a registry change is `observatory_propose`, which is a different
-  decision with different evidence.
+  Use when a change to a watched project needs the reason its diff cannot hold,
+  written to Project Observatory as a proposal. Triggers - the hook asks for a
+  why, "record why" / «запиши почему», "explain this change" / «объясни это
+  изменение». NOT for commit messages, PR descriptions, changelogs or registry
+  changes (observatory_propose).
 license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 metadata:
   version: "0.35.9"
@@ -24,6 +17,18 @@ compatibility: >-
 ---
 
 # Explaining changes
+
+## When to use
+
+Full trigger list: the Observatory asks for a `why` at the end of a turn; "record why" /
+"запиши почему"; "explain this change" / "объясни это изменение"; "log what we did" /
+"залогируй что сделали"; "why did we do it this way" / "почему мы сделали так"; reviewing a
+project's recorded history and finding an entry with an empty reason. The facts (files,
+lines, branch, unpushed commits) are already measured from git and need no help; this skill
+supplies only the reasoning, and writes it through the observatory's MCP server as a
+proposal that nobody self-approves. Not for a commit message, a PR description or a
+changelog, and not for the typed registry: a registry change is `observatory_propose`, a
+different decision with different evidence.
 
 A diff says what moved. It cannot say which constraint forced the shape, which
 alternative was rejected, or which trap was avoided — and that is the half a

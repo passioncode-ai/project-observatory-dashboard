@@ -1,13 +1,11 @@
 ---
 name: handling-secrets
 description: >-
-  Use when an agent needs to store, use, rotate or record exposure of a project's
-  credentials through Project Observatory: "use a secret", "rotate a key",
-  "record a leak", "give an agent its keys", «используй ключ», «ротируй ключ»,
-  «запиши утечку», «ключи для агента».
-  Keeps credential values out of prompts and command arguments, uses named slots,
-  and records changes without copying values into reports. NOT for granting
-  provider permissions or choosing a project's authentication architecture.
+  Use when an agent stores, uses, rotates or records exposure of a project's
+  credentials through Project Observatory, by slot name and never by value.
+  Triggers - "use a secret" / «используй ключ», "rotate a key" / «ротируй ключ»,
+  "record a leak" / «запиши утечку». NOT for granting provider permissions or
+  choosing an authentication architecture.
 license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 metadata:
   version: "0.35.9"
@@ -18,6 +16,13 @@ compatibility: >-
 ---
 
 # Handling secrets
+
+## When to use
+
+Full trigger list: "use a secret", "rotate a key", "record a leak", "give an agent its
+keys", «используй ключ», «ротируй ключ», «запиши утечку», «ключи для агента». The skill keeps
+credential values out of prompts and command arguments, uses named slots, and records
+changes without copying values into reports.
 
 Keep values on the user's machine. Work with project, environment and variable
 names. Never ask the user to paste a credential into the conversation.

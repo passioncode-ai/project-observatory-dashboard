@@ -1,18 +1,11 @@
 ---
 name: tracking-resources
 description: >-
-  Use right after an agent has created, connected or moved something outside the
-  repository for a watched project — an analytics property or tracker, a Firebase
-  or Google Cloud project, a server, database, DNS zone, cloud, payment or
-  app-store account, a Figma file — to record it through Project Observatory in the
-  same turn, and just before creating one to read whose account it belongs in.
-  Triggers - "record the new resource" / «запиши новый ресурс», "we created a
-  Firebase project" / «создали проект Firebase», "log the new server" / «запиши
-  новый сервер», "which account should this go in" / «в какой аккаунт это
-  создать». NOT for creating the Figma file itself (figma-create-new-file,
-  figma-use), wiring analytics or pixels (ad-tracking), provisioning the resource
-  with the provider's own tools, secrets (handling-secrets) or code changes inside
-  the repository.
+  Use right after an agent created, connected or moved a resource outside the
+  repository (analytics, Firebase, server, DNS, cloud or store account, Figma
+  file), to record it in Project Observatory. Triggers - «запиши новый ресурс»,
+  "which account should this go in". NOT for creating the Figma file itself
+  (figma-create-new-file), ad-tracking, provisioning or secrets.
 license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 metadata:
   version: "0.35.9"
@@ -23,6 +16,19 @@ compatibility: >-
 ---
 
 # Tracking resources
+
+## When to use
+
+Right after an agent has created, connected or moved something outside the repository for a
+watched project (an analytics property or tracker, a Firebase or Google Cloud project, a
+server, database, DNS zone, cloud, payment or app-store account, a Figma file), record it
+through Project Observatory in the same turn; just before creating one, read whose account
+it belongs in. Full trigger list: "record the new resource" / «запиши новый ресурс», "we
+created a Firebase project" / «создали проект Firebase», "log the new server" / «запиши
+новый сервер», "which account should this go in" / «в какой аккаунт это создать». Not for
+creating the Figma file itself (figma-create-new-file, figma-use), wiring analytics or
+pixels (ad-tracking), provisioning the resource with the provider's own tools, secrets
+(handling-secrets) or code changes inside the repository.
 
 Everything a project uses outside its repository is recorded in the observatory:
 which analytics, which clouds, which servers, which accounts, and under whose
