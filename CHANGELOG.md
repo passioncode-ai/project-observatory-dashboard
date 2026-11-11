@@ -13,6 +13,10 @@ while the major version is 0, a minor release may change behaviour and says so h
   listing (3.5 MB, 9,647 names) was past its own limits too. Each path class and each final check now reads one whole
   `lsof` and `ps` listing cut to the paths it may touch: a path nothing names is free. A failed, partial or diagnosed
   listing, a path outside the listing's scope, and Windows still keep every target.
+- **The disk guard keeps working on a full disk** (OBS-500). It scans build output without its cursor when the cursor
+  cannot be saved, goes on when the journal or the report cannot be written, and runs a cache command whose tool a whole
+  `ps` listing does not name. A coding agent's ended session folder under `/private/tmp/claude-UID` goes by hours (24,
+  6, 2 by pressure) once its transcript is quiet too.
 - **observatory-log skill descriptions fit the host's listing budget.** The three descriptions were 2,243 characters
   and the host truncated two of them to a bare name; they are now 1,046, with the full trigger lists in each skill's
   body.
