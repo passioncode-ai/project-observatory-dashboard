@@ -26,6 +26,11 @@ included. No setting or migration changes. The observatory-log plugin moves to 0
 - **A key prompt's decline imports the engine's own package** (OBS-507). `from node import actions` loaded
   `tools/node.py` whenever `tools/` was ahead of the engine on the import path; the DigitalOcean count also left
   `tools/` first in a long-lived process. Both are fixed.
+- **An update no longer rolls back because a coding session is working** (OBS-514). The workspace snapshot required
+  every file to hold still, but an MCP server a session runs is not stopped for an update and appends each call to the
+  usage analytics' queue; the 0.35.13 update on a machine with live sessions failed with "Workspace changed during
+  snapshot (store/analytics/queue.jsonl)" and rolled back. The analytics queue, counters and notice record are copied
+  without being required to hold still, like the logs and the update check's record.
 - **The Mac app** (OBS-508): a `--background` launch hides the dashboard by its window identity whenever it appears,
   not only at 0 and 0.5 s; the update prompt attaches to the dashboard even when the Assistant is in front; a second
   restart while an update helper runs starts no second helper (an exclusive lock held as long as the helper), which
