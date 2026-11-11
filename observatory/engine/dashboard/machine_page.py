@@ -233,7 +233,10 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
     parts.append(_table(t, "Memory by project",
                         [("Project", False), ("Processes", True), ("Memory", True)],
                         [[_project(p["project"], names), _e(p["processes"]), _size(p["rss_mb"], t)] for p in (procs.get("projects") or [])[:ROWS]],
-                        "No process runs inside a project folder." if m.get("processes") else UNMEASURED))
+                        # A sample that never split processes by project (the light memory snapshot,
+                        # `projects_measured: False`) is unmeasured, never "none" (OSS-21).
+                        "No process runs inside a project folder."
+                        if m.get("processes") and procs.get("projects_measured") is not False else UNMEASURED))
     disk = m.get("disk") or {}
     parts.append(_table(t, "Where the disk goes",
                         [("Place", False), ("Kind", False), ("Size", True), ("How it comes back", False)],

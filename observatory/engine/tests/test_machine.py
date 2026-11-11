@@ -949,6 +949,41 @@ class Page(Base):
             self.assertTrue(got == want, f"{built}→{reader}: " + relocalize.first_difference(got, want))
 
 
+class LightSample(Base):
+    """OSS-21: the light memory snapshot (`machine-memory.json`) names executables only; it never measured
+    which project a process runs in, nor its origin. It must not empty the page's project and origin tables."""
+
+    def light(self, stamp):
+        return {"schema_version": 1, "kind": "machine-memory", "attempted_at": stamp,
+                "memory": {"attempted_at": stamp, "measured_at": stamp, "total_mb": 8192,
+                           "free_mb": 2048, "swap_used_mb": 0, "degraded": []},
+                "processes": {"attempted_at": stamp, "measured_at": stamp, "count": 1,
+                              "attribution": "executable-only", "projects_measured": False,
+                              "groups": [{"origin": "executable:node", "processes": 1, "sessions": None,
+                                          "rss_mb": 100.0, "cpu": None}],
+                              "top": [{"pid": 9, "name": "node", "origin": "executable:node", "rss_mb": 100.0}],
+                              "projects": [], "degraded": []}}
+
+    def stamp(self, minutes_ago=0):
+        from datetime import timedelta
+        return (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def test_an_unmeasured_project_split_is_never_shown_as_none(self):
+        import machine_view, machine_page
+        from i18n import Translator
+        (self.home / "store/raw/machine-memory.json").write_text(json.dumps(self.light(self.stamp())))
+        en = machine_page.machine_html({"machine": machine_view.summary()}, Translator("en"))
+        self.assertNotIn("No process runs inside a project folder.", en)
+        self.assertIn("Not measured yet", en)
+
+    def test_the_light_sample_stands_alone_when_no_full_survey_ran(self):
+        import machine_view
+        (self.home / "store/raw/machine-memory.json").write_text(json.dumps(self.light(self.stamp())))
+        procs = machine_view.summary()["processes"]
+        self.assertEqual(procs["source"], "machine-memory.json")
+        self.assertEqual([g["origin"] for g in procs["groups"]], ["executable:node"])
+
+
 class PageFrees(Base):
     """OBS-66 on the page: a clone-heavy place says what removing it gives back."""
 
