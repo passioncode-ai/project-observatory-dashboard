@@ -1,0 +1,361 @@
+{
+  "schema": "add-only-lock/1",
+  "tools": {
+    "observatory_assistant_ask": {
+      "input": [
+        "conversation_id",
+        "project_id",
+        "question",
+        "request_id"
+      ],
+      "required": [
+        "question",
+        "request_id"
+      ]
+    },
+    "observatory_assistant_conversation": {
+      "input": [
+        "id"
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "observatory_assistant_status": {
+      "input": [
+        "includeProjects"
+      ],
+      "required": []
+    },
+    "observatory_checkpoint_latest": {
+      "input": [
+        "workflowId"
+      ],
+      "required": [
+        "workflowId"
+      ]
+    },
+    "observatory_checkpoint_write": {
+      "input": [
+        "body",
+        "close",
+        "executor",
+        "expectedRevision",
+        "idempotencyKey",
+        "leaseId",
+        "owner",
+        "projectId",
+        "sessionId",
+        "status",
+        "stepId",
+        "workflowId"
+      ],
+      "required": [
+        "body",
+        "idempotencyKey",
+        "owner",
+        "status",
+        "stepId"
+      ]
+    },
+    "observatory_credentials": {
+      "input": [
+        "projectId"
+      ],
+      "required": [
+        "projectId"
+      ]
+    },
+    "observatory_explain": {
+      "input": [
+        "receiptId"
+      ],
+      "required": [
+        "receiptId"
+      ]
+    },
+    "observatory_findings": {
+      "input": [
+        "cursor",
+        "include_acknowledged",
+        "limit",
+        "projectId",
+        "severity"
+      ],
+      "required": []
+    },
+    "observatory_handoff_accept": {
+      "input": [
+        "executor",
+        "handoffId",
+        "idempotencyKey",
+        "owner",
+        "sessionId"
+      ],
+      "required": [
+        "handoffId",
+        "idempotencyKey",
+        "owner"
+      ]
+    },
+    "observatory_handoff_create": {
+      "input": [
+        "idempotencyKey",
+        "leaseId",
+        "offerTtlSeconds",
+        "owner",
+        "reason",
+        "to",
+        "transcript",
+        "workflowId"
+      ],
+      "required": [
+        "idempotencyKey",
+        "owner",
+        "reason",
+        "to",
+        "workflowId"
+      ]
+    },
+    "observatory_handoff_get": {
+      "input": [
+        "handoffId"
+      ],
+      "required": [
+        "handoffId"
+      ]
+    },
+    "observatory_learn": {
+      "input": [
+        "failureId",
+        "fixId",
+        "owner",
+        "projectId",
+        "statement",
+        "why"
+      ],
+      "required": [
+        "failureId",
+        "fixId",
+        "owner",
+        "projectId",
+        "statement"
+      ]
+    },
+    "observatory_lesson": {
+      "input": [
+        "check",
+        "classKey",
+        "nouns",
+        "origin",
+        "owner",
+        "title",
+        "trigger"
+      ],
+      "required": [
+        "check",
+        "classKey",
+        "nouns",
+        "origin",
+        "owner",
+        "title",
+        "trigger"
+      ]
+    },
+    "observatory_machine": {
+      "input": [
+        "cursor",
+        "explainPid",
+        "limit",
+        "section"
+      ],
+      "required": []
+    },
+    "observatory_org_accounts": {
+      "input": [],
+      "required": []
+    },
+    "observatory_org_keys": {
+      "input": [
+        "org"
+      ],
+      "required": [
+        "org"
+      ]
+    },
+    "observatory_org_selection": {
+      "input": [
+        "action",
+        "changes",
+        "decision",
+        "digest",
+        "key",
+        "org"
+      ],
+      "required": [
+        "org"
+      ]
+    },
+    "observatory_overview": {
+      "input": [
+        "top"
+      ],
+      "required": []
+    },
+    "observatory_project": {
+      "input": [
+        "projectId",
+        "timelineLimit"
+      ],
+      "required": [
+        "projectId"
+      ]
+    },
+    "observatory_propose": {
+      "input": [
+        "evidence",
+        "owner",
+        "patch",
+        "targetId"
+      ],
+      "required": [
+        "owner",
+        "patch",
+        "targetId"
+      ]
+    },
+    "observatory_recall": {
+      "input": [
+        "cursor",
+        "kinds",
+        "limit",
+        "projectId",
+        "validity"
+      ],
+      "required": []
+    },
+    "observatory_record": {
+      "input": [
+        "evidence",
+        "expectedRevision",
+        "memoryId",
+        "owner",
+        "projectId",
+        "sessionId",
+        "statement",
+        "why"
+      ],
+      "required": [
+        "owner",
+        "statement"
+      ]
+    },
+    "observatory_resolve": {
+      "input": [
+        "id"
+      ],
+      "required": [
+        "id"
+      ]
+    },
+    "observatory_search": {
+      "input": [
+        "kinds",
+        "limit",
+        "project_id",
+        "query"
+      ],
+      "required": [
+        "query"
+      ]
+    },
+    "observatory_secret_request": {
+      "input": [
+        "env",
+        "project",
+        "provider",
+        "replace",
+        "slot",
+        "why"
+      ],
+      "required": [
+        "env",
+        "project",
+        "slot",
+        "why"
+      ]
+    },
+    "observatory_ssh_keys": {
+      "input": [
+        "github",
+        "name"
+      ],
+      "required": []
+    },
+    "observatory_status": {
+      "input": [
+        "asOfScanId",
+        "cursor",
+        "detail",
+        "includeExternal",
+        "kind",
+        "limit",
+        "scope",
+        "value"
+      ],
+      "required": []
+    },
+    "observatory_timeline": {
+      "input": [
+        "limit",
+        "projectId",
+        "since"
+      ],
+      "required": [
+        "projectId"
+      ]
+    },
+    "observatory_workflow_list": {
+      "input": [
+        "cursor",
+        "limit",
+        "projectId",
+        "status"
+      ],
+      "required": []
+    }
+  },
+  "capabilities": {
+    "estate.survey": {
+      "effect": "none"
+    },
+    "grant.check": {
+      "effect": "none"
+    },
+    "machine.mcp.inventory": {
+      "effect": "none"
+    },
+    "machine.mcp.refresh": {
+      "effect": "none"
+    },
+    "ops.digest.record": {
+      "effect": "draft"
+    },
+    "project.detail": {
+      "effect": "none"
+    },
+    "project.record": {
+      "effect": "draft"
+    },
+    "project.resolve": {
+      "effect": "none"
+    },
+    "project.timeline": {
+      "effect": "none"
+    }
+  },
+  "retired": {
+    "tools": {},
+    "capabilities": {}
+  }
+}
