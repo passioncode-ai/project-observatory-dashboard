@@ -56,13 +56,15 @@ import urllib.request
 from pathlib import Path
 from typing import Callable, NamedTuple, Optional
 
-if __name__ == '__main__':                             # run as a script: `python3 node/lifecycle/macos.py ...`
+if __name__ == '__main__' and not __package__:         # run as a script: `python3 node/lifecycle/macos.py ...`
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    import node.lifecycle  # noqa: E402,F401              # the package its relative imports resolve in (PEP 366)
+    __package__ = 'node.lifecycle'
 
 import osprivacy  # noqa: E402
 import osproc  # noqa: E402
 
-from node.lifecycle.broker import (  # noqa: E402
+from .broker import (  # noqa: E402
     BUNDLE_ID,
     IDENTITY_SCHEME,
     LAUNCHD_LABEL,

@@ -34,7 +34,7 @@ import threading
 import time
 from typing import Any, Callable, Optional
 
-from node.lifecycle.broker import LifecycleError
+from .broker import LifecycleError
 
 #: The safety sweep: always_on targets are looked at even when no event arrived.
 SWEEP_SECONDS = 600
@@ -46,7 +46,7 @@ JOIN_SECONDS = 3
 
 def supports_supervision(adapter: Any) -> bool:
     """False for the adapter of a platform with none yet: it can only answer `unsupported_platform`."""
-    from node.lifecycle import macos
+    from . import macos
     return not isinstance(adapter, macos.UnsupportedAdapter)
 
 

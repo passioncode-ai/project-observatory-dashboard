@@ -41,6 +41,29 @@ OTHER_TEAM = 'ZZZZZZZZZZ'
 APP_TARGET = {'kind': 'app', 'path': '/Applications/X.app', 'readiness': {'kind': 'process'}}
 
 
+@contextlib.contextmanager
+def tools_node_shadows_the_package():
+    """A process where `tools/` went first on the path and something imported `node`: the name is bound to
+    `tools/node.py`, a module, so `from node.lifecycle import ...` raises (OBS-507, OBS-512)."""
+    import importlib.util
+    saved = {k: sys.modules[k] for k in list(sys.modules) if k == 'node' or k.startswith('node.')}
+    path = list(sys.path)
+    try:
+        for k in saved:
+            del sys.modules[k]
+        sys.path.insert(0, str(ROOT / 'tools'))
+        spec = importlib.util.spec_from_file_location('node', ROOT / 'tools' / 'node.py')
+        shadow = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(shadow)
+        sys.modules['node'] = shadow
+        yield shadow
+    finally:
+        for k in [k for k in sys.modules if k == 'node' or k.startswith('node.')]:
+            del sys.modules[k]
+        sys.modules.update(saved)
+        sys.path[:] = path
+
+
 def done(stdout='', returncode=0, stderr=''):
     return subprocess.CompletedProcess([], returncode, stdout, stderr)
 
@@ -452,6 +475,35 @@ class StatusAndDoctorTests(Fixture):
                 self.assertEqual(workspace._lifecycle_helper(self.root), {'state': 'unknown', 'reason': 'OSError'})
             with mock.patch.object(service, 'read_config', side_effect=broker.LifecycleError('unsafe_config')):
                 self.assertEqual(workspace._lifecycle_helper(self.root), {'state': 'unknown', 'reason': 'unsafe_config'})
+
+    def test_doctor_reads_the_lifecycle_document_although_tools_node_shadows_the_package(self):
+        # OBS-512: with `node` bound to `tools/node.py`, `from node.lifecycle import ...` raised and doctor read every
+        # workspace as `unknown`; the engine's loader serves the lifecycle package under its private name instead.
+        import workspace
+        from node.lifecycle import service
+        (self.root / 'config').mkdir()
+        document = self.root / 'config/node-lifecycle.json'
+        document.write_text(json.dumps(service.empty_config()))
+        document.chmod(0o600)
+        with tools_node_shadows_the_package() as shadow:
+            self.assertEqual(workspace._lifecycle_helper(self.root), {'state': 'inert'})
+            self.assertIs(sys.modules['node'], shadow)
+
+    def test_the_engine_loader_serves_the_lifecycle_package_although_tools_node_shadows_it(self):
+        import engine_node
+        with tools_node_shadows_the_package() as shadow:
+            adapter = engine_node.module('lifecycle.macos')
+            lifecycle = engine_node.module('lifecycle.service')
+            self.assertIs(sys.modules['node'], shadow)
+        self.assertEqual(Path(adapter.__file__).resolve(), ROOT / 'node/lifecycle/macos.py')
+        self.assertTrue(callable(adapter.requirement_for))
+        self.assertEqual(lifecycle.empty_config()['targets'], {})
+
+    def test_the_adapter_still_runs_as_a_script(self):
+        out = subprocess.run([sys.executable, str(ROOT / 'node/lifecycle/macos.py'), '--help'],
+                             capture_output=True, text=True, timeout=60)
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn('build-helper', out.stdout)
 
     def test_doctor_adds_the_engine_to_the_import_path_once(self):
         import configuration
