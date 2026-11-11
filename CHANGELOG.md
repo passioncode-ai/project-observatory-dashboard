@@ -21,6 +21,8 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **A failed Dashboard → Rebuild Pages over the live dashboard is said** (macOS app, SCN-007, SCN-008). The error was
   drawn only over the saved pages and the empty or unavailable views, so over the live pages a failed rebuild said
   nothing. The live view now shows a banner while the rebuild works and the reason when it fails.
+- **The desktop workflow cites a rule that exists.** Its header pointed at `docs/CI-BATCHING.md`, a file this
+  repository does not have; it now names the CI section of the org-index `RULES.md`.
 
 ## 0.35.11 (2026-11-10)
 
