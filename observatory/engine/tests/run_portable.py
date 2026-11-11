@@ -364,7 +364,7 @@ RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'node', 'plugins', 's
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py', 'tracked.py',
-    'identity_map.py', 'identifiers.py', 'derivations.py', 'folder_attribution.py', 'fabric_attribution.py', 'fabric_hub.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'tick_progress.py', 'tick_budget.py', 'workspace.py',
+    'identity_map.py', 'identifiers.py', 'derivations.py', 'folder_attribution.py', 'fabric_attribution.py', 'fabric_hub.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'tick_progress.py', 'tick_budget.py', 'dashboard_stamp.py', 'workspace.py',
     'workspace_upgrade.py', 'backup_vault.py', 'secret_store_carry.py', 'organizations.py', 'org_view.py', 'org_selection.py', 'machine_view.py', 'memory_snapshot.py', 'checkout_inventory.py', 'checkout_state.py', 'checkout_graph.py', 'cache_coverage.py', 'open_unlinked.py', 'coverage_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
     'log_policy.py', 'code_freshness.py', 'session_reload.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',

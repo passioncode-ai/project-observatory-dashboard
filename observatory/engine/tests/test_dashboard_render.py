@@ -536,6 +536,48 @@ def page_with_its_script(pages: pathlib.Path, name: str, dest: pathlib.Path) -> 
     return out
 
 
+def test_the_pages_say_which_registry_they_were_built_from() -> None:
+    """OBS-504: a dashboard stopped at its limit kept the build before it, and the pages showed 301
+    projects while the registry held 302, without a word. The build records the registry it read,
+    beside the pages and in each page's data, so the tick and the local server can say when the
+    pages are older than the registry; a page carries the notice it shows then, hidden until then."""
+    sys.path.insert(0, str(ROOT))
+    import dashboard_stamp
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-built-from-")).resolve()
+    env = dashboard_fixture.seed(d)
+    registry, pages = d / "registry", pathlib.Path(env["OBSERVATORY_DASHBOARD_DIR"])
+    p = subprocess.run([PY, str(ROOT / "dashboard/build_dashboard.py")], cwd=ROOT, env=env,
+                       capture_output=True, text=True)
+    check("the pages build", p.returncode == 0, p.stderr[-300:])
+    record = dashboard_stamp.read(pages)
+    now = dashboard_stamp.registry_stamp(registry)
+    check("the build records the registry it read beside the pages",
+          record is not None and record["registry"].get("fingerprint") == now["fingerprint"]
+          and record["registry"].get("projects") == now["projects"] and bool(record.get("built_at")),
+          str(record))
+    index = (pages / "index.html").read_text(encoding="utf-8")
+    check("each page carries the registry it was built from",
+          f'"fingerprint": "{now["fingerprint"]}"' in index)
+    check("and the notice it shows when that registry is not the one now, hidden until then",
+          '<p class="stale-note" id="stale-note" role="status" hidden></p>' in index)
+    check("the pages built from the registry now are current",
+          dashboard_stamp.compare(pages, registry)["current"] is True)
+    doc = json.loads((registry / "projects.json").read_text(encoding="utf-8"))
+    doc["projects"].append(dict(doc["projects"][0], id="project:fixture-added"))
+    (registry / "projects.json").write_text(json.dumps(doc), encoding="utf-8")
+    answer = dashboard_stamp.compare(pages, registry)
+    check("a registry that moved after the build makes the pages older than it",
+          answer["current"] is False and answer["registry"]["projects"] == answer["built_from"]["projects"] + 1,
+          str(answer))
+    check("and says so in one line", "older registry" in dashboard_stamp.note(answer)
+          and f'({answer["built_from"]["projects"]} projects then, {answer["registry"]["projects"]} now)'
+          in dashboard_stamp.note(answer), dashboard_stamp.note(answer))
+    empty = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-no-record-"))
+    check("pages with no record are unknown, never current",
+          dashboard_stamp.compare(empty, registry)["current"] is None
+          and dashboard_stamp.note(dashboard_stamp.compare(empty, registry)) == "")
+
+
 def test_a_stub_document_is_not_scanned_and_says_how_to_scan() -> None:
     """`init` writes empty documents with `scanned_on: null`; the pages tested only
     whether the document existed, so Keys, ENV, MCP, Traffic and Heroku said
@@ -1026,6 +1068,7 @@ if __name__ == "__main__":
                test_an_unmeasured_estate_does_not_say_measured_not_measured,
                test_no_panel_renders_an_object_as_text,
                test_a_stub_document_is_not_scanned_and_says_how_to_scan,
+               test_the_pages_say_which_registry_they_were_built_from,
                test_a_heroku_scan_that_read_nothing_is_not_zero_apps,
                test_a_findings_command_runs_as_copied,
                test_domains_and_traffic_read_as_a_person_names_them,

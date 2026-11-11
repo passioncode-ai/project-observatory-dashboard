@@ -7,6 +7,7 @@
  "+ templates": "+ шаблоны",
  "+{n} more": "ещё {n}",
  "; registry content last changed": "; содержимое реестра последний раз менялось",
+ "These pages are older than the registry: they were built at {at}, and the registry has changed since. The next dashboard build replaces them.": "Эти страницы старше реестра: они собраны {at}, а реестр с тех пор изменился. Следующая сборка дашборда их заменит.",
  "A registry built from the connected sources: project folders, repositories and notes. Every project↔repository link carries the rule that made it.": "Реестр собран из подключённых источников: папок проектов, репозиториев и заметок. У каждой связи проекта с репозиторием указано правило, по которому она установлена.",
  "A value opens only on request and is hidden again.": "Значение показывается только по запросу и затем снова скрывается.",
  "Access": "Доступ",

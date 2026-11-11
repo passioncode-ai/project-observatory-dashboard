@@ -230,10 +230,10 @@ def old_limit(name, left):
     return left - (0.0 if name in OLD_CORE else SOFT_FLOOR)
 
 
-def run_tail(durations, limit_of, budget):
-    """{step: (outcome, seconds given)} of the tail run in TAIL_ORDER with `budget` seconds left."""
+def run_tail(durations, limit_of, budget, first="merge"):
+    """{step: (outcome, seconds given)} of the tail run in TAIL_ORDER from `first` with `budget` seconds left."""
     left, out = float(budget), {}
-    for name in tick_budget.TAIL_ORDER:
+    for name in tick_budget.TAIL_ORDER[tick_budget.TAIL_ORDER.index(first):]:
         if name == "findings-recheck":
             continue                                   # runs only when the page renders blank
         left -= OVERHEAD
@@ -358,7 +358,9 @@ class TailBudget(unittest.TestCase):
         need = {name: 0.1 for name in tick_budget.RESERVED}
         for name in tick_budget.MUST_FINISH:
             self.assertGreaterEqual(tick_budget.given(name, need), tick_budget.MUST_FINISH_MIN_DEFAULT, name)
-            self.assertEqual(tick_budget.tail_limit(name, 1000.0 if name == "logs" else 0.5, need) > 0, True, name)
+            # Half a second beyond the floors kept for the steps after it (OBS-504) is enough to start.
+            left = 1000.0 if name == "logs" else 0.5 + tick_budget.protected_after(name)
+            self.assertEqual(tick_budget.tail_limit(name, left, need) > 0, True, name)
         self.assertGreaterEqual(tick_budget.given("findings", need), 30.0)
         # The minimums are reserved by every step before them, the optional ones included.
         self.assertGreaterEqual(tick_budget.reserve_after("events", need),
@@ -368,12 +370,53 @@ class TailBudget(unittest.TestCase):
 
     def test_a_step_that_must_finish_takes_its_own_time_out_of_what_is_left(self):
         need = {**tick_budget.DEFAULT_NEED, "findings": 40.0, "dashboard": 20.0}
-        # 30 s left: less than the dashboard and the rest are owed, but findings still runs.
-        self.assertGreater(tick_budget.tail_limit("findings", 30.0, need), 0)
-        self.assertEqual(tick_budget.tail_limit("findings", 30.0, need), 30.0)
+        floor = tick_budget.PROTECTED_FLOOR["dashboard"]
+        # 30 s beyond the dashboard's floor: less than the rest are owed, but findings still runs.
+        self.assertGreater(tick_budget.tail_limit("findings", 30.0 + floor, need), 0)
+        self.assertEqual(tick_budget.tail_limit("findings", 30.0 + floor, need), 30.0)
         # An optional step with the same 30 s does not start.
-        self.assertLessEqual(tick_budget.tail_limit("events", 30.0, need), 0)
-        self.assertLessEqual(tick_budget.tail_limit("plugins", 30.0, need, SOFT_FLOOR), 0)
+        self.assertLessEqual(tick_budget.tail_limit("events", 30.0 + floor, need), 0)
+        self.assertLessEqual(tick_budget.tail_limit("plugins", 30.0 + floor, need, SOFT_FLOOR), 0)
+
+    def test_no_step_before_the_dashboard_spends_its_floor(self):
+        # OBS-504: `findings` took its own measured time out of the seconds kept for the dashboard.
+        need = {**tick_budget.DEFAULT_NEED, "findings": 107.0, "dashboard": 17.7}
+        floor = tick_budget.PROTECTED_FLOOR["dashboard"]
+        self.assertGreaterEqual(floor, 60.0)
+        self.assertGreaterEqual(tick_budget.given("dashboard", need), floor)
+        self.assertGreaterEqual(tick_budget.reserve_after("findings", need), floor)
+        for name in tick_budget.TAIL_ORDER[:tick_budget.TAIL_ORDER.index("dashboard")]:
+            self.assertGreaterEqual(tick_budget.protected_after(name), floor, name)
+            for left in (30.0, floor, 94.0, 170.0):
+                self.assertLessEqual(tick_budget.tail_limit(name, left, need, SOFT_FLOOR
+                                                            if name not in tick_budget.RESERVED else 0.0),
+                                     left - floor + 1e-9, (name, left))
+        # The dashboard itself, and the steps after it, keep no floor from it.
+        self.assertEqual(tick_budget.protected_after("dashboard"), 0.0)
+        self.assertEqual(tick_budget.tail_limit("dashboard", 30.0, need), 30.0)
+
+    #: The installed ticks of 2026-11-11 (one machine under load): the stage receipts' durations of
+    #: `findings` and `dashboard` over the 20 runs before the 06:22:52Z tick, `stopped` ones included.
+    NOV11_FINDINGS = (3.3, 3.2, 3.2, 2.5, 4.5, 6.4, 96.4, 3.0, 51.4, 36.6, 3.0, 2.2, 6.5, 5.7, 3.6,
+                      72.9, 107.4, 24.0, 63.3, 115.7)
+    NOV11_DASHBOARD = (3.6, 3.6, 3.5, 3.0, 2.3, 5.9, 17.7, 2.9, 15.8, 3.7, 2.4, 3.0, 3.8, 3.3, 26.1,
+                       6.8, 2.4, 28.3, 6.5, 3.7)
+
+    def test_the_ticks_of_2026_11_11_now_build_the_dashboard(self):
+        # The 06:22:52Z tick: `findings` began 170 s before the ceiling and took 115.7 s; the dashboard,
+        # handed 22 s, was stopped at 28 s, and the pages stayed a tick behind the registry (OBS-504).
+        runs = [{"stages": [{"step": "findings", "outcome": "ran", "duration_seconds": f},
+                            {"step": "dashboard", "outcome": "ran", "duration_seconds": d}]}
+                for f, d in zip(self.NOV11_FINDINGS, self.NOV11_DASHBOARD)]
+        need = tick_budget.needs(runs)
+        night = {"findings": 115.7, "dashboard": 40.0, "smoke": 14.3, "notify": 3.4, "registry": 0.8,
+                 "project-into-vault": 1.4, "projection": 1.9, "links": 3.3, "logs": 1.3}
+        for left in (98.0, 170.0):   # the 00:05Z tick began `findings` 98 s before its ceiling
+            tail = run_tail(night, lambda name, left: tick_budget.tail_limit(name, left, need), left,
+                            first="findings")
+            self.assertEqual(tail["dashboard"][0], "ran", (left, tail["dashboard"]))
+            self.assertGreaterEqual(tail["dashboard"][1], tick_budget.PROTECTED_FLOOR["dashboard"] - 2 * OVERHEAD,
+                                    (left, tail))
 
 
 class TailWatchdog(unittest.TestCase):
@@ -414,9 +457,16 @@ class TailWatchdog(unittest.TestCase):
 
     def test_findings_runs_with_its_measured_time_even_late(self):
         need = tick_budget.needs(self.history())
-        handed = self.handed("findings", 45, self.history())
-        self.assertIsNotNone(handed, "findings was not started with 45 s left")
+        floor = tick_budget.PROTECTED_FLOOR["dashboard"]
+        handed = self.handed("findings", 45 + floor, self.history())
+        self.assertIsNotNone(handed, "findings was not started with 45 s beyond the dashboard's floor")
         self.assertGreaterEqual(handed, min(45, tick_budget.NEED_MARGIN * need["findings"]) - 3)
+        self.assertLessEqual(handed, 45 + 3)
+
+    def test_findings_leaves_the_dashboard_its_floor(self):
+        # OBS-504: with less than the dashboard's floor left, findings waits and the page is built.
+        self.assertIsNone(self.handed("findings", tick_budget.PROTECTED_FLOOR["dashboard"] - 15, self.history()))
+        self.assertIsNotNone(self.handed("dashboard", tick_budget.PROTECTED_FLOOR["dashboard"] - 15, self.history()))
 
     def test_a_collector_leaves_the_measured_reserve(self):
         reserve = tick_budget.collector_reserve(tick_budget.needs(self.history(), defaults=False),

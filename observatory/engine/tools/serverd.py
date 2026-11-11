@@ -15,6 +15,7 @@ person or an agent between pulses talks to files. This daemon is the third shape
     http://127.0.0.1:47311/health    pid, uptime, versions, tick lease, last tick
     http://127.0.0.1:47311/remote    every project's remote-sync state, summarised
     http://127.0.0.1:47311/agents    the Agents page section, rendered now (its live refresh)
+    http://127.0.0.1:47311/dashboard-freshness   were the pages built from the registry now (OBS-504)
     http://127.0.0.1:47311/leaks     the vault's leak register status (names only)
     http://127.0.0.1:47311/skills    shipped skill versions vs what sessions report
     http://127.0.0.1:47311/.well-known/fabric-service   who answers, which build, is it healthy
@@ -771,10 +772,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json(refresh_skills())
         elif route == "/agents":
             self._agents()
+        elif route == "/dashboard-freshness":
+            # OBS-504: whether the pages were built from the registry as it stands; a page served
+            # here asks, and says so when it was not. Fingerprints and counts only, read now.
+            try:
+                import dashboard_stamp
+                self._json(dashboard_stamp.compare())
+            except Exception as exc:  # noqa: BLE001 - the pages keep what they show
+                self._json({"error": f"the dashboard's registry could not be read: {type(exc).__name__}"}, 503)
         else:
             self._json({"error": "no such route",
                         "routes": ["/", "/dashboard/<page>.html", "/health", "/remote",
-                                   "/leaks", "/skills", "/agents", "/.well-known/fabric-service",
+                                   "/leaks", "/skills", "/agents", "/dashboard-freshness",
+                                   "/.well-known/fabric-service",
                                    "/fabric/v1/events", "/fabric/v1/usage", "POST /mcp"]}, 404)
 
     def do_POST(self):                                    # noqa: N802
