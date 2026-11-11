@@ -18,7 +18,7 @@ expectation. It changes test evidence and documentation, not the published engin
 ## Latest run
 
 [2026-11-11: release 0.35.13](runs/2026-11-11-release-0.35.13/README.md): engine and observatory-log 0.35.13: the
-Cloudflare `zone-settings` preset (OBS-509), a key read from the folder `vault.py put` writes (OBS-510), week-old
+Cloudflare `zaraz-edit` preset (OBS-509, #500), a key read from the folder `vault.py put` writes (OBS-510), week-old
 Docker images pruned at critical (OBS-511).
 
 Next: OBS-504, then OBS-506, OBS-505, OBS-507 and OBS-508.

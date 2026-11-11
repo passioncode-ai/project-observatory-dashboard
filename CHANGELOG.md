@@ -5,16 +5,9 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## 0.35.13 (2026-11-11)
 
-A Cloudflare preset for one zone's settings, a key read from the folder `vault.py put` writes, and week-old Docker images
-pruned by the disk guard at critical. No setting or migration changes. The observatory-log plugin moves to 0.35.13: the
+A key read from the folder `vault.py put` writes, week-old Docker images pruned by the disk guard at critical, and the
+Cloudflare `zaraz-edit` preset (#500). No setting or migration changes. The observatory-log plugin moves to 0.35.13: the
 handling-secrets skill names the new preset.
-
-### Added
-
-- **`cloudflare.py issue --preset zone-settings --zone ZONE`**: Zone Read and Zone Settings Write on one zone, into a
-  vault slot, proved by reading the zone's settings with the new value. For a zone setting no ruleset carries, such
-  as the Google tag gateway, which the `zone-edge-rules` and `redirect-rules` tokens cannot change. Offered to
-  credential requests too.
 
 ### Fixed
 

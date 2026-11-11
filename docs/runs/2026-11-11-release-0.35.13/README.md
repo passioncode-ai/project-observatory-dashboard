@@ -1,7 +1,7 @@
 # Run 2026-11-11: release 0.35.13
 
 Objective: three requests from the Fabric board, taken right after 0.35.12 so its CI round was not restarted: a
-Cloudflare preset for one zone's settings, the vault read that served an older copy, and Docker images at critical.
+Cloudflare token for a zone's Google tag gateway (#500), the vault read that served an older copy, and Docker images at critical.
 
 ## State now
 
@@ -11,9 +11,9 @@ Cloudflare preset for one zone's settings, the vault read that served an older c
 
 ## What it releases
 
-- OBS-509: `cloudflare.py issue --preset zone-settings --zone ZONE` (Zone Read, Zone Settings Write on one zone,
-  proved by reading its settings), offered to credential requests; asked for by a site agent to switch off a zone's
-  Google tag gateway.
+- OBS-509: the Cloudflare `zaraz-edit` preset (PR #500, merged before this release): Zone Read and Zaraz Edit on one
+  zone, for a zone's Google tag gateway; narrower than the Zone Settings Write preset first drafted here, which was
+  dropped for it.
 - OBS-510: `use_secret.py run` reads the project's own folder first, where `vault.py put` writes, so a key put again
   by an old name is the one served; the older copy is named on stderr. Reported by a peer agent.
 - OBS-511: the disk guard runs `docker image prune -af --filter until=168h` at critical while a local daemon already

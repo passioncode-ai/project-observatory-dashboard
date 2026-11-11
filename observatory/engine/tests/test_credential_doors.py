@@ -1642,8 +1642,6 @@ def test_cf_email_presets_grant_exactly_what_the_email_service_needs() -> None:
         ("zone-edge-rules", "zone",
          ("Zone Read", "Cache Settings Write", "Config Settings Write", "Bot Management Write"),
          "/zones/z1/rulesets/phases/http_request_cache_settings/entrypoint", "er-value-"),
-        ("zone-settings", "zone", ("Zone Read", "Zone Settings Write"),
-         "/zones/z1/settings", "zs-value-"),
     ]
     for preset, level, groups, probe, prefix in cases:
         m = cf(); _cf_with_admin(m)
@@ -1688,12 +1686,11 @@ def test_cf_email_presets_refuse_what_they_do_not_grant() -> None:
               "workers-routes": ("Zone Read", "Workers Routes Write"),
               "cache-purge": ("Zone Read", "Cache Purge"),
               "zone-edge-rules": ("Zone Read", "Cache Settings Write", "Config Settings Write",
-                                  "Bot Management Write"),
-              "zone-settings": ("Zone Read", "Zone Settings Write")}
+                                  "Bot Management Write")}
     level = {"email-send": "account", "workers-edit": "account", "access-app": "account",
              "email-routing": "zone",
              "redirect-rules": "zone", "workers-routes": "zone", "cache-purge": "zone",
-             "zone-edge-rules": "zone", "zone-settings": "zone"}
+             "zone-edge-rules": "zone"}
     for preset in groups:
         m = cf(); _cf_with_admin(m)
         log, delivered = [], []
