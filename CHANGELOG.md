@@ -18,6 +18,9 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **«Start server» is greyed out while it cannot work** (Windows and Linux app, SCN-008). The Server menu offered it
   even when this workspace's server already ran or another workspace's server held the port. The menu is now rebuilt
   each time the dashboard is shown, and the item is enabled only when neither holds, as on macOS.
+- **A failed Dashboard → Rebuild Pages over the live dashboard is said** (macOS app, SCN-007, SCN-008). The error was
+  drawn only over the saved pages and the empty or unavailable views, so over the live pages a failed rebuild said
+  nothing. The live view now shows a banner while the rebuild works and the reason when it fails.
 
 ## 0.35.11 (2026-11-10)
 
