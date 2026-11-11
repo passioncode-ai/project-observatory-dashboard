@@ -940,8 +940,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "b3e38f43ab47adea4afafc74b73b783b1385365f10d5aa59d35bf7b8a65cc4bf",
-      "bytes": 39993,
+      "export_sha256": "5c0255570f6f5f0bbbc5843f9147e0b1db00d8e4e567ae09df2902f100b05a17",
+      "bytes": 40328,
       "upstream_modified": true
     },
     {
@@ -961,8 +961,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "6e3efc08175e6c8df8445d689398af70dce7a6e6b40392dc6296a4ec3c4cab2f",
-      "bytes": 321997,
+      "export_sha256": "63465400e74977873a2d11666182724d20e6e6442b498b9b64d13e92b0a12bf0",
+      "bytes": 322747,
       "upstream_modified": true
     },
     {
@@ -3215,8 +3215,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "c7420ee5b1aeef8681624725ef4169c577eb5ff832031eb50afa93cb37fec6fc",
-      "bytes": 132195,
+      "export_sha256": "d024915d7ca3a669fc59a1dba20a3edb21e62bdb5f59a868562376d63630aa6f",
+      "bytes": 132306,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -3544,8 +3544,8 @@
       "path": "org_selection.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c40f69fb500d9a96f9e13d62f5281a5a2a2862b782d19f0977b74323180bee83",
-      "bytes": 108945
+      "export_sha256": "479efe4a6309a8533df613c8c973f1ec1345bac4a635f62ed6cbac2fe6f26777",
+      "bytes": 112443
     },
     {
       "path": "org_view.py",
@@ -5484,8 +5484,8 @@
     {
       "path": "tests/test_mcp_wire.py",
       "source_sha256": "6ef615d88123f97f325c42bf8e4a9a41c0d3e501756f82c8833f761143cdf006",
-      "export_sha256": "9201ea72139efeb1d1e9ef234b8b1e30f328b679109f10b03860b8827fef606a",
-      "bytes": 49560,
+      "export_sha256": "68e6a3cfcebe3e8a0ad9875f0e4b3d723a4a19868daaa5cbb9007d2229756ef6",
+      "bytes": 49740,
       "python_comments_removed": 13,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -5764,8 +5764,8 @@
       "path": "tests/test_org_selection.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0b721909cd3e3bb601145d7ff5331a31edc7513fb82998b61d9adf82b72ca847",
-      "bytes": 108153
+      "export_sha256": "7a9a39eea18a759568883a3dd38e3f3b5c9012d2bdc4994696109ee95c7ddaae",
+      "bytes": 115626
     },
     {
       "path": "tests/test_organizations.py",
@@ -7276,8 +7276,8 @@
       "path": "tools/org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "229352ad49d8ef2600608126b0d5b6b80e2ca5ff918217f29ca35e858110f0b3",
-      "bytes": 25202
+      "export_sha256": "17ba2f3f90326344b0c4619f25fe77c7f5e6ca6cb2a4687294dc02dfd7e67f78",
+      "bytes": 26050
     },
     {
       "path": "tools/organization_findings.py",

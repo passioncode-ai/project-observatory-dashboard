@@ -76,10 +76,13 @@
         waits for the request queue and the rotation (no value is read or copied), the layout waits for its step.
         `show` reads the journal back with its counts and what was found since; `undo` restores the revision before;
         `confirm-replacement KEY` records that the organization's replacement for KEY works (separate-space layout).
-        An agent passes the operator's words with `--decision JSON` or `--decision-file FILE` (contract DEC-0121).
-        Gates: `plan` without a change and `show` none; a change, `apply`, `undo` and `confirm-replacement`
-        relayed (the operator's words for an agent); your passkey signing in Fabric, the macOS administrator
-        password and the administrator's computer token human
+        `undo` of an undo is a new plan: it drafts the revision the undo removed and answers its preview and digest,
+        applied only by `apply --digest`. An agent passes the operator's words with `--decision JSON` or
+        `--decision-file FILE` (contract DEC-0121). Gates: `plan` without a change and `show` none; a change,
+        `apply`, `undo` and `confirm-replacement` relayed: without `--decision` they are the person's own act only
+        when standard input is an interactive terminal, and otherwise refused (`operator-decision-required`) as
+        `observatory_org_selection` refuses them; your passkey signing in Fabric, the macOS administrator password
+        and the administrator's computer token human
 
 `accounts`, `keys` and `select` print text, or with `--json` one JSON document; every other answer is one JSON document on stdout; a refusal is `{"error": code, "message": ...}` on stderr, exit 1. A
 refusal a person resolves also carries `command` (and, outside `select`, `nextStep` in words). Exit 1 too when every organization asked
@@ -333,7 +336,12 @@ def select(args) -> int:
             if not isinstance(decision, dict):
                 # `null`, a list or a string is not a decision: never read as "no decision", which is the person's own.
                 raise S.Refusal("decision-invalid", "the decision is not one JSON object in contract DEC-0121's shape")
-        caller = "cli" if decision is None else "agent:cli"
+        # Who acts without words (OBS-505, ORG-R23): the person, only when a person types at this terminal (standard
+        # input is one, as every operator-only command asks, `osprivacy.is_terminal`). A script or an agent's shell
+        # is an agent: a change, apply, undo or confirmation then needs the operator's words and is refused without
+        # them exactly as `observatory_org_selection` refuses it (`operator-decision-required`).
+        import osprivacy
+        caller = "agent:cli" if decision is not None or not osprivacy.is_terminal(sys.stdin) else "cli"
         if args.action == "plan":
             try:
                 changes = {"include": args.include, "exclude": args.exclude, "includeGroup": args.include_group,

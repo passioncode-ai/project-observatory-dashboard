@@ -498,8 +498,10 @@ async def run_credentials() -> None:
             # OBS-417: the selection answers over the wire; a relayed act without the operator's words is refused.
             data = payload(await session.call_tool("observatory_org_selection", {"org": "example-team",
                                                                                  "action": "show"}))
-            check("org selection show answers org-select/1 with a degraded list",
-                  data.get("schema") == "org-select/1" and data.get("state") == "empty"
+            # OBS-505: with no organization configured and nothing applied, show refuses as plan would (never
+            # `empty` with a plan that then refuses).
+            check("org selection show without organizations is a typed refusal with its command",
+                  data.get("error") == "no-organizations" and bool(data.get("command"))
                   and data.get("degraded") == [], json.dumps(data)[:200])
             data = payload(await session.call_tool("observatory_org_selection", {
                 "org": "example-team", "action": "apply", "digest": "sha256:" + "0" * 64}))

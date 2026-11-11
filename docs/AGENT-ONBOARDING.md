@@ -98,7 +98,11 @@ including the line of what stays personal and any personal value that would be r
 cannot be undone). Changing the plan, `apply` with that `digest`, `undo` and `confirm-replacement`
 each need my words as `decision` (by operator, via relayed-instruction, the action
 `org.select.plan`, `org.select.apply`, `org.select.undo` or `org.select.confirm-replacement`, target
-the organization, or `ORG:vault:FOLDER/ENV/NAME` for a confirmation, my words verbatim, when I said them). The record never leaves this
+the organization, or `ORG:vault:FOLDER/ENV/NAME` for a confirmation, my words verbatim, when I said them).
+`undo` of an undo applies nothing: it answers a plan restoring the revision the undo removed, with its
+preview and `digest`; show me that preview, and apply its `digest` only with my words. The command line
+`full org select` refuses the same acts without `--decision` unless a person types at its terminal, so
+pass my words there too. The record never leaves this
 computer; nothing is sent to the organization or to Fabric yet, and no key moves: a waiting step names
 the door it waits for. My passkey signing in Fabric, the macOS administrator password and the
 administrator's computer token are mine or theirs; name them, never try them.

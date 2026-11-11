@@ -37,8 +37,9 @@ the rules propose that the record does not hold is listed as `new` and never cho
 projects and keys); anything else found since is listed and waits, unchosen.
 
 THE GATES (contract DEC-0121, ORG-R23). Reading (`show`, `plan` without a change) needs nothing. Changing the plan,
-`apply`, `undo` and `confirm-replacement` are relayed: from the CLI they are the person's own act, recorded as
-such; from an agent they need the operator's words in DEC-0121's decision shape, checked by `node/actions.py`
+`apply`, `undo` and `confirm-replacement` are relayed: from the CLI at an interactive terminal they are the person's
+own act, recorded as such (a script or an agent's shell is refused like the MCP tool, OBS-505); from an agent they
+need the operator's words in DEC-0121's decision shape, checked by `node/actions.py`
 (the contract's `actionDecision`), and the record keeps those words as who decided. The human steps (the passkey
 signing in Fabric the estate revision that places the projects in the organization's context, R1-D12; the macOS
 administrator password for a new OS account; the administrator's computer token) are named, never taken.
@@ -1469,7 +1470,8 @@ def fabric_items(rec: dict | None) -> list[dict]:
 
 def undo(org: str, *, decision: Any = None, caller: str = "cli") -> dict:
     """Restore the revision before the current one, exactly, as a new revision (ORG-R13). Refused once a project's
-    entry revision is signed in Fabric: a project then comes back only by a take-back (OBS-419)."""
+    entry revision is signed in Fabric: a project then comes back only by a take-back (OBS-419). Undoing an undo
+    writes no revision: it answers the plan that restores what the undo removed (`_redo_plan`, ORG-R14)."""
     org_ok = _org_checked(org, configured=False)
     q = CMD.format(org=_q(org_ok))
     if not _revisions(org_ok):
@@ -1490,10 +1492,10 @@ def undo(org: str, *, decision: Any = None, caller: str = "cli") -> dict:
                                           "its entry in Fabric); taking it back is a new estate revision your "
                                           "passkey signs (OBS-419, not built yet)", f"{q} show")
         if cur.get("kind") == "undo":
-            # Undoing an undo restores what the undo removed: the revision it undid.
-            restored = next((r for r in revs if r["digest"] == cur.get("undoes")), None)
-        else:
-            restored = revs[-2] if len(revs) >= 2 else None
+            # Undoing an undo is a new plan, never an apply unseen (OBS-505, ORG-R14): the form the undo removed is
+            # drafted and previewed, and only its digest applies it.
+            return _redo_plan(org_ok, cur, revs, who)
+        restored = revs[-2] if len(revs) >= 2 else None
         if restored is not None:
             sel = {"items": {i["id"]: dict(i) for i in restored["items"]}, "layout": restored.get("layout"),
                    "serves": (restored.get("serves") or {}).get("space")}
@@ -1550,6 +1552,48 @@ def undo(org: str, *, decision: Any = None, caller: str = "cli") -> dict:
     answer["answer"] = "undo"
     answer["draftDropped"] = bool(pending)
     answer["restored"] = None if restored is None else {"revision": restored["revision"], "digest": restored["digest"]}
+    return answer
+
+
+def _redo_plan(org: str, cur: dict, revs: list[dict], who: dict) -> dict:
+    """Undo of an undo (OBS-505): the revision the undo removed comes back as a draft, item by item with its own
+    decision, label and who decided it, with its layout and space, and the answer is the plan of that draft: its
+    preview and digest. Nothing is applied: ORG-R14 asks the person to see a form before it is applied, and the
+    world may have changed since that revision (a project gone, another organization's, a key found since). Called
+    under the selection's lock, after the gate."""
+    q = CMD.format(org=_q(org))
+    restored = next((r for r in revs if r["digest"] == cur.get("undoes")), None)
+    if restored is None:
+        raise Refusal("record-unreadable", "the undo does not name a revision of this record, so what it removed is "
+                                           "not known; nothing is planned", f"{q} show")
+    try:
+        pending = _draft(org)
+    except Refusal:
+        pending = None                                 # a damaged draft is replaced, as `plan --reset` would drop it
+    items: dict[str, dict] = {}
+    for i in restored.get("items") or []:
+        row = {"kind": i["kind"], "decision": i["decision"], "by": i.get("by", "record")}
+        for k in ("label", "decidedBy"):
+            if i.get(k) is not None:
+                row[k] = i[k]
+        items[i["id"]] = row
+    draft = {"schema": DRAFT_SCHEMA, "organization": org, "items": items, "layout": restored.get("layout"),
+             "restores": {"revision": restored["revision"], "digest": restored["digest"]},
+             "requestedBy": who, "updatedAt": _now(), "id": secrets.token_hex(8)}
+    draft["serves"] = ((restored.get("serves") or {}).get("space") if restored.get("layout") == "separate-space"
+                       else None)
+    # The organization's rules must read before anything is written: a plan is made only for an organization
+    # `plan` takes, so a refusal here leaves the record and any draft as they were.
+    ctx = _context(org, _chosen_projects(draft, cur))
+    _write(_folder(org) / "draft.json", draft)
+    sel = _effective(org, ctx, draft, cur)
+    if selection_digest(org, sel) == cur.get("selectionDigest"):
+        # The form the undo removed is the applied one again (everything it held is gone or the same): no draft.
+        (_folder(org) / "draft.json").unlink(missing_ok=True)
+        draft = None
+    answer = _plan_answer(org, ctx, sel, cur, draft)
+    answer.update(outcome="planned", restores={"revision": restored["revision"], "digest": restored["digest"]},
+                  draftReplaced=pending is not None, calledBy=who)
     return answer
 
 
@@ -1629,6 +1673,9 @@ def show(org: str) -> dict:
         degraded.append({"source": "store/org-selection draft", "code": refusal.code, "reason": str(refusal)[:200],
                          "effect": "the draft is ignored; drop it with " + (refusal.command or f"{q} plan --reset")})
     if not revs:
+        # Nothing applied: the organization must be one `plan` takes (OBS-505), or `empty` would send the person to
+        # a plan that refuses it. A record already applied reads without its rule: a record outlives the rule.
+        _org_checked(org_ok)
         return {"schema": VIEW_SCHEMA, "answer": "show", "organization": org_ok, "state": "empty", "record": None,
                 "draft": draft is not None, "history": [], "nextStep": "no selection is applied for this organization",
                 "command": f"{q} plan", "degraded": degraded}
@@ -1745,6 +1792,10 @@ def text(view: dict) -> str:
         for h in p["humanSteps"]:
             lines.append(f"your step: {h['what']}")
         lines.append(f"digest: {view['digest']}")
+        if view.get("restores"):
+            # Undo of an undo (OBS-505): a plan, nothing applied until its digest is.
+            lines.append(f"undo of an undo: this plan restores revision {view['restores']['revision']}; nothing is "
+                         "applied until you apply its digest")
         lines.append(f"next: {view.get('nextStep', '')}\n  {view.get('command', '')}")
     elif a == "show":
         lines = [f"Selection for {view['organization']} ({view['state']})"]

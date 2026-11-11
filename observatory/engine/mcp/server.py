@@ -658,7 +658,8 @@ def observatory_org_selection(
     `fabric-adaptation-plan` (Fabric has no door for it yet: nothing is sent), a key on `credential-requests` and
     `rotation` (OBS-191, OBS-416: no value is read or copied), the layout on its own step. `show` reads the record,
     its journal with counts per kind (done, failed, waiting, planned, undone) and the human steps; `undo` restores
-    the revision before; `confirm-replacement` records that the organization's replacement for `key` works
+    the revision before (an undo of an undo writes nothing and answers the plan that restores what it removed:
+    apply its `digest`); `confirm-replacement` records that the organization's replacement for `key` works
     (separate-space layout). Human steps are named, never taken: the passkey signing in Fabric the revision that
     places the projects in the organization's context, the macOS administrator password, the administrator's
     computer token. Refusals are typed answers with `command` (`operator-decision-required`, `decision-invalid`,
