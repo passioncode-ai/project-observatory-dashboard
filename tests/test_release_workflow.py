@@ -76,5 +76,42 @@ class WindowsHolderWorkflow(unittest.TestCase):
         self.assertNotIn("|| true", portable)
         self.assertIn("steps.portable.outcome", self.body)
 
+
+class DesktopReleaseGate(unittest.TestCase):
+    """OBS-506: the release ships the desktop app, so the guard waits for its tests too."""
+
+    def setUp(self):
+        self.release = WORKFLOW.read_text(encoding="utf-8")
+        self.desktop = (ROOT / ".github/workflows/desktop.yml").read_text(encoding="utf-8")
+
+    def guard_workflows(self):
+        body = job(self.release, "guard")
+        m = re.search(r"^          workflows: \|\n((?:^            \S.*\n)+)", body, re.M)
+        self.assertIsNotNone(m, "the guard's workflows input is not a block list")
+        return [line.strip() for line in m.group(1).splitlines()]
+
+    def test_the_guard_requires_check_and_desktop(self):
+        self.assertEqual(self.guard_workflows(), ["check.yml", "desktop.yml"])
+
+    def test_desktop_runs_on_the_release_tag(self):
+        # Paths filters are not evaluated for tag pushes, so the tag starts desktop.yml on the
+        # tagged commit beside release.yml; workflow_dispatch stays for the guard's fallback.
+        on = re.search(r"^on:\n(.*?)(?=^\S)", self.desktop, re.M | re.S).group(1)
+        self.assertRegex(on, r"(?m)^  push:\n    tags: \[\"v\[0-9\]\+\.\[0-9\]\+\.\[0-9\]\+\"\]$")
+        self.assertRegex(on, r"(?m)^  workflow_dispatch:")
+        release_on = re.search(r"^on:\n(.*?)(?=^\S)", self.release, re.M | re.S).group(1)
+        tags = re.compile(r"tags: (\[.*\])")
+        self.assertEqual(tags.search(on).group(1), tags.search(release_on).group(1))
+
+    def test_desktop_builds_every_runner_the_release_ships(self):
+        built = set(re.findall(r"^          - os: (\S+)$", self.desktop, re.M))
+        for name in ("windows", "linux"):
+            for runner in re.findall(r"runner: ([\w.-]+) \}", job(self.release, name)):
+                self.assertIn(runner, built, f"{name}: {runner}")
+
+    def test_desktop_artifacts_do_not_collide_across_architectures(self):
+        self.assertIn("name: desktop-${{ runner.os }}-${{ runner.arch }}", self.desktop)
+
+
 if __name__ == "__main__":
     unittest.main()
