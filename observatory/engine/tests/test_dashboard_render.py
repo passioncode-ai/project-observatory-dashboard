@@ -355,7 +355,7 @@ def test_the_health_page_names_versions_kinds_and_dollars() -> None:
     check("the health page builds", p.returncode == 0, p.stderr[-300:])
     page = page_with_its_script(pathlib.Path(env["OBSERVATORY_DASHBOARD_DIR"]), "health", d)
     words = ("0.17.2 → 0.17.3", "движок", "keychain", "backups status", "synthetic disk full",
-             "наблюдение", "$4.0000", "кред.")
+             "наблюдение", "$4,0000", "кред.")
     got = {w: render(page, count=w) for w in words}
     if any(v is None for v in got.values()):
         print("  SKIP  node is not on this machine")
@@ -367,7 +367,8 @@ def test_the_health_page_names_versions_kinds_and_dollars() -> None:
     check("the backup row hands over `backups status`", n["backups status"] >= 1, str(n))
     check("a maintenance warning reaches the page", n["synthetic disk full"] >= 1, str(n))
     check("a queue kind reads in Russian", n["наблюдение"] >= 1, str(n))
-    check("spend reads in dollars", n["$4.0000"] >= 1 and n["кред."] == 0, str(n))
+    # In the reader's digits (OSS-19): a Russian page writes a decimal comma.
+    check("spend reads in dollars", n["$4,0000"] >= 1 and n["кред."] == 0, str(n))
     # A14 review: with updates off the versions still show, a warning a row already
     # says is not repeated, and none is left in English; the digest reads "kind: n".
     import maintenance
