@@ -2426,7 +2426,9 @@ account of yours reads Personal (`implicit`), and a repository owner outside
 `ownership.json` still reads Not ours. `state` is `empty` (no account was found;
 `degraded` then says what was not read), `partial` (accounts were found and
 something in `degraded` was not read) or `complete`; `problems` repeats what
-`organizations.json` holds that the engine does not read.
+`organizations.json` holds that the engine does not read. An `organizations.json`
+that exists and cannot be read at all is also a `degraded` row (source
+`config/organizations.json`, code `unreadable`), so that answer reads `partial`.
 
 `org keys --org NAME` lists each vault slot of the projects NAME holds (and of
 projects whose disagreement includes it), plus each slot issued from one of its

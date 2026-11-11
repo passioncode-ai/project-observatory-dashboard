@@ -21,9 +21,16 @@ How it is known, per system:
            prove that a target is unused. Path removal therefore refuses unknown coverage;
   unknown  none of these: every path is held, and nothing is removed.
 
-Production snapshots remain incomplete because rendered argv cannot prove absence.
-Explicitly constructed complete snapshots are a legacy test/consumer API, not an
-assertion that take() observes every process use.
+`take()` snapshots remain incomplete: they keep at most MAX_HINTS names of a capped
+listing. `take_complete()` (OBS-173, OBS-327, OBS-397) reads the whole listing once,
+keeps only the names under its scope, and is the proof of non-use the disk guard and
+the cleanup act on: a path under the scope that no open file, working directory,
+executable or command line names is free. What it cannot see (a script closed after
+loading, launched by a relative path from outside the target) is accepted for the
+classes those tools remove, which are recoverable by construction: a worktree whose
+HEAD is retained, build output, caches and temporary runs. A listing that is
+unreadable, partial, cut by its deadline or carries diagnostics still refuses, and
+Windows stays unknown.
 
 Values never leave this module: a command line is cut to its absolute-path words, kept in
 memory for one decision, never logged, printed or written.
@@ -46,6 +53,12 @@ import osproc
 
 # These bound captured payload and parser collections, not whole-process RSS.
 MAX_BYTES = 2 * 1024 * 1024
+#: A whole-machine listing is read for one decision and cut to its scope: on a working Mac on
+#: 2026-11-11 `lsof -n -P -Fn` printed 3.5 MB and 9,647 distinct names, past MAX_BYTES and close
+#: to MAX_HINTS, so the capped snapshot could never be complete there (OBS-173, OBS-327).
+LISTING_BYTES = 64 * 1024 * 1024
+#: The most one action-time check may take: a whole listing read in about 1 s here, longer under load.
+FRESH_SECONDS = 15.0
 READ_BYTES = 65536
 MAX_FIELDS = 100000
 MAX_HINTS = 10000
@@ -87,7 +100,7 @@ def _capture(cmd: list[str], *, deadline: float, env: dict | None = None,
               "bytes_seen": 0, "complete": False, "reason": None, "reaped": False}
     try:
         valid = (not isinstance(deadline, bool) and math.isfinite(deadline)
-                 and type(max_bytes) is int and 0 < max_bytes <= MAX_BYTES)
+                 and type(max_bytes) is int and 0 < max_bytes <= LISTING_BYTES)
     except (TypeError, ValueError, OverflowError):
         valid = False
     if not valid or deadline <= time.monotonic():
@@ -305,16 +318,25 @@ def argument_paths(timeout: float = 20) -> list[str] | None:
 class Holders:
     """The paths held right now. `known` False means "cannot tell": every path is held."""
 
-    def __init__(self, names: list[str] | None, mode: str = "lsof", *, complete: bool = True):
+    def __init__(self, names: list[str] | None, mode: str = "lsof", *, complete: bool = True,
+                 scope: list[str] | None = None, commands: list[str] | None = None):
         # Explicit constructed snapshots retain the legacy API (used by synthetic
         # consumers); production take() must supply its actual coverage condition.
         self.known = names is not None and mode != "rename" and complete is True
         self.mode = mode if self.known else "unknown"
         self.observation = "unavailable" if names is None else "provided"
         self.names = sorted({os.path.normpath(n) for n in names or [] if n.startswith("/")})
+        # A scoped snapshot (take_complete) knows only the paths under its scope; any other
+        # path reads as held. Its command lines are kept for this decision only.
+        self.scope = scope
+        self.commands = commands or []
 
     @classmethod
-    def take(cls, timeout: float = 120, *, collect_hints: bool = True) -> "Holders":
+    def take(cls, timeout: float = 120, *, collect_hints: bool = True, complete: bool = False,
+             roots: list[str] | None = None) -> "Holders":
+        if complete:
+            # The proof the disk guard and the cleanup act on (take_complete).
+            return cls.take_complete(timeout, roots)
         # Admission cannot establish absence with today's collectors. Callers that
         # only need refusal avoid a full process inventory and its output buffers.
         # Explicit hint readers retain the existing incomplete observation path.
@@ -343,12 +365,56 @@ class Holders:
         result.observation = "partial"
         return result
 
+    @classmethod
+    def take_complete(cls, timeout: float = 60, roots: list[str] | None = None) -> "Holders":
+        """One whole `lsof` listing and one `ps` listing, cut to the paths under `roots`
+        (default: the home folder and the temporary roots). Unknown on Windows, without
+        lsof, past the deadline, or when either command fails, warns or prints nothing."""
+        if os.name == "nt":
+            return cls(None)
+        end = _deadline(timeout)
+        tool = shutil.which("lsof")
+        scope = _scope(roots)
+        if end is None or not tool or not scope:
+            return cls(None)
+        p = _capture([tool, "-n", "-P", "-Fn"], deadline=end, env=_utf8_env(), max_bytes=LISTING_BYTES)
+        if not p["complete"] or p["returncode"] != 0 or p["stderr_seen"] or not p["stdout"]:
+            return cls(None)
+        names, seen = [], False
+        try:
+            for line in p["stdout"].decode("utf-8", errors="strict").splitlines():
+                if line.startswith("n/"):
+                    seen = True
+                    name = os.path.normpath(_decode_escapes(line[1:]))
+                    if _within(name, scope):
+                        names.append(name)
+        except (UnicodeError, ValueError):
+            return cls(None)
+        # A listing of a running machine names at least one absolute path (its own lsof).
+        if not seen or time.monotonic() >= end:
+            return cls(None)
+        out = _run(["ps", "-axww", "-o", "args="], max(0, end - time.monotonic()))
+        if out is None or time.monotonic() >= end:
+            return cls(None)
+        commands = [line for line in out.splitlines() if any(root in line for root in scope)]
+        result = cls(names, "lsof", scope=scope, commands=commands)
+        result.observation = "complete"
+        return result
+
     def busy(self, path: str | os.PathLike) -> bool:
         if not self.known:
             return True
         if self.mode == "rename":
             return True                      # legacy rename state is not holder evidence
         real = os.path.normpath(os.path.realpath(str(path)))
+        if self.scope is not None:
+            if not _within(real, self.scope):
+                return True                  # outside what this snapshot looked at
+            given = os.path.normpath(str(path))
+            # Rendered command text keeps no argument boundaries: a target named anywhere in
+            # a line, spaces and all, is held (a longer sibling name holds it too, the safe side).
+            if any(real in line or given in line for line in self.commands):
+                return True
         i = bisect.bisect_left(self.names, real)
         if i < len(self.names) and self.names[i] == real:
             return True
@@ -363,8 +429,9 @@ class Holders:
 def running(names: list[str], timeout: float = 20) -> bool | None:
     """Whether a process of one of these tools runs now: True, False, or None (cannot tell).
 
-    Rendered command words can provide positive hints for interpreters and tools.
-    An unmatched nonempty request remains unknown because argv boundaries are lost.
+    Read from one whole `ps` listing: a tool named among a line's first words runs. A
+    listing that fails, is cut or is past the deadline is None; one read whole that names
+    none of them is False.
     """
     if not names:
         return False
@@ -382,43 +449,60 @@ def running(names: list[str], timeout: float = 20) -> bool | None:
     matched = False
     try:
         for position, word in _words(out):
-            if position < 3 and os.path.basename(word) in wanted:
+            base = os.path.basename(word)
+            # The tool itself, or run through an interpreter or launcher (`node .../pnpm.cjs`,
+            # `npx pnpm`): its name or `name.ext` among the first words of a line.
+            if position < 6 and (base in wanted or base.split(".", 1)[0] in wanted):
                 matched = True
     except _ParseLimit:
         return None
-    return True if matched and time.monotonic() < end else None
+    if time.monotonic() >= end:
+        return None
+    # A whole listing read without error and naming none of them: none runs (OBS-173). Until
+    # 0.35.12 this was None, and every cache command with a busy-tool condition was skipped.
+    return matched
+
+
+def _scope(roots: list[str] | None) -> list[str]:
+    """Real, existing folders a scoped snapshot covers; never the filesystem root."""
+    import tempfile
+    named = roots is not None
+    if roots is None:
+        roots = [os.path.expanduser("~"), "/tmp", tempfile.gettempdir(), "/private/var/folders"]
+    out = []
+    for root in roots:
+        try:
+            real = os.path.normpath(os.path.realpath(str(root)))
+        except (OSError, ValueError, TypeError):
+            continue
+        # A named root is the target itself, which may be gone by now; a default one must exist.
+        if real != "/" and real.startswith("/") and (named or os.path.isdir(real)) and real not in out:
+            out.append(real)
+    return out
+
+
+def _within(path: str, scope: list[str]) -> bool:
+    return any(path == root or path.startswith(root + "/") for root in scope)
 
 
 def fresh_busy(target: str, timeout: float = 5.0) -> bool | None:
-    """Fresh, target-scoped holder check. Unknown is never a free target.
+    """Fresh, target-scoped holder check: True (held), False (free) or None (cannot tell).
 
-    POSIX uses a bounded lsof query for this subtree plus fresh command paths. This
-    avoids another full-machine open-file inventory per action. Missing lsof, warnings,
-    partial output or timeout preserve the target; there is no unbounded /proc fallback.
-    Rendered ps supplies only positive hints: an empty lsof result and unmatched
-    command display remain unknown, including closed scripts. Windows is unknown
-    until a supported inventory exists. This is not a lifecycle or filesystem lock.
+    One whole `lsof` listing and one `ps` listing (`Holders.take_complete`) scoped to the
+    target: a target no open file, working directory, executable or command line names
+    is free. Missing lsof, warnings, partial output or the deadline answer None, and None
+    is never a free target; Windows is None until a supported inventory exists. This is
+    not a lifecycle or filesystem lock. Until 0.35.12 this answered only True or None, so
+    no worktree or build folder was ever removed (OBS-173, OBS-397).
     """
     if os.name == "nt":
         return None
-    end = _deadline(timeout, 5.0)
-    tool = shutil.which("lsof")
-    if not tool or end is None:
+    root = target if os.path.isdir(target) else os.path.dirname(target)
+    try:
+        budget = min(float(timeout), FRESH_SECONDS)
+    except (TypeError, ValueError):
         return None
-    selector = ["+D", target] if os.path.isdir(target) else ["--", target]
-    p = _capture([tool, "-n", "-P", "-Fn", *selector], deadline=end, env=_utf8_env())
-    if not p["complete"] or p["stderr_seen"] or time.monotonic() >= end:
+    snapshot = Holders.take_complete(budget, roots=[root])
+    if not snapshot.known:
         return None
-    if p["returncode"] == 0 and p["stdout"]:
-        try:
-            hints = _lsof_hints(p["stdout"].decode("utf-8", errors="strict"))
-        except UnicodeError:
-            return None
-        return True if hints and time.monotonic() < end else None
-    if p["returncode"] != 1 or p["stdout"]:
-        return None
-    out = _run(["ps", "-axww", "-o", "args="], max(0, end - time.monotonic()))
-    paths_held = _argument_hints(out) if out is not None else None
-    if paths_held is None or time.monotonic() >= end:
-        return None
-    return True if Holders(paths_held).busy(target) else None
+    return snapshot.busy(target)

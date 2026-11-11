@@ -8,12 +8,11 @@ import subprocess
 import time
 from pathlib import Path
 
-from .core import (ObservatoryError, config, known_slot_values, now, private_dir, private_file,
-                   redact, valid_name, write_json, write_private)
+from .core import (MIN_SECRET_BYTES, ObservatoryError, config, known_slot_values, now, private_dir,
+                   private_file, redact, valid_name, write_json, write_private)
 
 MAX_TARGET_BYTES = 16 * 1024 * 1024
 MAX_SQLITE_CELLS = 100_000
-MIN_SECRET_BYTES = 8
 
 
 def put_secret(state: Path, name: str, value: str) -> dict:

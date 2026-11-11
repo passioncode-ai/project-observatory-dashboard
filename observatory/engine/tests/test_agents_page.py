@@ -122,6 +122,12 @@ class AgentsPage(unittest.TestCase):
         stalled = next(n for n in self.view["needsYou"] if n["kind"] == "stalled")
         self.assertEqual(stalled["workflowId"], self.b)
         self.assertIn(f"workflow show {self.b}", stalled["command"])
+        # OSS-26: a command copied from a non-default workspace runs against that workspace.
+        import paths
+        self.assertTrue(stalled["command"].startswith(f"OBSERVATORY_HOME='{paths.HOME}' project-observatory full "),
+                        stalled["command"])
+        page = agents_page.agents_html({"agents": self.view}, Translator("en"))
+        self.assertNotIn(">project-observatory full workflow show", page)
 
     def test_the_lanes_follow_the_workflow_across_accounts(self) -> None:
         wf = next(w for w in self.view["workflows"] if w["workflowId"] == self.a)

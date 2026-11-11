@@ -914,6 +914,15 @@ class Create(Door):
         leftovers = [x.name for x in self.ssh.iterdir() if x.name not in ("id_new", "id_new.pub")]
         self.assertEqual(leftovers, [], "the temporary folder stayed behind")
 
+    def test_an_unattended_key_is_told_the_findings_will_list_it(self):
+        # OSS-63: the note was only in the help and the refusal; the success output now says it too.
+        p = self.door("create", "id_unattended", "--no-passphrase")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        line = next((l for l in p.stdout.splitlines() if "without a passphrase" in l), None)
+        self.assertIsNotNone(line, p.stdout)
+        self.assertIn("ssh-keys findings", line)
+        self.assertIn("ssh-keygen -p -f ~/.ssh/id_unattended", line)
+
     def test_never_overwrites_an_existing_key(self):
         self.plant("id_taken")
         before = (self.ssh / "id_taken").read_bytes()

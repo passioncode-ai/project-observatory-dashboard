@@ -190,11 +190,11 @@ class ParseAndBudget(unittest.TestCase):
                 patch.object(holders, "_run", side_effect=AssertionError("no remaining budget")):
             self.assertIsNone(holders.fresh_busy("/synthetic", timeout=.01))
 
-    def test_positive_hints_and_unknown_absence_stay_distinct(self):
+    def test_positive_hints_and_a_whole_listings_absence_stay_distinct(self):
         with patch.object(holders, "_run", return_value="python /synthetic/app.py\n"):
             self.assertEqual(holders.argument_paths(), ["/synthetic/app.py"])
             self.assertTrue(holders.running(["python"]))
-            self.assertIsNone(holders.running(["missing"]))
+            self.assertIs(holders.running(["missing"]), False)
         with patch.object(holders, "_run", side_effect=AssertionError("empty query must not spawn")):
             self.assertFalse(holders.running([]))
 

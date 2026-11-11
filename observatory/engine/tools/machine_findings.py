@@ -224,6 +224,15 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
             notes_by_source.setdefault(str(note.get("source") or "unknown"), []).append(str(note.get("reason") or "measurement unavailable"))
     for source, reasons in notes_by_source.items():
         fda = source == "trash" and any("Full Disk Access" in reason for reason in reasons)
+        if source == "holders":
+            # Without a holder listing the guard removes no path at all: not a measurement gap.
+            out.append({"type": "machine.guard_degraded", "subject": "guard:holders", "severity": "warning",
+                        **titled("the disk guard could not tell which processes hold paths, so it removed none"),
+                        "detail": "; ".join(reasons[:8]),
+                        "action": "check that `lsof` and `ps` run for this account without warnings (`lsof -n -P -Fn > /dev/null`), "
+                                  "then rerun `project-observatory full disk-guard`",
+                        "evidence": ["store:raw/disk-guard.json", "store:logs/disk-guard.jsonl"]})
+            continue
         out.append({"type": "machine.guard_degraded", "subject": "guard:" + source, "severity": "info",
                     **titled("the disk guard could not measure {source}", source=source),
                     "detail": "; ".join(reasons[:8]) + (f"; {len(reasons) - 8} further reasons in the receipt" if len(reasons) > 8 else ""),

@@ -75,6 +75,8 @@ def _e(v) -> str:
 
 
 def _command(text: str, t: Translator) -> str:
+    import paths  # a copied `full` command runs against the workspace that built the page (OSS-26)
+    text = paths.in_workspace(text)
     return (f'<p><button class="chip-btn mono" type="button" data-copy="{_e(text)}"'
             f'{t.attr("title", "copy the command")}>{_e(text)}</button></p>')
 

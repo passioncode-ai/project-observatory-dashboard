@@ -2263,7 +2263,7 @@
  "Estate spend near its monthly limit": "Общий расход близок к месячному лимиту",
  "the estate has spent ${spent} of its ${limit} monthly limit": "по всем проектам потрачено ${spent} из месячного лимита ${limit}",
  "cache-dir": "кэш приложения",
- "From the maintenance job when features.auto_cleanup is on: hourly while space is normal, every 15 minutes below the low line; never anything a process holds, maps, runs from or works inside: project-observatory full disk-guard --apply": "Запускается заданием обслуживания, если включён features.auto_cleanup: раз в час, пока места достаточно, и каждые 15 минут ниже порога low. Не трогает то, что процесс держит открытым, отображает в память, запускает или внутри чего работает: project-observatory full disk-guard --apply",
+ "From the maintenance job when features.auto_cleanup is on: hourly while space is normal, every 15 minutes below the low line; never anything a process holds, maps, runs from or works inside: {command}": "Запускается заданием обслуживания, если включён features.auto_cleanup: раз в час, пока места достаточно, и каждые 15 минут ниже порога low. Не трогает то, что процесс держит открытым, отображает в память, запускает или внутри чего работает: {command}",
  "The auto tier loses nothing; it runs on the tick and from the disk guard, which lowers its idle days under disk pressure. The manual tier archives first: project-observatory full cleanup --apply --include manual": "Автоматический уровень ничего не теряет: он работает при плановом запуске и из контроля диска, который при нехватке места сокращает сроки простоя. Ручной уровень сначала архивирует: project-observatory full cleanup --apply --include manual",
  "none yet — the maintenance job takes one a day": "пока нет: задание обслуживания делает её раз в день",
  "cleanup removed {n} items in 24 hours and freed {gb} GB": {
@@ -2310,6 +2310,7 @@
  "Disk guard measurement incomplete": "Очистка диска измерена не полностью",
  "Git cleanup stopped in three consecutive disk guard runs": "Очистка Git остановилась в трёх последовательных проходах",
  "the disk guard could not measure {source}": "Очистка диска не смогла проверить источник {source}",
+ "the disk guard could not tell which processes hold paths, so it removed none": "Очистка диска не смогла узнать, какие процессы держат пути, и ничего не удалила",
  "RSS totals may count shared pages more than once.": "Сумма RSS может учитывать общие страницы памяти несколько раз.",
  "stale": "устарело",
  "SSH folder open to other accounts": "Папка SSH открыта другим аккаунтам",

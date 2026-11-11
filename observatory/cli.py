@@ -11,7 +11,8 @@ from pathlib import Path
 
 from . import __version__
 from .core import (ObservatoryError, add_project, config, discover, init, latest, osprivacy,
-                   known_slot_values, private_file, public_export, redact, scan, state_path, write_json)
+                   known_slot_values, private_file, public_export, redact, registered_root_available, scan,
+                   state_path, write_json)
 from .credentials import put_secret, run_secret, scan_leaks, secret_names
 
 
@@ -41,7 +42,9 @@ def doctor(state: Path) -> dict:
             cfg = config(state)
             private_file(state / "fingerprint-salt")
             checks.append({"name": "private_state", "ok": True})
-            checks.append({"name": "registered_roots_available", "ok": all(Path(p["path"]).is_dir() for p in cfg["projects"])})
+            # The predicate scan uses: a folder that is, or sits under, a symlink is not available (O7).
+            available = all(registered_root_available(Path(p["path"])) for p in cfg["projects"])
+            checks.append({"name": "registered_roots_available", "ok": available})
         except ObservatoryError:
             checks.append({"name": "private_state", "ok": False})
     return {"version": __version__, "checks": checks, "network_requests": 0,

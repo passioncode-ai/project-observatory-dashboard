@@ -531,6 +531,15 @@ class ReviewRoundTwo(Base):
         self.assertIn(caught.exception.code, ("chosen-for-another", "not-ours"))
         self.assertEqual(self.sel._revisions("acme"), [])
 
+    def test_the_preview_counts_no_project_apply_would_refuse(self):
+        # ORG-R14: the preview says what apply moves; a project it always refuses is not one of them.
+        clean = self.ready()
+        included = {i["id"] for i in clean["items"] if i["kind"] == "project" and i["decision"] == "include"}
+        v = self.ready(include=["project:partner-app", "project:clone"])
+        self.assertEqual({c["project"] for c in v["conflicts"]}, {"project:partner-app", "project:clone"})
+        self.assertEqual(v["preview"]["organization"]["projects"], len(included - {"project:partner-app", "project:clone"}))
+        self.assertEqual(v["preview"]["organization"]["projects"], clean["preview"]["organization"]["projects"])
+
     def test_a_project_chosen_then_left_out_by_hand_says_so(self):
         self.sel.apply("acme", self.ready(include=["project:notes"])["digest"])
         row = next(i for i in self.sel.current("acme")["items"] if i["id"] == "project:notes")

@@ -1,16 +1,14 @@
 ---
 name: handling-secrets
 description: >-
-  Use when an agent needs to store, use, rotate or record exposure of a project's
-  credentials through Project Observatory: "use a secret", "rotate a key",
-  "record a leak", "give an agent its keys", «используй ключ», «ротируй ключ»,
-  «запиши утечку», «ключи для агента».
-  Keeps credential values out of prompts and command arguments, uses named slots,
-  and records changes without copying values into reports. NOT for granting
-  provider permissions or choosing a project's authentication architecture.
+  Use when an agent stores, uses, rotates or records exposure of a project's
+  credentials through Project Observatory, by slot name and never by value.
+  Triggers - "use a secret" / «используй ключ», "rotate a key" / «ротируй ключ»,
+  "record a leak" / «запиши утечку». NOT for granting provider permissions or
+  choosing an authentication architecture.
 license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 metadata:
-  version: "0.35.9"
+  version: "0.35.12"
 compatibility: >-
   Requires an initialized full Project Observatory installation, Python 3.11+
   and local shell access on macOS or Linux. Provider operations additionally
@@ -18,6 +16,13 @@ compatibility: >-
 ---
 
 # Handling secrets
+
+## When to use
+
+Full trigger list: "use a secret", "rotate a key", "record a leak", "give an agent its
+keys", «используй ключ», «ротируй ключ», «запиши утечку», «ключи для агента». The skill keeps
+credential values out of prompts and command arguments, uses named slots, and records
+changes without copying values into reports.
 
 Keep values on the user's machine. Work with project, environment and variable
 names. Never ask the user to paste a credential into the conversation.
@@ -46,7 +51,7 @@ signed app, a request is answered `no-client` with that step.
 2. Select the user's initialized `OBSERVATORY_HOME`. Run
    `project-observatory full doctor`. A missing workspace
    needs the documented onboarding before secret operations.
-3. Run `"$OBSERVATORY_PYTHON" "${OBSERVATORY_ROOT:-$(project-observatory full-path)}/tools/skill_check.py" handling-secrets 0.35.9`
+3. Run `"$OBSERVATORY_PYTHON" "${OBSERVATORY_ROOT:-$(project-observatory full-path)}/tools/skill_check.py" handling-secrets 0.35.12`
    (`full agent install` records that interpreter; the stock macOS `python3` is too old). An
    empty `OBSERVATORY_ROOT`, or one naming a folder that is gone (a venv rebuilt on another
    Python), is replaced by what `project-observatory full-path` prints.
