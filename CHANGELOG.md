@@ -7,6 +7,11 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Fixed
 
+- **The daily snapshot no longer fails on the update check's record** (OSS-43). The five-minute check job, which the
+  snapshot does not stop, rewrites `store/update-check.json`; a snapshot longer than five minutes always met that
+  write, failed with "Workspace changed during snapshot" three times in a row and kept the server and the tick stopped
+  for about twenty minutes each pass (the last daily before this fix was 2026-11-09). The check job's record and lock
+  are now copied without having to hold still, and a snapshot that does fail names the files that moved.
 - **systemd units name their working folder without quotes** (OBS-503). systemd does not unquote `WorkingDirectory=`,
   so the quoted path the Linux installer wrote was refused as `bad-setting` and the `-check` and `-maintain` timers
   never ran. Both unit writers now write the path bare (a space needs no escaping there); a path with a quote,
