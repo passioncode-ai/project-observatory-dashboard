@@ -3,6 +3,21 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Added
+
+- **`cloudflare.py issue --preset zone-settings --zone ZONE`**: Zone Read and Zone Settings Write on one zone, into a
+  vault slot, proved by reading the zone's settings with the new value. For a zone setting no ruleset carries, such
+  as the Google tag gateway, which the `zone-edge-rules` and `redirect-rules` tokens cannot change. Offered to
+  credential requests too.
+
+### Fixed
+
+- **A key put again by a project's old name is the one read.** `vault.py put` files a new value in the project's own
+  folder, while `use_secret.py run` by the old name read the folder it was typed as first and served the older copy
+  (a revoked key, 2026-11-11). Reads now start at the project's own folder and name the older copy on stderr.
+
 ## 0.35.12 (2026-11-11)
 
 Fixes from a walk of every shipped scenario on the installed 0.35.11 (OSS, ORG, the Mac, Windows and Linux apps and the

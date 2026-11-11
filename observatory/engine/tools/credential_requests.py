@@ -496,7 +496,7 @@ class CloudflareDoor(Door):
     #: would roll the token another slot holds), the plugin and bucket presets, which deliver elsewhere, and the
     #: Fabric Inbox ones, which reach every zone of the account.
     OFFERED = ("email-routing", "redirect-rules", "workers-routes", "email-sending-domain", "cache-purge",
-               "zone-edge-rules", "d1-edit", "email-send", "workers-edit", "workers-observability-read",
+               "zone-edge-rules", "zone-settings", "d1-edit", "email-send", "workers-edit", "workers-observability-read",
                "access-app")
 
     def presets(self) -> dict[str, dict]:

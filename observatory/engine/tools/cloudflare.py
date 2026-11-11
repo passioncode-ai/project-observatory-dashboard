@@ -20,6 +20,7 @@
     python "$T/cloudflare.py" issue --preset workers-routes --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset cache-purge --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset zone-edge-rules --zone example.com --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset zone-settings --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset workers-edit --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset fabric-inbox-server --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset fabric-inbox-account --account <slug> --vault PROJECT/ENV/NAME
@@ -327,6 +328,20 @@ PRESETS: dict[str, dict] = {
         "scope": "zone",
         "probe": "/zones/{zone_id}/rulesets/phases/http_request_cache_settings/entrypoint",
         "probe_absent_ok": True,
+    },
+    # ONE ZONE'S SETTINGS, INTO THE VAULT. A zone setting that no ruleset carries (the
+    # Google tag gateway, `/zones/{z}/settings/google-tag-gateway/config`, which injects a
+    # loader before a visitor consents) is Zone Settings Write and nothing else: the
+    # zone-edge-rules and redirect-rules tokens answered 10000 Authentication error on
+    # that PUT (a site agent's request, 2026-11-11). Not DNS, not rulesets, not purging,
+    # not a second zone. Verified by reading the zone's settings with the NEW value.
+    # Named after the zone AND the slot, like email-routing.
+    "zone-settings": {
+        "name": "observatory-zone-settings {zone} {slot} (managed)",
+        "groups": ("Zone Read", "Zone Settings Write"),
+        "why": "edits one zone's settings (such as the Google tag gateway) for the project named by the vault slot",
+        "scope": "zone",
+        "probe": "/zones/{zone_id}/settings",
     },
     # R2 OBJECTS, ONE BUCKET, INTO THE VAULT. An off-site backup needs to put
     # and read objects in one bucket — not list the account's other buckets,
