@@ -20,6 +20,7 @@
     python "$T/cloudflare.py" issue --preset workers-routes --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset cache-purge --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset zone-edge-rules --zone example.com --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset zaraz-edit --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset workers-edit --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset fabric-inbox-server --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset fabric-inbox-account --account <slug> --vault PROJECT/ENV/NAME
@@ -327,6 +328,26 @@ PRESETS: dict[str, dict] = {
         "scope": "zone",
         "probe": "/zones/{zone_id}/rulesets/phases/http_request_cache_settings/entrypoint",
         "probe_absent_ok": True,
+    },
+    # ZARAZ AND THE GOOGLE TAG GATEWAY, ONE ZONE, INTO THE VAULT. Turning off
+    # what a zone's Google tag gateway injects into its HTML (`setUpTag` in `PUT
+    # /zones/{z}/settings/google-tag-gateway/config`, a loader served to
+    # visitors before their consent) is a Zaraz right: Cloudflare's API reference
+    # accepts Zaraz Edit or Zaraz Admin for that PUT and Zaraz Read, Edit or
+    # Admin for its GET (read 2026-11-11). A board request asked for Zone
+    # Settings Write, which reaches every setting of the zone; Zaraz Edit is the
+    # narrower group that does the job (`groups --match zaraz`: Zaraz Admin, Edit
+    # and Read, all zone level). Not Zaraz Admin, not the zone's other settings,
+    # not DNS, not a second zone. Verified by reading the gateway's config with
+    # the NEW value; no 404 is taken as a proof, since how a zone without a
+    # gateway answers was not measured. Named after the zone AND the slot, like
+    # email-routing.
+    "zaraz-edit": {
+        "name": "observatory-zaraz-edit {zone} {slot} (managed)",
+        "groups": ("Zone Read", "Zaraz Edit"),
+        "why": "edits one zone's Zaraz and Google tag gateway settings for the project named by the vault slot",
+        "scope": "zone",
+        "probe": "/zones/{zone_id}/settings/google-tag-gateway/config",
     },
     # R2 OBJECTS, ONE BUCKET, INTO THE VAULT. An off-site backup needs to put
     # and read objects in one bucket — not list the account's other buckets,
@@ -1162,7 +1183,7 @@ def cmd_issue_zone(preset_key: str, zone: str | None, target: str | None,
                    account_label: str | None, wait: float = 2.0,
                    expire_days: int | None = key_expiry.DEFAULT_DAYS) -> int:
     """Issue a zone-scoped token (DNS edit, Email Routing rules, Single Redirects, cache purge,
-    edge rules) into a vault slot."""
+    edge rules, Zaraz) into a vault slot."""
     preset = PRESETS[preset_key]
     if preset.get("scope") != "zone":
         print(f"refused: preset {preset_key!r} is not zone-scoped", file=sys.stderr)
