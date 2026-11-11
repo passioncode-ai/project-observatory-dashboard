@@ -17,6 +17,9 @@ from pathlib import Path
 SKIP = {".git", ".venv", "venv", "node_modules", "__pycache__", ".next", "dist", "build"}
 MAX_FILES = 20_000
 MAX_ENV_BYTES = 1_000_000
+#: The shortest value treated as a secret: `leaks scan` skips shorter ones, and a scan redacts no
+#: shorter `.env` value, since `FLAG=1` or `MODE=a` would rewrite every "1" or "a" in the snapshot.
+MIN_SECRET_BYTES = 8
 NAME = re.compile(r"[a-zA-Z][a-zA-Z0-9_-]{0,63}\Z")
 ENV_LINE = re.compile(r"^(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$")
 
@@ -368,7 +371,7 @@ def observe_project(row: dict, salt: bytes, sensitive: set[str], budget: dict) -
                     budget["values"] = 0
                     continue
                 budget["values"] -= len(pairs)
-                sensitive.update(v for _, v in pairs if v)
+                sensitive.update(v for _, v in pairs if len(v.encode()) >= MIN_SECRET_BYTES)
                 item["environment"].append({"file": str(path.relative_to(root)),
                     "private_mode": osprivacy().private(path),
                     "variables": [{"name": k, "present": bool(v),

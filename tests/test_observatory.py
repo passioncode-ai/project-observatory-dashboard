@@ -115,6 +115,22 @@ class ObservatoryTest(unittest.TestCase):
         for sensitive in (sentinel, fingerprint, "EXAMPLE_TOKEN", "example"):
             self.assertNotIn(sensitive, export)
 
+    def test_short_env_values_never_corrupt_the_saved_snapshot(self):
+        # Scenarios O4, O8, O9: `FLAG=1` put "1" in the redaction set, so dates and ids in
+        # latest.json became [REDACTED] and status, export and dashboard refused the snapshot.
+        secret = "synthetic-long-value-0123456789"
+        (self.project / ".env").write_text(f"FLAG=1\nMODE=a\nEXAMPLE_TOKEN={secret}\n")
+        core.add_project(self.state, "example", str(self.project))
+        self.cli("scan")
+        saved = (self.state / "latest.json").read_text()
+        self.assertNotIn(secret, saved, "a value of the minimum length is still redacted")
+        report = json.loads(saved)
+        for key in ("projects", "findings"):
+            self.assertNotIn("[REDACTED]", json.dumps(report[key]), key)
+        self.cli("status")
+        self.cli("export")
+        self.cli("dashboard")
+
     def test_env_parser_never_expands_or_executes(self):
         marker = self.base / "should-not-exist"
         (self.project / ".env").write_text(f"X=$(touch {marker})\nY='literal'\n")

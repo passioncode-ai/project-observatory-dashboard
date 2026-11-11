@@ -28,6 +28,11 @@ while the major version is 0, a minor release may change behaviour and says so h
   the help and the refusal; the success output now says the key has no passphrase, that `ssh-keys findings` lists it,
   and that `ssh-keygen -p -f` gives it one.
 
+- **A short `.env` value no longer corrupts the portable scan's snapshot** (scenarios O4, O8, O9). Every non-empty
+  value joined the redaction set, so `FLAG=1` or `MODE=a` rewrote each "1" or "a" in `latest.json` as `[REDACTED]`,
+  and `status`, `export` and `dashboard` then refused the snapshot with exit 2. A scan now redacts only values of
+  at least 8 bytes, the length `leaks scan` already uses.
+
 ## 0.35.11 (2026-11-10)
 
 A service moved to another machine stays reachable at its old local address: on macOS, `full machine-move leave
