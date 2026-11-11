@@ -15,6 +15,9 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **A failed «Start server» or «Build the dashboard» is said on every page** (Windows and Linux app, SCN-008). The
   failure went to a banner that exists only over the saved pages, so on the live dashboard, the setup page or the
   empty page it vanished. Off the saved pages it is now a warning dialog, as a failed update install is.
+- **«Start server» is greyed out while it cannot work** (Windows and Linux app, SCN-008). The Server menu offered it
+  even when this workspace's server already ran or another workspace's server held the port. The menu is now rebuilt
+  each time the dashboard is shown, and the item is enabled only when neither holds, as on macOS.
 
 ## 0.35.11 (2026-11-10)
 

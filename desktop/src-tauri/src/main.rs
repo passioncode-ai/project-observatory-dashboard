@@ -135,6 +135,7 @@ fn show_dashboard(app: &AppHandle) {
                 }
             }
         }
+        refresh_menus(&app); // «Start server» follows what is shown now
     });
 }
 
@@ -290,8 +291,16 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<tauri::Wry>> {
         .separator()
         .item(&MenuItem::with_id(app, "assistant", t("Assistant"), true, Some("CmdOrCtrl+Shift+A"))?)
         .build()?;
+    // «Start server» is offered only while no server runs and the port is not another
+    // workspace's (SCN-008), as macOS does with `canStartServer`.
+    let can_start = {
+        let shown = app.state::<State>();
+        let shown = shown.shown.lock().unwrap();
+        let can_start = !shown.port_busy && shown.live.is_none();
+        can_start
+    };
     let server = SubmenuBuilder::new(app, t("Server"))
-        .item(&MenuItem::with_id(app, "start", t("Start server"), true, None::<&str>)?)
+        .item(&MenuItem::with_id(app, "start", t("Start server"), can_start, None::<&str>)?)
         .item(&MenuItem::with_id(app, "build", t("Build the dashboard"), true, None::<&str>)?)
         .build()?;
     let help = SubmenuBuilder::new(app, t("Help"))
