@@ -324,6 +324,9 @@ deploy is `--preset cache-purge --zone <zone>`, proved by purging one URL the si
 A zone's Cache Rules, Configuration Rules and AI-bot blocking are `--preset zone-edge-rules
 --zone <zone>`: Zone Read, Cache Settings Write, Config Settings Write and Bot Management Write
 on that zone, proved by reading its cache-settings phase (a 404 there means no Cache Rule yet).
+A zone's Zaraz settings, the Google tag gateway's (`setUpTag`) included, are `--preset zaraz-edit
+--zone <zone>`: Zone Read and Zaraz Edit on that zone (narrower than Zone Settings Write), proved
+by reading the gateway's config.
 Each is its own token in its own slot. When a preset's groups are unknown, `cloudflare.py groups
 --account <slug> --match "<words>"` lists the catalogue's names and levels,
 read-only and without ids.

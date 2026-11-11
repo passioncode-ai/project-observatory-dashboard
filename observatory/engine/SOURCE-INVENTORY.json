@@ -961,8 +961,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "c96c4e2f27a7a787bf65e3341cf090203cb2c3a09ad47a7f0de3c94d6e4c39c4",
-      "bytes": 321964,
+      "export_sha256": "6e3efc08175e6c8df8445d689398af70dce7a6e6b40392dc6296a4ec3c4cab2f",
+      "bytes": 321997,
       "upstream_modified": true
     },
     {
@@ -3963,8 +3963,8 @@
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "b9f16a04cdf4d9462ea915052d0b6270822ea6634ce71d11b0284dbb1ad14bd1",
-      "bytes": 27425,
+      "export_sha256": "c9932fa91694371b2d1d21290ae7e952d899bdba6119b8f58b70a22e1a08783c",
+      "bytes": 27654,
       "upstream_modified": true
     },
     {
@@ -4714,8 +4714,8 @@
     {
       "path": "tests/test_credential_doors.py",
       "source_sha256": "f008811e75e70131f87e329de7768c58b166901a4900dcfa483f4bc570c29afc",
-      "export_sha256": "65c8734cf7dff22d94a91c390459f700d61160405ba13d433790b2d1cec76d4b",
-      "bytes": 211682,
+      "export_sha256": "30fca151cc5c6f1161895c5eaad5080e69784de0e7f5d2231dd3a022cd39f7ce",
+      "bytes": 216201,
       "python_comments_removed": 14,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
@@ -6913,8 +6913,8 @@
     {
       "path": "tools/cloudflare.py",
       "source_sha256": "554f7d6d0d677c887404479e33a84d40e76f022ecd49ce15e85cf409d5e6738f",
-      "export_sha256": "89c782e2cef3f46f0c574813caddc711a035453fca80481ac0d3331151deaaf0",
-      "bytes": 125466,
+      "export_sha256": "8cbd17836556ab96e96f746ed280784a145759deccf1e6e8c8ca83382dbd095a",
+      "bytes": 126889,
       "python_comments_removed": 37,
       "python_docstrings_removed": 16,
       "tool_descriptions_retained": 0,
@@ -6978,8 +6978,8 @@
       "path": "tools/credential_requests.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "38b9f71a06ca363a984b0c71cc832f5dea573a292b5c5d612d164a03d1c0dcc4",
-      "bytes": 79162
+      "export_sha256": "019835c8a60f2b5af107f9ee94aa38213e29fb97b940c60f739911401e4e56aa",
+      "bytes": 79176
     },
     {
       "path": "tools/dashboard_open.py",

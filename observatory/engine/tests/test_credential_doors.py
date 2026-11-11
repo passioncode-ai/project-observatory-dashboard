@@ -1642,6 +1642,8 @@ def test_cf_email_presets_grant_exactly_what_the_email_service_needs() -> None:
         ("zone-edge-rules", "zone",
          ("Zone Read", "Cache Settings Write", "Config Settings Write", "Bot Management Write"),
          "/zones/z1/rulesets/phases/http_request_cache_settings/entrypoint", "er-value-"),
+        ("zaraz-edit", "zone", ("Zone Read", "Zaraz Edit"),
+         "/zones/z1/settings/google-tag-gateway/config", "zz-value-"),
     ]
     for preset, level, groups, probe, prefix in cases:
         m = cf(); _cf_with_admin(m)
@@ -1686,11 +1688,12 @@ def test_cf_email_presets_refuse_what_they_do_not_grant() -> None:
               "workers-routes": ("Zone Read", "Workers Routes Write"),
               "cache-purge": ("Zone Read", "Cache Purge"),
               "zone-edge-rules": ("Zone Read", "Cache Settings Write", "Config Settings Write",
-                                  "Bot Management Write")}
+                                  "Bot Management Write"),
+              "zaraz-edit": ("Zone Read", "Zaraz Edit")}
     level = {"email-send": "account", "workers-edit": "account", "access-app": "account",
              "email-routing": "zone",
              "redirect-rules": "zone", "workers-routes": "zone", "cache-purge": "zone",
-             "zone-edge-rules": "zone"}
+             "zone-edge-rules": "zone", "zaraz-edit": "zone"}
     for preset in groups:
         m = cf(); _cf_with_admin(m)
         log, delivered = [], []
@@ -1969,6 +1972,69 @@ def test_cf_zone_edge_rules_preset_proves_its_read_on_a_zone_without_cache_rules
                   and "deleted again" in err.getvalue(), err.getvalue())
         check(f"zone-edge-rules: no value printed ({status})",
               "er-value-" not in out.getvalue() + err.getvalue(), "")
+
+
+def test_cf_zaraz_edit_preset_takes_the_narrow_group_and_proves_the_gateway_read() -> None:
+    """Turning off the tag injection of one zone's Google tag gateway (`PUT
+    /zones/{z}/settings/google-tag-gateway/config`) is a Zaraz right: Cloudflare's
+    API reference accepts Zaraz Edit or Zaraz Admin for it, not Zone Settings Write
+    (a Fabric board request asked for that group; the narrower one exists, so the
+    preset takes it). Zone Read beside it, nothing else: no Zaraz Admin, no zone
+    settings, no DNS, no second zone. The proof reads the gateway's config with the
+    NEW value, which Zaraz Read, Edit or Admin may do; a 404 or 403 there is no
+    proof, and the token minted for the call is deleted again."""
+    import contextlib, io
+    m = cf()
+    preset = m.PRESETS["zaraz-edit"]
+    check("zaraz-edit grants Zone Read and Zaraz Edit only",
+          tuple(preset["groups"]) == ("Zone Read", "Zaraz Edit") and "account_groups" not in preset
+          and "zone_groups" not in preset, str(preset))
+    check("zaraz-edit never takes Zaraz Admin or Zone Settings Write",
+          not {"Zaraz Admin", "Zone Settings Write"} & set(preset["groups"]), str(preset))
+    check("zaraz-edit is a zone preset named after its zone and its slot",
+          preset["scope"] == "zone" and "{zone}" in preset["name"] and "{slot}" in preset["name"], str(preset))
+    check("zaraz-edit declares no 404 as a proof", not preset.get("probe_absent_ok"), str(preset))
+    entry = "/zones/z1/settings/google-tag-gateway/config"
+    groups = ("Zone Read", "Zaraz Edit")
+    for status, delivers in ((200, True), (404, False), (403, False)):
+        m = cf(); _cf_with_admin(m)
+        log, delivered = [], []
+        _preset_fake(m, log, [(g, "zone") for g in groups] + [("Zaraz Admin", "zone")], "/never", "zz-value-")
+        inner = m._request
+
+        def answer(path, token, payload=None, method=None, inner=inner, status=status):
+            if path.startswith(entry) and token.startswith("zz-value-"):
+                log.append(("GET", path, token, None))
+                if status == 200:
+                    return {"success": True, "result": {"enabled": True, "setUpTag": True}}
+                raise RuntimeError(f"cloudflare answered HTTP {status}; provider response withheld")
+            return inner(path, token, payload, method)
+        m._request = answer
+        m.deliver_to_vault = lambda value, p, e, n, d=delivered: d.append((p, e, n))
+        m._journal = lambda *a, **k: None
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = m.cmd_issue_zone("zaraz-edit", "example.com", "proj/prod/CF_ZARAZ", None, wait=0)
+        create = [pl for _m, p, _t, pl in log if p == "/accounts/a1/tokens" and pl]
+        if delivers:
+            check("zaraz-edit: the gateway config read with the NEW value proves the token",
+                  rc == 0 and delivered == [("proj", "prod", "CF_ZARAZ")], f"{rc} {err.getvalue()}")
+            check("zaraz-edit: the token is named after its zone and its slot",
+                  bool(create) and create[0]["name"]
+                  == "observatory-zaraz-edit example.com proj/prod/CF_ZARAZ (managed)", str(create))
+            pols = create[0]["policies"] if create else []
+            check("zaraz-edit: one policy, the zone's own resource, exactly its two groups",
+                  len(pols) == 1 and pols[0]["resources"] == {"com.cloudflare.api.account.zone.z1": "*"}
+                  and [g["id"] for g in pols[0]["permission_groups"]] == [f"id-zone-{g}" for g in groups],
+                  str(pols))
+        else:
+            check(f"zaraz-edit: a {status} on the gateway config is not a proof",
+                  rc == 1 and not delivered, f"{rc} {err.getvalue()}")
+            check(f"zaraz-edit: the token that never proved its read is deleted ({status})",
+                  any(_m == "DELETE" and p == "/accounts/a1/tokens/t-new" for _m, p, _t, _pl in log)
+                  and "deleted again" in err.getvalue(), err.getvalue())
+        check(f"zaraz-edit: no value printed ({status})",
+              "zz-value-" not in out.getvalue() + err.getvalue(), "")
 
 
 def test_cf_cache_purge_proves_itself_with_one_harmless_purge() -> None:
@@ -3643,6 +3709,7 @@ if __name__ == "__main__":
                test_cf_zone_analytics_preset_reads_one_zone_into_the_vault,
                test_cf_cache_purge_proves_itself_with_one_harmless_purge,
                test_cf_zone_edge_rules_preset_proves_its_read_on_a_zone_without_cache_rules,
+               test_cf_zaraz_edit_preset_takes_the_narrow_group_and_proves_the_gateway_read,
                test_cf_access_app_preset_reads_the_team_domain_and_changes_no_organization,
                test_or_stash_demands_a_label_because_the_provider_names_nothing,
                test_or_rotation_creates_and_delivers_before_deleting,

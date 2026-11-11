@@ -3,6 +3,17 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Added
+
+- **A Cloudflare preset for one zone's Zaraz settings** (`zaraz-edit`): `issue --preset zaraz-edit --zone <zone>
+  --vault PROJECT/ENV/NAME` grants Zone Read and Zaraz Edit on that zone only, so a site can turn off what its Google
+  tag gateway injects into HTML (`setUpTag` in `PUT /zones/{zone_id}/settings/google-tag-gateway/config`, which
+  Cloudflare's API reference allows to Zaraz Edit or Zaraz Admin). A board request asked for Zone Settings Write; Zaraz
+  Edit is the narrower group that does the job. The new value is proved by reading the gateway's config; the token is
+  named after the zone and the slot, and credential requests may ask for it.
+
 ## 0.35.12 (2026-11-11)
 
 Fixes from a walk of every shipped scenario on the installed 0.35.11 (OSS, ORG, the Mac, Windows and Linux apps and the
