@@ -1189,9 +1189,11 @@ def build():
                           "domains": DOMAIN_ROWS,
                           "updated": pdoc.get("updated_on", ""),
                           "measured": store["health"].get("last_scan", ""),
-                          # The registry this build read (OBS-504): a page served by the local
-                          # server asks whether it is still the registry now and says so if not.
-                          "built_from": built_from}
+                          # When this build read the registry (OBS-504): a page served by the local
+                          # server asks whether the registry is still the one recorded for this build.
+                          # Its fingerprint stays in built-from.json and the server's answer: a page
+                          # carries no value-shaped payload (test_env_page).
+                          "built_from": {k: built_from[k] for k in ("built_at", "projects")}}
     # THE MACHINE, read from what the tick's machine/git-hygiene/cleanup steps
     # wrote; only the Machine page carries it (shell.slice_for).
     try:
@@ -1220,7 +1222,8 @@ def build():
         PAYLOAD["agents"] = agents_view.summary()
     except Exception as exc:  # noqa: BLE001 — a page, not a crash
         PAYLOAD["agents"] = {"degraded": [{"source": "agents", "reason": f"{type(exc).__name__}: {exc}"[:200]}]}
-    build.last_payload = PAYLOAD                                                  
+    build.last_payload = PAYLOAD
+    build.last_stamp = built_from
     payload = json.dumps(PAYLOAD, ensure_ascii=False)
     locale = build_locale()
     t = i18n.Translator(locale)
@@ -2163,13 +2166,14 @@ if (cs) cs.textContent = DATE(D.updated || "—");
 // now, and says so when it is not. Opened as a file, it asks nothing and says nothing.
 (() => {
   const from = D.built_from || {};
-  if (!from.fingerprint || !String(location.protocol || "").startsWith("http")) return;
+  if (!from.built_at || typeof fetch !== "function"
+      || typeof location === "undefined" || !String(location.protocol || "").startsWith("http")) return;
   fetch("/dashboard-freshness", {cache: "no-store"})
     .then(r => r.ok ? r.json() : null)
     .then(answer => {
-      const now = (answer || {}).registry || {};
       const el = document.getElementById("stale-note");
-      if (!el || !now.fingerprint || now.fingerprint === from.fingerprint) return;
+      // Only the build the record names: pages written by a build stopped before its record are not it.
+      if (!el || !answer || answer.current !== false || answer.built_at !== from.built_at) return;
       el.textContent = T("These pages are older than the registry: they were built at {at}, and the registry has changed since. The next dashboard build replaces them.",
                          {at: DATE(String(from.built_at || "").replace("T", " ").replace("Z", " UTC"))});
       el.hidden = false;
@@ -4839,5 +4843,5 @@ if __name__ == "__main__":
           + ", ".join(f"{k} {v // 1024} KB" for k, v in sizes.items()))
     # Last, once every page is written (OBS-504): a build stopped before this line leaves the record
     # of the build before it, so the pages are never said to be newer than they are.
-    _from = dict(build.last_payload["built_from"])
+    _from = dict(build.last_stamp)
     dashboard_stamp.record({k: v for k, v in _from.items() if k != "built_at"}, built_at=_from["built_at"])

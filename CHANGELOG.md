@@ -3,6 +3,40 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.35.14 (2026-11-11)
+
+The last five findings of the 2026-11-11 scenario walk: the tick keeps the dashboard its time and the pages say when
+they are older than the registry; an undo of an undo in the organization selection is a new plan; a key prompt's
+decline no longer fails where `tools/node.py` shadows the engine's package; the Mac app hides a late dashboard window
+on a background launch and runs one update helper at a time; and a release now waits for the desktop builds, arm64
+included. No setting or migration changes. The observatory-log plugin moves to 0.35.14 with the release.
+
+### Fixed
+
+- **The dashboard step keeps 60 seconds the steps before it cannot spend** (OBS-504). On a loaded machine `findings`
+  took the time the tick keeps for the end, so the dashboard step was stopped at about 20 s and the pages stayed hours
+  older than the registry. A step before the dashboard now starts or runs only with time beyond that floor. The pages
+  record which registry they were built from (`built-from.json`); served by the local server they show a notice when
+  the registry has changed since, and the tick's receipt says so (`dashboard_current`, `dashboard_note`).
+- **An undo of an undo is a plan** (OBS-505). `org select undo` run twice wrote the earlier revision again without a
+  preview; it now writes a draft that needs its own preview and `apply --digest`, under the undo gate. Without
+  `--decision` the command line counts as the person's act only at an interactive terminal; from a script or an
+  agent's shell it answers the tool's `operator-decision-required` refusal (also OBS-444). `org select show` of an
+  organization nobody configured is refused instead of answered `empty`.
+- **A key prompt's decline imports the engine's own package** (OBS-507). `from node import actions` loaded
+  `tools/node.py` whenever `tools/` was ahead of the engine on the import path; the DigitalOcean count also left
+  `tools/` first in a long-lived process. Both are fixed.
+- **The Mac app** (OBS-508): a `--background` launch hides the dashboard by its window identity whenever it appears,
+  not only at 0 and 0.5 s; the update prompt attaches to the dashboard even when the Assistant is in front; a second
+  restart while an update helper runs starts no second helper (an exclusive lock held as long as the helper), which
+  installed one version twice on 2026-11-08.
+
+### Changed
+
+- **A release waits for the desktop builds** (OBS-506). The release guard requires `desktop.yml` as well as
+  `check.yml` on the tagged commit, `desktop.yml` runs on a release tag and builds Windows and Linux arm64 as the
+  release ships them. `check.yml` stays on pull requests because the default branch's protection requires its checks.
+
 ## 0.35.13 (2026-11-11)
 
 A key read from the folder `vault.py put` writes, week-old Docker images pruned by the disk guard at critical, and the

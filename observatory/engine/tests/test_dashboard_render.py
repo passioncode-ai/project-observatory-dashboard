@@ -556,8 +556,8 @@ def test_the_pages_say_which_registry_they_were_built_from() -> None:
           and record["registry"].get("projects") == now["projects"] and bool(record.get("built_at")),
           str(record))
     index = (pages / "index.html").read_text(encoding="utf-8")
-    check("each page carries the registry it was built from",
-          f'"fingerprint": "{now["fingerprint"]}"' in index)
+    check("each page carries when its build read the registry, and no fingerprint",
+          f'"built_at": "{record["built_at"]}"' in index and now["fingerprint"] not in index)
     check("and the notice it shows when that registry is not the one now, hidden until then",
           '<p class="stale-note" id="stale-note" role="status" hidden></p>' in index)
     check("the pages built from the registry now are current",
