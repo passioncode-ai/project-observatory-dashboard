@@ -12,6 +12,20 @@ while the major version is 0, a minor release may change behaviour and says so h
   never ran. Both unit writers now write the path bare (a space needs no escaping there); a path with a quote,
   backslash, newline, `%` or `$`, a relative path, or one ending in white space is refused. Reinstalling the jobs
   rewrites the units.
+- **The Machine page no longer says no process runs inside a project folder when nobody measured it** (OSS-21).
+  The light memory snapshot names executables only (`projects_measured: false`); the page now shows its unmeasured
+  state for that sample instead of an empty result.
+- **The Machine page keeps the grouping by origin and by project** (OSS-21). The light memory snapshot, written more
+  often, replaced the whole process section; memory still comes from the newest sample, while processes keep the full
+  survey unless the light sample attributes better than executable-only, each with its own measurement time.
+- **Backup size and spend figures follow the reader's locale** (OSS-19). The machine backup size, the project's spend
+  and a key's "spent" figure were fixed-point strings with an English decimal point; they are now formatted in the
+  reader's language.
+- **Commands rendered on the server name their workspace** (OSS-26). The Agents view's commands, the DigitalOcean
+  and Cloudflare pages' commands and the Machine page's disk-guard hint now carry `OBSERVATORY_HOME=…`, as the page
+  script's commands do, so one copied from a non-default workspace runs against it.
+- **A README that opens with HTML gives its prose as the project's description** (OSS-14). A line of HTML (a logo, a
+  badge row) is skipped like a heading; before, its markup was shown escaped as the description.
 
 ## 0.35.11 (2026-11-10)
 
