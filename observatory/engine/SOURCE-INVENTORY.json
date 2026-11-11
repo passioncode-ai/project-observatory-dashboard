@@ -734,15 +734,15 @@
       "path": "defaults/cleanup-history.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c705c824c544dd101ff548f298d83f87a86fd41900d44c6781488986d2c89998",
-      "bytes": 14299
+      "export_sha256": "14bf7e90813064636cd5eddf7e568ab1f6e2dcb287b7459c797fd912e45ca154",
+      "bytes": 21095
     },
     {
       "path": "defaults/cleanup.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "eda1d801172d33c4cd7dfdbb4223c01886912290336ff348a8e336ceaf292f9f",
-      "bytes": 6653
+      "export_sha256": "75faef996f4cab91b2cc1fb5a8296540047799727408b22e8f32ab015c478ac4",
+      "bytes": 7079
     },
     {
       "path": "defaults/credential_annotations.json",
@@ -4878,8 +4878,8 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9bf7f05ce0afd3beeb43c6c88b7c67b689a8841b9e48dc35f030c752e99b66ce",
-      "bytes": 173427
+      "export_sha256": "d76c4b4dfd2f581d46961a9000e06666c1f46fa3ad98e5648985474485bd2745",
+      "bytes": 174495
     },
     {
       "path": "tests/test_dispatch_packet.py",

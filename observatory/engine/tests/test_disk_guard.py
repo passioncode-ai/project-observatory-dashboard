@@ -2939,6 +2939,23 @@ class VmCacheAtCritical(Base):
             self.assertNotIn("limactl shell -- {instance} sudo -n fstrim -av",
                              {a["target"] for a in self.g.plan_commands(cfg, "critical")})
 
+    def test_critical_prunes_week_old_images_no_container_uses(self):
+        """A peer freed 1.2 GB by hand with `docker image prune -a` at 6 GB free (2026-11-11):
+        at critical the guard does it too, for images over a week old, never volumes."""
+        images = [c for c in self.shipped() if c["argv"][:3] == ["docker", "image", "prune"]
+                  and c.get("level") == "critical"]
+        self.assertEqual(len(images), 1, images)
+        self.assertIn("-af", images[0]["argv"])
+        self.assertIn("until=168h", images[0]["argv"])
+        self.assertTrue(images[0].get("needs_running"))
+        self.assertNotIn("volume", " ".join(images[0]["argv"]))
+
+    def test_a_workspace_copy_of_0_35_12_takes_the_new_commands(self):
+        hist = json.loads((Path(self.g.ROOT) / "defaults" / "cleanup-history.json").read_text())["guard"]
+        self.assertIn("0.35.12", hist)
+        shipped = json.loads((Path(self.g.ROOT) / "defaults" / "cleanup.json").read_text())["guard"]
+        self.assertNotEqual(hist["0.35.12"]["commands"], shipped["commands"])
+
     def test_docker_entries_count_a_colima_or_lima_daemon_as_running(self):
         import holders
         needs = [c["needs_running"] for c in self.shipped() if c["argv"][0] == "docker"]

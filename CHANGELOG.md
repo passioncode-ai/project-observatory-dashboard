@@ -14,6 +14,10 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ### Fixed
 
+- **The disk guard prunes week-old Docker images at critical.** At `critical` it now runs `docker image prune -af
+  --filter until=168h` while a local daemon already runs: images no container uses, made over a week ago, pulled or
+  built again on demand; never images in use, containers or volumes. A peer freed 1.2 GB this way by hand at 6 GB free.
+  The guard section 0.35.12 shipped is recorded, so a workspace's copy of it takes this default.
 - **A key put again by a project's old name is the one read.** `vault.py put` files a new value in the project's own
   folder, while `use_secret.py run` by the old name read the folder it was typed as first and served the older copy
   (a revoked key, 2026-11-11). Reads now start at the project's own folder and name the older copy on stderr.
