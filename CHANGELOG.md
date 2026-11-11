@@ -30,6 +30,10 @@ while the major version is 0, a minor release may change behaviour and says so h
 - **A provider's reason keeps the repair command it ends with** (OSS-102, OSS-106). `full org accounts` cut a scan's
   own reason at 200 characters, so a reason ending in `--account <account>` lost the command that repairs it. The
   bound is now 400 characters.
+- **`org select plan` previews only the projects apply can move** (ORG-R14). The preview counted a chosen project
+  that apply always refuses (another organization's, or Not ours), so it told the organization it would receive
+  projects it never would. Those projects stay listed under `conflicts` and are left out of
+  `preview.organization.projects`.
 
 ## 0.35.11 (2026-11-10)
 
