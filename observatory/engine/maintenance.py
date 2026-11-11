@@ -927,10 +927,34 @@ def _step_systemd_jobs(launch) -> dict:
         return {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
 
 
+def snapshot_due(base: Path, state: dict, at: datetime.datetime) -> bool:
+    """Whether the daily snapshot is due. An update's before-upgrade snapshot counts for it only
+    while no secret store is kept outside the workspace: that snapshot never carries one
+    (`update-snapshot`), so with an update a day the store was never carried and doctor's 48-hour
+    warning fired (OSS-100). With such a store the daily is due a day after the newest snapshot that
+    wrote a carry record, whatever the update did."""
+    if due(state, "snapshot", SNAPSHOT_EVERY, at):
+        return True
+    if (state.get("snapshot") or {}).get("result") != "before-upgrade":
+        return False
+    try:
+        import backup_vault
+        import secret_store_carry
+        home = base.resolve()
+        stores = [s for s in secret_store_carry.external_stores(base) if not backup_vault._within(home, s["path"])]
+        if not stores:
+            return False
+        last = parse_iso((backup_vault._last_carry(base) or {}).get("at"))
+    except Exception:  # noqa: BLE001: unreadable settings keep the cadence as it was
+        return False
+    return last is None or at - last >= SNAPSHOT_EVERY
+
+
 def step_snapshot(base: Path, state: dict, at: datetime.datetime, services=None,
                   sleep=time.sleep) -> dict:
-    """A full encrypted snapshot once a day. An update's before-upgrade snapshot counts."""
-    if not due(state, "snapshot", SNAPSHOT_EVERY, at):
+    """A full encrypted snapshot once a day. An update's before-upgrade snapshot counts, unless a
+    secret store kept outside the workspace waits to be carried (`snapshot_due`)."""
+    if not snapshot_due(base, state, at):
         return {"result": "not-due"}
     # A FAILED snapshot is retried after SNAPSHOT_RETRY, not on the next pass: every attempt
     # stops the tick and the server, and with the pass every 15 minutes a lasting failure
@@ -1206,7 +1230,8 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
                                        before_check=settle if first_check_delay > 0 else None)
         if report["update"]["result"].startswith("updated"):
             # The new release's code is what should run next: the app and the snapshot
-            # wait for the next pass, and the update's before-upgrade snapshot counts.
+            # wait for the next pass, and the update's before-upgrade snapshot counts (unless an
+            # external secret store waits to be carried: `snapshot_due`).
             state["snapshot"] = {"at": iso(at), "result": "before-upgrade"}
             report["next"] = "the next pass runs the new release"
         elif update_running(base):

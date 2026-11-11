@@ -13,6 +13,12 @@ while the major version is 0, a minor release may change behaviour and says so h
   backslash, newline, `%` or `$`, a relative path, or one ending in white space is refused. Reinstalling the jobs
   rewrites the units.
 
+- **An automatic update no longer keeps an external secret store out of the daily backup** (OSS-100). The snapshot
+  an update takes never carries a store kept outside the workspace, yet it reset the daily snapshot's clock, so with
+  an update a day the store was never carried and doctor warned that the newest carry was over 48 hours old. With
+  such a store the daily snapshot is now due a day after the last one that recorded the store, whatever the update
+  did; without one the cadence is unchanged.
+
 ## 0.35.11 (2026-11-10)
 
 A service moved to another machine stays reachable at its old local address: on macOS, `full machine-move leave
