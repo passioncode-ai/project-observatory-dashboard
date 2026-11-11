@@ -145,6 +145,11 @@ def summary_html(m: dict, t: Translator) -> str:
 GUARD_CLASSES = ("cache-command", "cache-dir", "build-output", "temp", "trash", "browser-clone")
 
 
+def _in_workspace(command: str) -> str:
+    import paths
+    return paths.in_workspace(command)
+
+
 def guard_html(g: dict | None, t: Translator) -> str:
     """The disk guard's last run, the largest files it found, and the simulators that
     hold memory swap writes to this disk — each with what brings the space back."""
@@ -169,8 +174,9 @@ def guard_html(g: dict | None, t: Translator) -> str:
                              for k in kept], ""))
     parts.append(t.mark("From the maintenance job when features.auto_cleanup is on: hourly while space is normal, every "
                         "15 minutes below the low line; never anything a process holds, maps, runs from or works inside: "
-                        "project-observatory full disk-guard --apply",
-                        tag="p", attrs=' class="machine-hint"'))
+                        "{command}", tag="p", attrs=' class="machine-hint"',
+                        # Copied from a page of a non-default workspace, it runs against that one (OSS-26).
+                        command=_in_workspace("project-observatory full disk-guard --apply")))
     coverage = g.get("largeFiles") or {}
     files = (coverage.get("files") or [])[:ROWS]
     measured = coverage.get("complete") is True

@@ -1003,6 +1003,15 @@ class LightSample(Base):
         self.assertIn("app:Editor", en)
         self.assertNotIn("executable:node", en)
 
+    def test_the_guard_command_names_the_workspace(self):
+        # OSS-26: a command copied from the page runs against the workspace that built it.
+        import machine_page, paths
+        from i18n import Translator
+        guard = {"at": "2026-01-01T00:00:00Z", "level": "normal", "results": {}, "planned": {}}
+        for locale in ("en", "ru"):
+            html = machine_page.guard_html(guard, Translator(locale))
+            self.assertIn(f"OBSERVATORY_HOME=&#x27;{paths.HOME}&#x27; project-observatory full disk-guard --apply", html)
+
     def test_the_light_sample_stands_alone_when_no_full_survey_ran(self):
         import machine_view
         (self.home / "store/raw/machine-memory.json").write_text(json.dumps(self.light(self.stamp())))

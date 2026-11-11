@@ -192,14 +192,15 @@ def summary(db: pathlib.Path | None = None,
         if w["stalled"]:
             needs.append({"kind": "stalled", "workflowId": wid, "projectId": w["projectId"],
                           "seconds": w["silentSeconds"],
-                          "command": f"project-observatory full workflow show {wid}"})
+                          "command": paths.in_workspace(f"project-observatory full workflow show {wid}")})
         if w.get("lapsedHandoff"):
             needs.append({"kind": "handoff-lapsed", "workflowId": wid,
                           "projectId": w["projectId"],
-                          "command": f"project-observatory full workflow handoff {wid} --to-provider PROVIDER --reason limit"})
+                          "command": paths.in_workspace(
+                              f"project-observatory full workflow handoff {wid} --to-provider PROVIDER --reason limit")})
         if w["keptSteps"]:
             needs.append({"kind": "kept-steps", "workflowId": wid, "projectId": w["projectId"],
-                          "count": w["keptSteps"], "command": "project-observatory full review"})
+                          "count": w["keptSteps"], "command": paths.in_workspace("project-observatory full review")})
         for c in w["credentials"]:
             # `unknown` blocks a workflow exactly as `missing` does (store/workflow._blocking),
             # so it waits for a person too (audit A10).

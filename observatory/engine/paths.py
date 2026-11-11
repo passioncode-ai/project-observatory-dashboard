@@ -92,6 +92,35 @@ SESSIONS = configuration.source_path("sessions", "sessions", "OBSERVATORY_SESSIO
 DB = setting_path("OBSERVATORY_DB", STORE / "observatory.db")
 
 
+FULL = "project-observatory full "
+
+
+def shell_arg(value: object) -> str:
+    """A shell word, always single-quoted with a quote escaped: the page script's `shellArg`."""
+    return "'" + str(value).replace("'", "'\\''") + "'"
+
+
+def handed_home() -> str | None:
+    """The workspace a handed-over command names: this one, or none in a demo build, whose pictures
+    are meant for strangers (`build_dashboard.runtime_paths`, OBSERVATORY_DEMO=1)."""
+    return None if os.environ.get("OBSERVATORY_DEMO") == "1" else str(HOME)
+
+
+def full_command(*args: str, home: object = None) -> str:
+    """The `full` command with these arguments, run against `home` when one is named
+    (`OBSERVATORY_HOME=…`). The dashboard's `fullCommand` and Home's `full_command` spell it the same way."""
+    return (f"OBSERVATORY_HOME={shell_arg(home)} " if home else "") + FULL + " ".join(args)
+
+
+def in_workspace(command: str) -> str:
+    """A handed-over `project-observatory full …` command, pinned to this workspace (OSS-26): copied
+    from a page of a non-default workspace it would otherwise run against the default one. Any
+    other command is returned as it is."""
+    if not command.startswith(FULL):
+        return command
+    return full_command(command[len(FULL):], home=handed_home())
+
+
 def sqlite_uri(path, mode: str = "ro") -> str:
     """The `file:` URI for `sqlite3.connect(…, uri=True)`, with the path percent-encoded.
 

@@ -512,6 +512,11 @@ class Pages(unittest.TestCase):
         body = infra_page.infra_html("cloudflare", payload_with(cloudflare=None), Translator())
         self.assertIn("Not measured yet", body, "on, but never scanned: the scan, not the switch")
         self.assertIn("scan-cloudflare-account", body)
+        # OSS-26: every `full` command names the workspace the page was built from.
+        import paths
+        self.assertIn(f"OBSERVATORY_HOME=&#x27;{paths.HOME}&#x27; project-observatory full scan-cloudflare-account", body)
+        self.assertIn(f"OBSERVATORY_HOME=&#x27;{paths.HOME}&#x27; project-observatory full local", body)
+        self.assertNotIn(">project-observatory full", body)
 
     def test_a_scan_that_read_nothing_is_never_no_resources(self):
         doc = infra_registry.digitalocean_document(
