@@ -340,11 +340,17 @@ def env_pairs(path: Path) -> list[tuple[str, str]]:
     return pairs
 
 
+def registered_root_available(root: Path) -> bool:
+    """Whether a registered folder can be observed: a directory that is not, and does not sit
+    under, a symlink. `scan` and `doctor` ask the same question (scenario O7)."""
+    return root.is_dir() and not root.is_symlink() and not any(p.is_symlink() for p in root.parents)
+
+
 def observe_project(row: dict, salt: bytes, sensitive: set[str], budget: dict) -> dict:
     root = Path(row["path"])
     item = {"name": row["name"], "evidence": row.get("evidence"), "files": 0,
             "bytes": 0, "dependencies": {}, "environment": [], "degraded": []}
-    if not root.is_dir() or root.is_symlink() or any(p.is_symlink() for p in root.parents):
+    if not registered_root_available(root):
         item["degraded"].append("Registered directory is absent or its scope now uses a symlink.")
         item["git"] = {"present": False}
         return item

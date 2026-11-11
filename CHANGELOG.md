@@ -33,6 +33,10 @@ while the major version is 0, a minor release may change behaviour and says so h
   and `status`, `export` and `dashboard` then refused the snapshot with exit 2. A scan now redacts only values of
   at least 8 bytes, the length `leaks scan` already uses.
 
+- **The portable `doctor` agrees with `scan` about a registered folder replaced by a symlink** (scenario O7). Doctor
+  followed the link and reported the folder available while `scan` refused it; both now use one check, and doctor
+  reports the folder not available.
+
 ## 0.35.11 (2026-11-10)
 
 A service moved to another machine stays reachable at its old local address: on macOS, `full machine-move leave

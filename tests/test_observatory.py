@@ -295,6 +295,19 @@ class ObservatoryTest(unittest.TestCase):
         self.assertTrue(report["projects"][0]["degraded"])
         self.assertEqual(report["projects"][0]["environment"], [])
 
+    def test_doctor_reports_a_registered_root_replaced_by_a_symlink(self):
+        # Scenario O7: doctor followed the link while scan refused it.
+        core.add_project(self.state, "example", str(self.project))
+        roots = lambda expected: next(c for c in self.cli("doctor", expected=expected)["checks"]  # noqa: E731
+                                      if c["name"] == "registered_roots_available")
+        self.assertTrue(roots(0)["ok"])
+        self.project.rename(self.base / "old-project")
+        external = self.base / "external"
+        external.mkdir()
+        self.project.symlink_to(external, target_is_directory=True)
+        self.assertFalse(roots(2)["ok"])
+        self.assertTrue(core.scan(self.state)["projects"][0]["degraded"], "doctor and scan agree")
+
     def test_metadata_canary_redacted_in_names_paths_and_slot_labels(self):
         value = "SYNTHETIC_CANARY_12345678"
         result = credentials.put_secret(self.state, value, value)
