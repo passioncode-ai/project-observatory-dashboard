@@ -34,7 +34,7 @@ extension XCTestCase {
     /// An update watch that logs into a temporary folder and can neither spawn nor quit.
     @MainActor func scratchUpdates(_ defaults: UserDefaults? = nil) -> Updates {
         let log = AppLog(file: FileManager.default.temporaryDirectory.appendingPathComponent("obs-log-\(UUID().uuidString)/app.log"))
-        return Updates(defaults: defaults ?? scratchDefaults(), log: log, spawn: { _, _ in throw BridgeError.configuration }, terminate: {},
+        return Updates(defaults: defaults ?? scratchDefaults(), log: log, spawn: { _, _, _ in throw BridgeError.configuration }, terminate: {},
                        badge: { _ in })
     }
     /// Open at login with the system replaced: nothing is registered for the person running the tests.

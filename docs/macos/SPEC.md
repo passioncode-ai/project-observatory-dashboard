@@ -188,7 +188,8 @@ verifies and stages a new app and swaps it only while the app is not running, re
 prompt hours behind the staged update) and again before acting on it; a pending `X.Y.Z` strictly newer than its own `CFBundleShortVersionString` shows
 **Restart to update** in the app menu and as a toolbar button in the dashboard window, and a
 badge (`↑`) on the Dock icon, so it is seen without opening a window. Once per version, while a
-window of the app is on screen, a sheet asks «Restart to finish updating» with *Restart now* (the
+window of the app is on screen, a sheet on the dashboard window (found by its identifier; the key
+window only when no dashboard is on screen, `UpdateAlert.sheetWindow`) asks «Restart to finish updating» with *Restart now* (the
 same act as *Restart to update*) and *Later* (remembered for that version as `updatePromptedVersion`;
 the menu item, the toolbar button and the badge stay). Activation happens only at a safe point:
 the person's *Restart to update*, the person's quit (⌘Q), or 30 minutes with no titled window
@@ -198,7 +199,18 @@ arguments only) that waits ≤ 60 s for the app to exit, runs the single documen
 `OBSERVATORY_HOME=<workspace> <program> full maintain app` (the engine's app step alone, under
 the maintenance lock; retried while another pass holds it, ≤ 5 min; ≤ 15 min in all), then
 opens the app again — in front after *Restart to update*, with `--background` (no window, no
-focus) after an idle restart, not at all after a quit. When the swap does not happen the old
+focus) after an idle restart, not at all after a quit. A `--background` launch puts the dashboard
+and the Assistant away by their identifiers whenever SwiftUI shows them (each window that comes
+on screen, becomes key or becomes main), until the person opens the app with a Dock click or
+brings it to the front (`BackgroundHold`); hiding at fixed delays let a window created later
+appear (OBS-508). One helper runs at a time on the account: the app takes an exclusive `flock` on
+`~/Library/Logs/Project Observatory/update-helper.lock` before spawning it and hands the helper a
+copy of the descriptor as 3 (the engine and `open` get none), so the lock lasts exactly as long
+as the helper and needs no stale-record cleanup (`UpdateLock`). A process of the app that finds it
+held starts no second helper and logs `update_restart` `refused` with reason `install-in-progress`;
+when that helper reopens the app (a restart or an idle restart) this process quits so the swap
+can happen, and when it reopens nothing (a quit's helper) the app keeps running (OBS-508: two
+restarts 22 s apart on 2026-11-08 had run the app step twice). When the swap does not happen the old
 app is opened again and the reason is logged. `~/Library/Logs/Project Observatory/app.log`
 holds one JSON line per event, UTC, codes only (`update_restart` `requested`/`refused`,
 `update_install` `started`/`installed`/`failed`/`timeout`, with `trigger`, `reason` and

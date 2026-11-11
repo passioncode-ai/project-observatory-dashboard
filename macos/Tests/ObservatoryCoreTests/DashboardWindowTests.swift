@@ -130,4 +130,40 @@ import ObservatoryCore
         XCTAssertEqual(Seen(w), Seen(identifier: WindowID.dashboard, visible: false, miniaturized: false))
         XCTAssertEqual(DashboardReopen.decide([Seen(w), assistant]), .open, "a dashboard that was never shown is not on screen")
     }
+    // MARK: a background launch keeps its windows away by their identity (OBS-508)
+
+    func testABackgroundLaunchHidesTheDashboardWhenEverItAppears() {
+        var hold = BackgroundHold(holding: true)
+        XCTAssertTrue(hold.hides(dashboard), "a dashboard SwiftUI creates at any time is put away")
+        XCTAssertTrue(hold.hides(Seen(identifier: "dashboard-AppWindow-1", visible: true, miniaturized: false)))
+        XCTAssertTrue(hold.hides(assistant), "a restored Assistant is a window too")
+        XCTAssertFalse(hold.hides(Seen(identifier: WindowID.dashboard, visible: false, miniaturized: false)), "not on screen: nothing to do")
+        for other in [WindowID.secret, WindowID.pairing, "com_apple_SwiftUI_Settings_window", "assistantish"] {
+            XCTAssertFalse(hold.hides(Seen(identifier: other, visible: true, miniaturized: false)), other)
+        }
+        XCTAssertFalse(hold.hides(Seen(identifier: nil, visible: true, miniaturized: false)))
+        hold.personOpened()
+        XCTAssertFalse(hold.hides(dashboard), "once the person opens the app its windows are seen")
+        XCTAssertFalse(BackgroundHold(holding: false).hides(dashboard), "an ordinary launch hides nothing")
+    }
+
+    // MARK: the update prompt's sheet goes on the dashboard (SCN-010, OBS-508)
+
+    private typealias Candidate = UpdateAlert.Candidate
+    func testTheUpdatePromptAttachesToTheDashboardEvenWhenTheAssistantIsKey() {
+        let assistantKey = Candidate(identifier: WindowID.assistant, visible: true, titled: true, key: true)
+        let board = Candidate(identifier: WindowID.dashboard, visible: true, titled: true, key: false)
+        XCTAssertEqual(UpdateAlert.sheetWindow([assistantKey, board]), 1)
+        XCTAssertEqual(UpdateAlert.sheetWindow([Candidate(identifier: "dashboard-AppWindow-1", visible: true, titled: true, key: false), assistantKey]), 0)
+    }
+    func testWithNoDashboardOnScreenTheKeyWindowThenAnyTitledWindowTakesThePrompt() {
+        let hiddenBoard = Candidate(identifier: WindowID.dashboard, visible: false, titled: true, key: false)
+        let assistantKey = Candidate(identifier: WindowID.assistant, visible: true, titled: true, key: true)
+        let pairing = Candidate(identifier: WindowID.pairing, visible: true, titled: true, key: false)
+        XCTAssertEqual(UpdateAlert.sheetWindow([hiddenBoard, pairing, assistantKey]), 2, "the key window when the dashboard is away")
+        XCTAssertEqual(UpdateAlert.sheetWindow([hiddenBoard, Candidate(identifier: nil, visible: true, titled: false, key: false), pairing]), 2)
+        XCTAssertNil(UpdateAlert.sheetWindow([hiddenBoard]), "nothing on screen: the alert runs on its own")
+        XCTAssertNil(UpdateAlert.sheetWindow([]))
+    }
 }
+

@@ -30,7 +30,15 @@ import ObservatoryCore
     let log: AppLog
     private let defaults: UserDefaults
     private let bundlePath: String
-    private let spawn: ([String], [String: String]) throws -> pid_t
+    private let spawn: ([String], [String: String], Int32?) throws -> pid_t
+    /// The account-wide install lock (`UpdateLock`): one helper at a time, whichever process started it.
+    let lockFile: URL
+    /// This process's copy of the lock while its helper runs; kept until the app exits.
+    private var lock: UpdateLock?
+    /// Who held the lock when this process last found it taken.
+    private(set) var inProgress: UpdateLock.Holder?
+    /// The refusal code while another helper holds the lock.
+    static let installInProgress = "install-in-progress"
     private let terminate: @MainActor () -> Void
     private let badge: @MainActor (String?) -> Void
     /// Set by the windows: a question, or a dashboard build or start, is running.
@@ -49,10 +57,12 @@ import ObservatoryCore
 
     init(defaults: UserDefaults = .standard, bundle: Bundle = .main, log: AppLog = .standard(),
          running: String? = nil, bundlePath: String? = nil,
-         spawn: @escaping ([String], [String: String]) throws -> pid_t = RestartHelper.spawnDetached,
+         spawn: @escaping ([String], [String: String], Int32?) throws -> pid_t = RestartHelper.spawnDetached,
          terminate: @escaping @MainActor () -> Void = { NSApp.terminate(nil) },
-         badge: @escaping @MainActor (String?) -> Void = { NSApp.dockTile.badgeLabel = $0 }) {
+         badge: @escaping @MainActor (String?) -> Void = { NSApp.dockTile.badgeLabel = $0 },
+         lockFile: URL? = nil) {
         self.defaults = defaults; self.log = log; self.spawn = spawn; self.terminate = terminate; self.badge = badge
+        self.lockFile = lockFile ?? UpdateLock.file(log: log.file)
         self.running = running ?? bundle.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
         self.bundlePath = bundlePath ?? bundle.bundlePath
     }
@@ -133,6 +143,7 @@ import ObservatoryCore
     }
 
     /// The person quit with an update staged: swap it in after the app has gone, open nothing.
+    /// A helper another process of the app already started does the swap: none is added.
     func installOnQuit() {
         guard !helperStarted, let staged = check() else { return }
         _ = startHelper(.quit, version: staged.version)
@@ -142,6 +153,17 @@ import ObservatoryCore
         guard !helperStarted, let staged else { return }
         log.record("update_restart", "requested", ["trigger": trigger, "version": staged.version])
         if let why = startHelper(mode, version: staged.version) {
+            if why == Self.installInProgress, let holder = inProgress, holder.reopens {
+                // Another process of this app already started the helper, and it opens the
+                // app again when it is done: this one steps aside so that helper's swap can
+                // happen (the engine swaps only while no copy of the app runs). It starts no
+                // second helper, so the version is installed once (OBS-508).
+                log.record("update_restart", "refused", ["trigger": trigger, "reason": why, "version": staged.version])
+                refusal = nil
+                helperStarted = true
+                terminate()
+                return
+            }
             refusal = why
             log.record("update_restart", "refused", ["trigger": trigger, "reason": why, "version": staged.version])
             return
@@ -150,16 +172,26 @@ import ObservatoryCore
         terminate()
     }
 
-    /// Starts the helper; returns why it could not, as a code.
+    /// Starts the helper; returns why it could not, as a code. `install-in-progress`: a helper
+    /// another process of this app started still runs (`inProgress` says which).
     func startHelper(_ mode: RestartHelper.Mode, version: String) -> String? {
         let plan = RestartHelper.Plan(pid: getpid(), engine: configured.executable, workspace: configured.workspace,
                                       bundle: bundlePath, mode: mode, log: log.file.path, version: version)
         if let why = plan.refusal { return why }
         try? FileManager.default.createDirectory(at: log.file.deletingLastPathComponent(), withIntermediateDirectories: true,
                                                  attributes: [.posixPermissions: 0o700])
+        var held: UpdateLock?
+        switch UpdateLock.acquire(lockFile, mode: mode, version: version) {
+        case .acquired(let taken): held = taken
+        case .held(let holder): inProgress = holder; return Self.installInProgress
+        // A lock file that cannot be opened (a folder it cannot be written in) must not keep
+        // the update from installing: one helper per process, as before the lock.
+        case .unavailable: held = nil
+        }
         var env = ProcessInfo.processInfo.environment
         env["OBSERVATORY_HOME"] = configured.workspace
-        do { _ = try spawn(plan.argv, env) } catch { return "spawn-failed" }
+        do { _ = try spawn(plan.argv, env, held?.fd) } catch { held?.release(); return "spawn-failed" }
+        lock = held
         helperStarted = true
         return nil
     }

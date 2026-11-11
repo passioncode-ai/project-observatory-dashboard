@@ -192,12 +192,13 @@ Preconditions: the app is open; the engine's maintenance pass verified a newer a
 `waiting-for-quit` with its `pending` version in the workspace's `store/maintenance.json`.
 Trigger: the app's launch or its check every 5 minutes (operator rule, 2026-10-17) reads the record.
 Steps: once per version, while a window of the app is on screen (or at the next minute one is), a
-prompt asks «Restart to finish updating» with **Restart now** and **Later**; Restart now is the same
+prompt on the dashboard window (the key window only when no dashboard is on screen) asks «Restart to finish updating» with **Restart now** and **Later**; Restart now is the same
 act as Restart to update below, Later is remembered for that version and asks no more. **Restart to update** appears in the app menu and in the dashboard's toolbar (its help
 names the version) → the person chooses it → the app quits, a detached helper waits for it,
 runs `full maintain app` and opens the new app in front. Or: the person quits → the same swap,
 nothing reopens. Or: no window on screen, the app in the background, no input and no work for
-30 minutes → the same swap, the app reopens with no window and no focus.
+30 minutes → the same swap, the app reopens with no window and no focus: the dashboard and the
+Assistant are put away whenever they appear, until the person opens the app.
 Expected result: a person who keeps the app open is never left on an old version, and nothing
 they are doing is interrupted: an open window, input in the last 30 minutes or a running
 question or build keeps the idle restart from happening.
@@ -205,17 +206,28 @@ Errors & recovery: a swap that does not happen (refused bundle, another pass hol
 for > 5 min, an engine failure) opens the old app again and logs `update_install failed` with
 its reason code; a helper that cannot start keeps the app running, logs `update_restart refused`
 and the toolbar's help says the update installs at quit; no newer pending version → no affordance.
+The app opened again while a helper still runs, and asked to restart again, starts no second helper:
+it logs `update_restart refused` with reason `install-in-progress` and quits so the running helper's
+swap can happen and reopen it, or, when that helper reopens nothing (a quit's), keeps running
+(OBS-508: two restarts 22 s apart on 2026-11-08 installed one version twice).
 Coverage: `AppUpdateTests` (`testOnlyAStrictlyNewerReadableVersionIsOffered`,
 `testAStagedUpdateIsReadFromTheMaintenanceRecord`, `testIdleRestartNeedsAStagedUpdateNoWindowNoInputAndNoWork`,
 `testRestartWaitsForTheAppSwapsAndOpensTheNewOne`, `testARefusedSwapReopensTheOldAppAndSaysWhy`,
 `testAFailedEngineInTheBackgroundReopensWithoutAWindow`, `testAQuitSwapsAndOpensNothing`,
-`testTheHelperRunsInASessionOfItsOwn`, `testTheLogHoldsCodesOnlyInUTC`), `UpdatesTests`
-(restart, refusal, quit, no bundle) in `macos/Tests/ObservatoryCoreTests/AppUpdateTests.swift`;
+`testTheHelperRunsInASessionOfItsOwn`, `testTheInstallLockLivesAsLongAsTheHelperThatHoldsIt`,
+`testTheHelperKeepsTheLockFromTheProgramsItStarts`, `testTheLogHoldsCodesOnlyInUTC`), `UpdatesTests`
+(restart, refusal, quit, no bundle, `testASecondRestartWhileAHelperRunsStartsNoSecondHelperAndStepsAside`,
+`testAHelperThatReopensNothingIsNotJoinedAndTheAppKeepsRunning`,
+`testALockThatCannotBeOpenedNeverKeepsTheUpdateFromInstalling`) in `macos/Tests/ObservatoryCoreTests/AppUpdateTests.swift`;
+`DashboardReopenTests` (`testABackgroundLaunchHidesTheDashboardWhenEverItAppears`,
+`testTheUpdatePromptAttachesToTheDashboardEvenWhenTheAssistantIsKey`,
+`testWithNoDashboardOnScreenTheKeyWindowThenAnyTitledWindowTakesThePrompt`) in `DashboardWindowTests.swift`;
 `AppLifecycleTests` (`testAReadyUpdateAsksOncePerVersionAndOnlyWhenSeen`,
 `testTheUpdatesWatchAsksThroughItsPresenterAndRemembersTheVersion`, `testTheUpdateRecordIsReadEveryFiveMinutes`);
 engine `observatory/engine/tests/test_maintain_app.py`. Not yet walked on a real Mac with a
 signed release: the menu item and toolbar button on screen, the prompt's sheet on the dashboard
-window, the real swap and relaunch, and `--background` keeping the reopened window hidden.
+window, the real swap and relaunch, and `--background` keeping the reopened window hidden (the
+window notifications the hold watches are AppKit's; the tests cover the decision, not SwiftUI's timing).
 
 ## SCN-011 — The app speaks the person's language
 Status: draft
