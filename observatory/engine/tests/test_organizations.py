@@ -816,6 +816,24 @@ class Views(Base):
         self.assertIn("projects must be an object keyed by project id", self.orgs.validate(self.orgs.load()))
         self.assertEqual(self.orgs.Assigner().assign({"id": "project:x", "owners": ["company-org"]})["source"], "rule")
 
+    def test_a_long_provider_reason_keeps_its_repair_command(self):
+        """OSS-102/106: a reason was cut at 200 characters, so the command it ends with was lost."""
+        import paths
+        tail = " --account acme-team"
+        reason = ("the Cloudflare account could not be listed with the stashed token: the token lacks Account "
+                  "Settings Read; issue a narrower one and stash it with cloudflare.py issue --scope read")
+        reason = reason + "x" * (214 - len(reason) - len(tail)) + tail
+        self.assertEqual(len(reason), 214)
+        self.registry("cloudflare-account.json", {"accounts": [], "resources": [], "degraded": [
+            {"source": "cloudflare:account:acc-co", "reason": reason}]})
+        (paths.SCRATCH / "gh" / "_degraded.json").write_text(json.dumps([{"source": "github:acme", "reason": reason}]))
+        rows = {d["source"]: d for d in self.view.accounts()["degraded"]}
+        self.assertEqual(rows["cloudflare:account:acc-co"]["reason"], reason)
+        self.assertEqual(rows["github:acme"]["reason"], reason)
+        (paths.SCRATCH / "gh" / "_degraded.json").write_text(json.dumps([{"source": "github:acme", "reason": "y" * 5000}]))
+        self.assertLessEqual(len({d["source"]: d for d in self.view.accounts()["degraded"]}["github:acme"]["reason"]),
+                             400, "still bounded")
+
     def test_round_two_edges(self):
         """Review round 2: a malformed declaration, a team name two teams bear, a door's record over the
         journal, the Heroku user in both views, an unusable file, one degraded row per unread file."""

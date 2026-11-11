@@ -407,7 +407,7 @@ def accounts() -> dict:
         try:
             for d in json.loads((listing / "_degraded.json").read_text(encoding="utf-8")) or []:
                 degraded.append({"source": str(d.get("source") or "github"), "code": "degraded",
-                                 "reason": str(d.get("reason") or "")[:200],
+                                 "reason": str(d.get("reason") or "")[:REASON_LIMIT],
                                  "effect": "that owner's repositories are as an earlier scan saw them"})
         except (OSError, ValueError, AttributeError):
             pass
@@ -586,6 +586,10 @@ def accounts() -> dict:
             "problems": problems, "degraded": degraded}
 
 
+#: How much of a scan's own reason a degraded row keeps: a bound, but long enough that the repair command a
+#: provider's reason ends with (`... --account <account>`) survives it (OSS-102, OSS-106).
+REASON_LIMIT = 400
+
 #: The doors whose journal rows name the slot they delivered to.
 DOOR_TOOLS = ("openrouter.py", "heroku.py", "digitalocean.py", "cloudflare.py")
 #: How each door stashes the token that connects an account.
@@ -654,7 +658,7 @@ def _passed_on(provider: str, doc: dict | None, degraded: list) -> None:
                 continue
             degraded.append({"source": source if source.startswith(provider + ":") else f"{provider}:{source}",
                              "code": "degraded",
-                             "reason": str(d.get("reason") or "")[:200],
+                             "reason": str(d.get("reason") or "")[:REASON_LIMIT],
                              "effect": "that account's rows are as the last good scan saw them",
                              **({"since": (doc or {}).get("scanned_on")} if (doc or {}).get("scanned_on") else {})})
 

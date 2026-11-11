@@ -27,6 +27,9 @@ while the major version is 0, a minor release may change behaviour and says so h
   listed under `problems` only, so the answer said `complete` with an empty `degraded` while every account was
   placed as if no organization were configured. It is now also a `degraded` row (`config/organizations.json`,
   `unreadable`, the reason).
+- **A provider's reason keeps the repair command it ends with** (OSS-102, OSS-106). `full org accounts` cut a scan's
+  own reason at 200 characters, so a reason ending in `--account <account>` lost the command that repairs it. The
+  bound is now 400 characters.
 
 ## 0.35.11 (2026-11-10)
 
