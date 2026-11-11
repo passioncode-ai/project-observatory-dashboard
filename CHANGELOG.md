@@ -24,6 +24,10 @@ while the major version is 0, a minor release may change behaviour and says so h
   a command; each now carries one (`project-observatory full machine-backup`, `... machine-backup status`, or the
   setting to correct).
 
+- **`full ssh-keys create NAME --no-passphrase` says the findings will list the key** (OSS-63). The note was only in
+  the help and the refusal; the success output now says the key has no passphrase, that `ssh-keys findings` lists it,
+  and that `ssh-keygen -p -f` gives it one.
+
 ## 0.35.11 (2026-11-10)
 
 A service moved to another machine stays reachable at its old local address: on macOS, `full machine-move leave
