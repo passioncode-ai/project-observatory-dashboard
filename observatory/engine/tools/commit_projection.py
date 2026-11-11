@@ -13,8 +13,16 @@ Three rules keep a scheduled committer from being worse than the problem:
   in progress.
 * **Under a lease.** `inventory/` is a guarded path in that repository, and a
   background job is exactly the second writer the lease exists for.
-* **Never pushes.** A commit is recoverable locally; a push is the operator's
-  decision about what leaves the machine.
+* **On origin, then pushed** (OBS-516). The wiki's source is its `origin`: a
+  commit that stays on one machine splits the wiki, and on 2026-11-11 an
+  unpushed projection commit left the operator's checkout two ahead and two
+  behind. So the commit is built in a temporary index on top of the upstream
+  branch, holding only the projection, and pushed, again on a fresh base if
+  another writer won the race. The local branch then follows only by a fast
+  forward that overwrites nothing local; a branch with no upstream keeps the
+  local commit, as before.
+
+A checkout marked as a read mirror (`wiki_checkout.MIRROR_KEY`) is not written.
 """
 from __future__ import annotations
 import argparse, json, subprocess, sys, pathlib
@@ -22,9 +30,11 @@ import argparse, json, subprocess, sys, pathlib
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from datetime import datetime, timezone
+import os, tempfile
 import atomic
 import paths
 import safe_git
+import wiki_checkout
 
 # The projection is the configured wiki's `inventory` folder, addressed relative
 # to the Git repository that holds the wiki; the lease uses the same name.
@@ -84,6 +94,103 @@ def report(outcome: str, detail: str = "", **extra) -> None:
         print(f"could not write the commit report: {exc}", file=sys.stderr)
 
 
+class PushError(Exception):
+    """A step of the push failed; the remote branch is left as it was."""
+
+
+def out(*args: str, cwd: pathlib.Path, env: dict | None = None, input: str | None = None) -> str:
+    p = safe_git.run(args, cwd=cwd, write=True, timeout=120, extra_env=env, input=input)
+    if p.returncode != 0:
+        raise PushError(f"git {args[0]}: {(p.stderr or '').strip()[:300] or p.returncode}")
+    return p.stdout.strip()
+
+
+def upstream(vault: pathlib.Path) -> tuple[str, str] | None:
+    """(remote, remote branch) the checked-out branch tracks, read from its configuration."""
+    code, branch = git("symbolic-ref", "--short", "-q", "HEAD", cwd=vault)
+    if code != 0 or not branch:
+        return None
+    code, remote = git("config", f"branch.{branch}.remote", cwd=vault)
+    code2, merge = git("config", f"branch.{branch}.merge", cwd=vault)
+    if code or code2 or not remote or remote == "." or not merge.startswith("refs/heads/"):
+        return None
+    return remote, merge[len("refs/heads/"):]
+
+
+def projection_tree(top: pathlib.Path, base: str, prefix: str) -> str:
+    """The tree of `base` with the projection folder as the working copy holds it, built in a
+    temporary index: nothing outside the projection, staged or not, reaches the commit."""
+    folder = prefix + PROJECTION
+    with tempfile.TemporaryDirectory(prefix="observatory-projection-") as tmp:
+        env = {"GIT_INDEX_FILE": os.path.join(tmp, "index")}
+        out("read-tree", base, cwd=top, env=env)
+        # Drop the folder as base has it, then add it as it is on disk: a file the projection
+        # no longer writes leaves the commit too.
+        out("rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", folder, cwd=top, env=env)
+        if (top / folder).is_dir():
+            out("add", "-f", "--", folder, cwd=top, env=env)
+        return out("write-tree", cwd=top, env=env)
+
+
+def push_on_origin(vault: pathlib.Path, branch: tuple[str, str], msg: str) -> tuple[str, str]:
+    """Commit the projection on the upstream branch and push it; three tries against a racing writer."""
+    remote, remote_branch = branch
+    top = pathlib.Path(out("rev-parse", "--show-toplevel", cwd=vault))
+    prefix = out("rev-parse", "--show-prefix", cwd=vault)
+    tracking = f"refs/remotes/{remote}/{remote_branch}"
+    ident = safe_git.identity(top)
+    last = ""
+    for _ in range(3):
+        out("fetch", "-q", remote, cwd=top)
+        base = out("rev-parse", "--verify", tracking, cwd=top)
+        tree = projection_tree(top, base, prefix)
+        if tree == out("rev-parse", f"{base}^{{tree}}", cwd=top):
+            return "clean", follow(top, base, prefix + PROJECTION)
+        commit = out("commit-tree", tree, "-p", base, "-m", msg, cwd=top, env=ident)
+        p = safe_git.run(["push", "-q", remote, f"{commit}:refs/heads/{remote_branch}"],
+                         cwd=top, write=True, timeout=120)
+        if p.returncode == 0:
+            safe_git.run(["fetch", "-q", remote], cwd=top, write=True, timeout=120)
+            return "pushed", follow(top, commit, prefix + PROJECTION)
+        last = (p.stderr or "").strip()[:300]
+    raise PushError(last or "the push was refused three times")
+
+
+def follow(top: pathlib.Path, commit: str, folder: str) -> str:
+    """Move the local branch to `commit` when that is a fast forward that overwrites no local edit.
+
+    After a successful push a failure here only leaves the branch where it was, and says why."""
+    try:
+        head = out("rev-parse", "HEAD", cwd=top)
+        if head == commit:
+            return ""
+        ahead = out("rev-list", "--count", f"{commit}..{head}", cwd=top)
+        if ahead != "0":
+            return f"; the local branch stays: {ahead} local commit(s) are not on origin"
+        if out("ls-files", "-u", cwd=top):
+            return "; the local branch stays: a merge is unfinished"
+        # A two-way read-tree updates only the files that differ between head and commit, and
+        # refuses when such a file has a local edit. The projection on disk equals `commit`, so
+        # its index entries are staged first, and put back as they were if the read-tree refuses.
+        saved = out("ls-files", "-s", "--", folder, cwd=top)
+        if saved or (top / folder).exists():
+            out("add", "-A", "-f", "--", folder, cwd=top)
+        r = safe_git.run(["read-tree", "-m", "-u", head, commit], cwd=top, write=True, timeout=120)
+        if r.returncode != 0:
+            safe_git.run(["reset", "-q", "--", folder], cwd=top, write=True, timeout=120)
+            if saved:
+                safe_git.run(["update-index", "--index-info"], cwd=top, write=True, timeout=120,
+                             input=saved + "\n")
+            busy = "index.lock" in (r.stderr or "")
+            return ("; the local branch stays: "
+                    + ("the index is in use" if busy else "following would overwrite a local edit"))
+        ref = out("symbolic-ref", "HEAD", cwd=top)
+        out("update-ref", "-m", "projection: follow origin", ref, commit, head, cwd=top)
+        return ""
+    except PushError as exc:
+        return f"; the local branch stays: {exc}"
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -94,6 +201,11 @@ def main() -> int:
     if not (vault / ".git").exists():
         print("the wiki is not a git repository — nothing to commit")
         report("no-git", "the wiki is not a git repository")
+        return 0
+    refused = wiki_checkout.mirror(vault)
+    if refused:
+        print(f"not committing: {refused}")
+        report("mirror", refused)
         return 0
 
     code, out = git("status", "--porcelain", cwd=vault)
@@ -155,13 +267,25 @@ def main() -> int:
                f"Committed automatically because the alternative — leaving three files dirty "
                f"every thirty minutes — makes a real abandoned edit in this directory "
                f"invisible among the generated ones.")
-        git("add", "--", PROJECTION, cwd=vault)
-        code, out = git("commit", "-q", "-m", msg, cwd=vault)
-        print(f"committed the projection: {summary}" if code == 0
-              else f"commit failed: {out}")
-        report("committed" if code == 0 else "commit-failed",
-               summary if code == 0 else out, files=len(changed))
-        print("  not pushed — what leaves the machine is the operator's decision")
+        branch = upstream(vault)
+        if branch is None:
+            git("add", "--", PROJECTION, cwd=vault)
+            code, out = git("commit", "-q", "-m", msg, cwd=vault)
+            print(f"committed the projection: {summary}" if code == 0
+                  else f"commit failed: {out}")
+            report("committed" if code == 0 else "commit-failed",
+                   summary if code == 0 else out, files=len(changed), pushed=False)
+            print("  not pushed: the wiki's branch has no upstream")
+        else:
+            try:
+                outcome, said = push_on_origin(vault, branch, msg)
+            except PushError as exc:
+                print(f"the projection was not pushed: {exc}", file=sys.stderr)
+                report("push-failed", str(exc), files=len(changed), pushed=False)
+            else:
+                print(f"{outcome}: {summary}{said}")
+                report(outcome, summary + said, files=len(changed),
+                       pushed=outcome == "pushed")
     finally:
         if held and script:
             subprocess.run([sys.executable, str(script), "release", LEASE_KEY], cwd=vault,
