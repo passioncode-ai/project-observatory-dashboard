@@ -32,9 +32,14 @@ added optional field; this gate compares only what a caller depends on (names, p
 | `python tools/update_inventory.py --check` | passed |
 | `python -m unittest discover -s tests` | 4 failures in `test_demo_estate` and `test_j1_evidence`, the same 4 on a clean `origin/main` checkout here (package not installed); CI runs them on an installed wheel |
 
+## Shipped
+
+- #504 squash-merged into `main` as `319bf114` on 2026-11-11, its three required checks green (ubuntu-latest 3.11, ubuntu-latest 3.14, macos-latest 3.14).
+- On `main` after the merge: `python tools/check_add_only.py check` printed "29 tools and 9 capabilities keep their promises" (exit 0); `python -m unittest tests.test_add_only` ran 11 tests, OK.
+- The board request (capability `agents.improve`) was answered in its thread with the merge commit and completed.
+
 ## Open
 
-- Merge #504 once its three required checks pass (squash), then answer the board request with the merge commit.
 - The `CHANGELOG.md` line comes with the next release (feature pull requests do not edit it).
 
-Next: merge #504 on green checks.
+Next: the next engine release carries OBS-515 in its `CHANGELOG.md` section.
