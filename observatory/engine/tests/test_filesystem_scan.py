@@ -600,6 +600,34 @@ def test_both_other_readers_use_the_shared_loader() -> None:
           len(local_scan.degraded(d / "new.json")) == 1)
 
 
+def test_a_readme_that_opens_with_html_gives_its_prose() -> None:
+    # OSS-14: a README opening with centred HTML (a logo, badges) put that markup in the project's
+    # description, escaped onto the page. A line of HTML is not prose; the paragraph after it is.
+    # The collector is a script that scans on import: take its reader alone.
+    import ast, types
+    source = (ROOT / "collectors/scan_filesystem.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    keep = [n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.Assign))
+            and (getattr(n, "name", "") == "first_para"
+                 or any(getattr(t, "id", "").startswith("_HTML") for t in getattr(n, "targets", [])))]
+    scan_filesystem = types.SimpleNamespace()
+    space = {"re": re, "Path": pathlib.Path}
+    exec(compile(ast.Module(body=keep, type_ignores=[]), "scan_filesystem.py", "exec"), space)
+    scan_filesystem.first_para = space["first_para"]
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-readme-"))
+    (d / "README.md").write_text(
+        '<p align="center">\n  <img src="logo.png" width="120" alt="Logo">\n</p>\n'
+        '<h1 align="center">Alpha</h1>\n\n'
+        '<div align="center"><a href="https://example.test"><img src="badge.svg"></a></div>\n\n'
+        'Alpha keeps a ledger of synthetic things.\nIt is a fixture.\n\n<br/>\nMore.\n', encoding="utf-8")
+    got = scan_filesystem.first_para(d)
+    check("the README's prose is the purpose, not its HTML",
+          got == "Alpha keeps a ledger of synthetic things. It is a fixture.", got)
+    (d / "README.md").write_text("<3 years of notes, kept in plain text.\n", encoding="utf-8")
+    check("a line that only starts with `<` is still prose",
+          scan_filesystem.first_para(d) == "<3 years of notes, kept in plain text.", scan_filesystem.first_para(d))
+
+
 if __name__ == "__main__":
     print("the base collector — and what a missing tool would have written\n")
     declare_exclusion()
@@ -622,7 +650,8 @@ if __name__ == "__main__":
                test_the_scan_skips_what_the_merge_would_discard,
                test_the_merged_model_is_unchanged_by_all_of_this,
                test_a_folder_on_an_uninventoried_host_records_its_unpushed_work,
-               test_both_other_readers_use_the_shared_loader):
+               test_both_other_readers_use_the_shared_loader,
+               test_a_readme_that_opens_with_html_gives_its_prose):
         fn()
     print()
     if FAILURES:

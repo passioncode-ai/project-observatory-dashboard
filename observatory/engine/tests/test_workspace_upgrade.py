@@ -143,6 +143,29 @@ class WorkspaceUpgrade(unittest.TestCase):
         with contextlib.closing(sqlite3.connect(dest/'store/observatory.db')) as conn:
             self.assertEqual(conn.execute('SELECT id FROM events').fetchone()[0],'synthetic-event')
 
+    def test_the_check_jobs_record_may_change_during_a_snapshot(self):
+        """The five-minute check job is not stopped for the daily snapshot; its record moving
+        mid-copy failed every daily from 2026-11-10 with the server down for each try."""
+        real = workspace.copy_private
+        def copy_while_the_check_writes(source, dest):
+            real(source, dest)
+            for name in upgrade.JOB_RECEIPTS:
+                with open(self.home / name, 'a') as receipt:
+                    receipt.write('{"at": "while copying"}\n')
+        with patch.object(workspace, 'copy_private', side_effect=copy_while_the_check_writes):
+            source = self.snapshot()
+        self.assertTrue((source / 'manifest.json').exists())
+
+    def test_a_steady_file_that_moves_still_refuses_and_is_named(self):
+        real = workspace.copy_private
+        def copy_while_settings_change(source, dest):
+            real(source, dest)
+            with open(self.home / 'config/settings.json', 'a') as settings:
+                settings.write(' ')
+        with patch.object(workspace, 'copy_private', side_effect=copy_while_settings_change):
+            with self.assertRaisesRegex(config.ConfigurationError, 'changed during snapshot.*config/settings.json'):
+                self.snapshot()
+
     def test_backup_does_not_recurse(self):
         first=self.snapshot()
         second=self.snapshot()

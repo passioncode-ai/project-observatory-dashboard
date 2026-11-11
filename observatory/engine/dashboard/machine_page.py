@@ -145,6 +145,11 @@ def summary_html(m: dict, t: Translator) -> str:
 GUARD_CLASSES = ("cache-command", "cache-dir", "build-output", "temp", "trash", "browser-clone")
 
 
+def _in_workspace(command: str) -> str:
+    import paths
+    return paths.in_workspace(command)
+
+
 def guard_html(g: dict | None, t: Translator) -> str:
     """The disk guard's last run, the largest files it found, and the simulators that
     hold memory swap writes to this disk — each with what brings the space back."""
@@ -169,8 +174,9 @@ def guard_html(g: dict | None, t: Translator) -> str:
                              for k in kept], ""))
     parts.append(t.mark("From the maintenance job when features.auto_cleanup is on: hourly while space is normal, every "
                         "15 minutes below the low line; never anything a process holds, maps, runs from or works inside: "
-                        "project-observatory full disk-guard --apply",
-                        tag="p", attrs=' class="machine-hint"'))
+                        "{command}", tag="p", attrs=' class="machine-hint"',
+                        # Copied from a page of a non-default workspace, it runs against that one (OSS-26).
+                        command=_in_workspace("project-observatory full disk-guard --apply")))
     coverage = g.get("largeFiles") or {}
     files = (coverage.get("files") or [])[:ROWS]
     measured = coverage.get("complete") is True
@@ -233,7 +239,10 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
     parts.append(_table(t, "Memory by project",
                         [("Project", False), ("Processes", True), ("Memory", True)],
                         [[_project(p["project"], names), _e(p["processes"]), _size(p["rss_mb"], t)] for p in (procs.get("projects") or [])[:ROWS]],
-                        "No process runs inside a project folder." if m.get("processes") else UNMEASURED))
+                        # A sample that never split processes by project (the light memory snapshot,
+                        # `projects_measured: False`) is unmeasured, never "none" (OSS-21).
+                        "No process runs inside a project folder."
+                        if m.get("processes") and procs.get("projects_measured") is not False else UNMEASURED))
     disk = m.get("disk") or {}
     parts.append(_table(t, "Where the disk goes",
                         [("Place", False), ("Kind", False), ("Size", True), ("How it comes back", False)],

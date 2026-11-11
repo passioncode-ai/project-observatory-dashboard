@@ -17,6 +17,13 @@ expectation. It changes test evidence and documentation, not the published engin
 
 ## Latest run
 
+[2026-11-11: release 0.35.12](runs/2026-11-11-release-0.35.12/README.md): engine 0.35.12 and observatory-log
+0.35.12: fixes from a walk of every shipped scenario (#497): cleanup and the disk guard remove what nobody holds
+again (OBS-173, OBS-327, OBS-397, OBS-500), the daily snapshot no longer fails on the update check's record, the
+dashboard, desktop, organization, backup and portable CLI fixes. New rows OBS-504 to OBS-508.
+
+Next: OBS-504, then OBS-506, OBS-505, OBS-507 and OBS-508.
+
 [2026-11-10: release 0.35.11](runs/2026-11-10-release-0.35.11/README.md): engine 0.35.11 (`observatory-log` stays
 0.35.9): a port forward for a service moved to another machine, installed or adopted by `full machine-move leave
 --via USER@HOST` and recorded in `placement.json`, removed by the new `full machine-move return`, with `cutover`

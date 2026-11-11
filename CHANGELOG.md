@@ -3,15 +3,104 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.35.12 (2026-11-11)
+
+Fixes from a walk of every shipped scenario on the installed 0.35.11 (OSS, ORG, the Mac, Windows and Linux apps and the
+portable CLI). The largest: since 0.25.0 cleanup and the disk guard could not prove any path unused, so they removed
+nothing even with the disk at zero; and the daily snapshot failed on the update check's record, keeping the server and
+the tick stopped for about twenty minutes a pass. No setting or migration changes. The observatory-log plugin moves to
+0.35.12: its three skill descriptions are shorter.
 
 ### Fixed
 
+- **Cleanup and the disk guard remove what nobody holds again** (OBS-173, OBS-327, OBS-397). Since 0.25.0 every
+  holder snapshot was declared incomplete, so `full cleanup --apply` skipped every worktree with "holders could not be
+  checked; nothing removed" and the guard removed no path, even with the disk at zero; on a working Mac the capped
+  listing (3.5 MB, 9,647 names) was past its own limits too. Each path class and each final check now reads one whole
+  `lsof` and `ps` listing cut to the paths it may touch: a path nothing names is free. A failed, partial or diagnosed
+  listing, a path outside the listing's scope, and Windows still keep every target.
+- **A checkout a scheduled job runs from is never cleaned.** A launchd or systemd job that runs every few minutes from a
+  clean, pushed worktree holds nothing open between runs, so the cleanup and the guard would have removed the worktree
+  or its dependencies (seen on this machine: a feed job's checkout). A worktree, a build-output checkout or a temporary
+  folder that any job definition names (program, working folder or argument, XML or binary plist, systemd unit) is
+  kept with the job's name as the reason.
+- **The disk guard keeps working on a full disk** (OBS-500). It scans build output without its cursor when the cursor
+  cannot be saved, goes on when the journal or the report cannot be written, and runs a cache command whose tool a whole
+  `ps` listing does not name. A coding agent's ended session folder under `/private/tmp/claude-UID` goes by hours (24,
+  6, 2 by pressure) once its transcript is quiet too.
+- **observatory-log skill descriptions fit the host's listing budget.** The three descriptions were 2,243 characters
+  and the host truncated two of them to a bare name; they are now 1,046, with the full trigger lists in each skill's
+  body.
+- **The daily snapshot no longer fails on the update check's record** (OSS-43). The five-minute check job, which the
+  snapshot does not stop, rewrites `store/update-check.json`; a snapshot longer than five minutes always met that
+  write, failed with "Workspace changed during snapshot" three times in a row and kept the server and the tick stopped
+  for about twenty minutes each pass (the last daily before this fix was 2026-11-09). The check job's record and lock
+  are now copied without having to hold still, and a snapshot that does fail names the files that moved.
 - **systemd units name their working folder without quotes** (OBS-503). systemd does not unquote `WorkingDirectory=`,
   so the quoted path the Linux installer wrote was refused as `bad-setting` and the `-check` and `-maintain` timers
   never ran. Both unit writers now write the path bare (a space needs no escaping there); a path with a quote,
   backslash, newline, `%` or `$`, a relative path, or one ending in white space is refused. Reinstalling the jobs
   rewrites the units.
+- **A failed «Start server» or «Build the dashboard» is said on every page** (Windows and Linux app, SCN-008). The
+  failure went to a banner that exists only over the saved pages, so on the live dashboard, the setup page or the
+  empty page it vanished. Off the saved pages it is now a warning dialog, as a failed update install is.
+- **«Start server» is greyed out while it cannot work** (Windows and Linux app, SCN-008). The Server menu offered it
+  even when this workspace's server already ran or another workspace's server held the port. The menu is now rebuilt
+  each time the dashboard is shown, and the item is enabled only when neither holds, as on macOS.
+- **A failed Dashboard → Rebuild Pages over the live dashboard is said** (macOS app, SCN-007, SCN-008). The error was
+  drawn only over the saved pages and the empty or unavailable views, so over the live pages a failed rebuild said
+  nothing. The live view now shows a banner while the rebuild works and the reason when it fails.
+- **The desktop workflow cites a rule that exists.** Its header pointed at `docs/CI-BATCHING.md`, a file this
+  repository does not have; it now names the CI section of the org-index `RULES.md`.
+- **`full org accounts` reads `partial` when `organizations.json` cannot be read** (OSS-102). The file's problem was
+  listed under `problems` only, so the answer said `complete` with an empty `degraded` while every account was
+  placed as if no organization were configured. It is now also a `degraded` row (`config/organizations.json`,
+  `unreadable`, the reason).
+- **A provider's reason keeps the repair command it ends with** (OSS-102, OSS-106). `full org accounts` cut a scan's
+  own reason at 200 characters, so a reason ending in `--account <account>` lost the command that repairs it. The
+  bound is now 400 characters.
+- **`org select plan` previews only the projects apply can move** (ORG-R14). The preview counted a chosen project
+  that apply always refuses (another organization's, or Not ours), so it told the organization it would receive
+  projects it never would. Those projects stay listed under `conflicts` and are left out of
+  `preview.organization.projects`.
+- **The Machine page no longer says no process runs inside a project folder when nobody measured it** (OSS-21).
+  The light memory snapshot names executables only (`projects_measured: false`); the page now shows its unmeasured
+  state for that sample instead of an empty result.
+- **The Machine page keeps the grouping by origin and by project** (OSS-21). The light memory snapshot, written more
+  often, replaced the whole process section; memory still comes from the newest sample, while processes keep the full
+  survey unless the light sample attributes better than executable-only, each with its own measurement time.
+- **Backup size and spend figures follow the reader's locale** (OSS-19). The machine backup size, the project's spend
+  and a key's "spent" figure were fixed-point strings with an English decimal point; they are now formatted in the
+  reader's language.
+- **Commands rendered on the server name their workspace** (OSS-26). The Agents view's commands, the DigitalOcean
+  and Cloudflare pages' commands and the Machine page's disk-guard hint now carry `OBSERVATORY_HOME=…`, as the page
+  script's commands do, so one copied from a non-default workspace runs against it.
+- **A README that opens with HTML gives its prose as the project's description** (OSS-14). A line of HTML (a logo, a
+  badge row) is skipped like a heading; before, its markup was shown escaped as the description.
+
+- **An automatic update no longer keeps an external secret store out of the daily backup** (OSS-100). The snapshot
+  an update takes never carries a store kept outside the workspace, yet it reset the daily snapshot's clock, so with
+  an update a day the store was never carried and doctor warned that the newest carry was over 48 hours old. With
+  such a store the daily snapshot is now due a day after the last one that recorded the store, whatever the update
+  did; without one the cadence is unchanged.
+
+- **Doctor's machine-backup rows name their step** (OSS-99). The attention rows for a missing, stale, failed or
+  refused machine backup, items it did not carry and refused settings showed no step although the sentence named
+  a command; each now carries one (`project-observatory full machine-backup`, `... machine-backup status`, or the
+  setting to correct).
+
+- **`full ssh-keys create NAME --no-passphrase` says the findings will list the key** (OSS-63). The note was only in
+  the help and the refusal; the success output now says the key has no passphrase, that `ssh-keys findings` lists it,
+  and that `ssh-keygen -p -f` gives it one.
+
+- **A short `.env` value no longer corrupts the portable scan's snapshot** (scenarios O4, O8, O9). Every non-empty
+  value joined the redaction set, so `FLAG=1` or `MODE=a` rewrote each "1" or "a" in `latest.json` as `[REDACTED]`,
+  and `status`, `export` and `dashboard` then refused the snapshot with exit 2. A scan now redacts only values of
+  at least 8 bytes, the length `leaks scan` already uses.
+
+- **The portable `doctor` agrees with `scan` about a registered folder replaced by a symlink** (scenario O7). Doctor
+  followed the link and reported the folder available while `scan` refused it; both now use one check, and doctor
+  reports the folder not available.
 
 ## 0.35.11 (2026-11-10)
 

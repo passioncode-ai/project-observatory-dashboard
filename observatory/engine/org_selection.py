@@ -733,17 +733,20 @@ def _clash(org: str, items: Any) -> None:
 
 # ── the preview ────────────────────────────────────────────────────────────────
 
-def _preview(org: str, ctx: dict, sel: dict) -> dict:
-    """ORG-W7 as data: what moves, where, what the organization will see, and the line that proves the rest."""
+def _preview(org: str, ctx: dict, sel: dict, refused: set[str] = frozenset()) -> dict:
+    """ORG-W7 as data: what moves, where, what the organization will see, and the line that proves the rest.
+    `refused`: the projects `conflicts` names (another organization's, or Not ours), which apply always refuses, so
+    the organization is never told it receives them (ORG-R14)."""
     items = sel["items"].values()
     projects = [i for i in items if i["kind"] == "project" and i["decision"] == "include" and not i.get("notFound")
                 and not i.get("unread")]
+    chosen_projects = {i["id"] for i in projects}       # what stays personal leaves out everything chosen
+    projects = [i for i in projects if i["id"] not in refused]
     keys_out = [i for i in items if i["kind"] == "key" and i["decision"] != "keep" and not i.get("notFound")
                 and not i.get("unread")]
     revoked = [i for i in keys_out if i["decision"] == "hand-over-revoke"]
     accounts_in = [i for i in items if i["kind"] == "account" and i["decision"] == "include" and not i.get("notFound")
                    and not i.get("unread")]
-    chosen_projects = {i["id"] for i in projects}
     default = ctx.get("default")
 
     def personal(organization: Any) -> bool:
@@ -906,7 +909,7 @@ def _plan_answer(org: str, ctx: dict, sel: dict, record: dict | None, draft: dic
                                                 "selectionDigest": record["selectionDigest"]},
             "items": _items_out(sel), "new": sorted(i["id"] for i in sel["items"].values() if i.get("new")),
             "newSince": (record or {}).get("decidedAt"),
-            "conflicts": conflicts, "unknown": sorted(unknown), "unread": sorted(unread), "preview": _preview(org, ctx, sel),
+            "conflicts": conflicts, "unknown": sorted(unknown), "unread": sorted(unread), "preview": _preview(org, ctx, sel, {c["project"] for c in conflicts}),
             "nextStep": step, "command": cmd, "gates": GATES,
             "gate": "relayed" if draft is not None else "none", "degraded": ctx["degraded"]}
 

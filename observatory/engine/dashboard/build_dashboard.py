@@ -2453,7 +2453,7 @@ if (H.maintenance && H.maintenance.state !== "unknown") {
   if (MB.enabled !== false)
     hb.push([T("machine backup"), !MB.newest_at ? T("none yet: the maintenance job takes one a day")
       : T("newest {date}, {size} MB, {items} items", {date: MB.newest_at.slice(0, 10),
-          size: ((MB.size || 0) / 1048576).toFixed(1), items: MB.items == null ? "?" : MB.items}),
+          size: Math.round((MB.size || 0) / 104857.6) / 10, items: MB.items == null ? "?" : MB.items}),
       fullCommand("machine-backup status")]);
   // Where the passphrase that opens those backups is kept besides the workspace (A14).
   if (MT.passphrase_state && MT.passphrase_state !== "environment")
@@ -2589,8 +2589,10 @@ if (H.degraded_sources) hb.push([T("sources degraded"), H.degraded_sources]);
 // OpenRouter's credits ARE US dollars (one credit, one dollar), so both read as "$"
 // rather than an abbreviation nobody could place (audit A34).
 const DOLLARS = new Set(["credits", "usd", "USD"]);
-const spend = n => DOLLARS.has(H.spend_denomination || "credits") ? "$" + (+n).toFixed(4)
-  : `${(+n).toFixed(4)} ${String(H.spend_denomination || "")}`.trim();
+// In the reader's digits (OSS-19): four decimals, as before, with the locale's decimal sign.
+const spendNum = n => (+n).toLocaleString(LOCALE, {minimumFractionDigits: 4, maximumFractionDigits: 4});
+const spend = n => DOLLARS.has(H.spend_denomination || "credits") ? "$" + spendNum(n)
+  : `${spendNum(n)} ${String(H.spend_denomination || "")}`.trim();
 if (H.spend_month != null)
   hb.push([T("spent by this project this month"), spend(H.spend_month)]);
 if (H.spend_today != null)
@@ -3711,11 +3713,13 @@ function renderCreds() {
   // and so is its spend; the reset period is a word the reader's language has.
   const RESET_LABEL = {daily: T("reset@@daily"), weekly: T("reset@@weekly"), monthly: T("reset@@monthly")};
   const usd = v => "$" + Number(v).toLocaleString(LOCALE, {maximumFractionDigits: 3});
+  // Spend keeps its three places (a tenth of a cent counts), in the reader's own digits.
+  const spent = v => "$" + Number(v).toLocaleString(LOCALE, {minimumFractionDigits: 3, maximumFractionDigits: 3});
   const cap = c => c.limit == null ? NONE
     : `<span class="mono">${E(usd(c.limit))}</span>` +
       `<div class="tier">${E(c.limit_reset ? labelOf(RESET_LABEL, c.limit_reset) : T("no reset"))}` +
       (c.limit_reset ? "" : " " + chip(T("lifetime"), "warn")) +
-      `</div><div class="anchor">${T("spent {value}", {value: "$" + (+c.usage || 0).toFixed(3)})}</div>`;
+      `</div><div class="anchor">${T("spent {value}", {value: spent(+c.usage || 0)})}</div>`;
   const who = c => (c.used_by || []).length
     ? (c.used_by || []).map(p =>
         `<a class="plink" href="#${E(p)}">${E(projLabel(p))}</a>`).join(", ") +

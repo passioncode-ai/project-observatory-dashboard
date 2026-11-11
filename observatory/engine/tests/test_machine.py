@@ -949,6 +949,77 @@ class Page(Base):
             self.assertTrue(got == want, f"{built}→{reader}: " + relocalize.first_difference(got, want))
 
 
+class LightSample(Base):
+    """OSS-21: the light memory snapshot (`machine-memory.json`) names executables only; it never measured
+    which project a process runs in, nor its origin. It must not empty the page's project and origin tables."""
+
+    def light(self, stamp):
+        return {"schema_version": 1, "kind": "machine-memory", "attempted_at": stamp,
+                "memory": {"attempted_at": stamp, "measured_at": stamp, "total_mb": 8192,
+                           "free_mb": 2048, "swap_used_mb": 0, "degraded": []},
+                "processes": {"attempted_at": stamp, "measured_at": stamp, "count": 1,
+                              "attribution": "executable-only", "projects_measured": False,
+                              "groups": [{"origin": "executable:node", "processes": 1, "sessions": None,
+                                          "rss_mb": 100.0, "cpu": None}],
+                              "top": [{"pid": 9, "name": "node", "origin": "executable:node", "rss_mb": 100.0}],
+                              "projects": [], "degraded": []}}
+
+    def stamp(self, minutes_ago=0):
+        from datetime import timedelta
+        return (datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    def test_an_unmeasured_project_split_is_never_shown_as_none(self):
+        import machine_view, machine_page
+        from i18n import Translator
+        (self.home / "store/raw/machine-memory.json").write_text(json.dumps(self.light(self.stamp())))
+        en = machine_page.machine_html({"machine": machine_view.summary()}, Translator("en"))
+        self.assertNotIn("No process runs inside a project folder.", en)
+        self.assertIn("Not measured yet", en)
+
+    def test_the_full_survey_keeps_origins_and_projects_while_memory_comes_from_the_light_sample(self):
+        import machine_view, machine_page
+        from i18n import Translator
+        full_at = self.stamp(20)
+        (self.home / "store/raw/machine.json").write_text(json.dumps({
+            "measured_at": full_at, "memory": {"total_mb": 8192, "free_mb": 512, "swap_used_mb": 4096},
+            "processes": {"count": 3, "groups": [{"origin": "app:Editor", "processes": 3, "sessions": 1,
+                                                 "rss_mb": 2048, "cpu": 1.0}],
+                          "top": [{"pid": 7, "name": "Editor", "origin": "app:Editor", "rss_mb": 2048,
+                                   "cpu": 1.0, "project": "project:alpha"}],
+                          "projects": [{"project": "project:alpha", "processes": 3, "rss_mb": 2048}]},
+            "disk": {}}))
+        light_at = self.stamp()
+        (self.home / "store/raw/machine-memory.json").write_text(json.dumps(self.light(light_at)))
+        summary = machine_view.summary()
+        self.assertEqual(summary["memory"]["source"], "machine-memory.json")
+        self.assertEqual(summary["memory"]["measured_at"], light_at)
+        self.assertEqual(summary["memory"]["swap_used_mb"], 0)
+        procs = summary["processes"]
+        self.assertEqual(procs["source"], "machine.json")
+        self.assertEqual(procs["measured_at"], full_at)
+        self.assertEqual([g["origin"] for g in procs["groups"]], ["app:Editor"])
+        self.assertEqual([p["project"] for p in procs["projects"]], ["project:alpha"])
+        en = machine_page.machine_html({"machine": summary}, Translator("en"))
+        self.assertIn("app:Editor", en)
+        self.assertNotIn("executable:node", en)
+
+    def test_the_guard_command_names_the_workspace(self):
+        # OSS-26: a command copied from the page runs against the workspace that built it.
+        import machine_page, paths
+        from i18n import Translator
+        guard = {"at": "2026-01-01T00:00:00Z", "level": "normal", "results": {}, "planned": {}}
+        for locale in ("en", "ru"):
+            html = machine_page.guard_html(guard, Translator(locale))
+            self.assertIn(f"OBSERVATORY_HOME=&#x27;{paths.HOME}&#x27; project-observatory full disk-guard --apply", html)
+
+    def test_the_light_sample_stands_alone_when_no_full_survey_ran(self):
+        import machine_view
+        (self.home / "store/raw/machine-memory.json").write_text(json.dumps(self.light(self.stamp())))
+        procs = machine_view.summary()["processes"]
+        self.assertEqual(procs["source"], "machine-memory.json")
+        self.assertEqual([g["origin"] for g in procs["groups"]], ["executable:node"])
+
+
 class PageFrees(Base):
     """OBS-66 on the page: a clone-heavy place says what removing it gives back."""
 

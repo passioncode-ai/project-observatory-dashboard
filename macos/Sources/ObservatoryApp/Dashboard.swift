@@ -254,6 +254,13 @@ struct DashboardView: View {
                 Button(alwaysOn ? m.t("Restart server") : m.t("Start server")) { Task { await m.startServer() } }
                     .buttonStyle(SecondaryButtonStyle()).disabled(!m.canStartServer)
             }
+        } else if case .live = m.dashboardMode, m.dashboardWorking || m.dashboardError != nil {
+            // The live pages have no banner of their own: «Rebuild Pages» says here that it
+            // works, and why it failed, instead of failing silently (SCN-007, SCN-008).
+            Banner(tone: m.dashboardError == nil ? .neutral : .negative, symbol: "arrow.clockwise",
+                   title: m.dashboardError ?? m.t("Rebuild Pages")) {
+                if m.dashboardWorking { ProgressView().controlSize(.small) }
+            }
         }
     }
 

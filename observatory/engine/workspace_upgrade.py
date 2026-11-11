@@ -243,13 +243,20 @@ SESSION_RECEIPTS = frozenset({'store/raw/record-turn.json', 'store/raw/sessions-
                               'store/raw/why-asks.jsonl.1', 'store/raw/why-asks.jsonl.lock'})
 
 
+#: What the five-minute update check job writes (`maintenance.check_pass`): its own record and
+#: lock. The daily snapshot stops the tick and the server but not this job, so a snapshot that
+#: took longer than five minutes always met one of its writes and failed three times in a row
+#: with the server down meanwhile (seen live 2026-11-10 and 11; the last daily was 11-09).
+JOB_RECEIPTS = frozenset({'store/update-check.json', 'store/update-check.lock'})
+
+
 def volatile(name: str, databases: set[str]) -> bool:
     """A path the snapshot copies without requiring it to hold still: a database and its
     WAL companions, an append-only log (with its rotated generations) under store/logs,
-    or a receipt the session hooks write (SESSION_RECEIPTS)."""
+    a receipt the session hooks write (SESSION_RECEIPTS) or the check job's (JOB_RECEIPTS)."""
     if name in databases or (name.endswith(('-wal', '-journal', '-shm')) and name.rsplit('-', 1)[0] in databases):
         return True
-    if name in SESSION_RECEIPTS:
+    if name in SESSION_RECEIPTS or name in JOB_RECEIPTS:
         return True
     path = PurePosixPath(name)
     if path.parts[:2] != ('store', 'logs'):
@@ -299,8 +306,14 @@ def _snapshot(base: Path, output: Path, *, carry_stores: bool = False,
         # copied mid-line loses at most that line (audit A11). A settings, registry or vault
         # file that changed during the copy still refuses the snapshot.
         steady = lambda inv: {k: v for k, v in inv.items() if not volatile(k, databases)}  # noqa: E731
-        if steady(before) != steady(inventory(base)) or before_dirs != directories(base):
-            raise config.ConfigurationError('Workspace changed during snapshot; stop all writers and retry')
+        after, after_dirs = steady(inventory(base)), directories(base)
+        if steady(before) != after or before_dirs != after_dirs:
+            # Name what moved (paths only, never contents), so the next failure says which writer.
+            moved = sorted({k for k in set(steady(before)) | set(after) if steady(before).get(k) != after.get(k)}
+                           | (before_dirs ^ after_dirs))
+            raise config.ConfigurationError('Workspace changed during snapshot; stop all writers and retry'
+                                            + (f" ({', '.join(moved[:5])}{', …' if len(moved) > 5 else ''})"
+                                               if moved else ''))
         # The secret stores the settings name outside the workspace (OBS-350): beside `data/`,
         # never inside it, so an older engine verifies and restores the home alone. A store is
         # never a reason for the snapshot to fail: one that cannot be carried says why.

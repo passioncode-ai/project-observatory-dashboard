@@ -115,6 +115,22 @@ class ObservatoryTest(unittest.TestCase):
         for sensitive in (sentinel, fingerprint, "EXAMPLE_TOKEN", "example"):
             self.assertNotIn(sensitive, export)
 
+    def test_short_env_values_never_corrupt_the_saved_snapshot(self):
+        # Scenarios O4, O8, O9: `FLAG=1` put "1" in the redaction set, so dates and ids in
+        # latest.json became [REDACTED] and status, export and dashboard refused the snapshot.
+        secret = "synthetic-long-value-0123456789"
+        (self.project / ".env").write_text(f"FLAG=1\nMODE=a\nEXAMPLE_TOKEN={secret}\n")
+        core.add_project(self.state, "example", str(self.project))
+        self.cli("scan")
+        saved = (self.state / "latest.json").read_text()
+        self.assertNotIn(secret, saved, "a value of the minimum length is still redacted")
+        report = json.loads(saved)
+        for key in ("projects", "findings"):
+            self.assertNotIn("[REDACTED]", json.dumps(report[key]), key)
+        self.cli("status")
+        self.cli("export")
+        self.cli("dashboard")
+
     def test_env_parser_never_expands_or_executes(self):
         marker = self.base / "should-not-exist"
         (self.project / ".env").write_text(f"X=$(touch {marker})\nY='literal'\n")
@@ -278,6 +294,19 @@ class ObservatoryTest(unittest.TestCase):
         report = core.scan(self.state)
         self.assertTrue(report["projects"][0]["degraded"])
         self.assertEqual(report["projects"][0]["environment"], [])
+
+    def test_doctor_reports_a_registered_root_replaced_by_a_symlink(self):
+        # Scenario O7: doctor followed the link while scan refused it.
+        core.add_project(self.state, "example", str(self.project))
+        roots = lambda expected: next(c for c in self.cli("doctor", expected=expected)["checks"]  # noqa: E731
+                                      if c["name"] == "registered_roots_available")
+        self.assertTrue(roots(0)["ok"])
+        self.project.rename(self.base / "old-project")
+        external = self.base / "external"
+        external.mkdir()
+        self.project.symlink_to(external, target_is_directory=True)
+        self.assertFalse(roots(2)["ok"])
+        self.assertTrue(core.scan(self.state)["projects"][0]["degraded"], "doctor and scan agree")
 
     def test_metadata_canary_redacted_in_names_paths_and_slot_labels(self):
         value = "SYNTHETIC_CANARY_12345678"

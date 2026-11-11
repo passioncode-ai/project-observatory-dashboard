@@ -161,6 +161,11 @@ def exclusions() -> tuple[tuple[str, ...], dict[str, str]]:
             {x["name"]: x.get("why", "") for x in doc.get("names") or []})
 
 
+#: A README line of HTML (a centred logo, a badge row, `</p>`): markup, never the project's purpose (OSS-14).
+#: A line that only starts with `<` ("<3 years of notes") is prose.
+_HTML_LINE = re.compile(r"</?[A-Za-z][\w-]*(?:\s|/?>|$)")
+
+
 def first_para(p: Path):
     for name in ("README.md","readme.md","README.MD"):
         f = p/name
@@ -170,7 +175,8 @@ def first_para(p: Path):
         out=[]
         for line in txt.splitlines():
             s=line.strip()
-            if not s or s.startswith(("#","!","[!","<!--","---","```","|","> [!")):
+            if (not s or s.startswith(("#","!","[!","<!--","---","```","|","> [!"))
+                    or (s.startswith("<") and _HTML_LINE.match(s))):
                 if out: break
                 continue
             out.append(s)
