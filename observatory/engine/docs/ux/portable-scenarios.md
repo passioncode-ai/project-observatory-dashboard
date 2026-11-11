@@ -420,7 +420,9 @@ runs. Until 0.35.12 the system refused every path whenever argv coverage was
 incomplete, which on every real machine meant always: `cleanup --apply` and the
 guard removed nothing under any pressure (OBS-173, OBS-327, OBS-397). A cache
 command with an unmatched nonempty busy-tool precondition still executes no child.
-Tests: `CompleteListing`, `LossyArgvEvidence`, `LossyArgvAdmission` and
+A path a launchd or systemd job names (its program, working folder or an argument) is
+kept whatever the listing says: between its runs such a job holds nothing open.
+Tests: `CompleteListing`, `ScheduledJobs`, `LossyArgvEvidence`, `LossyArgvAdmission` and
 `WorktreeFinalHolders` in `tests/test_disk_guard.py` (synthetic only).
 
 Cleanup admission: the cleanup's preliminary check takes the same complete listing

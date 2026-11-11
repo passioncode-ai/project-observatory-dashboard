@@ -36,6 +36,9 @@ One pull request, #497, built in three waves and merged as one:
   `fresh_busy` can answer False, `running` answers False from a whole listing), so cleanup and the guard remove
   again (OBS-173, OBS-327, OBS-397); the guard keeps working at ENOSPC; an ended coding session's folder goes by
   hours (OBS-500); a guard without holders raises a warning finding.
+- Found while planning the first real cleanup on this Mac: the plan held a clean worktree a launchd job runs from
+  (`app.okolos.feed`); a checkout, build output or temporary folder that a launchd or systemd job names is now kept
+  with the job's name (`cleanup_safety.scheduled_job_reason`, tests `ScheduledJobs`).
 - Wave 2: the dashboard fixes (OSS-14, OSS-19, OSS-21, OSS-26), the desktop fixes (SCN-007, SCN-008), the
   organization fixes (OSS-102, OSS-106, ORG-R14).
 - Wave 3: the secret store carry (OSS-100), doctor steps (OSS-99), the ssh-keys note (OSS-63), the portable CLI

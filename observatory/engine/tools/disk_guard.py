@@ -64,7 +64,7 @@ import configuration  # noqa: E402
 import osprivacy  # noqa: E402
 import paths  # noqa: E402
 import safe_git  # noqa: E402
-from cleanup_safety import (protected_entry_reason, bare_repository_reason, bare_ancestry_reason,  # noqa: E402
+from cleanup_safety import (scheduled_job_reason, protected_entry_reason, bare_repository_reason, bare_ancestry_reason,  # noqa: E402
                             KEEP_MARKER, KEEP_REASON)
 from holders import Holders, running, _utf8_env  # noqa: E402,F401  (re-exported: tests patch `disk_guard.running`)
 
@@ -573,6 +573,9 @@ def keep_reason(path: str, state: dict | None = None) -> str:
         for declared in s_["forms"]:
             if any(_covers(declared, c) or _covers(c, declared) for c in mine):
                 return f"the Fabric service {s_['service']} declares state here ({s_['field']})"
+    job = scheduled_job_reason(path)
+    if job:
+        return job
     name = os.path.basename(os.path.normpath(path))
     for service in (state or {}).get("unknown_services") or ():
         if _named_for(name, service):
@@ -1181,6 +1184,11 @@ def plan_builds(cfg: dict, level: str, holders: Holders, at: float, names: list[
         left = lambda: min(root_end - time.monotonic(), phase_left())
         if guarded(root, degraded) or left() <= 0:
             continue
+        # A checkout a scheduled job runs from needs its dependencies when the job next starts.
+        job = scheduled_job_reason(root)
+        if job:
+            _note_kept(kept, "build-output", root, job)
+            continue
         idle = checkout_idle_days(root, at, left())
         if idle is None:
             if degraded is not None:
@@ -1468,7 +1476,7 @@ def act(a: dict, holders: Holders, state: dict | None = None) -> dict:
         state = service_state() if state is None else state
         if a["class"] in ("cache-dir", "temp") and not state.get("complete", True):
             return {**rec, "result": "skipped", "reason": UNKNOWN_STATE}
-        why = keep_reason(target, state)
+        why = keep_reason(target, state) or (scheduled_job_reason(a["checkout"]) if a.get("checkout") else "")
         if why:
             return {**rec, "result": "skipped", "reason": why}
         if a["class"] == "temp" and git_ancestry(target):

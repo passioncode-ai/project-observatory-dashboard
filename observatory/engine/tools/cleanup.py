@@ -53,7 +53,7 @@ import configuration  # noqa: E402
 import paths  # noqa: E402
 import osprivacy  # noqa: E402
 import safe_git  # noqa: E402
-from cleanup_safety import protected_tree_reason, worktree_presence  # noqa: E402
+from cleanup_safety import protected_tree_reason, scheduled_job_reason, worktree_presence  # noqa: E402
 from holders import FRESH_SECONDS, fresh_busy  # noqa: E402
 
 AUTO_CLASSES = ("branch-merged", "branch-pushed", "worktree-missing", "worktree-clean", "build-artifacts")
@@ -777,6 +777,10 @@ def act(a: dict, archive: pathlib.Path) -> dict:
             return {**rec, "result": "skipped",
                     "reason": "holders could not be checked; nothing removed" if unknown
                     else "a process works inside it now"}
+        # A job a scheduler starts from this worktree holds nothing between its runs (2026-11-11).
+        job = scheduled_job_reason(target)
+        if job:
+            return {**rec, "result": "skipped", "reason": job}
         why = index_visibility_reason(target)
         if why:
             return {**rec, "result": "skipped", "reason": why}

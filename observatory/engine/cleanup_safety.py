@@ -140,3 +140,78 @@ def worktree_presence(path: str) -> str:
     except OSError:
         return "unknown"                      # a missing or unreadable ancestor
     return "absent"
+
+
+#: Where the schedulers keep the jobs that may run from a checkout: launchd for this account
+#: and the machine, systemd for this user and the machine. A job that is not running at the
+#: moment holds nothing open, so a holder listing cannot see it (app.okolos.feed runs every few
+#: minutes from a clean, pushed worktree the cleanup would otherwise remove, 2026-11-11).
+JOB_DIRS = ("~/Library/LaunchAgents", "/Library/LaunchAgents", "/Library/LaunchDaemons",
+            "~/.config/systemd/user", "/etc/systemd/system")
+JOB_SUFFIXES = (".plist", ".service", ".timer", ".socket", ".path")
+JOB_BYTES = 1024 * 1024
+#: Seconds a reading of the job definitions is reused within one run.
+JOB_FRESH = 60.0
+_jobs: tuple = (0.0, None)
+
+
+def _plist_strings(value) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [s for v in value.values() for s in _plist_strings(v)]
+    if isinstance(value, (list, tuple)):
+        return [s for v in value for s in _plist_strings(v)]
+    return []
+
+
+def _job_texts(dirs=JOB_DIRS) -> list[tuple[str, str]]:
+    """(job name, its definition as text) for every job file of the schedulers; a binary
+    plist is read through plistlib. A file that cannot be read is left out, a folder that
+    does not exist is empty."""
+    import plistlib
+    out = []
+    for folder in dirs:
+        folder = os.path.expanduser(folder)
+        try:
+            names = sorted(os.listdir(folder))
+        except OSError:
+            continue
+        for name in names:
+            if not name.endswith(JOB_SUFFIXES):
+                continue
+            try:
+                with open(os.path.join(folder, name), "rb") as f:
+                    raw = f.read(JOB_BYTES + 1)
+            except OSError:
+                continue
+            if len(raw) > JOB_BYTES:
+                continue
+            if raw.startswith(b"bplist"):
+                try:
+                    text = "\n".join(_plist_strings(plistlib.loads(raw)))
+                except Exception:  # noqa: BLE001: an unreadable plist names nothing
+                    continue
+            else:
+                text = raw.decode("utf-8", errors="replace")
+            out.append((name.rsplit(".", 1)[0], text))
+    return out
+
+
+def scheduled_job_reason(path: str, dirs=JOB_DIRS) -> str:
+    """The launchd or systemd job whose definition names this path (its program, its working
+    folder or an argument), or "" when none does. Read once a minute at most."""
+    global _jobs
+    taken, jobs = _jobs
+    if jobs is None or time.monotonic() - taken > JOB_FRESH or dirs is not JOB_DIRS:
+        jobs = _job_texts(dirs)
+        if dirs is JOB_DIRS:
+            _jobs = (time.monotonic(), jobs)
+    forms = {os.path.normpath(os.path.abspath(path)), os.path.normpath(os.path.realpath(path))}
+    for name, text in jobs:
+        for form in forms:
+            # The path itself or anything under it (a program inside the checkout).
+            if form + "/" in text or any(form + end in text for end in ("<", '"', "'", "\n", " ")) \
+                    or text.endswith(form):
+                return f"the scheduled job {name} runs from it"
+    return ""

@@ -19,6 +19,11 @@ the tick stopped for about twenty minutes a pass. No setting or migration change
   listing (3.5 MB, 9,647 names) was past its own limits too. Each path class and each final check now reads one whole
   `lsof` and `ps` listing cut to the paths it may touch: a path nothing names is free. A failed, partial or diagnosed
   listing, a path outside the listing's scope, and Windows still keep every target.
+- **A checkout a scheduled job runs from is never cleaned.** A launchd or systemd job that runs every few minutes from a
+  clean, pushed worktree holds nothing open between runs, so the cleanup and the guard would have removed the worktree
+  or its dependencies (seen on this machine: a feed job's checkout). A worktree, a build-output checkout or a temporary
+  folder that any job definition names (program, working folder or argument, XML or binary plist, systemd unit) is
+  kept with the job's name as the reason.
 - **The disk guard keeps working on a full disk** (OBS-500). It scans build output without its cursor when the cursor
   cannot be saved, goes on when the journal or the report cannot be written, and runs a cache command whose tool a whole
   `ps` listing does not name. A coding agent's ended session folder under `/private/tmp/claude-UID` goes by hours (24,

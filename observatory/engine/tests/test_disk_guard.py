@@ -2460,6 +2460,58 @@ class FullDisk(Base):
                 self.g.journal([{"a": 1}])
 
 
+class ScheduledJobs(Base):
+    """A checkout a launchd or systemd job runs from is kept: between runs the job holds
+    nothing open, so no holder listing can see it (app.okolos.feed, 2026-11-11)."""
+
+    def jobs(self, **files):
+        folder = self.base / "agents"
+        folder.mkdir(exist_ok=True)
+        for name, body in files.items():
+            (folder / name).write_bytes(body if isinstance(body, bytes) else body.encode())
+        return (str(folder),)
+
+    def test_a_job_that_names_the_checkout_or_a_file_in_it_keeps_it(self):
+        import cleanup_safety
+        import plistlib
+        wt = self.base / "agent-checkout"
+        xml = plistlib.dumps({"Label": "app.feed", "ProgramArguments": [str(wt / "run.sh")]}).decode()
+        binary = plistlib.dumps({"Label": "app.bin", "WorkingDirectory": str(wt)}, fmt=plistlib.FMT_BINARY)
+        unit = f"[Service]\nWorkingDirectory={wt}\nExecStart=/usr/bin/true\n"
+        for files in ({"app.feed.plist": xml}, {"app.bin.plist": binary}, {"feed.service": unit}):
+            with self.subTest(files=list(files)):
+                dirs = self.jobs(**files)
+                self.assertIn("runs from it", cleanup_safety.scheduled_job_reason(str(wt), dirs))
+                for f in files:
+                    (self.base / "agents" / f).unlink()
+
+    def test_a_sibling_with_a_longer_name_and_an_unrelated_job_do_not(self):
+        import cleanup_safety
+        import plistlib
+        wt = self.base / "wt"
+        dirs = self.jobs(**{"a.plist": plistlib.dumps({"ProgramArguments": [str(self.base / "wt-other" / "x")]}).decode(),
+                            "b.plist": "not a plist at all", "c.txt": str(wt)})
+        self.assertEqual(cleanup_safety.scheduled_job_reason(str(wt), dirs), "")
+
+    def test_cleanup_and_the_guard_skip_such_a_checkout(self):
+        import cleanup
+        reason = "the scheduled job app.feed runs from it"
+        with patch.object(cleanup, "busy_now", return_value=False), \
+                patch.object(cleanup, "scheduled_job_reason", return_value=reason), \
+                patch.object(cleanup, "git", side_effect=AssertionError("nothing is run against it")):
+            rec = cleanup.act({"class": "worktree-clean", "tier": "auto", "repo": str(self.base),
+                               "target": str(self.t1), "_deadline": time.monotonic() + 10}, self.base / "archive")
+        self.assertEqual((rec["result"], rec["reason"]), ("skipped", reason))
+        kept = []
+        with patch.object(self.g, "checkouts", return_value=[str(self.t1)]), \
+                patch.object(self.g, "scheduled_job_reason", return_value=reason), \
+                patch.object(self.g, "checkout_idle_days", side_effect=AssertionError("not even measured")):
+            plan = self.g.plan_builds(self.cfg(), "critical", self.free(), time.time(), ["node_modules"],
+                                      None, [], kept)
+        self.assertEqual(plan, [])
+        self.assertEqual(kept[0]["reason"], reason)
+
+
 class CoverageTruth(Base):
     def test_missing_swap_is_unknown_and_measured_zero_is_zero(self):
         for memory, expected in (({}, None), ({"swap_used_mb": None}, None),
