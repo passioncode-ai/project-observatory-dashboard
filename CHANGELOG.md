@@ -9,6 +9,15 @@ A key read from the folder `vault.py put` writes, week-old Docker images pruned 
 Cloudflare `zaraz-edit` preset (#500). No setting or migration changes. The observatory-log plugin moves to 0.35.13: the
 handling-secrets skill names the new preset.
 
+### Added
+
+- **A Cloudflare preset for one zone's Zaraz settings** (`zaraz-edit`): `issue --preset zaraz-edit --zone <zone>
+  --vault PROJECT/ENV/NAME` grants Zone Read and Zaraz Edit on that zone only, so a site can turn off what its Google
+  tag gateway injects into HTML (`setUpTag` in `PUT /zones/{zone_id}/settings/google-tag-gateway/config`, which
+  Cloudflare's API reference allows to Zaraz Edit or Zaraz Admin). A board request asked for Zone Settings Write; Zaraz
+  Edit is the narrower group that does the job. The new value is proved by reading the gateway's config; the token is
+  named after the zone and the slot, and credential requests may ask for it.
+
 ### Fixed
 
 - **The disk guard prunes week-old Docker images at critical.** At `critical` it now runs `docker image prune -af
