@@ -1214,6 +1214,16 @@ project-observatory full configure model chain VENDOR/MODEL[,VENDOR/MODEL...]   
 project-observatory full configure budget daily_ceiling AMOUNT                 # also monthly_ceiling, velocity_ceiling
 ```
 
+The wiki projection commits only its `inventory/` folder. When the wiki's branch tracks an upstream,
+the commit is built on that upstream branch and pushed, and the local branch follows by a fast
+forward that overwrites no local edit (a branch with local commits stays and the report says so); a
+branch with no upstream gets a local commit. On a machine that only reads a wiki another machine
+writes, mark the checkout and nothing is projected or committed there:
+
+```sh
+git -C <wiki checkout> config observatory.wikiMirror true
+```
+
 Ceilings are non-negative numbers in the wallet's denomination, written to
 `config/models.json`; all three must be above zero. To use the assistant (the Mac
 app's assistant window, `full assistant`, or the MCP `observatory_assistant_ask`):
