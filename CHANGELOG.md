@@ -3,6 +3,34 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.35.15 (2026-11-11)
+
+Two follow-ups of the 2026-11-11 fixes: the node's lifecycle package loads where `tools/node.py` shadows the engine's
+package, and the tick no longer reads a smoke check stopped at its time limit as a blank page. A lock of the shipped
+MCP tools and capabilities keeps what callers use from being changed or removed under its name. No setting or
+migration changes. The observatory-log plugin moves to 0.35.15 with the release.
+
+### Added
+
+- **What shipped to callers is added to, never changed under its name** (OBS-515, #504). `tools/shipped.lock.json`
+  holds the MCP tools `mcp/server.py` declares (their parameters and the required ones) and the capabilities of
+  `fabric-agent.json` (their effect); `tools/check_add_only.py` refuses a tool or capability no longer served without
+  a retired row, a dropped parameter, a newly required one, a changed effect, and a lock edited to hide them.
+
+### Fixed
+
+- **The lifecycle package loads wherever `tools/node.py` took the name `node`** (OBS-512). `node/lifecycle/` imported
+  its siblings by the absolute name `node.lifecycle`, so the engine's loader of OBS-507 could not serve it: in a process
+  with `tools/` ahead of the engine on the import path, `full doctor` read every workspace's lifecycle helper as
+  `unknown` (ModuleNotFoundError) and the key prompt could not check the signed app. The package now imports its
+  siblings relatively and its callers load it through the engine's loader; `node/lifecycle/macos.py` still runs as a
+  script.
+- **A smoke check stopped at its time limit is not a blank page** (OBS-513). The tick logged "dashboard SMOKE FAILED,
+  the page would render blank" and built the findings again whenever smoke did not exit cleanly, including when the
+  watchdog stopped it at its limit on a loaded machine (the 06:47Z tick of 2026-11-11). Only a smoke that failed does
+  that now; one stopped or not started is logged as not measured, stays in the report's failed steps with its outcome
+  (read as stopped at its time limit, a warning) and rebuilds nothing.
+
 ## 0.35.14 (2026-11-11)
 
 The last five findings of the 2026-11-11 scenario walk: the tick keeps the dashboard its time and the pages say when
