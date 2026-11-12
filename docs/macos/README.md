@@ -53,8 +53,9 @@ step that is missing. A typed workspace path is resolved like a picked one (the 
 refuses a path through a symbolic link such as `/tmp`). The engine must serve
 `observatory-assistant/1` with the dashboard actions: 0.12.0 or newer.
 
-The app is dark in every window and uses the PassionCode colour roles of the dashboard
-itself — gold for the primary action, selection and focus — defined once in
+The app is light in every window (OBS-523) and uses the PassionCode colour roles of the
+dashboard itself, from the token file's light palette: gold fills the primary action and
+selection, and the readable gold-brown (`--pc-focus`) draws focus, lines and accent text. They are defined once in
 `macos/Sources/ObservatoryCore/Palette.swift`; `PaletteTests` holds them to the vendored
 token file and to WCAG AA. Nothing in the app reads or writes the macOS Keychain, and the
 dashboard view cancels any password or client-certificate challenge rather than letting

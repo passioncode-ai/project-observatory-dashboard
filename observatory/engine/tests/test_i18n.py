@@ -763,7 +763,7 @@ class BuiltPages(unittest.TestCase):
     def test_lang_and_switch(self):
         for locale in i18n.LOCALES:
             text = self.page(locale)
-            self.assertIn(f'<html lang="{locale}" data-theme="dark" data-build-locale="{locale}">', text)
+            self.assertIn(f'<html lang="{locale}" data-theme="light" data-build-locale="{locale}">', text)
             # System, then each language by its own name (L10N-01).
             self.assertEqual(text.count('data-locale="'), len(i18n.LOCALES) + 1)
             self.assertIn('data-locale="system"', text)
@@ -847,13 +847,28 @@ class VendoredDesignSystem(unittest.TestCase):
             ratio = contrast(tokens["--pc-border-strong"], tokens[surface])
             self.assertGreaterEqual(ratio, 3.0, f"--pc-border-strong on {surface}: {ratio:.2f}:1")
 
-    def test_pages_stay_on_the_dark_contract(self):
-        """The vendored file carries an opt-in light palette since 1.1.0; the
-        dashboard is the dark product and names its theme so it never opts in."""
+    def test_pages_open_light_and_switch_to_dark_on_the_readers_choice(self):
+        """Light is the default since OBS-523: the page is built with the token
+        file's light palette and switches to the dark one only on the reader's
+        stored choice, set before first paint; no second theme source."""
         template = (DASH / "build_dashboard.py").read_text(encoding="utf-8")
-        self.assertIn('data-theme="dark"', template)
-        self.assertNotIn('data-theme="light"', template)
+        self.assertIn('data-theme="light"', template)
+        self.assertNotIn('data-theme="dark"', template)
+        self.assertIn('localStorage.getItem("observatory.theme")', template)
+        self.assertIn('theme === "dark" ? "dark" : "light"', template)
+        css = (DASH / "brand" / "passioncode-tokens.css").read_text(encoding="utf-8")
+        self.assertIn(':root[data-theme="light"]', css)
+        self.assertNotIn("prefers-color-scheme", css)
 
+    def test_no_line_or_text_takes_the_gold_fill_colour(self):
+        """Gold on white fails contrast, so a line, an outline or text in the
+        accent role reads `--focus` or `--link` (gold in dark, gold-brown in
+        light); `--accent` stays a fill."""
+        import re
+        for name in ("build_dashboard.py", "workspace.css"):
+            text = (DASH / name).read_text(encoding="utf-8")
+            bad = [m.group(0) for m in re.finditer(r"(?<![-\w])(?:color|border(?:-[a-z]+)*|outline):[^;{}]*var\(--accent\)", text)]
+            self.assertEqual(bad, [], name)
 
 if __name__ == "__main__":
     unittest.main()
