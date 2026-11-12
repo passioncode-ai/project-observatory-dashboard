@@ -150,7 +150,7 @@ say so, do not work around it. A copy to another machine is not this command (OB
 ## Waking, stopping and restarting my apps
 
 Never launch, quit or kill an app or background job I enrolled (no `open -a`, `osascript`,
-`pkill`): ask node.lifecycle, the MCP surface at `POST http://127.0.0.1:47311/mcp` on the local
+`pkill`): ask node.lifecycle, the MCP surface at `POST http://127.0.0.1:47311/mcp` (47311 on a computer with one OS account; `full ports show` names this account's port) on the local
 server, with the bearer of an access binding I issued you. `lifecycle.list` gives the
 `policyRevision` and your `grantRevision`; `lifecycle.ensure_running` with a fresh `requestId`
 admits a start; poll `lifecycle.operation.get` until a final state (`ready` and `already_ready`

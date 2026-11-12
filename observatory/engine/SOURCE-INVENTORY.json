@@ -947,8 +947,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "267fc7c5291271b40afd9178f694b2071f00f6d4d6fec8f2c101428ee5d04356",
-      "bytes": 40831,
+      "export_sha256": "b2eaa8ce835e0674822909190f8514b25436b45d4fc9a605cc536f6472c24515",
+      "bytes": 40918,
       "upstream_modified": true
     },
     {
@@ -968,15 +968,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "e5eaa2d11be27e43e81c45452293c3ee3568ddf7c2d15e312c88c53b886c76ff",
-      "bytes": 325897,
+      "export_sha256": "072e0b37e04bae45a68c46597341c59560a0d93ceabe5d122aeae12ee573d2e2",
+      "bytes": 326952,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "21a240496a2532a7d4132dc7a17ec8f66a74a3a2b373ca9f9347ea632c343c47",
-      "bytes": 248261,
+      "export_sha256": "9b7f960f1ae959746bddd5c86cb6a705b08d15f3eea94cf0f6f80bb42e4fbc9f",
+      "bytes": 249329,
       "upstream_modified": true
     },
     {
