@@ -316,6 +316,19 @@ class Health(Sandbox):
         self.assertIn("tick-history", rows)
         self.assertTrue(rows["tick-history"].startswith("3 of the last 10 ticks did not finish"))
 
+    def test_a_registry_the_emit_refuses_is_on_the_card_with_its_command(self):
+        import tick_health
+        raw = self.home / "store/raw"
+        now = datetime.now(timezone.utc)
+        (raw / "tick-lease.json").write_text(json.dumps({"last_acquired_at": (now - timedelta(minutes=40)).strftime("%Y-%m-%dT%H:%M:%SZ")}))
+        (raw / "tick.json").write_text(json.dumps({"finished_at": (now - timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%SZ")}))
+        tick_health.record(raw, {"outcome": "partial", "reason": "the tick stopped at `emit`: emit REFUSED: "
+                                 "projects.json would go from 94 to 52; re-run with OBSERVATORY_ALLOW_BULK=1."})
+        (self.home / "config/settings.json").write_text(json.dumps(
+            {"schema_version": 1, "sources": {}, "integrations": {}, "features": {"scheduler": True}}))
+        rows = {d["source"]: d["reason"] for d in self.snapshot()["degraded"]}
+        self.assertIn("OBSERVATORY_ALLOW_BULK=1", rows.get("registry-refused", ""), rows)
+
     def test_a_lost_projects_receipt_follows_the_sessions_switch(self):
         raw = self.home / "store/raw"
         (raw / "lost-projects.json").write_text(json.dumps({"ran_at": "2026-10-07T00:00:00Z", "degraded": [
