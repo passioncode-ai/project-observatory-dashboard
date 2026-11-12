@@ -6,8 +6,16 @@ while the major version is 0, a minor release may change behaviour and says so h
 ## 0.35.15 (2026-11-11)
 
 Two follow-ups of the 2026-11-11 fixes: the node's lifecycle package loads where `tools/node.py` shadows the engine's
-package, and the tick no longer reads a smoke check stopped at its time limit as a blank page. No setting or migration
-changes. The observatory-log plugin moves to 0.35.15 with the release.
+package, and the tick no longer reads a smoke check stopped at its time limit as a blank page. A lock of the shipped
+MCP tools and capabilities keeps what callers use from being changed or removed under its name. No setting or
+migration changes. The observatory-log plugin moves to 0.35.15 with the release.
+
+### Added
+
+- **What shipped to callers is added to, never changed under its name** (OBS-515, #504). `tools/shipped.lock.json`
+  holds the MCP tools `mcp/server.py` declares (their parameters and the required ones) and the capabilities of
+  `fabric-agent.json` (their effect); `tools/check_add_only.py` refuses a tool or capability no longer served without
+  a retired row, a dropped parameter, a newly required one, a changed effect, and a lock edited to hide them.
 
 ### Fixed
 
