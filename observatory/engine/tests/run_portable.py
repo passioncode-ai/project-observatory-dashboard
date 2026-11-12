@@ -79,7 +79,11 @@ BOUNDARY = (
     'workspace_scheduler', 'schema_compatibility', 'keyserver_boundary',
     'private_sources', 'public_contracts', 'vault_boundaries', 'provider_secret_boundaries', 'cli_compatibility', 'handed_commands', 'dashboard_portability',
     'agent_plugin', 'audit_regressions', 'identity_map', 'zone_accounts', 'deployed_commit', 'scrub_incremental', 'leak_scan_incremental', 'tick_health', 'accounts', 'environments', 'credential_bindings', 'local_keys', 'trap_anchors', 'leak_coverage', 'backup_vault', 'organizations', 'org_selection', 'machine', 'local_folders', 'config_locations', 'dashboard_stop',
+<<<<<<< HEAD
     'engine_update', 'workspace_profile', 'local_settings', 'local_ports', 'release_signature',
+=======
+    'engine_update', 'workspace_profile', 'local_settings', 'place_id', 'release_signature',
+>>>>>>> origin/main
     # Ported suites, first batch: each builds its own temporary workspace.
     'delta_fold', 'mcp_inventory', 'openrouter_keys', 'scan_ids', 'secrets', 'signature',
     'skill_check', 'use_secret', 'validator_rules',

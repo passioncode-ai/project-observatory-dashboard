@@ -195,6 +195,78 @@ def valid_id(value) -> bool:
     return isinstance(value, str) and bool(ID_SHAPE.fullmatch(value))
 
 
+# --- the place: this host and this OS account (OBS-357) ---------------------------------------------
+#
+# Two OS accounts of one host share the host id, so an id that names only the host cannot tell this
+# account's bundle, placement or receipt from another account's. The place id is the host id with a
+# hash of the account appended: `<host id>.a-<10 hex>`, 39 characters, inside ID_SHAPE, so every reader
+# that checks the shape accepts it. It names no account, and two accounts of one host share its prefix.
+
+PLACE_PREFIX = "observatory-place-id/1\0"
+ACCOUNT_ENV = "OBSERVATORY_ACCOUNT_FOR_TESTS"
+_PLACE = re.compile(r"(?P<host>[A-Za-z0-9][A-Za-z0-9._:-]{7,116})\.a-(?P<account>[0-9a-f]{10})")
+
+
+def _account() -> str:
+    """This OS account as text (the uid, the SID on Windows). A sandbox or a test may fake it, under the rule
+    that guards OBSERVATORY_MACHINE_ID."""
+    testing = os.environ.get("OBSERVATORY_SYSTEM_SETUP") == "0" or os.environ.get(TEST_MARKER) == "1"
+    if testing and os.environ.get(ACCOUNT_ENV):
+        return os.environ[ACCOUNT_ENV]
+    import osprivacy
+    return osprivacy.account()
+
+
+def is_place(value) -> bool:
+    return valid_id(value) and bool(_PLACE.fullmatch(value))
+
+
+def host_of(value) -> str | None:
+    """The host part of a place id, or a bare host id itself; None for what is not an id."""
+    if not valid_id(value):
+        return None
+    m = _PLACE.fullmatch(value)
+    return m.group("host") if m else value
+
+
+def place_id(home: Path | None = None, *, runner=subprocess.run, create: bool = True) -> str | None:
+    """This place: the host id and this OS account. None when the host id is None (`create=False`)."""
+    host = machine_id(home, runner=runner, create=create)
+    if host is None:
+        return None
+    if is_place(host):                                   # a sandbox's override that already names a place
+        return host
+    digest = hashlib.sha256((PLACE_PREFIX + host + "\0" + _account()).encode()).hexdigest()[:10]
+    return f"{host}.a-{digest}"
+
+
+def match(recorded, here: str | None = None, *, accounts=...) -> str:
+    """How an id written somewhere compares with this place: `same`, `other`, or `same-host-account-unknown`
+    (a bare host id of this host, written by an engine before place ids, on a host several accounts share or whose
+    account count cannot be told). A bare id of this host on a one-account host is `same`, as before."""
+    here = here or place_id(create=False)
+    if not valid_id(recorded) or not here:
+        return "other"
+    if is_place(recorded):
+        return "same" if recorded == here else "other"
+    if recorded != host_of(here):
+        return "other"
+    if accounts is ...:                                  # not given: read the host (None is "cannot be told")
+        import host_accounts
+        accounts = host_accounts.count()
+    return "same" if accounts == 1 else "same-host-account-unknown"
+
+
+def place_summary(home: Path | None = None) -> dict:
+    """Doctor's `place` block: the host, this place and how many accounts share the host."""
+    import host_accounts
+    try:
+        place = place_id(home, create=False)
+    except MachineIdentityError as exc:
+        return {"error": str(exc)[:200]}
+    return {"host": host_of(place), "place": place, "accountsOnHost": host_accounts.count()}
+
+
 def now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 

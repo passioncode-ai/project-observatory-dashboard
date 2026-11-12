@@ -338,6 +338,7 @@ older engine never reads `local.json`. A profile never carries it; a second-mach
 location dropped, scheduler off, backups root kept, place set to this machine). `settings.json` keeps `schema_version`
 1 and gains no `must_understand` entry. Tests: `tests/test_local_settings.py`.
 
+<<<<<<< HEAD
 ## Ports per OS account (OBS-354)
 
 `project-observatory full ports show|allocate|set|release` records the port of each listener (server,
@@ -352,6 +353,17 @@ allocation skips it; a claim holds only the account number, the ports and a time
 same answer as `full ports show` under `ports`. An older engine ignores both files and keeps its defaults.
 In this release nothing reads the record yet except `full ports` and doctor; the listeners and their clients
 move to it in the next one. Tests: `tests/test_local_ports.py`.
+=======
+## The place id (OBS-357, part 1)
+
+Two OS accounts of one computer share its machine id, so an id that names only the host cannot tell one account's
+records from another's. The place id names both: `<machine id>.a-<10 hex>` (a hash of the account, 39 characters,
+inside the id shape every reader accepts). `config/local.json` records it as its `place`; a file written before
+it, with the bare machine id, still matches this computer (and on a computer several accounts share it is read as
+"this host, account unknown"). `full doctor` names the host, the place and how many accounts share the host under
+`place`. Bundles, snapshots, receipts, placement and `full machine-move` still carry the machine id; they move to
+the place id, compared by `machine_identity.match`, in the next part. Tests: `tests/test_place_id.py`.
+>>>>>>> origin/main
 
 ## Machine placement (0.30.1, OBS-283, OBS-284; 0.31.0, OBS-282, OBS-286)
 
