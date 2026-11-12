@@ -5855,6 +5855,13 @@
       "bytes": 50845
     },
     {
+      "path": "tests/test_place_id.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "ee95551b2e97ca99e1c1a5743af107b369ff7e843cb8fe00c7c3963323219678",
+      "bytes": 4303
+    },
+    {
       "path": "tests/test_plugin_pair.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -7771,7 +7778,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 1046,
+  "file_count": 1047,
   "excluded": [
     "git-history",
     "operator-registries",
