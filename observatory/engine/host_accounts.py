@@ -235,3 +235,27 @@ def detail() -> dict:
 def count() -> int | None:
     """People's accounts on this host; None when it cannot be told (read it as several)."""
     return detail()["count"]
+
+
+def uid_exists(account: str) -> bool:
+    """Whether the account a port claim names still exists (OBS-354). On Windows a claim names a SID and is
+    taken as existing; on POSIX a uid the password database no longer knows claims nothing."""
+    if os.name == "nt":  # pragma: no cover - exercised on Windows only
+        return True
+    if not account.isdigit():
+        return False
+    try:
+        import pwd
+        pwd.getpwuid(int(account))
+        return True
+    except (KeyError, OverflowError):
+        return False
+
+
+def this_account() -> str:
+    """This process's account as a port claim names it: the uid, or on Windows the user SID ('' when unknown)."""
+    try:
+        import osprivacy
+        return osprivacy.account()
+    except Exception:  # noqa: BLE001 - an account that cannot be read claims nothing
+        return ""
