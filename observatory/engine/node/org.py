@@ -1361,6 +1361,22 @@ class Enrollment:
             renewed = {'by': 'key-on-record', 'epoch': state['epoch'], 'serial': state['certificate']['serial'],
                        'notAfter': state['certificate']['notAfter']} \
                 if before is not None and before.get('epoch') != state.get('epoch') else None
+            # CT-67's pair rule (fabric-agent-contract `718d87af`, OBS-524): a check-in goes only in a revision the
+            # server's last `protocols` list names. A list that names others and not ours means the server no longer
+            # reads what this node writes: nothing is sent, the events wait in the outbox, and the reason is kept. An
+            # empty or absent list (a server before DEC-0067) changes nothing.
+            held = [p for p in (state.get('protocols') or []) if isinstance(p, str)]
+            if held and DEVICE_PROTOCOL not in held:
+                state['lastCheckIn'] = {'at': iso(self.clock()), 'result': 'protocol-not-listed'}
+                state['nextCheckInAt'] = int(self.clock()) + state['checkInSeconds']
+                self._save(state)
+                self.journal('check-in-held', code='protocol-not-listed', listed=','.join(held)[:200])
+                out = {'ok': False, 'code': 'protocol-not-listed', 'status': None, 'listed': held,
+                       'nextStep': f'the server no longer lists {DEVICE_PROTOCOL}; update this engine '
+                                   f'(project-observatory full update --apply) or ask the server\'s owner'}
+                if renewed:
+                    out['renewed'] = renewed
+                return out
             doc = self.check_in_document(state)
             state['sequenceNum'] = doc['sequenceNum']      # a sequence number is spent once sent, answered or not
             pending = self._summary_due(state, inputs)
