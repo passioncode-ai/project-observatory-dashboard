@@ -3061,7 +3061,14 @@ running. `full machine-restore --second-machine` asks for the second-machine way
 machines keep running, a whole restore would give the second one this machine's SSH key, start
 every one of its launchd jobs at the next login (a bot polling one token on two machines, a
 scheduler acting twice) and copy its agent-network identity. A second-machine restore does none
-of that:
+of that. Which restore a bundle or snapshot gets is decided by the place it names (OBS-357): the
+host and the OS account it was taken under. This very place restores whole (`same-place`); another
+OS account of the same computer (`another-account`) and another computer (`another-machine`) restore
+as a second machine. A bundle from an engine before place ids names only the computer: on a computer
+with one account it is this place, as before; on a computer several accounts share, it is this
+account's only when its home is this home (`same-host-same-home`), else a second machine
+(`same-host-account-unknown`). `--second-machine` and `--same-machine` (at a terminal) still decide
+by hand:
 
 - **SSH.** `~/.ssh/config` (and `config.d/`), `known_hosts`, `authorized_keys`,
   `allowed_signers` and each `*.pub` whose private half is not in the bundle are written (the

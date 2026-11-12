@@ -1222,7 +1222,10 @@ def _take(base: Path, trigger: str, home: Path, runner, path: str | None, at, st
                               f"under the {limits['min_free_gb']} GB a machine backup keeps (limits.min_free_gb "
                               f"in config/{CONFIG_NAME}); the disk holds {root}")
         manifest = {"format": FORMAT, "created_at": iso(at), "trigger": trigger, "engine_version": config.VERSION,
-                    "platform": sys.platform, "machine_id": machine_identity.machine_id(home),
+                    "platform": sys.platform,
+                    # The place (OBS-357): this host and this OS account; an older engine compares it with its bare
+                    # host id, never finds them equal, and restores the bundle as a second machine, the safe way.
+                    "machine_id": machine_identity.place_id(home), "host_id": machine_identity.machine_id(home),
                     "home_path": str(home), "items": [], "skipped": col.skipped,
                     "absent": col.absent, "not_carried": col.not_carried,
                     "inventories": [{k: v for k, v in i.items() if k != "data"} for i in invs],
@@ -2506,7 +2509,8 @@ def restore(bundle: Path, home: Path, *, base: Path | None = None, mode: str = "
             pointer = stage / "inventories" / "observatory.json"
             workspace_doc = json.loads(pointer.read_text(encoding="utf-8")) if pointer.is_file() else None
         try:
-            placing = machine_identity.restore_mode(manifest.get("machine_id"), asked=machine, home=home)
+            placing = machine_identity.restore_mode(manifest.get("machine_id"), asked=machine, home=home,
+                                                    home_path=manifest.get("home_path"))
         except machine_identity.MachineIdentityError as exc:
             raise MachineBackupError(str(exc)) from None
         second = placing["mode"] == "second-machine"

@@ -21,6 +21,7 @@ sys.path.insert(0,str(ROOT))
 import configuration as config
 import workspace
 import workspace_upgrade as upgrade
+import machine_identity as MI  # noqa: E402  OBS-357: ids carry the place
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from secret_store_fixture import VALUES, all_values, make_external_store  # noqa: E402
 
@@ -629,7 +630,8 @@ class WorkspaceUpgrade(unittest.TestCase):
         workspace.write_json(self.home/'config/settings.json',settings)
 
     def test_a_snapshot_names_the_machine_it_was_taken_on(self):
-        self.assertEqual(config.read_json(self.snapshot()/'manifest.json')['machine_id'],ALPHA)
+        self.assertEqual(MI.host_of(config.read_json(self.snapshot()/'manifest.json')['machine_id']),ALPHA)
+        self.assertEqual(config.read_json(self.snapshot()/'manifest.json')['host_id'],ALPHA)
 
     def test_another_machine_never_takes_the_node_identity_or_the_schedules(self):
         self.identity()
@@ -646,7 +648,7 @@ class WorkspaceUpgrade(unittest.TestCase):
                             config.read_json(self.home/'workspace.json')['instance_id'],
                             'its own backup label, so the two machines never rotate each other\'s backups')
         machine=result['machine']
-        self.assertEqual((machine['mode'],machine['why'],machine['taken_on'],machine['this_machine']),
+        self.assertEqual((machine['mode'],machine['why'],MI.host_of(machine['taken_on']),MI.host_of(machine['this_machine'])),
                          ('second-machine','another-machine',ALPHA,BETA))
         self.assertEqual(machine['left_out'],['node/device/','node/orgs/','node/records/','node/shares/','store/maintenance.json'])
         self.assertIn('turned off',machine['scheduler'])
@@ -1495,7 +1497,7 @@ class RestoreSecretStore(unittest.TestCase):
         rows=self.movements()
         self.assertEqual(rows[0],{'event':'put','secret':'alpha/prod/API_KEY'},'the carried journal comes first')
         [line]=[r for r in rows if r.get('event')=='restore-store']
-        self.assertEqual((line['secret'],line['tool'],line['state'],line['snapshot'],line['taken_on']),
+        self.assertEqual((line['secret'],line['tool'],line['state'],line['snapshot'],MI.host_of(line['taken_on'])),
                          ('store/*','workspace_upgrade.py','written',snapshot.name,ALPHA))
         self.assertNotIn('value',line)
         self.assertEqual(block['journal'],'written')

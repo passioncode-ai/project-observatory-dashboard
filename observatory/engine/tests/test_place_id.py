@@ -90,5 +90,49 @@ class LocalSettingsPlace(unittest.TestCase):
                 self.assertFalse(config.local(home)["place"]["matches"], "another account's place is another place")
 
 
+class RestoreMode(unittest.TestCase):
+    """Spec M5 3.3: the restore mode from `match`, for bundles and snapshots."""
+
+    def setUp(self):
+        with env("501"):
+            self.here = mi.place_id()
+        with env("502"):
+            self.neighbour = mi.place_id()
+        with env("501", OTHER_HOST):
+            self.elsewhere = mi.place_id()
+
+    def mode(self, recorded, *, accounts=1, home_path=None, home=Path("/Users/a")):
+        with env("501"), patch.dict(os.environ, {"OBSERVATORY_HOST_ACCOUNTS": str(accounts)}):
+            got = mi.restore_mode(recorded, here=self.here, home=home, home_path=home_path)
+        return got["mode"], got["why"]
+
+    def test_the_table(self):
+        self.assertEqual(self.mode(self.here), ("same-machine", "same-place"))
+        self.assertEqual(self.mode(self.neighbour, accounts=2), ("second-machine", "another-account"))
+        self.assertEqual(self.mode(self.elsewhere), ("second-machine", "another-machine"))
+        self.assertEqual(self.mode(OTHER_HOST), ("second-machine", "another-machine"))
+        self.assertEqual(self.mode(HOST, accounts=1), ("same-machine", "same-place"), "a bare id, one account: as before")
+        self.assertEqual(self.mode(None), ("second-machine", "names-no-machine"))
+
+    def test_an_old_bundle_of_a_shared_host_is_this_accounts_only_by_its_home(self):
+        self.assertEqual(self.mode(HOST, accounts=2, home_path="/Users/a"), ("same-machine", "same-host-same-home"))
+        self.assertEqual(self.mode(HOST, accounts=2, home_path="/Users/b"),
+                         ("second-machine", "same-host-account-unknown"))
+        self.assertEqual(self.mode(HOST, accounts=2), ("second-machine", "same-host-account-unknown"),
+                         "a snapshot names no home")
+
+    def test_the_answer_names_the_hosts(self):
+        with env("501"):
+            got = mi.restore_mode(self.neighbour, here=self.here)
+        self.assertEqual((got["this_host"], got["taken_on_host"], got["same_host"]), (HOST, HOST, True))
+
+    def test_an_older_reader_restores_a_new_bundle_as_a_second_machine(self):
+        def restore_mode_0_33(recorded, here):           # the comparison of the engine before place ids
+            same = recorded == here
+            return "same-machine" if same else "second-machine"
+        self.assertEqual(restore_mode_0_33(self.here, HOST), "second-machine",
+                         "a new bundle never reads as the same machine to an older engine: the safe way")
+
+
 if __name__ == "__main__":
     unittest.main()

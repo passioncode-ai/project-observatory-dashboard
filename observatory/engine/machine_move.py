@@ -1143,7 +1143,9 @@ def status(home: Path, base: Path | None, *, peers: list[dict] | None = None, un
     # M2: the restore complete.
     receipt, receipt_problem = _receipt(home)
     mine = restore_summary(receipt)
-    theirs = [p for p in others if me and p.get("restore") and p["restore"].get("taken_on") == me]
+    # A receipt names where its bundle was taken: this host's bare id before place ids, this place since (OBS-357).
+    here = mi.place_id(home, create=False)
+    theirs = [p for p in others if me and p.get("restore") and p["restore"].get("taken_on") in (me, here)]
     if receipt_problem:
         items.append(_item("restore", UNKNOWN, [receipt_problem]))
     elif mine:

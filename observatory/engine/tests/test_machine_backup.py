@@ -1158,14 +1158,16 @@ class SecondMachine(Machine):
     def test_a_bundle_names_the_machine_it_was_taken_on(self):
         stage, manifest = self.open(self.bundle)
         self.addCleanup(shutil.rmtree, stage, True)
-        self.assertEqual(manifest['machine_id'], ALPHA)
+        self.assertEqual(MI.host_of(manifest['machine_id']), ALPHA)
+        self.assertTrue(MI.is_place(manifest['machine_id']), 'OBS-357: the place of host and account')
+        self.assertEqual(manifest['host_id'], ALPHA)
 
     def test_another_machine_gets_no_private_key_and_no_loaded_job(self):
         with self.on(BETA):
             planned = MB.restore(self.bundle, self.fresh, secret=PASS)
             self.assertEqual((planned['machine']['mode'], planned['machine']['why']),
                              ('second-machine', 'another-machine'))
-            self.assertEqual((planned['machine']['taken_on'], planned['machine']['this_machine']), (ALPHA, BETA))
+            self.assertEqual((MI.host_of(planned['machine']['taken_on']), MI.host_of(planned['machine']['this_machine'])), (ALPHA, BETA))
             rows = {r['source']: r for r in planned['plan']}
             self.assertEqual(rows['~/.ssh/id_example']['state'], 'withheld')
             self.assertIn('ssh-private', rows['~/.ssh/id_example']['reason'])
@@ -1228,9 +1230,10 @@ class SecondMachine(Machine):
         self.assertEqual(stat.S_IMODE(placement.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(placement.parent.stat().st_mode), 0o700)
         doc = json.loads(placement.read_text())
-        self.assertEqual((doc['schema'], doc['machine']), ('observatory-placement/1', BETA))
+        self.assertEqual((doc['schema'], MI.host_of(doc['machine'])), ('observatory-placement/1', BETA))
         nested = 'com.example.nested'
-        self.assertEqual(sorted(([{k: e[k] for k in ('label', 'serviceId', 'placedOn', 'by')} for e in doc['elsewhere']]),
+        self.assertEqual(sorted(([{k: MI.host_of(e[k]) if k == 'placedOn' else e[k]
+                                   for k in ('label', 'serviceId', 'placedOn', 'by')} for e in doc['elsewhere']]),
                                 key=lambda e: e['label']),
                          sorted([{'label': job_label(), 'serviceId': 'alpha-bot.default', 'placedOn': ALPHA,
                                   'by': 'machine-restore'},
@@ -1242,7 +1245,7 @@ class SecondMachine(Machine):
 
     def test_the_same_machine_keeps_todays_behaviour(self):
         planned = MB.restore(self.bundle, self.fresh, secret=PASS)
-        self.assertEqual((planned['machine']['mode'], planned['machine']['why']), ('same-machine', 'same-machine'))
+        self.assertEqual((planned['machine']['mode'], planned['machine']['why']), ('same-machine', 'same-place'))
         self.assertEqual(set(planned['counts']), {'missing', 'same', 'conflict'})
         self.assertFalse([r for r in planned['plan'] if r.get('staged') or r['state'] == 'withheld'])
         self.assertNotIn(MB.SECOND_MACHINE_NEXT[0], planned['next'])
@@ -1405,8 +1408,8 @@ class SecondMachine(Machine):
         self.assertEqual(applied['receipt'], '~/.local/share/project-observatory/machine-move/restore.json')
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         part = receipt['apply']
-        self.assertEqual((receipt['schema'], receipt['machine']), ('observatory-machine-restore/1', BETA))
-        self.assertEqual((part['mode'], part['taken_on'], part['this_machine']), ('second-machine', ALPHA, BETA))
+        self.assertEqual((receipt['schema'], MI.host_of(receipt['machine'])), ('observatory-machine-restore/1', BETA))
+        self.assertEqual((part['mode'], MI.host_of(part['taken_on']), MI.host_of(part['this_machine'])), ('second-machine', ALPHA, BETA))
         self.assertEqual((part['skip'], part['only'], part['failed']), (['claude'], [], 0))
         self.assertIn('claude', part['left_out'])
         self.assertIn({'key': 'id_work', 'fingerprint': fp, 'in_ssh': True}, part['other_keys'])

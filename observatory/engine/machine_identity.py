@@ -252,19 +252,28 @@ def match(recorded, here: str | None = None, *, accounts=...) -> str:
     if recorded != host_of(here):
         return "other"
     if accounts is ...:                                  # not given: read the host (None is "cannot be told")
-        import host_accounts
-        accounts = host_accounts.count()
+        accounts = accounts_on_host()
     return "same" if accounts == 1 else "same-host-account-unknown"
+
+
+def accounts_on_host() -> int | None:
+    """People's accounts on this host. A sandbox is a one-account host unless OBSERVATORY_HOST_ACCOUNTS says
+    otherwise, so a suite's verdicts never depend on the CI runner's accounts."""
+    testing = os.environ.get("OBSERVATORY_SYSTEM_SETUP") == "0" or os.environ.get(TEST_MARKER) == "1"
+    if testing:
+        told = os.environ.get("OBSERVATORY_HOST_ACCOUNTS", "1")
+        return int(told) if told.isdigit() else None
+    import host_accounts
+    return host_accounts.count()
 
 
 def place_summary(home: Path | None = None) -> dict:
     """Doctor's `place` block: the host, this place and how many accounts share the host."""
-    import host_accounts
     try:
         place = place_id(home, create=False)
     except MachineIdentityError as exc:
         return {"error": str(exc)[:200]}
-    return {"host": host_of(place), "place": place, "accountsOnHost": host_accounts.count()}
+    return {"host": host_of(place), "place": place, "accountsOnHost": accounts_on_host()}
 
 
 def now() -> str:
@@ -403,7 +412,7 @@ def record_restore(parts: dict, home: Path | None = None) -> Path:
             doc = read_restore_receipt(home) or {}
         except MachineIdentityError:
             doc = {}
-        out = {"schema": RECEIPT_SCHEMA, "machine": machine_id(home), "updatedAt": now()}
+        out = {"schema": RECEIPT_SCHEMA, "machine": place_id(home), "updatedAt": now()}
         for name in RECEIPT_PARTS:
             if name in parts:
                 out[name] = {"at": now(), **parts[name]}
@@ -447,17 +456,20 @@ def job_label(path: Path, data: bytes | None = None) -> str:
 
 
 def restore_mode(recorded, *, asked: str | None = None, here: str | None = None,
-                 home: Path | None = None, unknown: str = "second") -> dict:
-    """Whether a bundle or snapshot taken on machine `recorded` is restored here as the same machine.
+                 home: Path | None = None, unknown: str = "second", home_path: str | None = None) -> dict:
+    """Whether a bundle or snapshot taken at place `recorded` is restored here as the same machine.
 
     `asked` is the person's choice: `second` (always safe) or `same` (a terminal-only override the
-    caller checks). Otherwise the ids decide, and a bundle or snapshot that names no machine (taken
-    before 0.30.1) is treated as another machine's: the safe reading of an unknown. `unknown="keep"`
-    is `full init`'s reading on an empty home: such a snapshot is most often this machine's own
-    (taken by the engine before an update), so it is restored whole and the answer says `unknown`."""
+    caller checks). Otherwise `match` decides (OBS-357): this very place is the same machine; another account
+    of this host, or another host, is a second machine. An id an engine wrote before place ids names only the
+    host: on a host with one account it is this place, as before; on a host several accounts share, a bundle
+    whose `home_path` is this home is this account's (`same-host-same-home`), anything else is a second machine.
+    A bundle or snapshot that names no machine (taken before 0.30.1) is another machine's, the safe reading of
+    an unknown; `unknown="keep"` is `full init`'s reading on an empty home, where such a snapshot is most often
+    this machine's own (taken before an update), restored whole with the answer `unknown`."""
     if asked not in (None, "second", "same"):
         raise MachineIdentityError("the restore mode is `second` or `same`")
-    here = here or machine_id(home)
+    here = here or place_id(home)
     recorded = recorded if valid_id(recorded) else None
     if asked:
         why = "asked"
@@ -465,7 +477,16 @@ def restore_mode(recorded, *, asked: str | None = None, here: str | None = None,
     elif recorded is None:
         why, same = "names-no-machine", unknown == "keep"
     else:
-        same = recorded == here
-        why = "same-machine" if same else "another-machine"
+        verdict = match(recorded, here)
+        if verdict == "same":
+            why, same = "same-place", True
+        elif verdict == "same-host-account-unknown":
+            same = bool(home_path) and Path(home_path) == (home or Path.home())
+            why = "same-host-same-home" if same else "same-host-account-unknown"
+        else:
+            same = False
+            why = "another-account" if host_of(recorded) == host_of(here) else "another-machine"
     mode = "unknown" if why == "names-no-machine" and same else ("same-machine" if same else "second-machine")
-    return {"mode": mode, "why": why, "this_machine": here, "taken_on": recorded}
+    return {"mode": mode, "why": why, "this_machine": here, "taken_on": recorded,
+            "this_host": host_of(here), "taken_on_host": host_of(recorded) if recorded else None,
+            "same_host": bool(recorded) and host_of(recorded) == host_of(here)}
