@@ -26,6 +26,7 @@ import oslocks
 import osprivacy
 import json
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -82,6 +83,9 @@ def health(state: Path, scratch: Path, *, scheduler_enabled: bool = True,
            "recent": recent(scratch)}
     if scheduler_enabled and out["recent"]["incomplete"] >= INCOMPLETE_ALERT:
         out["history_warning"] = history_sentence(out["recent"])
+    said = refused(scratch, registry=state.parent / "registry" / "projects.json") if scheduler_enabled else None
+    if said:
+        out["registry_refused"] = said
     if not scheduler_enabled:
         return {**out, "verdict": "disabled", "why": "features.scheduler is off in this workspace"}
     if lock_held(state / "tick.lock"):
@@ -203,4 +207,53 @@ def degraded(state: Path, scratch: Path, *, scheduler_enabled: bool = True) -> l
         out.append({"source": "tick", "reason": f"{h['verdict']}: {h['why']}"})
     if h.get("history_warning"):
         out.append({"source": "tick-history", "reason": h["history_warning"]})
+    if h.get("registry_refused"):
+        out.append({"source": "registry-refused", "reason": h["registry_refused"]})
     return out
+
+
+#: The emit's wholesale-change guard (`collectors/emit_registry.py` `_bulk_refusal`), as the
+#: supervisor records the run (`tick_lease.registry_outcome`, 300 characters of the tick's note).
+REFUSAL_MARK = "emit REFUSED: "
+_SWING = re.compile(r"([\w.-]+\.json) would go from (\d+) to (\d+)")
+
+
+def refused(scratch: Path, last: int = RECENT_RUNS, *, registry: Path | None = None) -> str | None:
+    """A sentence while the newest runs keep stopping at the emit's guard, else None.
+
+    A refusal is right to stop one tick, and the tick used to log only "emit failed or REFUSED": on 2026-10-29 one machine had kept its registry from 2026-10-19 through 450 ticks,
+    because 0.25.0 folded remoteless worktrees into their main checkout's project (94 projects to
+    52) and nothing told the person the command the guard asks for. The sentence fits the card's
+    300 characters with the command last. A run that finished, or that stopped elsewhere, ends the
+    streak: only the newest runs count. So does a `registry` written after the newest refused run
+    ended: the person ran the command, and `full local` records no tick run."""
+    try:
+        lines = (scratch / RUNS_FILE).read_text(encoding="utf-8").splitlines()[-last:]
+    except (OSError, UnicodeDecodeError):
+        return None
+    streak, swing, newest = 0, None, None
+    for line in reversed(lines):
+        try:
+            run = json.loads(line)
+        except ValueError:
+            break
+        reason = str(run.get("reason") or "") if isinstance(run, dict) else ""
+        if not isinstance(run, dict) or run.get("outcome") != "partial" or REFUSAL_MARK not in reason:
+            break
+        streak += 1
+        swing = swing or _SWING.search(reason)
+        newest = newest or run.get("ended_at")
+    if not streak:
+        return None
+    if registry is not None and isinstance(newest, str):
+        try:
+            ended = datetime.strptime(newest, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+            if datetime.fromtimestamp(registry.stat().st_mtime, timezone.utc) > ended:
+                return None
+        except (OSError, ValueError):
+            pass
+    what = f"{swing[1]} would go from {swing[2]} to {swing[3]}" if swing else "a wholesale change"
+    ticks = "the last tick" if streak == 1 else f"the last {streak} ticks"
+    return (f"the emit refused the registry on {ticks} ({what}); projects, findings and the dashboard keep "
+            f"the one before. If the change is genuine (an engine update or folders moved on purpose), "
+            f"run `OBSERVATORY_ALLOW_BULK=1 project-observatory full local` once")
