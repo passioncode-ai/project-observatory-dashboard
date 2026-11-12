@@ -699,5 +699,7 @@
   "one": "{n} new item may belong to {organization}",
   "other": "{n} new items may belong to {organization}"
  },
- "step@@failed": "failed"
+ "step@@failed": "failed",
+ "theme@@Light": "Light",
+ "theme@@Dark": "Dark"
 }

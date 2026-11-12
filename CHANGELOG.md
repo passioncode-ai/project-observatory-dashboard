@@ -3,6 +3,47 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.35.16 (2026-11-12)
+
+Every Observatory surface now opens in the light theme: the dashboard pages (with a Light / Dark switch beside the
+language), the Mac app and the Windows and Linux app. The wiki projection is pushed to the wiki's origin instead of
+left as a local commit, and a checkout marked as a read mirror is never written. Two contributed fixes land: the vault's own lock and journals no longer read as leak-scan
+holes, and three silent stops of the local server and the tick now say why. No setting or migration changes; an
+installed server takes its new supervisor marker the next time `serverd.py --install` runs. The observatory-log plugin
+moves to 0.35.16 with the release.
+
+### Changed
+
+- **Light theme by default** (OBS-523). The dashboard pages open with the PassionCode token file's light palette and
+  offer Light / Dark beside the language; the choice is kept in the browser (`observatory.theme`) and applied before
+  the first paint. The Mac app (Aqua, the light palette in `Palette.swift`) and the Windows and Linux app
+  (`desktop/ui/app.css`) are light. Gold stays the fill of the primary action and selection; focus rings, accent lines
+  and links take the readable gold-brown (`--pc-focus`, `--pc-link`), because gold on white fails contrast. Every text
+  pair the Mac app draws holds WCAG AA in the light palette (`PaletteTests`).
+- **google-auth 2.62.1** in the `[full]` pins and both lock copies (supersedes Dependabot #499, which moved only
+  the pin in `pyproject.toml` and could not resolve; OBS-183).
+
+### Fixed
+
+- **The wiki projection no longer splits the wiki** (OBS-516, #507). `tools/commit_projection.py` committed the
+  projection to the local branch and never pushed, so an unpushed commit left the operator's wiki checkout ahead and
+  behind its origin at once. The projection commit is now built in a temporary index on top of the upstream branch and
+  pushed (three tries against a racing writer); the local branch follows only by a fast forward that overwrites nothing
+  local. A checkout marked `git config observatory.wikiMirror true` is never projected into or committed to. The
+  outcome reads `pushed`, `push-failed` or `mirror`, and `push-failed` counts in `projection.uncommitted`.
+- **The vault's own files are not leak-scan holes** (OBS-519, #509, contributed as #412). The leak scan expected only
+  project folders at the vault root, so `.vault.lock`, `movements.jsonl` and `leaks.jsonl`, which `vault.py` writes
+  there itself, kept `leak-scan:source-unreadable` and a degraded `/health` on any vault with one slot. A regular file
+  under those three names is passed by; a symlink, a FIFO or any other stray entry at the root is still a hole.
+- **Three silent stops say why** (OBS-520, #510, contributed as #398). A vanished interpreter: `tools/tick.sh` names the
+  missing `OBSERVATORY_PYTHON` and exits 78 instead of running another `python3`, and `full doctor` and the maintenance
+  warning read each job's `pid` and last exit (78 named as a missing interpreter). A registry the emit's guard refused:
+  the refusal reaches `tick.log` and a `registry-refused` row in `degraded` (doctor, `/health`, the service card, every
+  MCP answer) with the counts and the command that lets it through; the guard itself is not relaxed. The server's
+  launchd document sets `FABRIC_SERVICE_SUPERVISOR=launchd`.
+- **The restart-budget tests no longer fail on a slow Windows runner** (OBS-518). They gave a process one second to
+  become ready; a loaded runner took longer and the portable verdict read a new failing check. They now allow five.
+
 ## 0.35.15 (2026-11-11)
 
 Two follow-ups of the 2026-11-11 fixes: the node's lifecycle package loads where `tools/node.py` shadows the engine's

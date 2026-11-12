@@ -1304,11 +1304,11 @@ def build_pages(payload: dict) -> dict[str, int]:
 
 
 TEMPLATE = r"""<!doctype html>
-<html lang="__LOCALE__" data-theme="dark" data-build-locale="__LOCALE__">
+<html lang="__LOCALE__" data-theme="light" data-build-locale="__LOCALE__">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light dark">
 <title>__TITLE__</title>
 <link rel="icon" type="image/svg+xml" href="__ICON__">
 <script>
@@ -1322,14 +1322,21 @@ __LOCALE_RESOLVER__
   var root = document.documentElement, stored = null;
   try { stored = localStorage.getItem("observatory.locale"); } catch (e) {}
   root.lang = observatoryLocale(stored, observatorySystemLanguages(), root.getAttribute("data-build-locale"));
+  /* THE READER'S THEME, BEFORE FIRST PAINT (OBS-523): light unless the reader chose dark on the theme switch. */
+  var theme = null;
+  try { theme = localStorage.getItem("observatory.theme"); } catch (e) {}
+  root.setAttribute("data-theme", theme === "dark" ? "dark" : "light");
 })();
 </script>
 <style>
 __PC_TOKENS__
 /* DESIGN TOKENS. The PassionCode design system above owns every value; the
  * dashboard's own role names are aliases of its semantic `--pc-*` roles, so a
- * rule below never names a colour. One fixed dark theme, as in every
- * PassionCode product surface: gold is action, selection and focus; green,
+ * rule below never names a colour. Light by default (OBS-523), dark on the
+ * reader's choice, both from the system's one token file switched by
+ * `data-theme`: gold fills action and selection; a line or text in the accent
+ * role reads `--focus` and `--link`, which stay gold in dark and turn the
+ * readable gold-brown in light, where gold on white fails contrast; green,
  * peach, pink-red and blue are positive, warning, negative and information,
  * and each is always paired with words. */
 :root {
@@ -1344,6 +1351,8 @@ __PC_TOKENS__
   --accent-hover: var(--pc-accent-hover);
   --accent-weak: var(--pc-accent-soft);
   --accent-ink: var(--pc-on-accent);
+  --focus: var(--pc-focus);
+  --link: var(--pc-link);
   --ok: var(--pc-positive);
   --ok-weak: var(--pc-positive-soft);
   --warn: var(--pc-warning);
@@ -1380,7 +1389,6 @@ __PC_TOKENS__
 
   background-color: var(--bg);
   color: var(--ink);
-  color-scheme: dark;
 }
 
 /* Reduced motion: hover transitions collapse to instant. */
@@ -1398,9 +1406,9 @@ body {
   margin: 0; background: var(--bg); color: var(--ink);
   font: 400 var(--t-body)/1.5 var(--font-ui);
 }
-a { color: var(--accent); text-decoration: none; }
+a { color: var(--link); text-decoration: none; }
 a:hover { text-decoration: underline; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-control); }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: var(--r-control); }
 .mono { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
 
 /* HEADER */
@@ -1465,7 +1473,7 @@ td .mono { overflow-wrap: anywhere; }
 .qrow .qm { color: var(--muted); font-family: var(--font-data); font-size: var(--t-chip); }
 .tile.more-tiles { cursor: pointer; border-style: dashed; font: inherit; text-align: left;
   color: var(--muted); }
-.tile.more-tiles:hover { border-color: var(--accent); color: var(--ink); }
+.tile.more-tiles:hover { border-color: var(--focus); color: var(--ink); }
 .tile b { display: block; font: 600 var(--t-section)/1.2 var(--font-data);
   font-variant-numeric: tabular-nums; }
 .tile span { color: var(--muted); font-size: var(--t-label);
@@ -1535,7 +1543,7 @@ button.fold { margin: var(--space-2) 0 0 var(--space-3); }
 .dlist { margin: 4px 0 12px; padding-left: 18px; }
 .dlist li { font-size: var(--t-chip); line-height: 1.5; }
 .plink { color: inherit; text-decoration: none; border-bottom: 1px solid var(--border); }
-.plink:hover, .plink:focus { border-bottom-color: var(--accent); }
+.plink:hover, .plink:focus { border-bottom-color: var(--focus); }
 .health { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
           gap: 4px 16px; margin: 8px 0; }
 .hrow { display: flex; justify-content: space-between; gap: 8px;
@@ -1569,7 +1577,7 @@ input[type=search] { flex: 1; min-width: 240px; }
 }
 .chip-btn:hover { background: var(--panel-2); }
 .chip-btn[aria-pressed="true"] {
-  background: var(--accent-weak); border-color: var(--accent); color: var(--ink);
+  background: var(--accent-weak); border-color: var(--focus); color: var(--ink);
 }
 
 /* A value shown on request: monospace, selectable in one click, wrapping
@@ -1587,7 +1595,7 @@ code.val {
   position: fixed; left: 50%; bottom: var(--space-5, 24px);
   transform: translateX(-50%); z-index: 40;
   font: 400 var(--t-chip) var(--font-data); color: var(--ink);
-  background: var(--panel-2); border: 1px solid var(--accent);
+  background: var(--panel-2); border: 1px solid var(--focus);
   border-radius: var(--r-pill); padding: 8px 16px; max-width: 80vw;
 }
 
@@ -1716,6 +1724,8 @@ td.num .tier, td.num .anchor { white-space: normal; }
 .locale-switch button + button { border-left: 1px solid var(--border-strong); }
 .locale-switch button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); }
 .locale-switch button:hover:not([aria-pressed="true"]) { background: var(--panel-2); color: var(--ink); }
+/* LIGHT/DARK beside the language: the same two-choice control, light pressed by default. */
+.theme-switch { margin-left: 0; }
 .family-link { color: var(--muted); font-size: var(--t-chip); text-decoration: underline;
   text-underline-offset: .2em; }
 .family-link:hover { color: var(--ink); }
@@ -1760,7 +1770,7 @@ body[data-page="cloudflare"] #out, body[data-page="cloudflare"] #list-tools, bod
 .agents-wf > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center;
   gap: var(--space-2); list-style: none; }
 .agents-wf > summary::-webkit-details-marker { display: none; }
-.agents-wf > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.agents-wf > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .agents-meta { flex-basis: 100%; color: var(--muted); font-size: var(--t-label); }
 .agents-wf h3 { font: 600 var(--t-label) var(--font-ui); text-transform: uppercase;
   letter-spacing: .06em; color: var(--muted); margin: var(--space-3) 0 var(--space-1); }
@@ -1779,7 +1789,7 @@ body[data-page="cloudflare"] #out, body[data-page="cloudflare"] #list-tools, bod
 .agents-dot.st-done { border-color: var(--ok); }
 .agents-dot.st-blocked { border-color: var(--danger); }
 .agents-dot.st-failed { border-color: var(--danger); background: var(--danger-weak); }
-.agents-dot.st-in_progress { border-color: var(--accent); }
+.agents-dot.st-in_progress { border-color: var(--focus); }
 .agents-arrow { color: var(--muted); font: 400 var(--t-chip) var(--font-data); }
 .agents-ended { color: var(--muted); }
 .agents-needs { list-style: none; padding: 0; margin: 0; }
@@ -2140,6 +2150,25 @@ localeButtons.forEach(b => b.addEventListener("click", () => {
   }
   if (localeFor(choice) !== LOCALE) location.reload();
   else pressLocale(choice);
+}));
+// THE THEME SWITCH: Light / Dark (OBS-523). Light unless the reader chose
+// dark; applied at once (the token layer switches on `data-theme`) and kept
+// in the browser beside the language.
+const THEME_KEY = "observatory.theme";
+const themeButtons = [...document.querySelectorAll(".theme-switch button[data-theme-choice]")];
+const pressTheme = choice => themeButtons.forEach(b =>
+  b.setAttribute("aria-pressed", String(b.dataset.themeChoice === choice)));
+pressTheme(document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light");
+themeButtons.forEach(b => b.addEventListener("click", () => {
+  const choice = b.dataset.themeChoice === "dark" ? "dark" : "light";
+  document.documentElement.setAttribute("data-theme", choice);
+  pressTheme(choice);
+  try {
+    if (choice === "light") localStorage.removeItem(THEME_KEY);
+    else localStorage.setItem(THEME_KEY, choice);
+  } catch (e) {
+    toast(T("Your browser keeps no settings here, so the next page opens in the light theme."));
+  }
 }));
 // `/` focuses the search box, unless the reader is already typing.
 document.addEventListener("keydown", ev => {

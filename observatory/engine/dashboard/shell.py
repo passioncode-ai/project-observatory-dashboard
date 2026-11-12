@@ -144,6 +144,18 @@ def locale_switch_html(t: Translator) -> str:
     return f'<div class="locale-switch" role="group"{t.attr("aria-label", "Language")}>{system}{buttons}</div>'
 
 
+def theme_switch_html(t: Translator) -> str:
+    """Theme: Light / Dark (OBS-523). Light is the default; the page script
+    presses the reader's choice, applies it at once and keeps it (see
+    `THEME_KEY` in the template and the resolver before first paint)."""
+    light = t.mark("theme@@Light", tag="button",
+                   attrs=' type="button" data-theme-choice="light" aria-pressed="false"')
+    dark = t.mark("theme@@Dark", tag="button",
+                  attrs=' type="button" data-theme-choice="dark" aria-pressed="false"')
+    buttons = light + dark
+    return f'<div class="locale-switch theme-switch" role="group"{t.attr("aria-label", "Theme")}>{buttons}</div>'
+
+
 def nav_html(page: str, counts: dict[str, int | str], t: Translator | None = None) -> str:
     """Grouped navigation keeps every route reachable without disclosure."""
     t = t or Translator()
@@ -164,6 +176,7 @@ def nav_html(page: str, counts: dict[str, int | str], t: Translator | None = Non
             + brand_html(t)
             + f'<nav class="pages" id="pages"{t.attr("aria-label", "Sections")}>' + "".join(groups) + "</nav>"
             + locale_switch_html(t)
+            + theme_switch_html(t)
             + f'<a class="family-link" href="{FAMILY_URL}" rel="noopener">{t.mark("Part of the PassionCode toolkit")}</a>'
             + "</aside>")
 

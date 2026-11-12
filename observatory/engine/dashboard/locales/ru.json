@@ -2481,5 +2481,9 @@
  "Plugin behind its marketplace's newest version": "Плагин отстаёт от новейшей версии своего маркетплейса",
  "plugin {plugin} is at {installed}, its marketplace publishes {latest}": "плагин {plugin} на версии {installed}, его маркетплейс публикует {latest}",
  "step@@failed": "не удался",
- "step {step} failed, {at}": "шаг {step} не удался, {at}"
+ "step {step} failed, {at}": "шаг {step} не удался, {at}",
+ "Theme": "Тема",
+ "theme@@Light": "Светлая",
+ "theme@@Dark": "Тёмная",
+ "Your browser keeps no settings here, so the next page opens in the light theme.": "Браузер здесь не хранит настройки, поэтому следующая страница откроется в светлой теме."
 }

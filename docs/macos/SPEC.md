@@ -236,13 +236,16 @@ changes invalidate in-flight UI callbacks; late results cannot paint a different
 workspace. Closing the window does not kill a detached accepted job; reopening
 can resume it. Stop explicitly cancels the job, not unrelated processes.
 
-Design (2026-10-03): one PassionCode product. Every window — dashboard, assistant,
-Settings, alerts and menus — is dark (`NSApp.appearance` is Dark Aqua) and drawn from
-the design system's own colour roles, the values the dashboard's pages use
+Design (2026-10-03): one PassionCode product. Every window (dashboard, assistant,
+Settings, alerts and menus) is light since OBS-523 (`NSApp.appearance` is Aqua; it was
+Dark Aqua until 0.35.16) and drawn from the design system's own colour roles, the light
+values the dashboard's pages open with
 (`dashboard/brand/passioncode-tokens.css`). They are defined once, in
 `macos/Sources/ObservatoryCore/Palette.swift`, and the views read them through
-`macos/Sources/ObservatoryApp/Theme.swift`: gold (`--pc-accent`) for the primary action,
-the selected conversation and the focus ring, with `--pc-on-accent` text on it; semantic
+`macos/Sources/ObservatoryApp/Theme.swift`: gold (`--pc-accent`) fills the primary action,
+with `--pc-on-accent` text on it, and the readable gold-brown (`--pc-focus`) draws the
+selected conversation's mark, accent text and the focus ring, since gold on white is not
+readable; semantic
 roles for state only (warning: a person is needed; negative: a failure; positive: ready;
 info: running). No system blue: buttons, fields, the language switch and the conversation
 list draw their own states. `PaletteTests` compares every value with the vendored CSS,
