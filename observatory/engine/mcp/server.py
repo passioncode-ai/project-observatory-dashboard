@@ -1788,7 +1788,7 @@ def observatory_checkpoint_write(
                                                      "with the same key and request returns the "
                                                      "first answer.")],
     stepId: Annotated[str, Field(description="The step this checkpoint closes or reports.")],
-    status: Annotated[Literal["in_progress", "done", "blocked"], Field()],
+    status: Annotated[Literal["in_progress", "done", "blocked", "failed"], Field()],
     body: Annotated[dict[str, Any], Field(description=(
         "Typed state, not prose: goal (required), plan [{step_id,title,needs}], done "
         "[{step_id,result,evidence}], open [{step_id,next_action}], decisions "

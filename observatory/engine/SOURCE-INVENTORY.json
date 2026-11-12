@@ -576,8 +576,8 @@
       "path": "dashboard/agents_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "aaca513c79da34e1d5f5485154601ec2ab49fe12600bf62b4f71e3f2ad9bc9de",
-      "bytes": 16869
+      "export_sha256": "48001cdf386338c2232ac5c4a407af2f3355552ecc4c6220f329952db05000b2",
+      "bytes": 16917
     },
     {
       "path": "dashboard/audit_pack.py",
@@ -620,8 +620,8 @@
     {
       "path": "dashboard/build_dashboard.py",
       "source_sha256": "9169551d891a47eb7e9d96011b07f6b0a621338884beeba4c868c10d3f84724a",
-      "export_sha256": "599879c4dd02c46a26c74699db8474be0c48a3e50251a6435e9c3b45abdf1e30",
-      "bytes": 295114,
+      "export_sha256": "ba8908879ecb803c70eab9215b330433052b1ac2f6e33c03baf98006ab333ec6",
+      "bytes": 295201,
       "python_comments_removed": 235,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,
@@ -659,15 +659,15 @@
       "path": "dashboard/locales/en.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "145b9fd900c806bfee8ef32e2cf1f7a021e7e38aa4c728248800ef77a41ea57e",
-      "bytes": 27845
+      "export_sha256": "37c91721157640f30bf036bd2e098e41f2489fef5f7f904f3a16b321808c0a79",
+      "bytes": 27872
     },
     {
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5e33ab8e35f48e76f0260606a06d2d413ee6ff6dbd1cceb14f4c7f1adcbfc821",
-      "bytes": 203596
+      "export_sha256": "0183e4c3094bdfe97e36a0cb664a713876add5a89f80b7eeefd3a0822df533c3",
+      "bytes": 203704
     },
     {
       "path": "dashboard/machine_page.py",
@@ -3222,8 +3222,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "d024915d7ca3a669fc59a1dba20a3edb21e62bdb5f59a868562376d63630aa6f",
-      "bytes": 132306,
+      "export_sha256": "4772625c3fa500e93dba5b21b23fa7e8fb37625275911b294b12d6f6e100892c",
+      "bytes": 132316,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -4104,8 +4104,8 @@
       "path": "store/workflow.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "96dff53e1a90e5f2810584bdfe33cfb64d1f9d88b0fce892686b92e9fdb55a99",
-      "bytes": 83452
+      "export_sha256": "efac4cb4c70cadf6aa44add4224d384db88da31993c952f12ab597d97aafb144",
+      "bytes": 83654
     },
     {
       "path": "store_faults.py",
@@ -6655,8 +6655,8 @@
       "path": "tests/test_workflow_memory.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2fb7c3d7cec5e7a4744543a1e8b495e0229647c9fd95406111740df55e03ce57",
-      "bytes": 59868
+      "export_sha256": "8883524b7b0e9bf9f3bde870ab7879c4cbcf332f9cf320afb8cfc3ca34abdc80",
+      "bytes": 61541
     },
     {
       "path": "tests/test_workspace.py",

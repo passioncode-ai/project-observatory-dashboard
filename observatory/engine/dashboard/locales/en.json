@@ -698,5 +698,6 @@
  "{n} new items may belong to {organization}": {
   "one": "{n} new item may belong to {organization}",
   "other": "{n} new items may belong to {organization}"
- }
+ },
+ "step@@failed": "failed"
 }
