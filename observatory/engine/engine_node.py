@@ -10,8 +10,9 @@ raises ImportError. `module(name)` answers `node.<name>` of the package beside t
   name `node` is never bound to `tools/node.py` by this lookup (that would shadow the package for every later import
   in the process).
 
-Only submodules whose imports are relative work under the private name: `node/lifecycle/` imports `node.lifecycle`
-by its absolute name and still needs the engine's package on the path. Standard library only.
+Only submodules whose imports are relative work under the private name, so every module of the package imports its
+siblings relatively (`node/lifecycle/` included since OBS-512): `module("lifecycle.macos")` answers the engine's
+lifecycle adapter in the same process. Standard library only.
 """
 from __future__ import annotations
 

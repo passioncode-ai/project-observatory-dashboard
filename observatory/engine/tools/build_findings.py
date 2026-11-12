@@ -2041,7 +2041,7 @@ def collect() -> list[dict]:
         outcome = pj.get("outcome") or ""
         stale_hours = hours_since(pj.get("wiki_last_commit") or "")
         if (outcome.startswith("refused") or outcome in
-                ("lease-held-elsewhere", "commit-failed", "status-failed")) and (
+                ("lease-held-elsewhere", "commit-failed", "push-failed", "status-failed")) and (
                 stale_hours is None or stale_hours > PROJECTION_COMMIT_HOURS):
             out.append({
                 "type": "projection.uncommitted", "subject": "wiki:inventory",
