@@ -325,6 +325,19 @@ the registry document yet is named there too. New command `project-observatory f
 COPY`, which reads only and prints the sync steps; it writes nothing. An older engine ignores both
 files; deleting `registry/derivations.json` loses nothing the next emit does not rebuild.
 
+## Machine-local settings (OBS-353)
+
+`config/local.json` (schema `observatory-local/1`, owner-only, no symbolic link) holds what this machine and this OS
+account decide: `scheduler`, `storage.backups`, and the keys other rows own (`ports`, `apps.location`,
+`loopback.peerCheck`; `session` and `context` are reserved). `features.scheduler` and `storage.backups` are written
+there and MIRRORED into `config/settings.json` on every write, in three atomic steps (local.json with the old mirror,
+settings.json, local.json with the new mirror), so an older engine reads the same values from `settings.json` and a
+crash between the steps loses none. `configuration.load()` takes the local value while `settings.json` still equals the
+recorded mirror, and adopts a `settings.json` changed since (a rollback's writes, a hand edit) at the next write. An
+older engine never reads `local.json`. A profile never carries it; a second-machine restore rewrites it (ports and app
+location dropped, scheduler off, backups root kept, place set to this machine). `settings.json` keeps `schema_version`
+1 and gains no `must_understand` entry. Tests: `tests/test_local_settings.py`.
+
 ## Machine placement (0.30.1, OBS-283, OBS-284; 0.31.0, OBS-282, OBS-286)
 
 A machine bundle's `MANIFEST.json` and a workspace snapshot's `manifest.json` gain `machine_id`, the machine they

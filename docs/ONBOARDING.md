@@ -1283,6 +1283,11 @@ server no provider is listed, as no collector runs. Fabric's hub reads `unknown`
 installed and `degraded` when the hub refused anything else. No key, URL with a
 key, path or name is in it. Not declared yet (OBS-338): git remotes (`ls-remote`), remote environments, GA4, Search Console, Cloudflare analytics, the assistant's model provider, the organization server, relay and mailbox, and release downloads (only the feed is declared).
 
+The scheduler switch and the backups root are this machine's and this OS account's own (OBS-353): `configure`
+writes them to `config/local.json` and mirrors them into `config/settings.json` for an older engine; a profile never
+carries them. `full configure apps location auto|user|system` and `full configure loopback peerCheck auto|always`
+write `config/local.json` only. `full doctor` shows each with its source in `local_settings`.
+
 ```sh
 project-observatory full configure features scheduler true
 ENGINE="$(project-observatory full-path)"
