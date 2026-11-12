@@ -49,7 +49,19 @@ LIST_BODY = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "para
 
 
 class Service:
-    def __init__(self, port: int, rate: int = 1000) -> None:
+    """The memory-http door on a real port. Without `port` it takes a free one and,
+    when another process took that number between `free_port()` closing its socket
+    and uvicorn binding it (`address already in use`, seen on a CI runner on
+    2026-11-12), tries a fresh one: the race belongs to the test, not the door."""
+
+    def __init__(self, port: int | None = None, rate: int = 1000) -> None:
+        tries = 1 if port is not None else 5
+        for attempt in range(tries):
+            if self._start(port if port is not None else free_port(), rate):
+                return
+        raise RuntimeError("the service did not start")
+
+    def _start(self, port: int, rate: int) -> bool:
         import uvicorn
         for name in ("server", "http_service"):
             sys.modules.pop(name, None)
@@ -58,14 +70,23 @@ class Service:
         app = http_service.build_app(port=port, rate=rate)
         self.srv = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port,
                                                  log_level="warning", lifespan="on"))
-        self.thread = threading.Thread(target=self.srv.run, daemon=True)
+        self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
         for _ in range(200):
-            if self.srv.started:
+            if self.srv.started or not self.thread.is_alive():
                 break
             time.sleep(0.05)
-        if not self.srv.started:
-            raise RuntimeError("the service did not start")
+        if self.srv.started:
+            return True
+        self.srv.should_exit = True
+        self.thread.join(timeout=15)
+        return False
+
+    def _run(self) -> None:
+        try:
+            self.srv.run()
+        except SystemExit:        # uvicorn exits its thread when the port cannot be bound
+            pass
 
     @property
     def url(self) -> str:
@@ -81,7 +102,7 @@ class Base(unittest.TestCase):
         self.ws = Workspace()
         self.ws.bind("agent:alpha-bot", [ALPHA], bearer="tok-alpha")
         self.ws.bind("agent:beta-bot", [BETA], bearer="tok-beta")
-        self.svc = Service(free_port())
+        self.svc = Service()
 
     def tearDown(self) -> None:
         self.svc.stop()
@@ -254,7 +275,7 @@ class TheDoor(Base):
 
     def test_a_binding_over_its_rate_is_told_when_to_retry(self) -> None:
         self.svc.stop()
-        self.svc = Service(free_port(), rate=2)
+        self.svc = Service(rate=2)
         auth = {**MODERN, "Authorization": "Bearer tok-alpha"}
         codes = [self.raw(auth)[0] for _ in range(3)]
         self.assertEqual(codes[:2], [200, 200])
@@ -319,7 +340,7 @@ class TheGateAlone(unittest.TestCase):
 class UnauthenticatedFloods(Base):
     def test_a_peer_flooding_without_a_bearer_is_limited_before_the_journal(self) -> None:
         self.svc.stop()
-        self.svc = Service(free_port(), rate=2)
+        self.svc = Service(rate=2)
         codes = [self.raw(MODERN)[0] for _ in range(6)]
         self.assertEqual(codes[:4], [401] * 4, codes)
         self.assertEqual(codes[4:], [429, 429], "past twice the binding rate, refused unread")
@@ -329,7 +350,7 @@ class UnauthenticatedFloods(Base):
     def test_a_flood_of_bad_bearers_does_not_lock_out_a_client_already_working(self) -> None:
         # Audit A17: every local client is 127.0.0.1, so the peer's refusal budget is shared.
         self.svc.stop()
-        self.svc = Service(free_port(), rate=2)
+        self.svc = Service(rate=2)
         good = {**MODERN, "Authorization": "Bearer tok-alpha"}
         self.assertEqual(self.raw(good)[0], 200)
         codes = [self.raw({**MODERN, "Authorization": f"Bearer guess-{i}"})[0] for i in range(6)]
@@ -340,7 +361,7 @@ class UnauthenticatedFloods(Base):
 
     def test_a_revoked_bearer_loses_its_pass(self) -> None:
         self.svc.stop()
-        self.svc = Service(free_port(), rate=2)
+        self.svc = Service(rate=2)
         good = {**MODERN, "Authorization": "Bearer tok-alpha"}
         self.assertEqual(self.raw(good)[0], 200)
         for i in range(4):
@@ -387,6 +408,31 @@ class ConcurrencyAndRestart(Base):
         self.svc = Service(port)
         out = self.call("tok-alpha", "observatory_recall", {"projectId": ALPHA})
         self.assertIn("kept across a restart", [r["statement"] for r in out["records"]])
+
+
+class ThePortRace(unittest.TestCase):
+    def test_a_port_taken_after_it_was_chosen_is_replaced_by_a_fresh_one(self) -> None:
+        """The CI failure of 2026-11-12: another process bound the number `free_port()`
+        had just released. The test's own service tries another port."""
+        ws = Workspace()
+        held = socket.socket()
+        held.bind(("127.0.0.1", 0))
+        held.listen(1)
+        taken = held.getsockname()[1]
+        numbers = iter([taken])
+        real = globals()["free_port"]
+        globals()["free_port"] = lambda: next(numbers, None) or real()
+        try:
+            svc = Service()
+            try:
+                self.assertNotEqual(svc.port, taken)
+                self.assertTrue(svc.srv.started)
+            finally:
+                svc.stop()
+        finally:
+            globals()["free_port"] = real
+            held.close()
+            ws.MA.serve_stdio()
 
 
 if __name__ == "__main__":
