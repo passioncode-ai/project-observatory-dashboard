@@ -247,6 +247,8 @@ def match(recorded, here: str | None = None, *, accounts=...) -> str:
     here = here or place_id(create=False)
     if not valid_id(recorded) or not here:
         return "other"
+    if recorded == here:                                 # the very same id is the very same place
+        return "same"
     if is_place(recorded):
         return "same" if recorded == here else "other"
     if recorded != host_of(here):
