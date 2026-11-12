@@ -493,7 +493,10 @@ each organization enrollment of a machine gets keys of its own), so no two organ
 - **Check-in and rotation**: a signed `check-in` with the sequence number, the collector stream (`observatory-node`,
   the server's epoch, `lastSeq`, `bufferedFrom`, unacknowledged dropped ranges) and the certificate; the answer sets the
   next interval, `collectionStart`, `report_full_state`, `certificate.action` and, when present, `protocols`, which
-  replaces the held list as an enrollment or rotation answer does (DEC-0094). The check-in's `health` is `degraded`
+  replaces the held list as an enrollment or rotation answer does (DEC-0094). A held list that names other revisions
+  and not `fabric-device/0.1` stops check-ins (CT-67's pair rule, OBS-524): nothing is sent, the events wait in the
+  outbox, `lastCheckIn.result` and the journal read `protocol-not-listed`, and the answer names the update as the next
+  step; an empty or absent list changes nothing. The check-in's `health` is `degraded`
   while the outbox retries or dropped events are undelivered. Rotation sends a new request from the same key under the
   current serial at two thirds of the lifetime or when asked; the request is persisted before it is sent and sent
   again unchanged after a lost answer, which the server answers with the same certificate (CT-65), and the previous

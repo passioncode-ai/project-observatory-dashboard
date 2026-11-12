@@ -544,7 +544,7 @@
     {
       "path": "configuration.py",
       "source_sha256": "69575bf4b71bf590301f5dde7f87c26e19be4c96ed0f93647897a20c14574202",
-      "export_sha256": "357fe12db4fd56f5e14dba877ed81e80d8591119038fb358dcb05db314a38162",
+      "export_sha256": "9f07f6f6f646634b3756c42236c9675a67e3909a88a5311cd0b57746d835d850",
       "bytes": 17514,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
@@ -961,7 +961,7 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "a98946ba31cf77b668474280ccf4cdae6db3210f1371acd017814d990c1e5e1f",
+      "export_sha256": "ceff17c7264ceb00682f1241495b184c8a0245541176adfdbe00deaa280244ba",
       "bytes": 135532,
       "upstream_modified": true
     },
@@ -3422,8 +3422,8 @@
       "path": "node/org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c59084bfe3037b7bd2d643e1565b3a0d9bb3127490bd48fe8155bfc19f9e577d",
-      "bytes": 160201
+      "export_sha256": "51b67ef432f61d1023cee8c71b385b1c15a865d89e5235802f5995c236da1500",
+      "bytes": 161466
     },
     {
       "path": "node/p256.py",
@@ -3916,14 +3916,14 @@
     {
       "path": "skill/.claude-plugin/marketplace.json",
       "source_sha256": "68a99261f346d399ff411a8bbe6cb46d7b169e6ef030d84f7b92c41a2f797c57",
-      "export_sha256": "b116344203539befe49229bff5fabe28e2a7a041e8cbb19278aeb1260a61da27",
+      "export_sha256": "a836975930b24a26606322e95fc4eb4b36f8c091ea4ae1709b79d50f7580a2a5",
       "bytes": 942,
       "upstream_modified": true
     },
     {
       "path": "skill/plugins/observatory-log/.claude-plugin/plugin.json",
       "source_sha256": "1f267b5383edab6b68302df81f1790f73ebf2ef0a5e697bff81778bc0e9b31f2",
-      "export_sha256": "0d5a4ec81fc5617e9ec3f476a256aa35f043efc468606f14f239cc5ed598d5de",
+      "export_sha256": "c5f92f3d85c98bbaf15f166f7e145dadcf3dc787e98fce25e418af09923b95f5",
       "bytes": 627,
       "upstream_modified": true
     },
@@ -3970,14 +3970,14 @@
     {
       "path": "skill/plugins/observatory-log/skills/explaining-changes/SKILL.md",
       "source_sha256": "1a0b0708fc8a17a9bc1c45d89c59aeb44330147e77bc0e5e2262f197b97d31d4",
-      "export_sha256": "a25dc974bc47be0f0a628ef046a876917ddccacf31a5cf2daa779b97ed6bc794",
+      "export_sha256": "a6f5fef9aec79f2712fd57ef61ad29df3c76549c6e987b335f48be3cbf44d897",
       "bytes": 6508,
       "upstream_modified": true
     },
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "e45254c004bc7a8ec728b0b65f82aee4f788b8abd6942151d68519390b12553c",
+      "export_sha256": "c5fe1336b094ee4d9496564fdbed4a72c6ed9337c09bc6575f3bd1d6ceffd9a4",
       "bytes": 27654,
       "upstream_modified": true
     },
@@ -3985,7 +3985,7 @@
       "path": "skill/plugins/observatory-log/skills/tracking-resources/SKILL.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "53cb558888fde673fec035ac9ccbd836bf6058787d97ddc36483859a8718255a",
+      "export_sha256": "801018d07a38467b6d3935aad82b89bcdea90e4643385a9851f61b2c50c1cbf4",
       "bytes": 4998
     },
     {
@@ -5530,8 +5530,8 @@
       "path": "tests/test_memory_http.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d6f180828acfd4fcf3e73014d3aba139a5fae03370df4253394ee2d1cd6d5483",
-      "bytes": 20429
+      "export_sha256": "10b30f499c3a61e9eed93b170b74d47c84358b5fd6a934cfe8355ca2b2ed9e37",
+      "bytes": 22164
     },
     {
       "path": "tests/test_memory_wire.py",
@@ -5565,8 +5565,8 @@
       "path": "tests/test_meter_wire.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "925b0e77cb72976246f2405eb2309e3a4b2a7b7c2b221add4785d1a57626075b",
-      "bytes": 6849
+      "export_sha256": "cb09924f67f352c688bcaafb5f88b2fe220111f6ca0ebfce5591e26f5748b9ef",
+      "bytes": 6838
     },
     {
       "path": "tests/test_metric_labels.py",
@@ -5687,8 +5687,8 @@
       "path": "tests/test_node_org.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "80f9c0a1db5c4b4532f4ac5439ead1a9f1d56cf1f990577b927c58114dd992ec",
-      "bytes": 137951
+      "export_sha256": "cf597749be206cdb62f983f5151ac03d8e40593b2d11d1631648216ed395c310",
+      "bytes": 139399
     },
     {
       "path": "tests/test_node_pairing.py",

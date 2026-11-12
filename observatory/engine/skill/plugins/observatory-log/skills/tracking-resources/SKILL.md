@@ -8,7 +8,7 @@ description: >-
   (figma-create-new-file), ad-tracking, provisioning or secrets.
 license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 metadata:
-  version: "0.35.16"
+  version: "0.35.17"
 compatibility: >-
   Requires a full Project Observatory installation with organizations.json
   configured; the observatory MCP server or its local CLI. Creating the resource

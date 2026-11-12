@@ -1933,6 +1933,28 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.make().check_in()
         self.assertEqual(self.make().state()['protocols'], ['fabric-device/0.1'])
 
+    def test_a_server_that_stops_listing_the_device_protocol_gets_no_check_in(self):
+        """CT-67's pair rule (OBS-524): a check-in goes only in a revision the server's last list names."""
+        self.enroll()
+        self.server.checkin_protocols = ['fabric-device/0.2', 'fabric-activity/0.1']
+        self.assertTrue(self.make().check_in()['ok'])               # the answer that drops 0.1 is taken
+        sent = sum(1 for path, _ in self.server.requests if path == '/v1/devices/check-in')
+        out = self.make().check_in()
+        self.assertEqual((out['ok'], out['code']), (False, 'protocol-not-listed'))
+        self.assertIn('update this engine', out['nextStep'])
+        self.assertEqual(sum(1 for path, _ in self.server.requests if path == '/v1/devices/check-in'), sent,
+                         'nothing reaches a server that no longer reads fabric-device/0.1')
+        self.assertEqual(self.make().state()['lastCheckIn']['result'], 'protocol-not-listed')
+        journal = (self.make().folder / 'journal.jsonl').read_text()
+        self.assertIn('"code": "protocol-not-listed"', journal)
+
+    def test_an_empty_protocol_list_still_checks_in(self):
+        """A server before DEC-0067 lists nothing: the rule holds only against a list that names others."""
+        self.enroll()
+        self.server.checkin_protocols = []
+        self.assertTrue(self.make().check_in()['ok'])
+        self.assertTrue(self.make().check_in()['ok'])
+
     def test_a_file_held_key_is_declared_and_each_organization_has_its_own(self):
         from node.org import Enrollment, OrgError
         self.enroll()
