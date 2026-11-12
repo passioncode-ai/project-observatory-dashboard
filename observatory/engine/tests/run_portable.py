@@ -79,7 +79,7 @@ BOUNDARY = (
     'workspace_scheduler', 'schema_compatibility', 'keyserver_boundary',
     'private_sources', 'public_contracts', 'vault_boundaries', 'provider_secret_boundaries', 'cli_compatibility', 'handed_commands', 'dashboard_portability',
     'agent_plugin', 'audit_regressions', 'identity_map', 'zone_accounts', 'deployed_commit', 'scrub_incremental', 'leak_scan_incremental', 'tick_health', 'accounts', 'environments', 'credential_bindings', 'local_keys', 'trap_anchors', 'leak_coverage', 'backup_vault', 'organizations', 'org_selection', 'machine', 'local_folders', 'config_locations', 'dashboard_stop',
-    'engine_update', 'workspace_profile', 'local_settings', 'place_id', 'release_signature',
+    'engine_update', 'workspace_profile', 'local_settings', 'local_ports', 'place_id', 'release_signature',
     # Ported suites, first batch: each builds its own temporary workspace.
     'delta_fold', 'mcp_inventory', 'openrouter_keys', 'scan_ids', 'secrets', 'signature',
     'skill_check', 'use_secret', 'validator_rules',
@@ -380,6 +380,8 @@ ROOT_FILES = (
     'secret_prompt.py', 'secret_client.py',
     # Who owns each end of a loopback connection, the account count, and the servers' peer check (OBS-355).
     'peer_owner.py', 'host_accounts.py', 'peer_check.py',
+    # The port of each listener for this OS account (OBS-354).
+    'local_ports.py',
     # The organization's signature on a release, checked before any update (audit A04).
     'release_signature.py',
     # The standing review policy (OBS-227): read by review.py, the findings, doctor and Health.

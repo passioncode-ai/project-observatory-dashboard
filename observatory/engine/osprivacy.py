@@ -150,6 +150,15 @@ if not WINDOWS:
         can hold another account's files (one created with sudo), and those are not ours."""
         return info.st_uid == os.getuid()
 
+    def owned_by(path: Path, account: str) -> bool:
+        """Whether `account` (a uid as text) owns `path`, read without following a link. A world-readable
+        file in a shared folder names its owner in its own name (OBS-354's port claims); this is the check
+        that the name does not lie."""
+        try:
+            return account.isdigit() and os.lstat(path).st_uid == int(account)
+        except OSError:
+            return False
+
     def _console_fd(fd: int) -> bool:
         return False
 
@@ -426,6 +435,13 @@ else:  # pragma: no cover - exercised by the Windows CI job
         """Windows keeps no uid in a stat result; ownership there is the ACL's, and the guard's
         rename probe (holders.py) refuses what another account holds."""
         return True
+
+    def owned_by(path: Path, account: str) -> bool:
+        """Whether the SID `account` owns `path` (OBS-354's port claims)."""
+        try:
+            return bool(account) and _owner(path) == account
+        except OSError:
+            return False
 
     _kernel32.GetFileType.argtypes = [wintypes.HANDLE]
     _kernel32.GetFileType.restype = wintypes.DWORD
