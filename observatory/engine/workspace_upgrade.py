@@ -595,6 +595,40 @@ def _left_out(name: str) -> bool:
     return any(name == p or name.startswith(p + '/') for p in ANOTHER_MACHINE_LEAVES)
 
 
+def _reset_local_settings(stage: Path, settings: dict) -> str:
+    """The other machine's config/local.json made this place's own (OBS-353): its ports and app location dropped (this
+    place allocates its own), the scheduler off, the backups root kept, the place set to this one, and the mirror
+    re-read from the restored settings.json. Rewritten, never deleted. Returns `reset`, `absent` or `unreadable`."""
+    file = stage / 'config' / config.LOCAL_FILE
+    if not os.path.lexists(file):
+        return 'absent'
+    doc, notes = config.read_local(stage)
+    if doc is None:
+        path = stage / 'config' / config.LOCAL_FILE
+        path.unlink()
+        return 'unreadable'
+    doc.pop('ports', None)
+    doc.pop('apps', None)
+    doc['scheduler'] = False
+    try:
+        import machine_identity
+        place = machine_identity.machine_id(create=False)
+    except Exception:
+        place = None
+    if place:
+        doc['place'] = place
+    else:
+        doc.pop('place', None)
+    mirrored = {}
+    for key, _where in config.LOCAL_MOVED.items():
+        value = (settings.get(key[0]) or {}).get(key[1])
+        if value is not None:
+            mirrored['.'.join(key)] = value
+    doc['mirrored'] = mirrored
+    workspace.write_json(file, doc)
+    return 'reset'
+
+
 def _as_another_machine(stage: Path) -> dict:
     """Make a restored copy this machine's own (OBS-284): leave out the other machine's identity
     and schedule state, turn its scheduler off, and give the workspace its own instance id."""
@@ -614,6 +648,7 @@ def _as_another_machine(stage: Path) -> dict:
         doc['features']['scheduler'] = False
         workspace.write_json(settings_file, doc)
         scheduler = 'turned off: `project-observatory full configure features scheduler true` on the one machine that runs it'
+    local_settings = _reset_local_settings(stage, config.read_json(settings_file))
     held = []
     lifecycle_file = stage / LIFECYCLE
     if lifecycle_file.is_file():
@@ -632,6 +667,7 @@ def _as_another_machine(stage: Path) -> dict:
     marker['instance_id'] = str(uuid.uuid4())
     workspace.write_json(marker_file, marker)
     return {'left_out': left, 'scheduler': scheduler, 'new_instance_id': True, 'held_off': held,
+            'local_settings': local_settings,
             'previous_instance_label': str(previous or '').replace('-', '')[:8] or None,
             'notes': [OTHER_PASSPHRASE_NOTE],
             'next': ['project-observatory full node --init  (this machine\'s own device id)',
