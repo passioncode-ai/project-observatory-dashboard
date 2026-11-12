@@ -157,6 +157,34 @@ A test pins each claim that can drift, the way
 the operator can make does not block the work: ship the safe default, say it in those
 surfaces, and record the open decision in `docs/backlog.md`.
 
+## Add only, improve only
+
+Operator rule, 2026-11-11 (rule R28 of the organization's agent templates), a hard rule for
+every agent and person who changes this repository, in every copy of it:
+
+- **What shipped stays.** A thing the engine already shipped to its callers (an MCP tool, a
+  parameter a caller may send, a Fabric capability and its effect, a released schema, a
+  released `CHANGELOG.md` section) is never changed or removed under its name, so it can
+  always be read and repeated. A changed one is added beside it under a new name or version;
+  one leaves only by a `retired` row with its date and reason.
+- **The gate.** `tools/shipped.lock.json` remembers every MCP tool `mcp/server.py` declares
+  (its parameters and the required ones) and every capability in `fabric-agent.json` (its
+  effect). `python tools/check_add_only.py check` fails on a tool or capability no longer
+  served without a `retired` row, a dropped parameter, a newly required one, a changed effect,
+  or a lock edited to hide any of these against the lock on `origin/main` (`--base-ref`); it
+  runs in the root tests (`tests/test_add_only.py`). A change that adds a tool, a parameter or
+  a capability runs `python tools/check_add_only.py lock` and commits the lock with it; the
+  lock never forgets a row. Retiring one: add
+  `"retired": {"tools": {"<name>": {"date": "YYYY-MM-DD", "reason": "..."}}}` to the lock in the
+  pull request that stops serving it. Released schemas are pinned at a tag
+  (`check_manifest_urls.py`) and released changelog sections by
+  `tests/test_changelog_releases.py`.
+- **Only improvements.** A change is taken only when a test, an acceptance run or a
+  before/after measurement proves it no worse; a regression is rolled back first and fixed
+  second.
+- **Every change is logged.** Each change, by an agent or a person, has its `docs/backlog.md`
+  row and its `CHANGELOG.md` line (written at the release) with its reason and basis.
+
 ## How a change reaches `main`
 
 1. Branch from `main`; commit in small logical commits.
