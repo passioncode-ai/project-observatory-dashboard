@@ -5,14 +5,21 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## 0.35.16 (2026-11-12)
 
-The wiki projection is pushed to the wiki's origin instead of left as a local commit, and a checkout marked as a read
-mirror is never written. Two contributed fixes land: the vault's own lock and journals no longer read as leak-scan
+Every Observatory surface now opens in the light theme: the dashboard pages (with a Light / Dark switch beside the
+language), the Mac app and the Windows and Linux app. The wiki projection is pushed to the wiki's origin instead of
+left as a local commit, and a checkout marked as a read mirror is never written. Two contributed fixes land: the vault's own lock and journals no longer read as leak-scan
 holes, and three silent stops of the local server and the tick now say why. No setting or migration changes; an
 installed server takes its new supervisor marker the next time `serverd.py --install` runs. The observatory-log plugin
 moves to 0.35.16 with the release.
 
 ### Changed
 
+- **Light theme by default** (OBS-523). The dashboard pages open with the PassionCode token file's light palette and
+  offer Light / Dark beside the language; the choice is kept in the browser (`observatory.theme`) and applied before
+  the first paint. The Mac app (Aqua, the light palette in `Palette.swift`) and the Windows and Linux app
+  (`desktop/ui/app.css`) are light. Gold stays the fill of the primary action and selection; focus rings, accent lines
+  and links take the readable gold-brown (`--pc-focus`, `--pc-link`), because gold on white fails contrast. Every text
+  pair the Mac app draws holds WCAG AA in the light palette (`PaletteTests`).
 - **google-auth 2.62.1** in the `[full]` pins and both lock copies (supersedes Dependabot #499, which moved only
   the pin in `pyproject.toml` and could not resolve; OBS-183).
 

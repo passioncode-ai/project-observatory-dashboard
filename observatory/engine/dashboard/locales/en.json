@@ -698,5 +698,7 @@
  "{n} new items may belong to {organization}": {
   "one": "{n} new item may belong to {organization}",
   "other": "{n} new items may belong to {organization}"
- }
+ },
+ "theme@@Light": "Light",
+ "theme@@Dark": "Dark"
 }
