@@ -1194,6 +1194,18 @@ how to create one, on stderr, and exits 2, because nothing was opened. Open it e
 lifecycle tools of [node.lifecycle](#which-apps-an-agent-may-wake-stop-and-restart-nodelifecycle),
 which serve only callers you allowed).
 
+### Ports on a computer several people share
+
+The listeners use 47311 (server), 47313 (memory over HTTP), 47317 (relay) and 7717 (keyserver) on a computer with
+one person's OS account, and every port named below is that case. Loopback is shared by every account of a computer,
+so where several accounts run Observatory, each records its own ports (OBS-354): an account whose historical ports
+are free or its own keeps them, any other takes a block of eight from 47400 to 47999, and every client of the account
+(agents, `full open`, the apps) reads that record instead of a default. `project-observatory full ports show` names
+this account's ports, where each came from and who listens there; `full ports allocate` records them (the maintenance
+pass does it by itself for an installed server), `full ports set NAME PORT` records a person's choice, and
+`full ports release` removes the record once the server job is uninstalled. `full doctor` carries the same answer
+under `ports`, and the `accounts` section of `observatory_machine` gives it to an agent.
+
 The Keys and ENV pages' buttons — mint, cap or revoke a provider key, mark a leak,
 reveal one inventoried value — act only when the pages are served by the
 token-guarded credential server, `python "$(project-observatory full-path)/tools/keyserver.py"`

@@ -525,7 +525,7 @@ project-observatory full lifecycle import --from FOLDER              # terminal 
 
 What the operator runs next, on the machine that uses the private broker: `import --dry-run`, then `import`; issue a
 binding to each caller the report names and `allow` it as printed; enroll again any `reenroll_required` target;
-`full lifecycle status`; point each agent's MCP client at `POST http://127.0.0.1:47311/mcp` with its binding's bearer
+`full lifecycle status`; point each agent's MCP client at `POST http://127.0.0.1:47311/mcp` (on a computer several OS accounts share, the port `full ports show` names) with its binding's bearer
 and check one `lifecycle.list`; then switch the private broker off with its own uninstall, and only then turn each
 target the report names back to always_on with `full lifecycle policy TARGET_ID --desired always_on`. Processes the private
 broker started are, from then on, the person's to the node: it never idles them out.

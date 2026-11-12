@@ -520,7 +520,10 @@ class LifecycleExecutor:
     def __init__(self, bearer: Callable[[], str], *, port: Optional[int] = None,
                  transport: Optional[HttpTransport] = None):
         self._bearer = bearer
-        self.port = port if port is not None else int(os.environ.get('OBSERVATORY_SERVER_PORT', '47311'))
+        if port is None:
+            import local_ports                   # this OS account's server (OBS-354); PortError on a shared host
+            port = local_ports.port("server")    # with no record, never another account's listener
+        self.port = port
         self.transport = transport or _loopback_transport
         self._sequence = 0
 
