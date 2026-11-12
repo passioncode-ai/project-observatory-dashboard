@@ -338,6 +338,16 @@ older engine never reads `local.json`. A profile never carries it; a second-mach
 location dropped, scheduler off, backups root kept, place set to this machine). `settings.json` keeps `schema_version`
 1 and gains no `must_understand` entry. Tests: `tests/test_local_settings.py`.
 
+## The place id (OBS-357, part 1)
+
+Two OS accounts of one computer share its machine id, so an id that names only the host cannot tell one account's
+records from another's. The place id names both: `<machine id>.a-<10 hex>` (a hash of the account, 39 characters,
+inside the id shape every reader accepts). `config/local.json` records it as its `place`; a file written before
+it, with the bare machine id, still matches this computer (and on a computer several accounts share it is read as
+"this host, account unknown"). `full doctor` names the host, the place and how many accounts share the host under
+`place`. Bundles, snapshots, receipts, placement and `full machine-move` still carry the machine id; they move to
+the place id, compared by `machine_identity.match`, in the next part. Tests: `tests/test_place_id.py`.
+
 ## Machine placement (0.30.1, OBS-283, OBS-284; 0.31.0, OBS-282, OBS-286)
 
 A machine bundle's `MANIFEST.json` and a workspace snapshot's `manifest.json` gain `machine_id`, the machine they

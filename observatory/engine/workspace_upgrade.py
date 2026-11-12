@@ -612,7 +612,7 @@ def _reset_local_settings(stage: Path, settings: dict) -> str:
     doc['scheduler'] = False
     try:
         import machine_identity
-        place = machine_identity.machine_id(create=False)
+        place = machine_identity.place_id(create=False)
     except Exception:
         place = None
     if place:
