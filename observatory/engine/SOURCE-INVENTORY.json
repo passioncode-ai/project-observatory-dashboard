@@ -22,8 +22,8 @@
       "path": "agent/assistant.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "be02bafa900a6c12ee8a5c502d76f50f2de430197bf43db5eb7f0cead74f2686",
-      "bytes": 31310
+      "export_sha256": "64eaa6b77b85b41ebe89e9e434542a2d973374fb21575d1ac1ff4ea6ea07f1d4",
+      "bytes": 31656
     },
     {
       "path": "agent/observe.py",
@@ -5429,8 +5429,8 @@
       "path": "tests/test_local_ports.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "efd98a86ad38806b301a7944c860ec91183cf80b837aecea31b3fe5bdccdd6f4",
-      "bytes": 14478
+      "export_sha256": "fff18b3a5780e72eaf74fb8adf3565dcc3c33272cd06d7e3d8ea86fb17937928",
+      "bytes": 15110
     },
     {
       "path": "tests/test_local_settings.py",

@@ -243,6 +243,19 @@ class Clients(Fixture):
         self.listening = {47311: "this-account"}
         self.assertIn("this account", serverd._holder_sentence(47311))
 
+    def test_the_apps_see_another_accounts_server_and_never_probe_it(self):
+        sys.path.insert(0, str(ROOT / "agent"))
+        import assistant
+        lp.allocate()
+        self.listening = {47400: "another-account"}
+        with patch("tools.dashboard_open.served_workspace") as probe:
+            state = assistant.dashboard()
+        probe.assert_not_called()
+        self.assertEqual((state["server"], state.get("url")), ("other-account", None))
+        with self.assertRaises(assistant.AssistantError) as caught:
+            assistant.serve()
+        self.assertEqual(caught.exception.args[0], "dashboard-port-foreign")
+
     def test_an_install_with_a_port_another_account_claims_is_refused(self):
         sys.path.insert(0, str(ROOT / "tools"))
         import serverd

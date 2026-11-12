@@ -268,9 +268,13 @@ def dashboard():
     app shows the dashboard either way and says which one it is."""
     from tools import dashboard_open
     port=_port()
-    served=dashboard_open.served_workspace(port,timeout=3)
+    import local_ports
+    # Another OS account's server on this port (OBS-354): never probed, never shown as ours.
+    if local_ports.listener_kind(port)=='another-account':served='other-account'
+    else:served=dashboard_open.served_workspace(port,timeout=3)
     index=(paths.DASHBOARD_DIR/'index.html')
-    out={'port':port,'server':'verified' if served==str(paths.HOME) else 'absent' if served is None else 'other-workspace',
+    out={'port':port,'server':'verified' if served==str(paths.HOME) else 'absent' if served is None
+         else 'other-account' if served=='other-account' else 'other-workspace',
          'always_on':dashboard_open._always_on(),'files':None,'built_at':None}
     if out['server']=='verified':out['url']=f'http://127.0.0.1:{port}/dashboard/index.html'
     if index.is_file():
@@ -288,6 +292,7 @@ def serve(wait=45.0):
     state=dashboard()
     if state['server']=='verified':return state
     if state['server']=='other-workspace':raise AssistantError('dashboard-port-busy')
+    if state['server']=='other-account':raise AssistantError('dashboard-port-foreign')
     try:
         if state['always_on']:
             if sys.platform=='darwin':
