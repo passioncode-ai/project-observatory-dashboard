@@ -2480,6 +2480,8 @@
  },
  "Plugin behind its marketplace's newest version": "Плагин отстаёт от новейшей версии своего маркетплейса",
  "plugin {plugin} is at {installed}, its marketplace publishes {latest}": "плагин {plugin} на версии {installed}, его маркетплейс публикует {latest}",
+ "step@@failed": "не удался",
+ "step {step} failed, {at}": "шаг {step} не удался, {at}",
  "Theme": "Тема",
  "theme@@Light": "Светлая",
  "theme@@Dark": "Тёмная",

@@ -213,6 +213,39 @@ class TheS1Scenario(WorkflowCase):
                                            "accountRef": "codex-1"})
 
 
+class StepStatus(WorkflowCase):
+    def test_a_failed_step_is_written_and_read_back_as_failed(self) -> None:
+        """OBS-525: memory/0.1 declares `failed`; the shared store took only three
+        statuses, so the schema promised what every door refused."""
+        wf = self.start()
+        got = self.write(wf, wf["leaseId"], "key-failed-0001", status="failed", close=True)
+        self.assertEqual((got["status"], got["closed"]), ("failed", True))
+        latest = W.checkpoint_latest(self.conn, wf["workflowId"])
+        self.assertEqual(latest["checkpoint"]["status"], "failed")
+
+    def test_the_store_takes_every_status_the_memory_schema_declares(self) -> None:
+        schema = json.loads((ROOT / "fabric/memory-schemas/memory-capability.schema.json").read_text())
+        found = []
+        def walk(node):
+            if isinstance(node, dict):
+                st = node.get("properties", {}).get("status") if isinstance(node.get("properties"), dict) else None
+                if isinstance(st, dict) and "in_progress" in (st.get("enum") or []):
+                    found.append(set(st["enum"]))
+                for v in node.values():
+                    walk(v)
+            elif isinstance(node, list):
+                for v in node:
+                    walk(v)
+        walk(schema)
+        self.assertTrue(found, "the checkpoint status enum was not found in the memory schema")
+        for declared in found:
+            self.assertEqual(declared, set(W.STATUSES))
+
+    def test_an_unknown_status_is_still_refused(self) -> None:
+        with self.assertRaises(W.InvalidInput):
+            self.start(status="cancelled", idempotency_key="key-status-bad1")
+
+
 class Lease(WorkflowCase):
     def test_new_workflow_hands_its_creator_the_lease(self) -> None:
         wf = self.start()

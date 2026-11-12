@@ -1788,6 +1788,7 @@ body[data-page="cloudflare"] #out, body[data-page="cloudflare"] #list-tools, bod
   background: var(--panel); }
 .agents-dot.st-done { border-color: var(--ok); }
 .agents-dot.st-blocked { border-color: var(--danger); }
+.agents-dot.st-failed { border-color: var(--danger); background: var(--danger-weak); }
 .agents-dot.st-in_progress { border-color: var(--focus); }
 .agents-arrow { color: var(--muted); font: 400 var(--t-chip) var(--font-data); }
 .agents-ended { color: var(--muted); }
