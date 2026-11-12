@@ -464,7 +464,7 @@ PUBLIC_SOURCE_ONLY = {
 }
 WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migrate-local", "open", "agent",
                       "workspace-backup", "upgrade", "restore", "backups", "backup-passphrase", "machine", "cleanup", "disk-guard",
-                      "machine-backup", "machine-restore", "machine-move",
+                      "machine-backup", "machine-restore", "machine-move", "ports",
                       "update", "profile", "maintain", "auto-update", "analytics", "track", "untrack", "tracked"}
 #: Commands `main` hands to a parser of their own before the step table is read. The dispatcher's
 #: whole surface is this, WORKSPACE_COMMANDS, STEPS and GROUPS; `tests/test_cli_compatibility.py`
@@ -519,6 +519,10 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                the checklist of a move, M1 to M4 (one release, the restore complete,
                                its own SSH key and device id, the vault the same, no job on both),
                                against the other machine's facts
+  ports show|allocate [--reinstall]|set NAME PORT|release [--json]
+                               the port of each listener for this OS account: one account keeps the
+                               historical ports; on a host shared by several accounts each records a
+                               block of its own and claims it, so clients never reach another account
   upgrade                      preview; --apply requires --writers-stopped
   restore SNAPSHOT | --latest  restore a snapshot dir or encrypted .obsnap into a new empty workspace;
                                --latest finds the newest backup a workspace at this path left;
