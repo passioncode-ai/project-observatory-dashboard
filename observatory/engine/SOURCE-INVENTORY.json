@@ -5858,8 +5858,8 @@
       "path": "tests/test_place_id.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ea70d4a04d10a5b32450e87d8a340841ec28340ffecac3cb380e8e97b397c339",
-      "bytes": 9065
+      "export_sha256": "e6b76d06763cabb9336f9451260ffb02f082ecd0f84fa457d5c7f9b962b588ff",
+      "bytes": 11248
     },
     {
       "path": "tests/test_plugin_pair.py",
@@ -7698,8 +7698,8 @@
       "path": "tools/vault_digests.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5d0d258c4e73974197b0d6b7d6c055afe81e03e3b68ec463da14247588479dc8",
-      "bytes": 36748
+      "export_sha256": "30ad89ebe7ea195df9f7572e3fac08f286a4b4d9234065a10a744f65433ba11a",
+      "bytes": 37736
     },
     {
       "path": "tools/workflow_cli.py",

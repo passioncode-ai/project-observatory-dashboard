@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """OBS-357, part 1: the place id of this host and this OS account, and how a recorded id matches it."""
 from __future__ import annotations
+import json
 import os
 from pathlib import Path
 import sys
@@ -179,6 +180,53 @@ class MoveAcrossAccounts(unittest.TestCase):
         machines = {m["machine"]: m["sameHost"] for m in view["other_machines"]}
         self.assertEqual(machines, {neighbour: True, HOST: True}, "both are other places of this host")
         self.assertIn("same-host-account-unknown", [d["code"] for d in view["degraded"]])
+
+
+class DigestName(unittest.TestCase):
+    """Spec M5 3.7: vault digests published under a host name two accounts share."""
+
+    def setUp(self):
+        # vault_digests brings the tools' own modules; they leave with this test, so a later test imports the
+        # engine's modules of the same names, never these.
+        self._modules, self._path = set(sys.modules), list(sys.path)
+
+    def tearDown(self):
+        for name in set(sys.modules) - self._modules:
+            del sys.modules[name]
+        sys.path[:] = self._path                          # vault_digests puts tools/ first on import
+
+    def name(self, accounts, manifest=None):
+        import tempfile
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("vault_digests_for_place_test", ROOT / "tools" / "vault_digests.py")
+        vd = importlib.util.module_from_spec(spec)
+        added = str(ROOT / "tools") not in sys.path
+        if added:
+            sys.path.append(str(ROOT / "tools"))          # its own imports (vault), never ahead of the engine's root
+        try:
+            spec.loader.exec_module(vd)
+        finally:
+            if added:
+                sys.path.remove(str(ROOT / "tools"))
+        with tempfile.TemporaryDirectory() as raw, env("501"), \
+                patch.dict(os.environ, {"OBSERVATORY_HOST_ACCOUNTS": str(accounts)}), \
+                patch.object(vd.socket, "gethostname", lambda: "studio.local"):
+            path = Path(raw) / "manifest.json"
+            if manifest:
+                path.write_text(json.dumps(manifest))
+            with patch.object(vd, "local_manifest_path", lambda: path), \
+                    patch.object(vd, "read_manifest", lambda p: json.loads(Path(p).read_text())):
+                return vd.machine_name()
+
+    def test_one_account_keeps_the_host_name(self):
+        self.assertEqual(self.name(1), "studio")
+
+    def test_a_new_workspace_on_a_shared_host_gets_its_own_name(self):
+        name = self.name(2)
+        self.assertRegex(name, r"^studio-[0-9a-f]{6}$")
+
+    def test_a_workspace_that_published_keeps_its_name(self):
+        self.assertEqual(self.name(2, {"machine": "studio"}), "studio")
 
 
 if __name__ == "__main__":
