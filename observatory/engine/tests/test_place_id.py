@@ -134,5 +134,52 @@ class RestoreMode(unittest.TestCase):
                          "a new bundle never reads as the same machine to an older engine: the safe way")
 
 
+class MoveAcrossAccounts(unittest.TestCase):
+    """Spec M5 3.5: `leave --to` another account of this host; `status` reads such a peer as another place."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name).resolve()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def leave(self, to, accounts):
+        import machine_move as mm
+        with env("501"), patch.dict(os.environ, {"OBSERVATORY_HOST_ACCOUNTS": str(accounts)}):
+            try:
+                mm.leave("com.example.bot", to, self.home, platform="linux", uid=501)
+            except mm.MachineMoveError as exc:
+                return str(exc)
+        return "moved"
+
+    def test_leave_to_another_account_of_this_host_passes_the_checks(self):
+        with env("502"):
+            neighbour = mi.place_id()
+        self.assertIn("no job com.example.bot is defined", self.leave(neighbour, 2),
+                      "the --to checks pass; only the missing job stops it")
+
+    def test_leave_to_a_bare_id_of_this_host_is_refused_with_several_accounts(self):
+        self.assertIn("to-names-this-host", self.leave(HOST, 2))
+        self.assertIn("names this machine", self.leave(HOST, 1), "one account: the bare id is this machine, as before")
+        with env("501"):
+            here = mi.place_id()
+        self.assertIn("names this machine", self.leave(here, 2))
+
+    def test_status_reads_a_same_host_peer_as_another_place(self):
+        import machine_move as mm
+        with env("502"):
+            neighbour = mi.place_id()
+        peer = {"machine": neighbour, "generated_at": "2026-11-12T10:00:00Z", "engine_version": "0", "platform": "linux",
+                "ssh": [], "device": None, "jobs": [], "elsewhere": [], "restore": None}
+        old = dict(peer, machine=HOST)
+        with env("501"), patch.dict(os.environ, {"OBSERVATORY_HOST_ACCOUNTS": "2"}):
+            view = mm.status(self.home, None, peers=[peer, old], platform="linux")
+        machines = {m["machine"]: m["sameHost"] for m in view["other_machines"]}
+        self.assertEqual(machines, {neighbour: True, HOST: True}, "both are other places of this host")
+        self.assertIn("same-host-account-unknown", [d["code"] for d in view["degraded"]])
+
+
 if __name__ == "__main__":
     unittest.main()

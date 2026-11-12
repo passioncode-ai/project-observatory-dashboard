@@ -352,8 +352,11 @@ placement name places too. A restore compares with `machine_identity.match`: thi
 `another-machine`), and an older bundle naming only this computer as before on a one-account computer, else by its
 home (`same-host-same-home`, `same-host-account-unknown`). An older engine compares `machine_id` with its bare id,
 never finds them equal and restores a newer bundle as a second machine (the safe way); the same person going back
-to an older engine gives `--same-machine` at a terminal. `full machine-move` keeps the bare machine id until its
-own part. Tests: `tests/test_place_id.py`, `tests/test_machine_backup.py`, `tests/test_workspace_upgrade.py`.
+to an older engine gives `--same-machine` at a terminal. `full machine-move` works across accounts of one computer:
+`show` prints `place`, `host` and `accountsOnHost`; `leave --to` takes another account's place and refuses a bare
+id of this computer where several accounts share it (`to-names-this-host`); the facts file's `machine` is the place
+(with `host` and `accountsOnHost`), and `status` reads a peer of this computer and another account as another place
+(`sameHost`), an older peer naming only this computer as another account's (`same-host-account-unknown`). Tests: `tests/test_place_id.py`, `tests/test_machine_backup.py`, `tests/test_workspace_upgrade.py`.
 
 ## Machine placement (0.30.1, OBS-283, OBS-284; 0.31.0, OBS-282, OBS-286)
 

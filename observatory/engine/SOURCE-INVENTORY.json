@@ -961,15 +961,15 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "b4a5b40c8376e600734c7f38b82f704406b4fd31763f7fd37193f27a17e53f18",
-      "bytes": 138292,
+      "export_sha256": "c41e325ca40befe63cddfe5b08ec91513c187f8dafc0bbb4f1c29b21cb1dbed1",
+      "bytes": 138737,
       "upstream_modified": true
     },
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "dc8d1be9a07a485cba176d3d12ab9b01a2330af597e1c91f364344de165ac920",
-      "bytes": 326579,
+      "export_sha256": "281b4ce82aeb6fd8b222b2fbb927055b9e511ba20edc011be8a484647b652c96",
+      "bytes": 326745,
       "upstream_modified": true
     },
     {
@@ -3181,8 +3181,8 @@
       "path": "machine_move.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "aae63ebadaa393e44672e64938e27bb5749fe4374bc48e71cde1e65afff3422e",
-      "bytes": 83853
+      "export_sha256": "4f1eda228e53d0b2ab9431f6badd08545ea050c21a15c7fd7a5a313c26138663",
+      "bytes": 85662
     },
     {
       "path": "machine_view.py",
@@ -5443,8 +5443,8 @@
       "path": "tests/test_machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d692d5aba242962fd3d6136f613ae3fbee51655a6b6a71c306f11f44bb8d7407",
-      "bytes": 170244
+      "export_sha256": "0c72984a4b42bf3aaecaf1e6a12bb94e7f02fd3cb77ea336e2b77306f25b7ba6",
+      "bytes": 170396
     },
     {
       "path": "tests/test_machine_findings.py",
@@ -5858,8 +5858,8 @@
       "path": "tests/test_place_id.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9a461c2eb40542b3420a93c76273eb4f8bd609660145a156e107dc19635738cf",
-      "bytes": 6786
+      "export_sha256": "ea70d4a04d10a5b32450e87d8a340841ec28340ffecac3cb380e8e97b397c339",
+      "bytes": 9065
     },
     {
       "path": "tests/test_plugin_pair.py",
