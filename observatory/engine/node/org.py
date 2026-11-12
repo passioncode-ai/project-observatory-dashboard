@@ -1361,7 +1361,7 @@ class Enrollment:
             renewed = {'by': 'key-on-record', 'epoch': state['epoch'], 'serial': state['certificate']['serial'],
                        'notAfter': state['certificate']['notAfter']} \
                 if before is not None and before.get('epoch') != state.get('epoch') else None
-            # CT-67's pair rule (fabric-agent-contract `718d87af`, OBS-524): a check-in goes only in a revision the
+            # CT-67's pair rule (OBS-524): a check-in goes only in a revision the
             # server's last `protocols` list names. A list that names others and not ours means the server no longer
             # reads what this node writes: nothing is sent, the events wait in the outbox, and the reason is kept. An
             # empty or absent list (a server before DEC-0067) changes nothing.
