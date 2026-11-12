@@ -139,6 +139,15 @@ operating system's grammar (a drive letter on macOS or Linux) names nothing here
 The report carries `kept` (class, path, reason; at most 200), and the Machine page shows it as
 "Kept by the guard". `tests/test_disk_guard.py::LiveStateUnderCacheRoots` pins each rule.
 
+A coding agent's session folder that the guard passes over because its transcript is recent (OBS-500)
+is named in `kept` too, with how many hours ago the transcript changed and the project folder it sits
+under (OBS-527). On 2026-11-12 two live sessions held several gigabytes of a 2 GB free disk this way
+and nothing in the report said where the space was.
+
+A survey or a cleanup that cannot write its own record on a full disk (`ENOSPC`) says so and goes on:
+`scan_git_hygiene.py` keeps its last snapshot, and `full cleanup` acts on the plan in memory instead of
+stopping before it frees anything (OBS-527).
+
 ## Space inside a Docker VM at `critical` (OBS-305, 2026-11-03)
 
 A finding measured on a MacBook whose Docker daemon runs inside a Colima VM: the guard was at
