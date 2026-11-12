@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import errno
 import json
 import os
 import pathlib
@@ -917,9 +918,18 @@ def main(argv: list[str]) -> int:
         out = paths.SCRATCH / "cleanup-plan.json"
         out.parent.mkdir(parents=True, exist_ok=True)
         tmp = out.with_suffix(".tmp")
-        tmp.write_text(json.dumps(plan, indent=1, ensure_ascii=False), encoding="utf-8")
-        os.chmod(tmp, 0o600)
-        os.replace(tmp, out)
+        try:
+            tmp.write_text(json.dumps(plan, indent=1, ensure_ascii=False), encoding="utf-8")
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, out)
+        except OSError as exc:
+            # A full disk (OBS-527): the plan stays in memory and the auto tier still runs, since it is what frees
+            # the space; only the plan file is missing, and the run says so.
+            tmp.unlink(missing_ok=True)
+            if exc.errno != errno.ENOSPC:
+                raise
+            print("cleanup: the plan file was not written, no space left on the disk; acting on the plan in memory",
+                  file=sys.stderr)
         counts = ", ".join(f"{k} {v}" for k, v in plan["counts"].items() if v) or "nothing"
         held_back = plan.get("carried")
         # In the JSON summary too: under `--json` the line goes to stderr, and the disk guard keeps
