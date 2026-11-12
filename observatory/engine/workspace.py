@@ -560,6 +560,8 @@ def doctor(base: Path) -> dict:
             "features": _switches(doc, "features"),
             # What this machine and OS account decide (OBS-353): config/local.json, each setting with its source.
             "local_settings": config.local(base),
+            # The port of each listener for this OS account, and who listens there (OBS-354).
+            "ports": _ports(base),
             "interface": {"locale": doc.get("interface", {}).get("locale", "en")},
             "coverage_warnings": coverage_warnings(doc),
             "tracked": __import__("tracked").health(),
@@ -915,7 +917,18 @@ def parse(argv: list[str]) -> argparse.Namespace:
     if name == "machine-move":
         import machine_move
         return machine_move.parser().parse_args(rest)
+    if name == "ports":
+        import local_ports
+        return local_ports.parser().parse_args(rest)
     return _parser().parse_args(argv)
+
+
+def _ports(base: Path) -> dict:
+    try:
+        import local_ports
+        return local_ports.show(base)
+    except Exception as exc:  # noqa: BLE001 - doctor names a block it could not read, never fails on it
+        return {"error": f"{type(exc).__name__}: {exc}"[:200]}
 
 
 def main(argv: list[str]) -> int:
@@ -948,6 +961,9 @@ def main(argv: list[str]) -> int:
     if argv and argv[0] == "machine-move":
         import machine_move
         return machine_move.main(argv[1:])
+    if argv and argv[0] == "ports":
+        import local_ports
+        return local_ports.main(argv[1:])
     a = _parser().parse_args(argv)
     try:
         base = config.home()

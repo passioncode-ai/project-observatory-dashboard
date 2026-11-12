@@ -338,6 +338,21 @@ older engine never reads `local.json`. A profile never carries it; a second-mach
 location dropped, scheduler off, backups root kept, place set to this machine). `settings.json` keeps `schema_version`
 1 and gains no `must_understand` entry. Tests: `tests/test_local_settings.py`.
 
+## Ports per OS account (OBS-354)
+
+`project-observatory full ports show|allocate|set|release` records the port of each listener (server,
+memory over HTTP, relay, keyserver) for this OS account in `config/local.json` under `ports`
+(`{scheme: legacy|allocated|chosen, server, memory_http, relay, keyserver, allocatedAt}`), valid only at
+the place it was written. On a host with one person's account the scheme is `legacy` (47311, 47313,
+47317, 7717) and nothing else changes. On a host with several, an account whose historical ports are free
+or its own keeps them; any other takes a block of 8 from 47400 to 47999 (server, +2, +6, +7). Each account
+also writes a world-readable claim, `.passioncode-ports.project-observatory.<uid>.json`, in `/Users/Shared`
+(macOS), `/var/tmp` (Linux) or `%ProgramData%\PassionCode\port-claims` (Windows), so the next account's
+allocation skips it; a claim holds only the account number, the ports and a time. `full doctor` carries the
+same answer as `full ports show` under `ports`. An older engine ignores both files and keeps its defaults.
+In this release nothing reads the record yet except `full ports` and doctor; the listeners and their clients
+move to it in the next one. Tests: `tests/test_local_ports.py`.
+
 ## Machine placement (0.30.1, OBS-283, OBS-284; 0.31.0, OBS-282, OBS-286)
 
 A machine bundle's `MANIFEST.json` and a workspace snapshot's `manifest.json` gain `machine_id`, the machine they
