@@ -321,14 +321,16 @@ def read_local(base: Path) -> tuple[dict | None, list[dict]]:
         return None, []
     unreadable = {"code": "local-settings-unreadable",
                   "step": f"move {file} aside; the next write recreates it from config/settings.json"}
+    import osprivacy   # beside this file; lazily, since everything imports configuration first
+
+    def mine_and_private(fd: int) -> None:
+        if not (osprivacy.owned_by_me(fd) and osprivacy.private(fd)):
+            raise ValueError("not owner-only")
     try:
         if any(p.is_symlink() for p in (file, *file.parents)):
             return None, [unreadable]
-        st = file.stat()
-        if hasattr(os, "getuid") and (st.st_uid != os.getuid() or st.st_mode & 0o077):
-            return None, [unreadable]
-        doc = json.loads(file.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        doc = json.loads(osprivacy.read_regular(file, 1 << 20, check=mine_and_private).decode("utf-8"))
+    except (OSError, ValueError, UnicodeDecodeError):
         return None, [unreadable]
     if not isinstance(doc, dict):
         return None, [unreadable]
@@ -394,8 +396,7 @@ def local(base: Path | None = None, *, place: str | None = None) -> dict:
     out["place"].update(recorded=recorded, matches=None if not (recorded and place) else not stale)
     if stale:
         out["notes"].append({"code": "local-settings-stale",
-                             "step": "project-observatory full ports allocate, then "
-                                     "project-observatory full configure apps location auto"})
+                             "step": "project-observatory full configure apps location auto"})
     for key, where in LOCAL_MOVED.items():
         name = ".".join(key)
         value = _local_get(doc, where)

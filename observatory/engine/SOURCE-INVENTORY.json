@@ -544,8 +544,8 @@
     {
       "path": "configuration.py",
       "source_sha256": "69575bf4b71bf590301f5dde7f87c26e19be4c96ed0f93647897a20c14574202",
-      "export_sha256": "07df9ea663ff4d0f7dc3120c97ca7c0f6c0695b52e30be7bc6d88ac7d0c1529b",
-      "bytes": 28856,
+      "export_sha256": "382b8c41baf42547150a9bf1a09325012c5a0d6ac07543d32e3876ea81fe8d79",
+      "bytes": 28942,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
