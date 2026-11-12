@@ -3,6 +3,27 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.35.17 (2026-11-12)
+
+A checkpoint step may be left `failed`, as the memory/0.1 schema has always declared; a node stops checking in to a
+server that no longer lists the device protocol; and the tests that start the memory-http door no longer fail when
+another process takes their port first. No setting or migration changes. The
+observatory-log plugin moves to 0.35.17 with the release.
+
+### Fixed
+
+- **A checkpoint step may be left `failed`** (OBS-525, #514). The store shared by `observatory_checkpoint_write` and
+  `memory.checkpoint.write` took only `in_progress`, `done` and `blocked`, so a board run that failed had to close as
+  `blocked` although memory/0.1 offers `failed`. The store, the MCP tool and the Agents page take and show it; a test
+  holds the store to every status the schema declares.
+- **A check-in goes only to a server that still lists `fabric-device/0.1`** (OBS-524), contract CT-67's pair rule.
+  A held `protocols` list that names other revisions and not this one stops check-ins: nothing is sent, the events wait
+  in the outbox, `lastCheckIn` and the node's journal read `protocol-not-listed`, and the answer names the update as
+  the next step. An empty or absent list (a server before DEC-0067) changes nothing.
+- **The memory-http tests take a fresh port when theirs was taken** (OBS-526). `free_port()` releases the number it
+  found before the door binds it; on a CI runner on 2026-11-12 another process took it (`address already in use`) and
+  failed `test_ops_digest_record.py` on `main`. The tests' service tries another port, up to five times.
+
 ## 0.35.16 (2026-11-12)
 
 Every Observatory surface now opens in the light theme: the dashboard pages (with a Light / Dark switch beside the
