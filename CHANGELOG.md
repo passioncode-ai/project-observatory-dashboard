@@ -11,6 +11,11 @@ holes, and three silent stops of the local server and the tick now say why. No s
 installed server takes its new supervisor marker the next time `serverd.py --install` runs. The observatory-log plugin
 moves to 0.35.16 with the release.
 
+### Changed
+
+- **google-auth 2.62.1** in the `[full]` pins and both lock copies (supersedes Dependabot #499, which moved only
+  the pin in `pyproject.toml` and could not resolve; OBS-183).
+
 ### Fixed
 
 - **The wiki projection no longer splits the wiki** (OBS-516, #507). `tools/commit_projection.py` committed the
