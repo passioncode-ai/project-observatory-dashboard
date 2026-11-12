@@ -390,7 +390,7 @@ ROOT_FILES = (
     'ed25519_order.py',
     # The engine's own `node` package wherever `tools/node.py` took the name (OBS-507).
     'engine_node.py',
-    'fabric_service.py', 'dispatch_packet.py', 'ops_digest.py', 'ops_digest_store.py', 'learning_review.py', 'service_connections.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'observatory-profile.lock.json', 'contract_lock.py', 'public-profile.json',
+    'fabric_service.py', 'dispatch_packet.py', 'ops_digest.py', 'ops_digest_store.py', 'learning_review.py', 'service_connections.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'wiki_checkout.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'observatory-profile.lock.json', 'contract_lock.py', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',
 )

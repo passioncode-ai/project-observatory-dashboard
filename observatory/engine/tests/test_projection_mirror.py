@@ -207,7 +207,7 @@ def test_the_commit_reports_on_every_path() -> None:
     src = (ROOT / "tools/commit_projection.py").read_text(encoding="utf-8")
     check("there is one reporter", "def report(outcome: str" in src)
     for outcome in ("no-git", "status-failed", "clean", "refused-foreign-changes",
-                    "lease-held-elsewhere", "committed"):
+                    "lease-held-elsewhere", "committed", "pushed", "push-failed", "mirror"):
         check(f"`{outcome}` is reported", f'"{outcome}"' in src or
               f"'{outcome}'" in src, outcome)
     check("a dry run reports NOTHING, deliberately",
@@ -302,6 +302,135 @@ def test_only_a_standing_refusal_is_a_finding() -> None:
               got[0]["action"])
 
 
+# ─────────── the commit reaches origin (OBS-516) ───────────────────────
+
+def g(*args: str, cwd: pathlib.Path) -> str:
+    r = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, timeout=120)
+    if r.returncode != 0:
+        raise AssertionError(f"git {' '.join(args)}: {r.stderr}")
+    return r.stdout.strip()
+
+
+def wiki_pair() -> tuple[pathlib.Path, pathlib.Path, pathlib.Path]:
+    """A bare origin, the writer's checkout (`wiki`) and a second writer's (`other`), both on
+    `master` tracking origin, holding a projection and an operator's note."""
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-projpush-"))
+    origin, seed = d / "origin.git", d / "seed"
+    g("init", "-q", "--bare", "-b", "master", str(origin), cwd=d)
+    g("init", "-q", "-b", "master", str(seed), cwd=d)
+    for k, v in (("user.email", "fixture@example.invalid"), ("user.name", "t")):
+        g("config", k, v, cwd=seed)
+    (seed / "projects-vault/inventory").mkdir(parents=True)
+    (seed / "projects-vault/inventory/projects.json").write_text('{"_generated": true}', encoding="utf-8")
+    (seed / "projects-vault/inventory/gone.json").write_text('{"_generated": true}', encoding="utf-8")
+    (seed / "note.md").write_text("an operator's note\n", encoding="utf-8")
+    g("add", "-A", cwd=seed)
+    g("commit", "-qm", "base", cwd=seed)
+    g("remote", "add", "origin", str(origin), cwd=seed)
+    g("push", "-q", "-u", "origin", "master", cwd=seed)
+    wiki, other = d / "wiki", d / "other"
+    for c in (wiki, other):
+        g("clone", "-q", str(origin), str(c), cwd=d)
+        for k, v in (("user.email", "fixture@example.invalid"), ("user.name", "t")):
+            g("config", k, v, cwd=c)
+    (d / "scratch").mkdir()
+    (d / "home").mkdir()
+    return d, wiki, other
+
+
+def commit_projection(d: pathlib.Path, wiki: pathlib.Path) -> dict:
+    # HOME is the fixture's, so no installed agent-sync takes a lease in the fixture wiki.
+    env = dict(os.environ, HOME=str(d / "home"), OBSERVATORY_VAULT=str(wiki / "projects-vault"),
+               OBSERVATORY_SCRATCH=str(d / "scratch"))
+    p = subprocess.run([PY, "tools/commit_projection.py"], cwd=ROOT, env=env,
+                       capture_output=True, text=True, timeout=300)
+    check("it exits 0", p.returncode == 0, (p.stdout + p.stderr)[-300:])
+    f = d / "scratch/commit-projection.json"
+    return json.loads(f.read_text(encoding="utf-8")) if f.is_file() else {}
+
+
+def test_the_projection_is_pushed_on_top_of_origin() -> None:
+    d, wiki, other = wiki_pair()
+    # Another writer moved origin since `wiki` last fetched.
+    (other / "note.md").write_text("the other writer's edit\n", encoding="utf-8")
+    g("commit", "-qam", "other", cwd=other)
+    g("push", "-q", cwd=other)
+    # The tick rewrote one file and stopped writing another.
+    (wiki / "projects-vault/inventory/projects.json").write_text('{"_generated": true, "n": 2}',
+                                                                  encoding="utf-8")
+    (wiki / "projects-vault/inventory/gone.json").unlink()
+    doc = commit_projection(d, wiki)
+    check("the outcome is `pushed`", doc.get("outcome") == "pushed", str(doc))
+    check("and says so", doc.get("pushed") is True, str(doc))
+    tip = g("rev-parse", "master", cwd=other.parent / "origin.git")
+    check("origin's tip is the projection on top of the other writer",
+          g("log", "-1", "--format=%P", tip, cwd=wiki) == g("rev-parse", "origin/master~1", cwd=wiki)
+          and g("log", "-1", "--format=%s", tip, cwd=wiki).startswith("Projection refresh"))
+    files = g("show", "--name-status", "--format=", tip, cwd=wiki)
+    check("the commit holds only the projection",
+          set(files.split()) == {"M", "D", "projects-vault/inventory/projects.json",
+                                 "projects-vault/inventory/gone.json"}, files)
+    check("the local branch followed origin", g("rev-parse", "HEAD", cwd=wiki) == tip)
+    check("and the checkout is clean, neither ahead nor behind",
+          g("status", "--porcelain", "-b", cwd=wiki) == "## master...origin/master",
+          g("status", "--porcelain", "-b", cwd=wiki))
+    check("the other writer's note reached the working copy",
+          (wiki / "note.md").read_text(encoding="utf-8") == "the other writer's edit\n")
+
+
+def test_a_local_commit_keeps_the_branch_where_it_is() -> None:
+    d, wiki, _ = wiki_pair()
+    (wiki / "projects-vault/x.md").write_text("a local page\n", encoding="utf-8")
+    g("add", "-A", cwd=wiki)
+    g("commit", "-qm", "local, unpushed", cwd=wiki)
+    head = g("rev-parse", "HEAD", cwd=wiki)
+    (wiki / "projects-vault/inventory/projects.json").write_text('{"_generated": true, "n": 3}',
+                                                                  encoding="utf-8")
+    doc = commit_projection(d, wiki)
+    check("the projection is still pushed", doc.get("outcome") == "pushed", str(doc))
+    check("and the reason the branch stayed is reported",
+          "local commit(s) are not on origin" in doc.get("detail", ""), str(doc))
+    check("the local commit is untouched", g("rev-parse", "HEAD", cwd=wiki) == head)
+    check("and is not what was pushed",
+          g("rev-parse", "origin/master", cwd=wiki) != head
+          and "projects-vault/x.md" not in g("ls-tree", "-r", "--name-only", "origin/master", cwd=wiki))
+
+
+def test_a_read_mirror_is_not_written() -> None:
+    d, wiki, _ = wiki_pair()
+    g("config", "observatory.wikiMirror", "true", cwd=wiki)
+    (wiki / "projects-vault/inventory/projects.json").write_text('{"_generated": true, "n": 4}',
+                                                                  encoding="utf-8")
+    before = g("rev-parse", "origin/master", cwd=wiki)
+    doc = commit_projection(d, wiki)
+    check("the commit refuses the mirror", doc.get("outcome") == "mirror", str(doc))
+    g("fetch", "-q", cwd=wiki)
+    check("nothing was pushed", g("rev-parse", "origin/master", cwd=wiki) == before)
+    g("checkout", "-q", "--", ".", cwd=wiki)
+    p = subprocess.run([PY, "tools/project_into_vault.py"], cwd=ROOT, timeout=300,
+                       capture_output=True, text=True,
+                       env=dict(os.environ, OBSERVATORY_HOME=str(projection_home(d)),
+                                OBSERVATORY_REGISTRY=str(paths.REGISTRY),
+                                OBSERVATORY_VAULT=str(wiki / "projects-vault"),
+                                OBSERVATORY_SCRATCH=str(d / "scratch")))
+    check("the projection exits 0 on a mirror", p.returncode == 0, (p.stdout + p.stderr)[-300:])
+    check("and writes nothing into it", g("status", "--porcelain", cwd=wiki) == "",
+          g("status", "--porcelain", cwd=wiki))
+    rep = d / "scratch/projection.json"
+    check("saying why", rep.is_file() and "read mirror" in json.loads(rep.read_text())["refused"])
+
+
+def test_a_branch_without_upstream_commits_locally() -> None:
+    d, wiki, _ = wiki_pair()
+    g("branch", "-q", "--unset-upstream", cwd=wiki)
+    (wiki / "projects-vault/inventory/projects.json").write_text('{"_generated": true, "n": 5}',
+                                                                  encoding="utf-8")
+    doc = commit_projection(d, wiki)
+    check("committed, not pushed", doc.get("outcome") == "committed" and doc.get("pushed") is False,
+          str(doc))
+    check("on the local branch", g("log", "-1", "--format=%s", cwd=wiki).startswith("Projection refresh"))
+
+
 if __name__ == "__main__":
     print("the wiki's mirror — every document, written atomically, and a refusal that speaks\n")
     for fn in (test_the_projection_is_opt_in,
@@ -312,7 +441,11 @@ if __name__ == "__main__":
                test_a_document_the_mirror_cannot_carry_stops_the_run_by_name,
                test_the_commit_reports_on_every_path,
                test_a_refusal_is_recorded_rather_than_only_printed,
-               test_only_a_standing_refusal_is_a_finding):
+               test_only_a_standing_refusal_is_a_finding,
+               test_the_projection_is_pushed_on_top_of_origin,
+               test_a_local_commit_keeps_the_branch_where_it_is,
+               test_a_read_mirror_is_not_written,
+               test_a_branch_without_upstream_commits_locally):
         fn()
     print()
     if FAILURES:
