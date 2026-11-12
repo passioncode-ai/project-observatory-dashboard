@@ -344,7 +344,14 @@ SERVER_EXIT_TIMEOUT = 30
 
 
 def default_server_port() -> int:
-    return int(os.environ.get("OBSERVATORY_SERVER_PORT", "47311"))
+    """This account's server port (OBS-354): the environment, the record, the receipt, the historical default on a
+    host with one account. A shared host with no record falls back to the historical default here, because the
+    pass that rebuilds a job must not stop; `full ports allocate` records a port, and doctor names the gap."""
+    try:
+        import local_ports
+        return local_ports.port("server")
+    except Exception:  # noqa: BLE001
+        return int(os.environ.get("OBSERVATORY_SERVER_PORT", "47311"))
 
 
 def server_document(port: int, python: str | None = None) -> dict:

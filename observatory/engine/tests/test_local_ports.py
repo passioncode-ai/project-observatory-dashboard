@@ -26,7 +26,7 @@ OTHER = str(os.getuid()) if hasattr(os, "getuid") else "501"
 FIRST_BLOCK = {"server": 47400, "memory_http": 47402, "relay": 47406, "keyserver": 47407}
 
 
-class Ports(unittest.TestCase):
+class Fixture(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.base = Path(self.tmp.name).resolve()
@@ -72,6 +72,8 @@ class Ports(unittest.TestCase):
     def my_claim(self) -> dict:
         return json.loads((self.claims / f"{lp.CLAIM_PREFIX}{ME}.json").read_text())
 
+
+class Ports(Fixture):
     def test_one_account_records_legacy_and_changes_nothing(self):
         self.n, self.server = 1, 47311
         receipt = self.home / "store" / "raw" / "serverd.json"
@@ -204,6 +206,54 @@ class Ports(unittest.TestCase):
         printed = "".join(c.args[0] for c in out.write.call_args_list)
         self.assertEqual(json.loads(printed)["ports"], FIRST_BLOCK)
         self.assertIn("ports", workspace.doctor(self.home))
+
+
+class Clients(Fixture):
+    """Each client of the record (spec 3.5) and the server's bind message (3.6)."""
+
+    def test_every_client_reads_the_record_and_refuses_on_a_shared_host_without_one(self):
+        import secret_client
+        from node.repair import LifecycleExecutor
+        sys.path.insert(0, str(ROOT / "tools"))
+        import dashboard_open
+        sys.path.insert(0, str(ROOT / "agent"))
+        import assistant
+        with self.assertRaises(secret_client.ClientRefused) as refused:
+            secret_client.node_url()
+        self.assertEqual(refused.exception.args[0], "port-unallocated")
+        with self.assertRaises(lp.PortError):
+            LifecycleExecutor(lambda: "")
+        with patch("sys.stderr"):
+            self.assertIsNone(dashboard_open.account_port(False))
+        with self.assertRaises(assistant.AssistantError):
+            assistant._port()
+        lp.allocate()
+        self.assertEqual(secret_client.node_url(), "http://127.0.0.1:47400/mcp")
+        self.assertEqual(LifecycleExecutor(lambda: "").port, 47400)
+        self.assertEqual(dashboard_open.account_port(False), 47400)
+        self.assertEqual(assistant._port(), 47400)
+
+    def test_the_server_names_who_holds_the_port(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        import serverd
+        for kind, code in (("another-account", "port-held-by-another-account"),
+                           ("unknown", "port-held-by-unknown-owner")):
+            self.listening = {47311: kind}
+            self.assertIn(code, serverd._holder_sentence(47311))
+        self.listening = {47311: "this-account"}
+        self.assertIn("this account", serverd._holder_sentence(47311))
+
+    def test_an_install_with_a_port_another_account_claims_is_refused(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        import serverd
+        self.other_claim([47500])
+        args = type("A", (), {"port": 47500, "install": True, "run": False})()
+        with self.assertRaises(lp.PortError) as caught:
+            serverd._port_for(args)
+        self.assertEqual(caught.exception.code, "port-claimed-by-another-account")
+        args.port = 47600
+        self.assertEqual(serverd._port_for(args), 47600)
+        self.assertEqual(lp.record()["scheme"], "chosen")
 
 
 if __name__ == "__main__":

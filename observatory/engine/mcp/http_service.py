@@ -229,7 +229,8 @@ def parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="project-observatory full memory-http",
                                 description="Serve agent memory over loopback HTTP to callers "
                                             "holding an access binding.")
-    p.add_argument("--port", type=int, default=DEFAULT_PORT, help=f"default {DEFAULT_PORT}")
+    p.add_argument("--port", type=int, default=None,
+                   help=f"default: this OS account's recorded port ({DEFAULT_PORT} on a host with one account)")
     p.add_argument("--rate", type=int, default=DEFAULT_RATE,
                    help=f"requests a minute per binding; default {DEFAULT_RATE}")
     return p
@@ -237,6 +238,12 @@ def parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str]) -> int:
     a = parser().parse_args(argv)
+    if a.port is None:
+        import local_ports                         # this OS account's port, recorded when it has none (OBS-354)
+        try:
+            a.port = local_ports.resolve("memory_http", allocate_missing=True)
+        except local_ports.PortError as exc:
+            raise SystemExit(f"memory-http: {exc} ({exc.code}); run: {exc.step}") from None
     if not 1 <= a.port <= 65535 or a.rate < 1:
         raise SystemExit("memory-http: --port must be 1..65535 and --rate at least 1")
     import configuration

@@ -245,11 +245,17 @@ def project_choices():
                 for p in doc.get('projects',[]) if isinstance(p,dict) and isinstance(p.get('id'),str)][:1000]
     except (ValueError,OSError,AttributeError):return []
 
+def _account_port():
+    # This OS account's server (OBS-354): never the historical default on a host several accounts share.
+    import local_ports
+    try:return local_ports.port('server')
+    except local_ports.PortError:raise AssistantError('dashboard-unavailable') from None
+
 def _port():
     try:
         state=json.loads((paths.SCRATCH/'serverd.json').read_text())
-        port=state.get('port',47311)
-    except FileNotFoundError:port=47311
+        port=state.get('port') or _account_port()
+    except FileNotFoundError:port=_account_port()
     except (ValueError,OSError,AttributeError):raise AssistantError('dashboard-unavailable') from None
     if type(port) is not int or not 1<=port<=65535:raise AssistantError('dashboard-unavailable')
     return port
