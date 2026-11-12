@@ -5436,8 +5436,8 @@
       "path": "tests/test_local_settings.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1c3078052ae25e8560aab538e454b36a4ca61063e9319fc0ea0d201ba5deb0de",
-      "bytes": 9952
+      "export_sha256": "53a683b441b69d6d7d800bef0e41d3b975d2be0a05913c588ad2a1fafa3678b9",
+      "bytes": 10047
     },
     {
       "path": "tests/test_lost_projects.py",
