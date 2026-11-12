@@ -717,7 +717,7 @@ Known-value scanning finds occurrences of values already known locally. It
 cannot prove the absence of unknown, encoded or previously deleted values.
 Rotation changes the local slot; provider revocation is a separate action.
 
-Vault slot discovery reports unreadable ancestors and excludes symbolic links or special files as unmeasured. Session directory links are likewise unmeasured and are never followed.
+Vault slot discovery reports unreadable ancestors and excludes symbolic links or special files as unmeasured. The vault's own lock and journals at its root (`.vault.lock`, `movements.jsonl`, `leaks.jsonl`), names and places only, are not projects and are passed by; under those names anything but a regular file is still unmeasured. Session directory links are likewise unmeasured and are never followed.
 
 The leak scan reads the transcripts of every agent CLI it knows, each from the tool's own
 location (`paths.transcript_homes`):
@@ -1227,6 +1227,16 @@ model chain and every budget ceiling at 0, so the agent and the assistant refuse
 ```sh
 project-observatory full configure model chain VENDOR/MODEL[,VENDOR/MODEL...]   # tried in order
 project-observatory full configure budget daily_ceiling AMOUNT                 # also monthly_ceiling, velocity_ceiling
+```
+
+The wiki projection commits only its `inventory/` folder. When the wiki's branch tracks an upstream,
+the commit is built on that upstream branch and pushed, and the local branch follows by a fast
+forward that overwrites no local edit (a branch with local commits stays and the report says so); a
+branch with no upstream gets a local commit. On a machine that only reads a wiki another machine
+writes, mark the checkout and nothing is projected or committed there:
+
+```sh
+git -C <wiki checkout> config observatory.wikiMirror true
 ```
 
 Ceilings are non-negative numbers in the wallet's denomination, written to

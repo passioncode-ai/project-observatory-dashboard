@@ -793,6 +793,44 @@ class Coverage(unittest.TestCase):
             notes = []; self.assertEqual(list(L.vault_slots(notes, max_entries=0)), [])
             self.assertTrue(any("limit reached" in n["why"] and n["unreadable"] for n in notes))
 
+    def test_vault_own_bookkeeping_files_are_not_holes(self):
+        # `vault.py put` writes its lock, and `moved`/`leak` their journals, at the vault's root, beside the
+        # project folders: names and places only, never a value. They are the vault's, not unreadable projects.
+        vault = self.readable.parent / "vault"
+        slot = vault / "project" / "prod" / "KEY"
+        slot.parent.mkdir(parents=True); slot.write_text("sk-synthetic-" + "a" * 32)
+        for name in (".vault.lock", "movements.jsonl", "leaks.jsonl"):
+            (vault / name).write_text("")
+        with patch.object(L, "VAULT", vault):
+            notes = []; slots = list(L.vault_slots(notes))
+        self.assertEqual(slots, [slot])
+        self.assertEqual(notes, [])
+
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "OBS-278: Windows has no FIFO to stand in for a special file")
+    def test_vault_bookkeeping_name_that_is_not_a_regular_file_stays_a_hole(self):
+        vault = self.readable.parent / "vault"; vault.mkdir()
+        os.mkfifo(vault / "movements.jsonl")
+        external = self.readable.parent / "outside-vault"; external.write_text("")
+        (vault / ".vault.lock").symlink_to(external)
+        with patch.object(L, "VAULT", vault):
+            notes = []; list(L.vault_slots(notes))
+        self.assertEqual({n["what"] for n in notes}, {"vault:movements.jsonl", "vault:.vault.lock"})
+
+    def test_vault_bookkeeping_file_that_cannot_be_examined_is_its_own_hole(self):
+        vault = self.readable.parent / "vault"
+        slot = vault / "project" / "prod" / "KEY"
+        slot.parent.mkdir(parents=True); slot.write_text("sk-synthetic-" + "a" * 32)
+        (vault / "movements.jsonl").write_text("")
+        original = Path.lstat
+        def denied(self, *args, **kwargs):
+            if self == vault / "movements.jsonl":
+                raise PermissionError("synthetic")
+            return original(self, *args, **kwargs)
+        with patch.object(L, "VAULT", vault), patch.object(Path, "lstat", denied):
+            notes = []; slots = list(L.vault_slots(notes))
+        self.assertEqual(slots, [slot])
+        self.assertEqual([n["what"] for n in notes], ["vault:movements.jsonl"])
+
     def test_session_directory_symlink_is_unmeasured_without_following(self):
         base = self._target_sources()
         external = base / "external"; external.mkdir()

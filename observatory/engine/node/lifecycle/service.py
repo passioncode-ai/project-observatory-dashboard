@@ -50,9 +50,9 @@ import fabric_service as fs
 import interop
 import private_io
 
-from node.lifecycle import broker
-from node.lifecycle import supervisor as supervision
-from node.lifecycle.broker import TOOLS, LifecycleError
+from . import broker
+from . import supervisor as supervision
+from .broker import TOOLS, LifecycleError
 
 #: What the well-known document and the descriptor's hosts call this service.
 SERVICE = 'node.lifecycle'
@@ -329,7 +329,7 @@ def trace_ids(traceparent: Optional[str]) -> dict:
 def default_adapter():
     """The adapter of this system: macOS's, with its verified-bundle cache beside the store; elsewhere one that
     answers `unsupported_platform` to everything."""
-    from node.lifecycle import macos
+    from . import macos
     return macos.platform_adapter(cache_path=macos.default_cache())
 
 

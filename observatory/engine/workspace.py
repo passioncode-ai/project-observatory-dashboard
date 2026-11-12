@@ -759,7 +759,9 @@ def _lifecycle_helper(base: Path) -> dict:
     if str(config.SOURCE) not in sys.path:
         sys.path.insert(0, str(config.SOURCE))
     try:
-        from node.lifecycle import macos, service
+        import engine_node
+        macos = engine_node.module("lifecycle.macos")           # OBS-512: the engine's package, never tools/node.py
+        service = engine_node.module("lifecycle.service")
         if not service.read_config(path)["targets"]:
             return {"state": "inert"}
         return macos.helper_choice()
