@@ -1,6 +1,6 @@
 # The activity journal: units of agent work, their class and their spend (OBS-378)
 
-**Status:** design, 2026-11-12. The event's shape is the contract's: fabric-agent-contract CT-259,
+**Status:** design, 2026-11-12; J1.4 and J1.5 follow the contract's CT-259 draft (fabric-agent-contract `e7eafe5d`). The event's shape is the contract's: fabric-agent-contract CT-259,
 [the activity unit design](https://github.com/ssheleg/fabric-agent-contract/blob/main/docs/evidence/plans/2026-11-12-ct259-activity-unit.md)
 (rules `AE-1` to `AE-5`). This document is Observatory's half: what the journal keeps, the capability a kit
 writes through, how the North Star number is counted from it, and Observatory's answers to the four questions
@@ -33,10 +33,13 @@ something accepted, per task class, per organization, divided by the organizatio
    claim the writer could make about anyone.
 3. **The capability a kit calls: `activity.unit.record`**, bound exactly as `ops.digest.record` (J2).
 4. **The class map's revision is needed.** `taskClass` alone is not enough: the assessment's map will rename, split
-   and merge classes, and a month counted under one revision must still read the same after the next. Proposed for
-   the DEC: an optional `taskClassMap: {id, revision}` beside `taskClass`, required whenever `taskClass` is not
-   `unclassified`. A unit written without it is joined against the map revision in force at its `acceptedAt` and the
-   month is marked `class-map-inferred`.
+   and merge classes, and a month counted under one revision must still read the same after the next. Accepted by
+   the contract (board thread `52aa2f93`, 2026-11-12; CT-259 draft in fabric-agent-contract #271, `e7eafe5d`, AE-2a):
+   `taskClassMap: {id, revision}` with an integer revision, required whenever `taskClass` is not `unclassified`. The
+   journal refuses a classified unit without it, so no month is counted against a guessed map.
+5. **The event id names its run.** Observatory's second answer (board thread `b83440d6`) added `run.root` to the event
+   id of every transition, also in the CT-259 draft: a unit handed over between runs keeps one key, and the journal's
+   idempotency (J2) reads the id as the contract defines it.
 
 ## J2. The capability `activity.unit.record`
 
@@ -55,7 +58,8 @@ operations digest needs no second kind of credential:
   repository measured as the project's), as `ops.digest.record` checks `service`; otherwise `agent-not-of-project`.
 - **Input:** 1 to 50 `telemetry-event` objects of kind `unit`, each checked against the contract's schema at the
   pinned revision and its `FAC-SEM` rule (`outcome` only on `ended`, `acceptedBy` and `acceptedAt` only on
-  `accepted`). An event with a `user` or a `session` is refused (`AE-3`). One bad event refuses the whole call and
+  `accepted`). An event with a `user` or a `session` is refused (`AE-3`), and so is a classified event without
+  `taskClassMap` (`class-map-missing`). One bad event refuses the whole call and
   names it by index; nothing is half written.
 - **Idempotent by the event id** (`AE-2`): the same event again answers `repeated: true` and changes nothing. A
   second `accepted` for the same unit and stream without a `started` between them is refused (`accepted-twice`).
@@ -82,7 +86,8 @@ For one organization and one calendar month (UTC):
   reopened and accepted again counts in the month of its last acceptance).
 - **Verified units:** the accepted units the assessment marks verified for their class (G1-c). Until that reading
   exists the number is published as accepted, and labelled so, never as verified.
-- **Per class:** grouped by `taskClass` under the map revision of J1.4; `unclassified` is its own row.
+- **Per class:** grouped by `taskClass` under the map revision each unit names (J1.4); `unclassified` is its own
+  row.
 - **Spend:** the sum of `cost.usd` over every event of the units counted. One unknown cost (`null`) makes the sum a
   lower bound, published with `partial: true`, never as if complete; an unknown cost is never read as 0.
 - **Per person:** the organization's verified (or accepted) units divided by its member count in the month from the
