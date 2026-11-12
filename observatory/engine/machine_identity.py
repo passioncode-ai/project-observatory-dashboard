@@ -456,7 +456,8 @@ def job_label(path: Path, data: bytes | None = None) -> str:
 
 
 def restore_mode(recorded, *, asked: str | None = None, here: str | None = None,
-                 home: Path | None = None, unknown: str = "second", home_path: str | None = None) -> dict:
+                 home: Path | None = None, unknown: str = "second", home_path: str | None = None,
+                 clone: bool = False) -> dict:
     """Whether a bundle or snapshot taken at place `recorded` is restored here as the same machine.
 
     `asked` is the person's choice: `second` (always safe) or `same` (a terminal-only override the
@@ -478,6 +479,14 @@ def restore_mode(recorded, *, asked: str | None = None, here: str | None = None,
         why, same = "names-no-machine", unknown == "keep"
     else:
         verdict = match(recorded, here)
+        if verdict == "same" and clone:
+            # A clone shares the platform identifier, so the place too; what differs is the agent-network device.
+            # Restoring whole would give the clone this machine's identity: a person decides (OBS-357).
+            raise MachineIdentityError(
+                "clone-suspected: the bundle names this place but another device; restore it as a second machine "
+                "(--second-machine), or, when this really is the same machine, --same-machine at a terminal; a clone "
+                "needs its own identifier (systemd-machine-id-setup on Linux, a new machine identifier for the virtual "
+                "machine on macOS), then `project-observatory full node --init`")
         if verdict == "same":
             why, same = "same-place", True
         elif verdict == "same-host-account-unknown":

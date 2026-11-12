@@ -11,6 +11,9 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import machine_identity as mi
+import configuration as config  # noqa: E402  imported before any test puts tools/ first on sys.path
+import workspace  # noqa: E402
+import runtime_identity  # noqa: E402,F401  the root module, before tools/ (its CLI of the same name) can shadow it
 
 HOST = "m-" + "a" * 24
 OTHER_HOST = "m-" + "b" * 24
@@ -73,9 +76,7 @@ class LocalSettingsPlace(unittest.TestCase):
     """config/local.json records the place id; a record from before (a bare host id) still matches this host."""
 
     def test_a_bare_host_record_still_matches_and_a_neighbours_does_not(self):
-        import configuration as config
         import tempfile
-        import workspace
         with tempfile.TemporaryDirectory() as raw, env("501"), \
                 patch.dict(os.environ, {"OBSERVATORY_HOME": str(Path(raw).resolve() / "home"),
                                         "HOME": str(Path(raw).resolve() / "u")}):
@@ -227,6 +228,31 @@ class DigestName(unittest.TestCase):
 
     def test_a_workspace_that_published_keeps_its_name(self):
         self.assertEqual(self.name(2, {"machine": "studio"}), "studio")
+
+
+class CloneCheck(unittest.TestCase):
+    """Spec M5 3.4: the same place with another device is a clone, refused or named, never restored whole."""
+
+    def test_a_bundle_of_this_place_from_another_device_is_refused_until_asked(self):
+        with env("501"):
+            here = mi.place_id()
+            with self.assertRaises(mi.MachineIdentityError) as caught:
+                mi.restore_mode(here, here=here, clone=True)
+            self.assertIn("clone-suspected", str(caught.exception))
+            self.assertEqual(mi.restore_mode(here, here=here, clone=True, asked="second")["mode"], "second-machine")
+            self.assertEqual(mi.restore_mode(here, here=here, clone=False)["mode"], "same-machine")
+
+    def test_clone_facts_are_named_not_dropped(self):
+        import machine_move as mm
+        import tempfile
+        with env("501"):
+            here = mi.place_id()
+        peer = {"machine": here, "generated_at": "2026-11-12T10:00:00Z", "engine_version": "0", "platform": "linux",
+                "ssh": [], "device": "dev-other-0001", "jobs": [], "elsewhere": [], "restore": None}
+        with tempfile.TemporaryDirectory() as raw, env("501"), \
+                patch.object(mm, "device_id", lambda base: ("dev-this-0001", None)):
+            view = mm.status(Path(raw), None, peers=[peer], platform="linux")
+        self.assertIn("clone-suspected", [d["code"] for d in view["degraded"]])
 
 
 if __name__ == "__main__":

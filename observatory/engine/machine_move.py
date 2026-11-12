@@ -1112,6 +1112,15 @@ def status(home: Path, base: Path | None, *, peers: list[dict] | None = None, un
     for peer in peers or []:
         verdict = mi.match(peer["machine"], me) if me else "other"
         if verdict == "same":
+            mine = device_id(base)[0]
+            if mine and isinstance(peer.get("device"), str) and peer["device"] != mine:
+                # A clone shares the place and differs in its device (OBS-357): named, never dropped as this machine.
+                degraded.append({"source": "peers", "code": "clone-suspected",
+                                 "reason": f"a facts file names this place with another device ({peer['device']}): "
+                                           "a copy of this machine; give it its own identifier "
+                                           "(systemd-machine-id-setup on Linux, a new machine identifier for the "
+                                           "virtual machine on macOS), then `project-observatory full node --init`"})
+                continue
             degraded.append({"source": "peers", "code": "this-machine",
                              "reason": "a facts file names this machine; it is not another machine's and is ignored"})
             continue
