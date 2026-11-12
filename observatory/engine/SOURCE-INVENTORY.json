@@ -544,7 +544,7 @@
     {
       "path": "configuration.py",
       "source_sha256": "69575bf4b71bf590301f5dde7f87c26e19be4c96ed0f93647897a20c14574202",
-      "export_sha256": "e8529f13f36427a6761d86d27a081847626b594bb926f312bf32a74124a30e1c",
+      "export_sha256": "148020ddfce242885e87762e7a610a1fc5ce712713eadde052c98d8076dda5f0",
       "bytes": 17514,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
@@ -961,7 +961,7 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "64bbad7a680b39daab36d2c0ae5bcd669e0d5fd90bb2e65115aa6285b1139cd0",
+      "export_sha256": "8631cd9e20876c11dc3d3eb0eb7631373e8cbb5cfc32ab98b5e9efb34fd34ea2",
       "bytes": 135532,
       "upstream_modified": true
     },
@@ -997,8 +997,8 @@
       "path": "engine_node.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d6cc4ad87401a3d53021103c02b32fe96b555d096e9bfcc8ec2c8a54af14e9ae",
-      "bytes": 2718
+      "export_sha256": "cf52e81d4b875cd728970405eb8a3dadb55e4094c5481d2891feccce29952969",
+      "bytes": 2799
     },
     {
       "path": "engine_update.py",
@@ -3373,15 +3373,15 @@
       "path": "node/lifecycle/importer.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2e8ebdd1849dfeb02ecc6fa8437af559e8d2abdc86990be85da2552a04e2c356",
-      "bytes": 34474
+      "export_sha256": "c4a21dec314b65e52dcfd38e4481c7a9b7c7097065fd9fe9ada0cdb83f45ecfd",
+      "bytes": 34421
     },
     {
       "path": "node/lifecycle/macos.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "59bd8b6105970a8b65a9d0c7c55f5e0e6e410ee59f9409506875b840a95555ba",
-      "bytes": 76400
+      "export_sha256": "fc112e05ded7b056642b02f975f541b31cbe92bf711d99903493e2a293f1a416",
+      "bytes": 76535
     },
     {
       "path": "node/lifecycle/native_app.swift",
@@ -3394,15 +3394,15 @@
       "path": "node/lifecycle/service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3e9203793c7b27fc32acf2254a286cf1e77a7e9c397b7a3b6133564cc6c7acf3",
-      "bytes": 37844
+      "export_sha256": "2915cd598a16ab5efd5749936f135dcd8419ff2dc32bdfa95ae927f61926232c",
+      "bytes": 37791
     },
     {
       "path": "node/lifecycle/supervisor.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "312737353638377da295595792520f2b74bf845136ab56ba43abc7a7fac67fde",
-      "bytes": 13508
+      "export_sha256": "d3affc93375a1b34761e113d106b92ca46f7442d1896c9c4997dde5402f792df",
+      "bytes": 13481
     },
     {
       "path": "node/mailbox.py",
@@ -3868,8 +3868,8 @@
       "path": "secret_prompt.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5e1aafc7adc2ff85fdb41caea35f09674e3c6496711f9422e7de9bcf4db7a556",
-      "bytes": 63156
+      "export_sha256": "33e787f767bb672a7973acee6b8db5703766a09ebafd6e04ee10e3b16d9bca10",
+      "bytes": 63313
     },
     {
       "path": "secret_store_carry.py",
@@ -3916,14 +3916,14 @@
     {
       "path": "skill/.claude-plugin/marketplace.json",
       "source_sha256": "68a99261f346d399ff411a8bbe6cb46d7b169e6ef030d84f7b92c41a2f797c57",
-      "export_sha256": "78cd752f24468f2c4cbebaa8a64ffd436e9ff81ea06500508c91059f2169237e",
+      "export_sha256": "5743f9e428ce500742f631aae91d60417161ab704f778f98023977f5759f9450",
       "bytes": 942,
       "upstream_modified": true
     },
     {
       "path": "skill/plugins/observatory-log/.claude-plugin/plugin.json",
       "source_sha256": "1f267b5383edab6b68302df81f1790f73ebf2ef0a5e697bff81778bc0e9b31f2",
-      "export_sha256": "824057d0ca472634bd0a8525de390793b21be2a12b56ff683d098596cd006a36",
+      "export_sha256": "1daece142792800c6e1db64e75a93f96b3bede358d1fd0d1034ff465b2b0d842",
       "bytes": 627,
       "upstream_modified": true
     },
@@ -3970,14 +3970,14 @@
     {
       "path": "skill/plugins/observatory-log/skills/explaining-changes/SKILL.md",
       "source_sha256": "1a0b0708fc8a17a9bc1c45d89c59aeb44330147e77bc0e5e2262f197b97d31d4",
-      "export_sha256": "e4022c31a88ea7e9482cfa7d64f3b609714eff7afdd5cc9499e9e132d92cdd8b",
+      "export_sha256": "c36c8ff6635b918a826222afb9a6e3b8a61dc69d93c3424c4b07db4e01831856",
       "bytes": 6508,
       "upstream_modified": true
     },
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "fb8fab18f109064f9ef57b0f31eb2c80c7b1b54a535e8639c766766528c7ebf0",
+      "export_sha256": "b88627dcc3dd0da011b72c15db94be249bb3c6517b575d3c08c50ae8ad3f123d",
       "bytes": 27654,
       "upstream_modified": true
     },
@@ -3985,7 +3985,7 @@
       "path": "skill/plugins/observatory-log/skills/tracking-resources/SKILL.md",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f0649d514d396a5293dbae3f6dbf8dea4d986451f568b24115013ae28a07697c",
+      "export_sha256": "66f7d93f706dc2fd2e224981e9ccf97525fbb218616511ddeb39f9f1f3b6e60c",
       "bytes": 4998
     },
     {
@@ -5652,8 +5652,8 @@
       "path": "tests/test_node_lifecycle_helper.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d726eccf875be93884ce4b05d54f877a344c582b1828c7b500609647a1c0da62",
-      "bytes": 26418
+      "export_sha256": "aed9862c8b600ac44bf4e7b622629ae26a8666bc1e9133bb0c8cf112671c7951",
+      "bytes": 29087
     },
     {
       "path": "tests/test_node_lifecycle_import.py",
@@ -6458,8 +6458,8 @@
       "path": "tests/test_tick_py.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1b89a0a803da4f19fe07392fd44c0ac724438008c54f39635368d6a700b499fe",
-      "bytes": 38756
+      "export_sha256": "3bc37379605df6fbf86db7da4411f526be6513fd889d4850c661325d704451f6",
+      "bytes": 40502
     },
     {
       "path": "tests/test_tick_repo.py",
@@ -7585,8 +7585,8 @@
       "path": "tools/tick.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f91c0e983f274bda9064abec3995d8109ab36a8b3d843985a277c1acece688aa",
-      "bytes": 43196
+      "export_sha256": "0fb28dc864d08c5e4996668f8b86ccde2ad73561b9b458ee72ee0bc9f90e56b2",
+      "bytes": 44290
     },
     {
       "path": "tools/tick.sh",
@@ -7732,8 +7732,8 @@
     {
       "path": "workspace.py",
       "source_sha256": "40d5ac9aafad0ab2485f03b86d84a0f192103a284f27309dfc2bf798f18071ef",
-      "export_sha256": "57b8f0fff7bffa1f16f9ee4a7c30e5c93704bd47c126045014565a502597ee27",
-      "bytes": 67918,
+      "export_sha256": "08a1bb0bd765fb10339e4d6efc569f06955fd0cd194eef8f85a3e53bf07be4b2",
+      "bytes": 68070,
       "python_comments_removed": 3,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
