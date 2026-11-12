@@ -314,6 +314,12 @@ class Temp(Base):
                                      for a in self.g.plan_temp(cfg, level, self.free(), time.time()))
         self.assertEqual(names("normal"), [])
         self.assertEqual(names("critical"), ["ended", "no-talk"])
+        kept = []
+        self.g.plan_temp(cfg, "critical", self.free(), time.time(), kept=kept)
+        live = [k for k in kept if Path(k["target"]).name == "live"]
+        self.assertEqual(len(live), 1, "OBS-527: the live session's folder is named, not silently passed over")
+        self.assertIn("live coding-agent session", live[0]["reason"])
+        self.assertIn("project -proj", live[0]["reason"])
         unreadable = self.cfg(temp_roots=[{"path": str(root), "depth": 2, "transcripts": str(self.base / "absent"),
                                            "hours": {"normal": 24, "low": 6, "critical": 2}}])
         self.assertEqual(self.g.plan_temp(unreadable, "critical", self.free(), time.time()), [])

@@ -687,6 +687,9 @@ def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget
                         # A live or unreadable session: only the root-wide age in days applies.
                         entry_cutoff = min(cutoff, at - days * 86400)
                         if top >= entry_cutoff:
+                            # Named in the report, so a session that grows its folder for days is
+                            # seen with its project instead of hiding in the free-space count (OBS-527).
+                            _note_kept(kept, "temp", full, _live_session_reason(spoken, at, d))
                             continue
                 r = inspect(full, entry_cutoff, time.monotonic() + max(1.0, budget.left()) if budget else None)
                 if r["reason"] == KEEP_REASON:          # a marker deeper inside
@@ -695,6 +698,14 @@ def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget
                     out.append({"class": "temp", "target": full, "bytes": r["size"], "cutoff": entry_cutoff, "identity": r["identity"],
                                 "why": f"untouched {(at - r['newest']) / 86400:.1f} days, nobody holds it"})
     return out
+
+
+def _live_session_reason(spoken: float | None, at: float, project_dir: str) -> str:
+    """Why a session folder stays: its transcript is recent (or unreadable), and whose project it is."""
+    project = os.path.basename(project_dir.rstrip(os.sep)) or project_dir
+    if spoken is None:
+        return f"the session's transcript could not be read; project {project}"
+    return f"a live coding-agent session: its transcript changed {max(0.0, at - spoken) / 3600:.1f} h ago; project {project}"
 
 
 def _transcript_time(transcripts: str, session: str) -> float | None:
