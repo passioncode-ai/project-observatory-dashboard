@@ -256,5 +256,38 @@ class Clients(Fixture):
         self.assertEqual(lp.record()["scheme"], "chosen")
 
 
+class Pass(Fixture):
+    """The maintenance pass records an installed server's ports once and refreshes the claim (spec 3.4, 3.11)."""
+
+    def test_the_pass_records_an_install_once_then_keeps_it(self):
+        import maintenance
+        self.assertEqual(maintenance.step_ports(self.home)["result"], "no-server")
+        self.n, self.server = 1, 47311
+        first = maintenance.step_ports(self.home)
+        self.assertEqual((first["result"], first["scheme"], first["server"]), ("recorded", "legacy", 47311))
+        again = maintenance.step_ports(self.home)
+        self.assertEqual((again["result"], again["claim"]), ("kept", "written"))
+
+    def test_the_pass_moves_a_server_off_another_accounts_port(self):
+        import maintenance
+        self.server = 47311
+        self.listening = {47311: "another-account"}
+        with patch("subprocess.run") as run:
+            run.return_value.returncode, run.return_value.stderr, run.return_value.stdout = 0, "", ""
+            out = maintenance.step_ports(self.home)
+        self.assertEqual((out["result"], out["server"]), ("moved", 47400))
+
+    def test_the_machine_tool_answers_the_accounts_section(self):
+        sys.path.insert(0, str(ROOT / "mcp"))
+        try:
+            import server
+        except ImportError as exc:                      # the MCP runtime is not installed in this interpreter
+            self.skipTest(f"mcp runtime: {exc}")
+        fn = getattr(server.observatory_machine, "fn", server.observatory_machine)
+        out = fn(section="accounts")
+        self.assertEqual(out["accounts"]["accountsOnHost"], 2)
+        self.assertIn("server", out["accounts"]["listeners"])
+
+
 if __name__ == "__main__":
     unittest.main()

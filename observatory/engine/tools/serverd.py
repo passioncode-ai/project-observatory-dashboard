@@ -943,12 +943,12 @@ def _holder_sentence(port: int) -> str:
     kind = local_ports.listener_kind(port)
     if kind == "another-account":
         return ("The port is held by another OS account on this host (port-held-by-another-account); "
-                "project-observatory full ports allocate --reinstall moves this account to its own block.")
+                "to move this account to its own block, run project-observatory full ports allocate --reinstall.")
     if kind == "this-account":
         return "A process of this account holds the port; pass --port, or stop it."
     if kind in ("unknown", "system"):
         return ("A process whose owner could not be read holds the port (port-held-by-unknown-owner); "
-                "project-observatory full ports show names it.")
+                "to see it, run project-observatory full ports show.")
     return "Another program holds the port; pass --port."
 
 
