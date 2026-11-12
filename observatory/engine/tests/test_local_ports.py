@@ -188,7 +188,9 @@ class Ports(unittest.TestCase):
             self.assertIsNone(lp.record(), "a record from another place is not read")
             self.assertIn("port-record-stale", [n["code"] for n in lp.show()["notes"]])
             self.assertEqual(lp.allocate()["scheme"], "allocated")
-            self.assertEqual(json.loads(config.local_path(self.home).read_text())["place"], "m-" + "b" * 24)
+            import machine_identity                      # OBS-357: the record names the place of host and account
+            self.assertEqual(machine_identity.host_of(json.loads(config.local_path(self.home).read_text())["place"]),
+                             "m-" + "b" * 24)
 
     def test_set_refuses_another_accounts_port_and_records_a_choice(self):
         self.other_claim([47500])

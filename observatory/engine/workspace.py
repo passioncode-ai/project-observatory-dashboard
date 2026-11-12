@@ -560,13 +560,10 @@ def doctor(base: Path) -> dict:
             "features": _switches(doc, "features"),
             # What this machine and OS account decide (OBS-353): config/local.json, each setting with its source.
             "local_settings": config.local(base),
-<<<<<<< HEAD
             # The port of each listener for this OS account, and who listens there (OBS-354).
             "ports": _ports(base),
-=======
             # This host and this OS account (OBS-357): the id bundles, receipts and placement carry.
             "place": __import__("machine_identity").place_summary(),
->>>>>>> origin/main
             "interface": {"locale": doc.get("interface", {}).get("locale", "en")},
             "coverage_warnings": coverage_warnings(doc),
             "tracked": __import__("tracked").health(),
