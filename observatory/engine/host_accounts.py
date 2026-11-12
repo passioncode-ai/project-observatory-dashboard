@@ -254,10 +254,8 @@ def uid_exists(account: str) -> bool:
 
 def this_account() -> str:
     """This process's account as a port claim names it: the uid, or on Windows the user SID ('' when unknown)."""
-    if hasattr(os, "getuid"):
-        return str(os.getuid())
-    try:  # pragma: no cover - exercised on Windows only
-        import peer_owner
-        return peer_owner._windows_sid(os.getpid()) or ""
-    except Exception:  # noqa: BLE001
+    try:
+        import osprivacy
+        return osprivacy.account()
+    except Exception:  # noqa: BLE001 - an account that cannot be read claims nothing
         return ""

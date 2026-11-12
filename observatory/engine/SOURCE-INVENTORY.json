@@ -3094,8 +3094,8 @@
       "path": "host_accounts.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c7d67f4d9e957b461917873f7b6ce31fe468e05620ba6e08b9a1598d1c2dbc19",
-      "bytes": 11773
+      "export_sha256": "64938da89d87bf48e0aed152ae40e283b6b99a87ef7b143a05e02f014ecd004e",
+      "bytes": 11687
     },
     {
       "path": "identifiers.py",
@@ -3153,8 +3153,8 @@
       "path": "local_ports.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "41fc91e0dd5f8377b2569fafbd975ac750a2d1dfecd420fb75a4d887171bc648",
-      "bytes": 24349
+      "export_sha256": "1084243ac3dfa78c93d5a78d864df400e066fec9130ba3d3c51a276e076bb54c",
+      "bytes": 24355
     },
     {
       "path": "log_policy.py",
@@ -3586,8 +3586,8 @@
       "path": "osprivacy.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e22489bacc4daa03e9c839c99fece7785cd539cee9873c44de243e88df80cec7",
-      "bytes": 25939
+      "export_sha256": "8ebdebe7b06de040f2ceb4d128595bd6b5121bdbc4d3a1139c72b67fff603892",
+      "bytes": 26638
     },
     {
       "path": "osproc.py",
