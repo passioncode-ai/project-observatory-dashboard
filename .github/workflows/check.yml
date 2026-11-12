@@ -3,7 +3,15 @@ name: observatory-release-check
 # on every pull request, so moving it to the nightly cadence would block every merge. The nightly
 # cadence (RULES.md, CI section) applies to the heavy suites, not to these required checks.
 # release.yml's guard requires this workflow and desktop.yml green on a release tag's commit.
-on: [push, pull_request, workflow_dispatch]
+# It also runs every night at 22:00 UTC over `main` (GitHub's cron may start late), so a check that turns red without a push (a
+# runner image, a dependency, the calendar) is seen the next morning rather than on the next pull
+# request, and the Windows portable job reads main once a day.
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 22 * * *'
 permissions:
   contents: read
 # No git a step runs, the root tests' included (`unittest discover -s tests` runs outside the
