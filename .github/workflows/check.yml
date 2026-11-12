@@ -6,12 +6,22 @@ name: observatory-release-check
 # It also runs every night at 22:00 UTC over `main` (GitHub's cron may start late), so a check that turns red without a push (a
 # runner image, a dependency, the calendar) is seen the next morning rather than on the next pull
 # request, and the Windows portable job reads main once a day.
+# A branch push runs nothing of its own: its pull request runs the checks branch protection requires, and a push
+# to a branch with a pull request used to run them twice (2026-11-12: 25 runs queued for four branches, holding
+# every runner of the organization). `main` and release tags keep their push runs: the release guard reads this
+# workflow on the tagged commit. A newer push to a pull request cancels the run it supersedes; runs of `main`, a
+# tag, the schedule or a dispatch are never cancelled.
 on:
   push:
+    branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
   schedule:
     - cron: '0 22 * * *'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 # No git a step runs, the root tests' included (`unittest discover -s tests` runs outside the
