@@ -702,7 +702,7 @@ Known-value scanning finds occurrences of values already known locally. It
 cannot prove the absence of unknown, encoded or previously deleted values.
 Rotation changes the local slot; provider revocation is a separate action.
 
-Vault slot discovery reports unreadable ancestors and excludes symbolic links or special files as unmeasured. Session directory links are likewise unmeasured and are never followed.
+Vault slot discovery reports unreadable ancestors and excludes symbolic links or special files as unmeasured. The vault's own lock and journals at its root (`.vault.lock`, `movements.jsonl`, `leaks.jsonl`), names and places only, are not projects and are passed by; under those names anything but a regular file is still unmeasured. Session directory links are likewise unmeasured and are never followed.
 
 The leak scan reads the transcripts of every agent CLI it knows, each from the tool's own
 location (`paths.transcript_homes`):
