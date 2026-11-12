@@ -375,14 +375,14 @@ def _merge_local(base: Path, doc: dict) -> dict:
 def local(base: Path | None = None, *, place: str | None = None) -> dict:
     """What local.json says, for doctor and the parts that own its keys (OBS-353): each setting with its value and
     `source` (`local`, `settings-mirror`, `adopted`, `default`), the recorded and current place, the reserved and
-    unknown keys, and the typed notes. `place` is this place's id (default: the machine id, read without creating it)."""
+    unknown keys, and the typed notes. `place` is this place's id (default: the place id of this host and OS account, OBS-357, read without creating it)."""
     base = base or home()
     local_doc, notes = read_local(base)
     raw = _raw_settings(base)
     if place is None:
         try:
             import machine_identity
-            place = machine_identity.machine_id(create=False)
+            place = machine_identity.place_id(create=False)
         except Exception:                                   # an id that cannot be read leaves the place unknown
             place = None
     out: dict = {"file": f"config/{LOCAL_FILE}", "present": local_doc is not None, "schema": LOCAL_SCHEMA,
@@ -469,7 +469,7 @@ def write_local(base: Path, changes: dict, *, place: str | None = None, writer=N
     if place is None:
         try:
             import machine_identity
-            place = machine_identity.machine_id(create=False)
+            place = machine_identity.place_id(create=False)
         except Exception:
             place = None
     if place:
