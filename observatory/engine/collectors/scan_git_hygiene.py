@@ -29,6 +29,7 @@ pass and each carried repository keeps its original registration time and stale 
 """
 from __future__ import annotations
 
+import errno
 import json
 import os
 import pathlib
@@ -429,9 +430,19 @@ def main(argv: list[str]) -> int:
                       "branches": sum(len(r["branches"]) for r in rows)}}
     out_path.parent.mkdir(parents=True, exist_ok=True)
     tmp = out_path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(doc, indent=1, ensure_ascii=False), encoding="utf-8")
-    os.chmod(tmp, 0o600)
-    os.replace(tmp, out_path)
+    try:
+        tmp.write_text(json.dumps(doc, indent=1, ensure_ascii=False), encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, out_path)
+    except OSError as exc:
+        # A full disk (OBS-527): the cleanup that runs after this survey is what frees space, so the survey says
+        # it could not write, keeps the previous one in place, and does not stop it.
+        tmp.unlink(missing_ok=True)
+        if exc.errno != errno.ENOSPC:
+            raise
+        print(f"git hygiene: not written, no space left on the disk; the previous survey stands ({out_path.name})",
+              file=sys.stderr)
+        return 0
     t = doc["totals"]
     print(f"git hygiene: {t['checkouts']} checkouts, {t['worktrees']} worktrees, {t['branches']} branches"
           + (f"; {len(degraded)} degraded" if degraded else ""))
