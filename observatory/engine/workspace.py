@@ -558,6 +558,8 @@ def doctor(base: Path) -> dict:
                            if not doc.get("sources", {}).get(k)}},
             "integrations": _switches(doc, "integrations"),
             "features": _switches(doc, "features"),
+            # What this machine and OS account decide (OBS-353): config/local.json, each setting with its source.
+            "local_settings": config.local(base),
             "interface": {"locale": doc.get("interface", {}).get("locale", "en")},
             "coverage_warnings": coverage_warnings(doc),
             "tracked": __import__("tracked").health(),
@@ -809,7 +811,7 @@ def _parser() -> argparse.ArgumentParser:
     migration.add_argument("--writers-stopped", action="store_true")
     conf = sub.add_parser("configure", help="set one setting in config/settings.json; model and budget write config/models.json")
     conf.add_argument("section", choices=["sources", "integrations", "features", "interface", "storage",
-                                                 "learning_review", "model", "budget"])
+                                                 "learning_review", "model", "budget", "apps", "loopback"])
     conf.add_argument("name")
     conf.add_argument("value")
     phrase = sub.add_parser("backup-passphrase", help="the passphrase that encrypts backups (stdin)")
@@ -983,6 +985,19 @@ def main(argv: list[str]) -> int:
         else:
             config.validate_workspace(base, required=True)
             doc = config.load(base)
+            if a.section in config.LOCAL_SECTIONS:   # exact names from a closed list (peerCheck is the spec's)
+                # Settings of this machine and OS account only (OBS-353): config/local.json, never settings.json.
+                choices = config.LOCAL_SECTIONS[a.section].get(a.name)
+                if choices is None:
+                    raise config.ConfigurationError(
+                        f"Unknown {a.section} setting: {a.name}; known: {', '.join(config.LOCAL_SECTIONS[a.section])}")
+                if a.value not in choices:
+                    raise config.ConfigurationError(f"{a.section} {a.name} must be one of: {', '.join(choices)}")
+                with lock(base):
+                    config.write_local(base, {a.section: {a.name: a.value}})
+                print(json.dumps({"status": "configured", "section": a.section, "name": a.name,
+                                  "file": "config/local.json"}, indent=2))
+                return 0
             if not re_safe_name(a.name):
                 raise config.ConfigurationError("Invalid configuration name")
             if a.section in ("integrations", "features", "sources") and a.name not in config.known_names(a.section):
@@ -1021,11 +1036,20 @@ def main(argv: list[str]) -> int:
                 if a.value not in {"true", "false"}:
                     raise config.ConfigurationError("Use true or false")
                 value = a.value == "true"
+            local_key = config.LOCAL_MOVED.get((a.section, a.name))
             with lock(base):
-                doc = config.load(base)
-                doc.setdefault(a.section, {})[a.name] = value
-                write_json(base / "config/settings.json", doc)
+                if local_key:
+                    # Decided per machine and OS account (OBS-353): local.json, mirrored into settings.json so an older
+                    # engine reads the same value.
+                    change = {local_key[0]: value} if len(local_key) == 1 else {local_key[0]: {local_key[1]: value}}
+                    config.write_local(base, change)
+                else:
+                    doc = config.load(base)
+                    doc.setdefault(a.section, {})[a.name] = value
+                    write_json(base / "config/settings.json", doc)
             result = {"status": "configured", "section": a.section, "name": a.name}
+            if local_key:
+                result["file"] = "config/local.json"
             if stored_as:
                 result["stored_as"] = stored_as
             if a.section == "interface":

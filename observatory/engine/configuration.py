@@ -233,7 +233,7 @@ def load(base: Path | None = None) -> dict:
     if file.is_symlink():
         raise ConfigurationError("Settings must not be a symbolic link")
     if not file.exists():
-        return {"schema_version": CONFIG_VERSION, "sources": {}, "integrations": {}, "features": {}}
+        return _merge_local(base, {"schema_version": CONFIG_VERSION, "sources": {}, "integrations": {}, "features": {}})
     doc = read_json(file)
     if type(doc.get("schema_version")) is not int or doc["schema_version"] != CONFIG_VERSION:
         raise ConfigurationError("Unsupported configuration schema; run a compatible release")
@@ -288,7 +288,228 @@ def load(base: Path | None = None) -> dict:
     required = doc.get("must_understand", [])
     if not isinstance(required, list) or required:
         raise ConfigurationError("Configuration requires unsupported capabilities")
+    return _merge_local(base, doc)
+
+# MACHINE-LOCAL SETTINGS (OBS-353): what this machine and this OS account decide, in one file profiles never carry.
+# `config/local.json` holds them; `features.scheduler` and `storage.backups` moved there and are MIRRORED into
+# settings.json on every write, so an older engine (a rollback, a second machine on an older release) reads the same
+# switch and backups root. `load()` merges the moved keys; everything else is read through `local()`.
+
+LOCAL_SCHEMA = "observatory-local/1"
+LOCAL_FILE = "local.json"
+#: (section in settings.json, name) of each moved setting, and where it sits in local.json.
+LOCAL_MOVED = {("features", "scheduler"): ("scheduler",), ("storage", "backups"): ("storage", "backups")}
+#: Keys other parts of the engine own (U1 ports, U4 apps, U2 loopback) or will own (U3 session, V1 context):
+#: kept and read, never refused.
+LOCAL_OWNED = ("place", "updatedAt", "scheduler", "storage", "ports", "apps", "loopback", "mirrored", "schema")
+LOCAL_RESERVED = ("session", "context")
+#: What `configure apps location` and `configure loopback peerCheck` accept (U4, U2 b): local.json only.
+LOCAL_SECTIONS = {"apps": {"location": ("auto", "user", "system")}, "loopback": {"peerCheck": ("auto", "always")}}
+_ABSENT = object()
+
+
+def local_path(base: Path) -> Path:
+    return base / "config" / LOCAL_FILE
+
+
+def read_local(base: Path) -> tuple[dict | None, list[dict]]:
+    """(local.json, notes). None with a note when the file cannot be trusted: a link, not owner-only, not this
+    account's, not JSON, or another schema. A missing file is (None, []). Never raises: a bad local file must not stop
+    the engine, whose settings.json still holds the mirrored values."""
+    file = local_path(base)
+    if not file.exists() and not file.is_symlink():
+        return None, []
+    unreadable = {"code": "local-settings-unreadable",
+                  "step": f"move {file} aside; the next write recreates it from config/settings.json"}
+    try:
+        if any(p.is_symlink() for p in (file, *file.parents)):
+            return None, [unreadable]
+        st = file.stat()
+        if hasattr(os, "getuid") and (st.st_uid != os.getuid() or st.st_mode & 0o077):
+            return None, [unreadable]
+        doc = json.loads(file.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None, [unreadable]
+    if not isinstance(doc, dict):
+        return None, [unreadable]
+    if doc.get("schema") != LOCAL_SCHEMA:
+        return None, [{"code": "local-settings-unsupported", "step": "project-observatory full update"}]
+    return doc, []
+
+
+def _local_get(doc: dict, path: tuple):
+    value = doc
+    for key in path:
+        if not isinstance(value, dict) or key not in value:
+            return _ABSENT
+        value = value[key]
+    return value
+
+
+def _valid_moved(key: tuple, value) -> bool:
+    if key == ("features", "scheduler"):
+        return type(value) is bool
+    return isinstance(value, str) and Path(value).expanduser().is_absolute()
+
+
+def _merge_local(base: Path, doc: dict) -> dict:
+    """The moved keys of local.json over settings.json (OBS-353): local.json wins while settings.json still equals the
+    value last mirrored into it; a settings.json changed since (an older engine after a rollback, or a hand edit) wins
+    and is adopted at the next write. The returned document gains no new key."""
+    local_doc, _ = read_local(base)
+    if not local_doc:
+        return doc
+    mirrored = local_doc.get("mirrored") if isinstance(local_doc.get("mirrored"), dict) else {}
+    for key, where in LOCAL_MOVED.items():
+        value = _local_get(local_doc, where)
+        if value is _ABSENT or not _valid_moved(key, value):
+            continue
+        current = (doc.get(key[0]) or {}).get(key[1], _ABSENT)
+        if current == mirrored.get(".".join(key), _ABSENT):
+            doc.setdefault(key[0], {})[key[1]] = value
     return doc
+
+
+def local(base: Path | None = None, *, place: str | None = None) -> dict:
+    """What local.json says, for doctor and the parts that own its keys (OBS-353): each setting with its value and
+    `source` (`local`, `settings-mirror`, `adopted`, `default`), the recorded and current place, the reserved and
+    unknown keys, and the typed notes. `place` is this place's id (default: the machine id, read without creating it)."""
+    base = base or home()
+    local_doc, notes = read_local(base)
+    raw = _raw_settings(base)
+    if place is None:
+        try:
+            import machine_identity
+            place = machine_identity.machine_id(create=False)
+        except Exception:                                   # an id that cannot be read leaves the place unknown
+            place = None
+    out: dict = {"file": f"config/{LOCAL_FILE}", "present": local_doc is not None, "schema": LOCAL_SCHEMA,
+                 "place": {"recorded": None, "here": place, "matches": None}, "settings": {},
+                 "reserved": [], "unknown": [], "notes": list(notes)}
+    doc = local_doc or {}
+    mirrored = doc.get("mirrored") if isinstance(doc.get("mirrored"), dict) else {}
+    recorded = doc.get("place") if isinstance(doc.get("place"), str) else None
+    stale = bool(recorded and place and not (recorded == place or place.startswith(recorded + ".")
+                                              or recorded.startswith(place + ".")))
+    out["place"].update(recorded=recorded, matches=None if not (recorded and place) else not stale)
+    if stale:
+        out["notes"].append({"code": "local-settings-stale",
+                             "step": "project-observatory full ports allocate, then "
+                                     "project-observatory full configure apps location auto"})
+    for key, where in LOCAL_MOVED.items():
+        name = ".".join(key)
+        value = _local_get(doc, where)
+        if value is not _ABSENT and not _valid_moved(key, value):
+            value = _ABSENT                                 # a value of the wrong shape is never read
+        current = (raw.get(key[0]) or {}).get(key[1], _ABSENT)
+        if value is not _ABSENT and current == mirrored.get(name, _ABSENT):
+            out["settings"][name] = {"value": value, "source": "local"}
+        elif value is not _ABSENT:
+            out["settings"][name] = {"value": None if current is _ABSENT else current, "source": "adopted"}
+            out["notes"].append({"code": "local-settings-adopted", "setting": name})
+        elif current is not _ABSENT:
+            out["settings"][name] = {"value": current, "source": "settings-mirror"}
+        else:
+            out["settings"][name] = {"value": None, "source": "default"}
+    ports = doc.get("ports") if isinstance(doc.get("ports"), dict) and not stale else None
+    out["settings"]["ports"] = {"value": ports, "source": "local" if ports else "default"}
+    apps = _local_get(doc, ("apps", "location"))
+    usable = apps in LOCAL_SECTIONS["apps"]["location"] and not stale
+    out["settings"]["apps.location"] = {"value": apps if usable else "auto", "source": "local" if usable else "default"}
+    peer = _local_get(doc, ("loopback", "peerCheck"))
+    usable = peer in LOCAL_SECTIONS["loopback"]["peerCheck"]
+    out["settings"]["loopback.peerCheck"] = {"value": peer if usable else "auto",
+                                             "source": "local" if usable else "default"}
+    out["reserved"] = [k for k in LOCAL_RESERVED if k in doc]
+    out["unknown"] = sorted(k for k in doc if k not in LOCAL_OWNED and k not in LOCAL_RESERVED)
+    return out
+
+
+def _raw_settings(base: Path) -> dict:
+    """settings.json as written, without the local merge; {} when absent or unreadable."""
+    file = base / "config" / "settings.json"
+    try:
+        return read_json(file) if file.exists() else {}
+    except ConfigurationError:
+        return {}
+
+
+def write_local(base: Path, changes: dict, *, place: str | None = None, writer=None) -> dict:
+    """Merge `changes` into local.json and mirror the moved keys into settings.json (OBS-353). The CALLER holds the
+    workspace lock (`workspace.lock`). Three atomic writes, in this order, so a crash between any two reads right
+    under `_merge_local`: (1) local.json with the new values and the OLD `mirrored`; (2) settings.json with the new
+    values; (3) local.json with `mirrored` set to them. A first write copies the moved keys from settings.json, so the
+    move loses nothing; a settings.json changed since the last mirror is adopted first. `writer(path, doc)` is the
+    atomic writer (tests inject a crash). Returns the written local.json."""
+    import atomic
+    from datetime import datetime, timezone
+    write = writer or (lambda path, doc: atomic.write_json(path, doc, indent=2))
+    file = local_path(base)
+    current, _ = read_local(base)
+    raw = _raw_settings(base)
+    doc = dict(current) if current else {"schema": LOCAL_SCHEMA}
+    old_mirror = dict(doc.get("mirrored")) if isinstance(doc.get("mirrored"), dict) else {}
+    for key, where in LOCAL_MOVED.items():            # first write, or settings.json changed since the last mirror
+        name, value = ".".join(key), (raw.get(key[0]) or {}).get(key[1], _ABSENT)
+        if current is None or value != old_mirror.get(name, _ABSENT):
+            if value is _ABSENT:
+                _local_pop(doc, where)
+            else:
+                _local_set(doc, where, value)
+            if value is _ABSENT:
+                old_mirror.pop(name, None)
+            else:
+                old_mirror[name] = value
+    for key, value in changes.items():
+        if isinstance(value, dict) and isinstance(doc.get(key), dict):
+            doc[key] = {**doc[key], **value}
+        else:
+            doc[key] = value
+    if place is None:
+        try:
+            import machine_identity
+            place = machine_identity.machine_id(create=False)
+        except Exception:
+            place = None
+    if place:
+        doc["place"] = place
+    doc["schema"] = LOCAL_SCHEMA
+    doc["updatedAt"] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    doc["mirrored"] = old_mirror
+    write(file, doc)                                                       # (1)
+    new_mirror = {}
+    settings = dict(raw) if raw else {"schema_version": CONFIG_VERSION, "sources": {}, "integrations": {},
+                                       "features": {}}
+    changed = False
+    for key, where in LOCAL_MOVED.items():
+        name, value = ".".join(key), _local_get(doc, where)
+        if value is _ABSENT:
+            continue
+        new_mirror[name] = value
+        if (settings.get(key[0]) or {}).get(key[1], _ABSENT) != value:
+            settings.setdefault(key[0], {})[key[1]] = value
+            changed = True
+    if changed:
+        write(base / "config" / "settings.json", settings)                 # (2)
+    if new_mirror != old_mirror:
+        doc["mirrored"] = new_mirror
+        write(file, doc)                                                   # (3)
+    return doc
+
+
+def _local_set(doc: dict, path: tuple, value) -> None:
+    for key in path[:-1]:
+        if not isinstance(doc.get(key), dict):
+            doc[key] = {}
+        doc = doc[key]
+    doc[path[-1]] = value
+
+
+def _local_pop(doc: dict, path: tuple) -> None:
+    for key in path[:-1]:
+        doc = doc.get(key) if isinstance(doc.get(key), dict) else {}
+    doc.pop(path[-1], None)
+
 
 def source_path(name: str, fallback: str, env: str | None = None) -> Path:
     if env and os.environ.get(env):
