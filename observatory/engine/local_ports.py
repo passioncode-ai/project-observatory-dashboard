@@ -290,8 +290,8 @@ def current_server_port(base: Path | None = None) -> int | None:
 
 
 def receipt_port(base: Path | None = None) -> int | None:
-    base = base or config.home()
-    for file in (base / "store" / "raw" / "serverd.json",):
+    import paths                                        # the server writes its receipt under paths.SCRATCH
+    for file in (paths.SCRATCH / "serverd.json",):
         try:
             port = json.loads(file.read_text(encoding="utf-8")).get("port")
             if isinstance(port, int) and 0 < port < 65536:

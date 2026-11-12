@@ -3153,8 +3153,8 @@
       "path": "local_ports.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1084243ac3dfa78c93d5a78d864df400e066fec9130ba3d3c51a276e076bb54c",
-      "bytes": 24355
+      "export_sha256": "0f86b476d9cb913722633560afd39ec6d2ee6183961c4ec90928ec3cbb31e5f0",
+      "bytes": 24421
     },
     {
       "path": "log_policy.py",
@@ -5429,7 +5429,7 @@
       "path": "tests/test_local_ports.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e67f64fce262ca80383b790bab293c1cf25966609525eae84b8e9defc9d9a436",
+      "export_sha256": "9340dc23e6496a3f72bc488f8e53518b730aef267f78caa71f6c15bb2286de4e",
       "bytes": 10536
     },
     {

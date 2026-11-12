@@ -74,7 +74,7 @@ class Ports(unittest.TestCase):
 
     def test_one_account_records_legacy_and_changes_nothing(self):
         self.n, self.server = 1, 47311
-        receipt = self.home / "store" / "raw" / "serverd.json"
+        receipt = __import__("paths").SCRATCH / "serverd.json"
         receipt.parent.mkdir(parents=True, exist_ok=True)
         receipt.write_text('{"port": 47311}')
         before = receipt.read_bytes()
@@ -163,7 +163,7 @@ class Ports(unittest.TestCase):
         with self.assertRaises(lp.PortError) as caught:
             lp.port("server")
         self.assertEqual(caught.exception.code, "port-unallocated")
-        receipt = self.home / "store" / "raw" / "serverd.json"
+        receipt = __import__("paths").SCRATCH / "serverd.json"
         receipt.parent.mkdir(parents=True, exist_ok=True)
         receipt.write_text('{"port": 47999}')
         self.assertEqual(lp.port("server"), 47999)
