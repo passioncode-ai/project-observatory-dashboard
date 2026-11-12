@@ -3152,5 +3152,29 @@ class DockerDaemonIsLocal(Base):
             self.assertEqual(self.g.act(a, self.free())["reason_code"], "remote-docker-context")
 
 
+class VirtualMachineDisks(unittest.TestCase):
+    """OBS-529: VM disk files are measured, and a VM that writes on a low disk is warned about."""
+
+    def test_disks_are_measured_and_a_writing_vm_warns_only_under_pressure(self):
+        import tempfile
+        sys.path.insert(0, str(ROOT / "tools"))
+        import disk_guard as g
+        with tempfile.TemporaryDirectory() as raw:
+            disk = Path(raw) / "_disks" / "colima" / "datadisk"
+            disk.parent.mkdir(parents=True)
+            with open(disk, "wb") as fh:
+                fh.truncate(4 * 1024 ** 3)                 # sparse: 4 GB in size, almost nothing allocated
+                fh.write(b"x" * 4096)
+            now = time.time()
+            vms = g.vm_disks(now, globs=(str(Path(raw) / "_disks" / "*" / "datadisk"),))
+            self.assertEqual(len(vms), 1)
+            self.assertEqual(vms[0]["size_gb"], 4.0)
+            self.assertLess(vms[0]["allocated_gb"], 1.0, "a sparse file's real size, not its length")
+            self.assertEqual(g.vm_warnings("normal", vms), [])
+            self.assertEqual(g.vm_warnings("low", vms)[0]["code"], "vm-disk-at-risk")
+            old = [dict(vms[0], written_minutes_ago=g.VM_WRITING_MINUTES + 1)]
+            self.assertEqual(g.vm_warnings("critical", old), [], "a VM that has not written in an hour is not at risk")
+
+
 if __name__ == "__main__":
     unittest.main()
