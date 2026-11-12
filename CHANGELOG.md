@@ -3,6 +3,35 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.35.16 (2026-11-12)
+
+The wiki projection is pushed to the wiki's origin instead of left as a local commit, and a checkout marked as a read
+mirror is never written. Two contributed fixes land: the vault's own lock and journals no longer read as leak-scan
+holes, and three silent stops of the local server and the tick now say why. No setting or migration changes; an
+installed server takes its new supervisor marker the next time `serverd.py --install` runs. The observatory-log plugin
+moves to 0.35.16 with the release.
+
+### Fixed
+
+- **The wiki projection no longer splits the wiki** (OBS-516, #507). `tools/commit_projection.py` committed the
+  projection to the local branch and never pushed, so an unpushed commit left the operator's wiki checkout ahead and
+  behind its origin at once. The projection commit is now built in a temporary index on top of the upstream branch and
+  pushed (three tries against a racing writer); the local branch follows only by a fast forward that overwrites nothing
+  local. A checkout marked `git config observatory.wikiMirror true` is never projected into or committed to. The
+  outcome reads `pushed`, `push-failed` or `mirror`, and `push-failed` counts in `projection.uncommitted`.
+- **The vault's own files are not leak-scan holes** (OBS-519, #509, contributed as #412). The leak scan expected only
+  project folders at the vault root, so `.vault.lock`, `movements.jsonl` and `leaks.jsonl`, which `vault.py` writes
+  there itself, kept `leak-scan:source-unreadable` and a degraded `/health` on any vault with one slot. A regular file
+  under those three names is passed by; a symlink, a FIFO or any other stray entry at the root is still a hole.
+- **Three silent stops say why** (OBS-520, #510, contributed as #398). A vanished interpreter: `tools/tick.sh` names the
+  missing `OBSERVATORY_PYTHON` and exits 78 instead of running another `python3`, and `full doctor` and the maintenance
+  warning read each job's `pid` and last exit (78 named as a missing interpreter). A registry the emit's guard refused:
+  the refusal reaches `tick.log` and a `registry-refused` row in `degraded` (doctor, `/health`, the service card, every
+  MCP answer) with the counts and the command that lets it through; the guard itself is not relaxed. The server's
+  launchd document sets `FABRIC_SERVICE_SUPERVISOR=launchd`.
+- **The restart-budget tests no longer fail on a slow Windows runner** (OBS-518). They gave a process one second to
+  become ready; a loaded runner took longer and the portable verdict read a new failing check. They now allow five.
+
 ## 0.35.15 (2026-11-11)
 
 Two follow-ups of the 2026-11-11 fixes: the node's lifecycle package loads where `tools/node.py` shadows the engine's
