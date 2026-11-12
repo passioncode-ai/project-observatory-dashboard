@@ -80,7 +80,8 @@ class LocalSettings(unittest.TestCase):
         self.assertEqual(local["mirrored"], {"features.scheduler": False, "storage.backups": self.backups})
         self.assertIs(self.settings()["features"]["scheduler"], False, "mirrored into settings.json")
         self.assertIs(config.load(self.home)["features"]["scheduler"], False)
-        self.assertEqual(oct(config.local_path(self.home).stat().st_mode & 0o777), oct(0o600))
+        import osprivacy                                 # 0600 on POSIX, an owner-only ACL on Windows
+        self.assertTrue(osprivacy.private(config.local_path(self.home)), "owner-only")
 
     def test_crash_after_local_before_settings_keeps_the_new_value(self):
         calls = []

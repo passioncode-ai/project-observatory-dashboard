@@ -189,7 +189,8 @@ def _read_claim(path: Path, who: str) -> dict | None:
     import stat
     if not stat.S_ISREG(st.st_mode) or st.st_size > CLAIM_MAX_BYTES:
         return None
-    if hasattr(os, "getuid") and (not who.isdigit() or st.st_uid != int(who)):
+    import osprivacy
+    if not osprivacy.owned_by(path, who):
         return None                                    # only its owner (or root) can have written it
     if not account_exists(who):
         return None
@@ -218,7 +219,8 @@ def write_claim(ports: dict, folder: Path | None = None) -> str:
         if target.is_symlink():
             return ""
         tmp = folder / f"{target.name}.{os.getpid()}.tmp"
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o644)
+        import osprivacy
+        fd = osprivacy.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | osprivacy.NOFOLLOW, 0o644)
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             json.dump(doc, fh)
         if hasattr(os, "chmod"):
@@ -296,8 +298,8 @@ def current_server_port(base: Path | None = None) -> int | None:
 
 
 def receipt_port(base: Path | None = None) -> int | None:
-    base = base or config.home()
-    for file in (base / "store" / "raw" / "serverd.json",):
+    import paths                                        # the server writes its receipt under paths.SCRATCH
+    for file in (paths.SCRATCH / "serverd.json",):
         try:
             port = json.loads(file.read_text(encoding="utf-8")).get("port")
             if isinstance(port, int) and 0 < port < 65536:

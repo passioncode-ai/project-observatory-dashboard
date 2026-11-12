@@ -760,6 +760,29 @@ class Estate(Base):
                 patch.object(cleanup, "fresh_busy", side_effect=lambda target, timeout: held.busy(target)):
             return cleanup.main(["cleanup.py", *args])
 
+    def test_a_full_disk_neither_stops_the_survey_nor_the_cleanup(self):
+        """OBS-527: with no space left, `full cleanup` failed writing git-hygiene.tmp, so the run that frees space
+        never ran. The survey keeps the previous one and the cleanup acts on the plan in memory."""
+        import errno
+        self.build()
+        first = self.survey()
+        real = Path.write_text
+
+        def full(path, *args, **kwargs):
+            if path.suffix == ".tmp":
+                raise OSError(errno.ENOSPC, "No space left on device")
+            return real(path, *args, **kwargs)
+        err = io.StringIO()
+        with patch.object(Path, "write_text", full), contextlib.redirect_stderr(err), \
+                contextlib.redirect_stdout(io.StringIO()):
+            again = self.survey()
+            self.assertEqual(self.run_cleanup("--apply"), 0)
+        self.assertEqual(again["measured_at"], first["measured_at"], "the previous survey stands")
+        self.assertIn("no space left", err.getvalue())
+        self.assertEqual(list((self.home / "store/raw").glob("*.tmp")), [], "no partial file is left behind")
+        branches = git(self.data / "app", "branch", "--format=%(refname:short)").split()
+        self.assertNotIn("merged-one", branches, "the auto tier still ran")
+
     def test_the_recheck_reuses_a_listing_younger_than_twenty_seconds(self):
         """2026-10-12: a full listing per worktree, tens of seconds each under load, spent the
         guard's whole git-tier share before the first removal."""
