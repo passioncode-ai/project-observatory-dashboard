@@ -1464,7 +1464,15 @@ class RestartBudgetTests(BrokerFixture, unittest.TestCase):
         self.adapter = UnreadyAdapter(self.data)
         self.gave_up = []
         self.broker = self.make_broker(on_gave_up=self.gave_up.append)
-        self.policy['targets']['alpha.app'] = target(desired='always_on', timeout=1)
+        # A start must reach ready within the timeout in real time; one second was not enough for a process
+        # start on a loaded Windows runner (OBS-518). Starts that never serve wait the whole timeout, so they
+        # take a short one through never_serves().
+        self.policy['targets']['alpha.app'] = target(desired='always_on', timeout=5)
+        self.save_policy()
+
+    def never_serves(self):
+        (self.data / 'alpha.app.unready').write_text('')
+        self.policy['targets']['alpha.app']['timeoutSeconds'] = 1
         self.save_policy()
 
     def supervised_start(self):
@@ -1495,7 +1503,7 @@ class RestartBudgetTests(BrokerFixture, unittest.TestCase):
         self.assertEqual(status['supervision']['failedStarts'], 3)
 
     def test_a_start_that_never_served_counts_however_long_it_ran(self):
-        (self.data / 'alpha.app.unready').write_text('')
+        self.never_serves()
         for _ in range(3):
             receipt = self.fail_once(after=1200)
             self.assertEqual(receipt['state'], 'capability_missing')
@@ -1505,7 +1513,7 @@ class RestartBudgetTests(BrokerFixture, unittest.TestCase):
         self.assertEqual(len(self.gave_up), 1)
 
     def test_a_process_that_does_not_exit_is_never_relaunched(self):
-        (self.data / 'alpha.app.unready').write_text('')
+        self.never_serves()
         self.supervised_start()
         self.clock.now += 600
         self.assertEqual(self.broker.supervise(), [], 'alive but not serving is never a restart reason')
@@ -1517,7 +1525,7 @@ class RestartBudgetTests(BrokerFixture, unittest.TestCase):
         self.assertEqual(self.gave_up, [])
 
     def test_failures_older_than_the_window_do_not_count(self):
-        (self.data / 'alpha.app.unready').write_text('')  # never served: counted whenever the exit is seen
+        self.never_serves()  # never served: counted whenever the exit is seen
         self.fail_once()
         self.fail_once()
         self.clock.now += broker.RESTART_WINDOW_SECONDS
