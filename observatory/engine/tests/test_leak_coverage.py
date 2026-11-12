@@ -806,6 +806,7 @@ class Coverage(unittest.TestCase):
         self.assertEqual(slots, [slot])
         self.assertEqual(notes, [])
 
+    @unittest.skipUnless(hasattr(os, "mkfifo"), "OBS-278: Windows has no FIFO to stand in for a special file")
     def test_vault_bookkeeping_name_that_is_not_a_regular_file_stays_a_hole(self):
         vault = self.readable.parent / "vault"; vault.mkdir()
         os.mkfifo(vault / "movements.jsonl")

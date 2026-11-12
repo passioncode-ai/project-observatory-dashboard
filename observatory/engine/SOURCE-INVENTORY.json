@@ -5342,8 +5342,8 @@
       "path": "tests/test_leak_coverage.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2e17730bdcde45ecbb120043ca21969341ee9b264873220008740189cc2c3991",
-      "bytes": 119859
+      "export_sha256": "abd780a04267e6a7adde721e81075a832214852c84d123ca31da78a854af9784",
+      "bytes": 119970
     },
     {
       "path": "tests/test_leak_scan_incremental.py",
