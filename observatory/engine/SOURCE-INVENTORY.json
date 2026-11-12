@@ -3150,6 +3150,13 @@
       "bytes": 70976
     },
     {
+      "path": "local_ports.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "41fc91e0dd5f8377b2569fafbd975ac750a2d1dfecd420fb75a4d887171bc648",
+      "bytes": 24349
+    },
+    {
       "path": "log_policy.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -5417,6 +5424,13 @@
       "upstream_modified": true,
       "export_sha256": "089140fde118573c7f82f03fa97516ef9489abec56ceb19e0f78039686f1c848",
       "bytes": 3906
+    },
+    {
+      "path": "tests/test_local_ports.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "e67f64fce262ca80383b790bab293c1cf25966609525eae84b8e9defc9d9a436",
+      "bytes": 10536
     },
     {
       "path": "tests/test_local_settings.py",
@@ -7771,7 +7785,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 1046,
+  "file_count": 1048,
   "excluded": [
     "git-history",
     "operator-registries",
