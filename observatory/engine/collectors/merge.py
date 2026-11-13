@@ -363,6 +363,40 @@ for folder,p in projects.items():
         p["repos"].remove(k)
         p["rules"]=[r for r in p["rules"] if not r.startswith(f"{k}:")]
         print(f"  denied by the operator: {folder} does not hold {k}")
+# A recorded COPY stands apart from its source (OBS-535). `config/derivations.json`
+# names, per entry, a copy and the repository it was copied from; a copy is
+# another owner's working repository (an organization's copy of a personal agent),
+# so a weak rule must not pour it into its source's project: a wiki note that
+# names the copy, a folder or repository name it shares. On 2026-11-13 the note
+# rule put an organization's copy of a personal agent into the agent's project,
+# and the name rule put another copy beside its source: both projects held two
+# owners' repositories and lost their organization. Only a submodule pin keeps it, or the
+# copy's own vault folder; a verified link can still attach it on purpose.
+# A move is the same work relocated and is left alone.
+def _recorded_copies():
+    try:
+        doc = json.load(open(paths.config_file('derivations.json')))
+    except FileNotFoundError:
+        return {}
+    except (OSError, ValueError) as exc:
+        print(f"  derivations.json unreadable, recorded copies not kept apart: {type(exc).__name__}")
+        return {}
+    out = {}
+    for e in (doc.get("derivations") or []) if isinstance(doc, dict) else []:
+        if not isinstance(e, dict) or e.get("kind") != "copy":
+            continue
+        copy, source = e.get("copy"), e.get("source")
+        if isinstance(copy, str) and isinstance(source, str):
+            out[copy.removeprefix("repository:")] = source.removeprefix("repository:")
+    return out
+COPIES = _recorded_copies()
+for folder, p in projects.items():
+    apart = [k for k in p["repos"] if k in COPIES and own_folder_of.get(k) != folder
+            and f"{k}: git submodule at " not in " ".join(r for r in p["rules"] if r.startswith(f"{k}:"))]
+    for k in apart:
+        p["repos"].remove(k)
+        p["rules"] = [r for r in p["rules"] if not r.startswith(f"{k}:")]
+        print(f"  a recorded copy stands apart: {k} (copy of {COPIES[k]}) left {folder}")
 # A repository the operator has retired. It stays in the registry — it exists, and
 # a reader following a link to it must be told what it is — but it stops anchoring
 # a PROJECT. Otherwise an empty or abandoned repository would get a project row of
