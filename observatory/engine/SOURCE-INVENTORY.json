@@ -409,8 +409,8 @@
     {
       "path": "collectors/scan_github.py",
       "source_sha256": "0718c5d57374c8d2f31ed4ccdb19767462b8c5df3b5843833aa7068375ab21ff",
-      "export_sha256": "0718c5d57374c8d2f31ed4ccdb19767462b8c5df3b5843833aa7068375ab21ff",
-      "bytes": 4332,
+      "export_sha256": "5ac04a0532b6b77afe1cd708c22638a01f9e8d8149b37c69747a240341775e6e",
+      "bytes": 5144,
       "python_comments_removed": 15,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -4513,8 +4513,8 @@
       "path": "tests/test_api_listings.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e5567d54adccc29c42ff32796f42a8312b6385fe641805816445f9b6773ee1b8",
-      "bytes": 29485
+      "export_sha256": "eeeb99d8221cd9bc7629e26a981e8d99a5d5f79ca7830fd4c6a37c7cd78feebe",
+      "bytes": 30802
     },
     {
       "path": "tests/test_ask_why.py",

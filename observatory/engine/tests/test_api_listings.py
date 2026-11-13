@@ -150,6 +150,25 @@ def test_a_real_listing_still_replaces_the_previous_one() -> None:
     check("and nothing is reported degraded", not deg, str(deg))
 
 
+def test_a_listing_as_long_as_its_limit_is_named_as_cut() -> None:
+    """OBS-536: `gh repo list` stops at `--limit` silently; a full listing is written and named."""
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-gh-cut-"))
+    gh_dir = d / "gh"
+    gh_dir.mkdir()
+    payload = '[{"nameWithOwner":"alpha-owner/a"},{"nameWithOwner":"alpha-owner/b"}]'
+    bin_dir = stub_gh(d, "alpha-owner", f"echo '{payload}'; exit 0")
+    p = subprocess.run([PY, "collectors/scan_github.py", str(gh_dir)], cwd=ROOT,
+                       capture_output=True, text=True, timeout=300,
+                       env=dict(os.environ, PATH=f"{bin_dir}:/usr/bin:/bin", OBSERVATORY_GH_LIST_LIMIT="2"))
+    rows = json.loads((gh_dir / "alpha-owner.json").read_text(encoding="utf-8"))
+    check("the full listing is still written", len(rows) == 2, str(rows))
+    deg = json.loads((gh_dir / "_degraded.json").read_text(encoding="utf-8"))
+    check("and named as possibly cut", any("reached its limit of 2" in x["reason"] for x in deg), str(deg))
+    code, out = run_scan(bin_dir, gh_dir)
+    deg = json.loads((gh_dir / "_degraded.json").read_text(encoding="utf-8"))
+    check("under the default limit two repositories are not cut", not deg, str(deg) + out[-200:])
+
+
 def test_an_empty_listing_with_no_previous_file_is_written() -> None:
     """An owner that has genuinely never had a repository is not a refusal."""
     d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-gh3-"))
@@ -538,6 +557,7 @@ if __name__ == "__main__":
                test_a_successful_empty_listing_is_refused,
                test_a_real_listing_still_replaces_the_previous_one,
                test_an_empty_listing_with_no_previous_file_is_written,
+               test_a_listing_as_long_as_its_limit_is_named_as_cut,
                test_a_failed_listing_keeps_the_previous_file,
                test_a_github_degradation_reaches_the_survey,
                test_the_reader_accepts_both_shapes_and_the_right_path,
