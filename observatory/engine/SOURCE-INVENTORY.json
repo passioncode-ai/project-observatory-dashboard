@@ -5429,8 +5429,8 @@
       "path": "tests/test_local_ports.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "dc827372bd5f397fcebe7383b51f8ee7546903e80e4b48c18cc54102f02eba44",
-      "bytes": 15280
+      "export_sha256": "14a6c783351bc6fd04f6ca9adf7bcfc13a25550200defdb84002bc30540661d3",
+      "bytes": 15780
     },
     {
       "path": "tests/test_local_settings.py",
