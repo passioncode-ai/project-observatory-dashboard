@@ -4906,8 +4906,8 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9dd3d56bf19126374b1490467aa54924059b55560970f3e37ba68530e076a524",
-      "bytes": 179447
+      "export_sha256": "2a859025d9789ed731e57ebeb5044e028109c25d1939737432705a03b0de95b7",
+      "bytes": 179545
     },
     {
       "path": "tests/test_dispatch_packet.py",

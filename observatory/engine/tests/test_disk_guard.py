@@ -263,6 +263,7 @@ class CheapHolderAdmission(Base):
         (row,) = [d for d in doc["degraded"] if d.get("source") == "holders"]
         self.assertEqual(row["detail"], "command-timeout")
 
+    @unittest.skipIf(os.name == "nt", "take_complete answers `windows` there before any listing")
     def test_take_complete_names_each_failure(self):
         import holders
         def capture(result):
