@@ -1,9 +1,11 @@
-/* PassionCode design tokens, the dashboard's own values (dashboard/brand/passioncode-tokens.css). */
+/* PassionCode design tokens, the dashboard's light values (dashboard/brand/passioncode-tokens.css,
+   `:root[data-theme="light"]`): light is every Observatory surface's default (OBS-523). Gold stays the
+   action fill; a line or outline in the accent role reads `--pc-focus`, the readable gold-brown. */
 :root {
-  --pc-bg: #0a070d; --pc-panel: #110c15; --pc-panel-raised: #1b1420; --pc-text: #fff9f0;
-  --pc-text-muted: #b6aabc; --pc-border-strong: #6f5e77; --pc-accent: #ffd21a; --pc-accent-hover: #ffdf5e;
-  --pc-on-accent: #211900; --pc-positive: #79d49a; --pc-warning: #f6ba75; --pc-negative: #ff969f;
-  color-scheme: dark;
+  --pc-bg: #ffffff; --pc-panel: #f7f5f8; --pc-panel-raised: #ffffff; --pc-text: #211725;
+  --pc-text-muted: #655769; --pc-border-strong: #8f8095; --pc-accent: #ffd21a; --pc-accent-hover: #edbd00;
+  --pc-on-accent: #211900; --pc-focus: #806200; --pc-positive: #246b3b; --pc-warning: #8a4b0b; --pc-negative: #a82f44;
+  color-scheme: light;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--pc-bg); color: var(--pc-text);
@@ -16,10 +18,10 @@ code { background: var(--pc-panel-raised); padding: 1px 6px; border-radius: 4px;
 button { font: inherit; padding: 8px 16px; border-radius: 8px; cursor: pointer;
   background: var(--pc-panel); color: var(--pc-text); border: 1px solid var(--pc-border-strong);
   transition: background 120ms, border-color 120ms; }
-button.primary { background: var(--pc-accent); color: var(--pc-on-accent); border-color: var(--pc-accent); }
-button:hover { border-color: var(--pc-accent); }
+button.primary { background: var(--pc-accent); color: var(--pc-on-accent); border-color: transparent; }
+button:hover { border-color: var(--pc-focus); }
 button.primary:hover { background: var(--pc-accent-hover); }
-button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--pc-accent); outline-offset: 2px; }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--pc-focus); outline-offset: 2px; }
 button:disabled { opacity: .55; cursor: default; }
 label { display: block; margin: 18px 0 6px; font-weight: 600; }
 .row { display: flex; gap: 8px; }

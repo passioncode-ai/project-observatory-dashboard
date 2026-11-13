@@ -330,6 +330,9 @@ class Holders:
         # path reads as held. Its command lines are kept for this decision only.
         self.scope = scope
         self.commands = commands or []
+        # Why the snapshot is unknown, when it is (`take_complete`): a timed-out, failed, warning or empty listing,
+        # so a guard that removed nothing says which (OBS-534).
+        self.reason: str | None = None
 
     @classmethod
     def take(cls, timeout: float = 120, *, collect_hints: bool = True, complete: bool = False,
@@ -370,16 +373,21 @@ class Holders:
         """One whole `lsof` listing and one `ps` listing, cut to the paths under `roots`
         (default: the home folder and the temporary roots). Unknown on Windows, without
         lsof, past the deadline, or when either command fails, warns or prints nothing."""
+        def unknown(reason: str) -> "Holders":
+            result = cls(None)
+            result.reason = reason
+            return result
         if os.name == "nt":
-            return cls(None)
+            return unknown("windows")
         end = _deadline(timeout)
         tool = shutil.which("lsof")
         scope = _scope(roots)
         if end is None or not tool or not scope:
-            return cls(None)
+            return unknown("no-deadline" if end is None else "no-lsof" if not tool else "no-scope")
         p = _capture([tool, "-n", "-P", "-Fn"], deadline=end, env=_utf8_env(), max_bytes=LISTING_BYTES)
         if not p["complete"] or p["returncode"] != 0 or p["stderr_seen"] or not p["stdout"]:
-            return cls(None)
+            return unknown(p.get("reason") or ("lsof-exit-%s" % p["returncode"] if p["returncode"] != 0
+                                               else "lsof-warnings" if p["stderr_seen"] else "lsof-no-output"))
         names, seen = [], False
         try:
             for line in p["stdout"].decode("utf-8", errors="strict").splitlines():
@@ -389,13 +397,13 @@ class Holders:
                     if _within(name, scope):
                         names.append(name)
         except (UnicodeError, ValueError):
-            return cls(None)
+            return unknown("lsof-undecodable")
         # A listing of a running machine names at least one absolute path (its own lsof).
         if not seen or time.monotonic() >= end:
-            return cls(None)
+            return unknown("lsof-no-path" if not seen else "command-timeout")
         out = _run(["ps", "-axww", "-o", "args="], max(0, end - time.monotonic()))
         if out is None or time.monotonic() >= end:
-            return cls(None)
+            return unknown("ps-failed" if out is None else "command-timeout")
         commands = [line for line in out.splitlines() if any(root in line for root in scope)]
         result = cls(names, "lsof", scope=scope, commands=commands)
         result.observation = "complete"

@@ -121,6 +121,32 @@ class Privacy(unittest.TestCase):
             os.close(osprivacy.open(self.dir, os.O_RDONLY | osprivacy.DIRECTORY))
 
 
+@unittest.skipIf(osprivacy.WINDOWS, "a POSIX group's write bit")
+class PrivateGroup(unittest.TestCase):
+    """OBS-354: under umask 002 a person's folder is group-writable for their own private group; only that case may
+    be tightened at initialization, never a folder others or a shared group may write to."""
+
+    def check(self, mode, *, name="me", members=()):
+        import grp
+        import pwd
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "store"
+            folder.mkdir()
+            folder.chmod(mode)
+            group = mock.Mock(gr_name=name, gr_mem=list(members))
+            user = mock.Mock(pw_name="me")
+            with mock.patch.object(grp, "getgrgid", lambda gid: group), \
+                    mock.patch.object(pwd, "getpwuid", lambda uid: user):
+                return osprivacy.only_my_group_may_write(folder)
+
+    def test_only_the_accounts_own_private_group_counts(self):
+        self.assertTrue(self.check(0o775))
+        self.assertFalse(self.check(0o777), "others may write")
+        self.assertFalse(self.check(0o755), "nothing to tighten")
+        self.assertFalse(self.check(0o775, name="staff"), "a shared group")
+        self.assertFalse(self.check(0o775, members=("someone",)), "a group with another member")
+
+
 class ReadRegular(unittest.TestCase):
     """A small file read with no wait and no bound left open: the disk guard reads Fabric
     service descriptors with it, and a FIFO, a link to a device or a huge file named like one

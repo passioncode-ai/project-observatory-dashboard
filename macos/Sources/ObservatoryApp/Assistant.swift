@@ -42,7 +42,7 @@ struct AssistantView: View {
                         }
                         .buttonStyle(.plain)
                         .listRowBackground(RoundedRectangle(cornerRadius: Theme.radiusControl).fill(on ? Theme.accentSoft : Color.clear)
-                            .overlay(alignment: .leading) { if on { Rectangle().fill(Theme.accent).frame(width: 2) } }
+                            .overlay(alignment: .leading) { if on { Rectangle().fill(Theme.focus).frame(width: 2) } }
                             .padding(.horizontal, 6))
                         .accessibilityAddTraits(on ? .isSelected : [])
                         .contextMenu { Button(m.t("Delete Conversation…"), role: .destructive) { m.deleting = c.id } }
@@ -191,7 +191,7 @@ struct AssistantView: View {
                     .background(Tone.warning.fill, in: RoundedRectangle(cornerRadius: Theme.radiusControl))
                 }
                 ForEach(Array(t.steps.enumerated()), id: \.offset) { _, step in
-                    Label { Text(rendered(step)).foregroundStyle(Theme.text) } icon: { Image(systemName: "arrow.right").foregroundStyle(Theme.accent) }
+                    Label { Text(rendered(step)).foregroundStyle(Theme.text) } icon: { Image(systemName: "arrow.right").foregroundStyle(Theme.focus) }
                         .textSelection(.enabled)
                 }
                 if !t.evidence.isEmpty {
@@ -200,7 +200,7 @@ struct AssistantView: View {
                             VStack(alignment: .leading, spacing: 4) {
                                 // The id the answer cites, so "(E17)" in the text leads somewhere.
                                 HStack(spacing: 6) {
-                                    Text(e["id"] as? String ?? "").font(.caption.monospaced()).foregroundStyle(Theme.accent)
+                                    Text(e["id"] as? String ?? "").font(.caption.monospaced()).foregroundStyle(Theme.focus)
                                     Text(e["title"] as? String ?? "").bold().foregroundStyle(Theme.text)
                                 }
                                 Text("\(e["source"] as? String ?? "") · " + ((e["measured_at"] as? String) ?? m.t("measurement time unknown")))

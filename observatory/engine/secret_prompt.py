@@ -393,7 +393,7 @@ def enrolled_app_intact(target: dict) -> bool:
     if sys.platform != "darwin":
         return False
     try:
-        from node.lifecycle import macos
+        macos = engine_node.module("lifecycle.macos")   # OBS-512: never `from node.lifecycle`, tools/node.py shadows it
         requirement = macos.requirement_for(target["identity"]["bundleId"], target["identity"]["teamId"])
         return macos.satisfies(str(target["path"]), requirement, deep=True, run=macos.Runner())
     except Exception:  # noqa: BLE001
@@ -962,8 +962,8 @@ def signed_app_parent(platform: str | None = None, *, document: dict | None = No
     if (platform or sys.platform) != "darwin":
         return False
     try:
-        from node.lifecycle import macos
-        from node.lifecycle import service as lifecycle
+        macos = engine_node.module("lifecycle.macos")   # OBS-512: the engine's package wherever tools/node.py is
+        lifecycle = engine_node.module("lifecycle.service")
         target = observatory_target(document if document is not None else lifecycle.read_config())
         if target is None:
             return False

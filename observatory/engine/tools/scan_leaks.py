@@ -117,6 +117,11 @@ OUT = paths.SCRATCH / "leak-scan.json"
 VAULT = pathlib.Path(os.environ.get(
     "OBSERVATORY_VAULT_DIR",
     paths.source_path("secret_store", paths.SECRETS) / 'projects'))
+#: The vault's own files at its root, beside the project folders: `vault.py`'s
+#: lock and its two journals (`MOVES`, `LEAKS`), names and places only. They are
+#: no project, so discovery passes them by instead of calling them holes; under
+#: these names only a regular file is passed by, anything else stays a hole.
+VAULT_OWN_FILES = frozenset({".vault.lock", "movements.jsonl", "leaks.jsonl"})
 SESSIONS = pathlib.Path(os.environ.get(
     "OBSERVATORY_SESSIONS", paths.SESSIONS))
 
@@ -261,6 +266,8 @@ def vault_slots(notes: list[dict], *, max_entries: int = 100_000):
                     yield path
                 else:
                     hole(path, "not a regular slot file; excluded without reading")
+            elif depth == 1 and path.name in VAULT_OWN_FILES and stat.S_ISREG(info.st_mode):
+                pass
             elif not stat.S_ISDIR(info.st_mode):
                 hole(path, "not a directory; excluded without reading")
             else:

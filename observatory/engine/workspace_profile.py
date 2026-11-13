@@ -18,7 +18,8 @@ token (`leaks`), so a hand-edited policy file cannot carry one out; the same
 check runs over the whole profile before it is written and again on import.
 
 Import never touches `sources` or `storage`, and keeps what is decided per
-machine (`features.scheduler`). It preserves every local field the profile does
+machine (`features.scheduler`); `config/local.json`, where this machine and OS
+account keep their own settings (OBS-353), is never read, written or carried. It preserves every local field the profile does
 not name, refuses a profile format it does not know and a profile made by a
 newer engine than the one installed (`full update` first), and verifies the
 profile's sha256 over its canonical JSON so a damaged or hand-edited file is
@@ -53,6 +54,7 @@ LOG = Path("store") / "logs" / "profile.jsonl"
 MACHINE_LOCAL = {
     ("features", "scheduler"): "whether this machine runs background jobs is decided on the machine "
                                "(`agent install`, the scheduler step), not carried by a profile",
+    ("storage", "backups"): "where this machine and OS account keep their backups (config/local.json, OBS-353)",
 }
 
 #: Every config/ file this release knows, and whether it travels. The rule for
@@ -66,6 +68,8 @@ POLICY_FILES: dict[str, tuple[bool, str]] = {
     "models.json": (True, "model chain, attempts, wallet ceilings and embedding choice; keys never live here"),
     "retention.json": (True, "how long each kind of store record is kept"),
     "settings.json": (False, "exported by section: integrations, features and interface"),
+    "local.json": (False, "settings decided by this machine and this OS account: ports, app location, scheduler, "
+                          "backups root, session mode, context"),
     "credential_annotations.json": (False, "which credential is whose: sensitive and machine-specific"),
     "credential_owners.json": (False, "credential ownership records"),
     "denied_links.json": (False, "links between this estate's projects (inventory)"),
@@ -93,6 +97,7 @@ POLICY_FILES: dict[str, tuple[bool, str]] = {
 WORKSPACE_EXCLUDED = (
     ("config/settings.json#sources", "absolute paths on this machine"),
     ("config/settings.json#storage", "the backups root, a path on this machine"),
+    ("config/local.json", "settings decided by this machine and this account"),
     ("secrets/", "credential values and project slots never leave the machine"),
     ("registry/", "the estate's typed registry (inventory)"),
     ("store/", "database, journals and this workspace's identities"),

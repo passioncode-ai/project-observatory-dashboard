@@ -4,9 +4,12 @@ import Foundation
 /// pages use (`observatory/engine/dashboard/brand/passioncode-tokens.css`, pinned
 /// there byte for byte). Defined ONCE here: the app's views read `Theme`, which
 /// reads this, and a test compares every value with the vendored CSS and checks
-/// the text pairs the app draws against WCAG AA. PassionCode is dark by design,
-/// so there is one set, not a light and a dark twin: the token file's opt-in light
-/// palette (1.1.0) is used by neither the app nor the dashboard pages.
+/// the text pairs the app draws against WCAG AA. The app is light (OBS-523), as
+/// every Observatory surface is by default: these are the token file's light
+/// palette (`:root[data-theme="light"]`, over the base values it does not
+/// redefine). Gold stays the action fill; text, lines and the focus ring in the
+/// accent role are `focus`, the readable gold-brown, because gold on white is
+/// not readable.
 public enum Palette {
     public struct RGB: Equatable, Sendable, CustomStringConvertible {
         public let hex: UInt32
@@ -28,25 +31,27 @@ public enum Palette {
         }
     }
 
-    public static let bg = RGB(0x0a070d)
-    public static let panel = RGB(0x110c15)
-    public static let panelRaised = RGB(0x1b1420)
-    public static let text = RGB(0xfff9f0)
-    public static let textMuted = RGB(0xb6aabc)
-    public static let border = RGB(0x342b3a)
-    public static let borderStrong = RGB(0x6f5e77)
+    public static let bg = RGB(0xffffff)
+    public static let panel = RGB(0xf7f5f8)
+    public static let panelRaised = RGB(0xffffff)
+    public static let text = RGB(0x211725)
+    public static let textMuted = RGB(0x655769)
+    public static let border = RGB(0xddd4df)
+    public static let borderStrong = RGB(0x8f8095)
     public static let accent = RGB(0xffd21a)
-    public static let accentHover = RGB(0xffdf5e)
+    public static let accentHover = RGB(0xedbd00)
     public static let onAccent = RGB(0x211900)
-    public static let accentSoft = RGB(0x30270e)
-    public static let positive = RGB(0x79d49a)
-    public static let positiveSoft = RGB(0x12291c)
-    public static let warning = RGB(0xf6ba75)
-    public static let warningSoft = RGB(0x332314)
-    public static let negative = RGB(0xff969f)
-    public static let negativeSoft = RGB(0x35191f)
-    public static let info = RGB(0xa6bfff)
-    public static let infoSoft = RGB(0x18243d)
+    public static let accentSoft = RGB(0xfff2b8)
+    public static let positive = RGB(0x246b3b)
+    public static let positiveSoft = RGB(0xe4f3e8)
+    public static let warning = RGB(0x8a4b0b)
+    public static let warningSoft = RGB(0xfff0dc)
+    public static let negative = RGB(0xa82f44)
+    public static let negativeSoft = RGB(0xfde8ec)
+    public static let info = RGB(0x345da7)
+    public static let infoSoft = RGB(0xe8efff)
+    /// The accent role as a line, a ring or text: `--pc-focus` (and `--pc-link`, the same value).
+    public static let focus = RGB(0x806200)
 
     /// Each role by its name in the design system's CSS, for the drift test.
     public static let byToken: [String: RGB] = [
@@ -58,6 +63,7 @@ public enum Palette {
         "--pc-warning": warning, "--pc-warning-soft": warningSoft,
         "--pc-negative": negative, "--pc-negative-soft": negativeSoft,
         "--pc-info": info, "--pc-info-soft": infoSoft,
+        "--pc-focus": focus, "--pc-link": focus,
     ]
 
     /// Radii and spacing of the same system, in points.
@@ -71,13 +77,13 @@ public enum Palette {
     public static let textPairs: [(name: String, fg: RGB, bg: RGB)] = {
         var pairs: [(String, RGB, RGB)] = []
         for (surface, s) in [("bg", bg), ("panel", panel), ("raised", panelRaised)] {
-            for (role, f) in [("text", text), ("muted", textMuted), ("accent", accent), ("positive", positive),
+            for (role, f) in [("text", text), ("muted", textMuted), ("focus", focus), ("positive", positive),
                               ("warning", warning), ("negative", negative), ("info", info)] {
                 pairs.append(("\(role) on \(surface)", f, s))
             }
         }
         pairs += [("on-accent on accent", onAccent, accent), ("on-accent on accent-hover", onAccent, accentHover),
-                  ("text on accent-soft", text, accentSoft), ("accent on accent-soft", accent, accentSoft),
+                  ("text on accent-soft", text, accentSoft), ("focus on accent-soft", focus, accentSoft),
                   ("warning on warning-soft", warning, warningSoft), ("text on warning-soft", text, warningSoft),
                   ("muted on warning-soft", textMuted, warningSoft),
                   ("negative on negative-soft", negative, negativeSoft), ("text on negative-soft", text, negativeSoft),
@@ -90,7 +96,7 @@ public enum Palette {
     /// and so is a control's resting edge — the design system's `--pc-border-strong`,
     /// as on the dashboard's own inputs — on every surface a field or button sits on.
     public static let uiPairs: [(name: String, fg: RGB, bg: RGB)] = [
-        ("focus ring on bg", accent, bg), ("focus ring on panel", accent, panel), ("focus ring on raised", accent, panelRaised),
+        ("focus ring on bg", focus, bg), ("focus ring on panel", focus, panel), ("focus ring on raised", focus, panelRaised),
         ("control edge on bg", borderStrong, bg), ("control edge on panel", borderStrong, panel),
         ("control edge on raised", borderStrong, panelRaised),
     ]

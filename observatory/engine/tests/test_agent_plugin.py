@@ -334,7 +334,9 @@ class OpenDashboardTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.home = Path(self.tmp.name).resolve() / "workspace"
-        self.env = clean_env(OBSERVATORY_HOME=str(self.home))
+        # A test touches no machine (audit A25), and a CI runner with several OS accounts is still a
+        # one-account host to it: `open` would otherwise ask for this account's port record (OBS-354).
+        self.env = clean_env(OBSERVATORY_HOME=str(self.home), OBSERVATORY_SYSTEM_SETUP="0")
         self.procs = []
 
     def tearDown(self):

@@ -77,6 +77,8 @@ WALK_LIMIT = 50_000
 #: The class order of a run. Paths first, the tools' commands last (a lock wait in one
 #: command once spent a whole run with nothing removed).
 CLASSES = ("cache-dir", "build-output", "temp", "trash", "browser-clone", "cache-command")
+#: The most the pass's first holder listing may take (OBS-534): the first `lsof` of a scheduled pass is the slow one.
+WARMUP_SECONDS = 60.0
 #: Set by the guard for the cleanup it starts, which then does not take the lock again.
 LOCK_HELD_ENV = "OBSERVATORY_CLEANUP_LOCK_HELD"   # = cleanup_lock.HELD_ENV
 
@@ -687,6 +689,9 @@ def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget
                         # A live or unreadable session: only the root-wide age in days applies.
                         entry_cutoff = min(cutoff, at - days * 86400)
                         if top >= entry_cutoff:
+                            # Named in the report, so a session that grows its folder for days is
+                            # seen with its project instead of hiding in the free-space count (OBS-527).
+                            _note_kept(kept, "temp", full, _live_session_reason(spoken, at, d))
                             continue
                 r = inspect(full, entry_cutoff, time.monotonic() + max(1.0, budget.left()) if budget else None)
                 if r["reason"] == KEEP_REASON:          # a marker deeper inside
@@ -695,6 +700,14 @@ def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget
                     out.append({"class": "temp", "target": full, "bytes": r["size"], "cutoff": entry_cutoff, "identity": r["identity"],
                                 "why": f"untouched {(at - r['newest']) / 86400:.1f} days, nobody holds it"})
     return out
+
+
+def _live_session_reason(spoken: float | None, at: float, project_dir: str) -> str:
+    """Why a session folder stays: its transcript is recent (or unreadable), and whose project it is."""
+    project = os.path.basename(project_dir.rstrip(os.sep)) or project_dir
+    if spoken is None:
+        return f"the session's transcript could not be read; project {project}"
+    return f"a live coding-agent session: its transcript changed {max(0.0, at - spoken) / 3600:.1f} h ago; project {project}"
 
 
 def _transcript_time(transcripts: str, session: str) -> float | None:
@@ -946,6 +959,44 @@ def docker_daemon(docker: str, timeout: float) -> str:
             return "unknown"
         host = (p.stdout or "").strip()
     return endpoint_kind(host)
+
+
+# The disk files of local virtual machines (Colima's and Lima's), which grow as the VM writes: a VM is a VICTIM of
+# a full host disk as much as a cause. At zero free space its file system fails with input/output errors and every
+# service inside stops (2026-11-12: Fabric's database in Colima for five hours), while the guard itself still runs.
+VM_DISK_GLOBS = ("~/.colima/_lima/_disks/*/datadisk", "~/.colima/_lima/*/disk", "~/.colima/_lima/*/diffdisk",
+                 "~/.lima/_disks/*/datadisk", "~/.lima/*/diffdisk")
+VM_WRITING_MINUTES = 60
+
+
+def vm_disks(at: float, globs=VM_DISK_GLOBS) -> list[dict]:
+    """Each VM disk file: its path, the space it takes now (allocated, a sparse file's real size), its size, and
+    how long ago the VM last wrote it. Reads metadata only; starts and asks nothing."""
+    import glob
+    out = []
+    for pattern in globs:
+        for path in sorted(glob.glob(os.path.expanduser(pattern))):
+            try:
+                st = os.lstat(path)
+            except OSError:
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                continue
+            out.append({"path": path, "allocated_gb": round(getattr(st, "st_blocks", 0) * 512 / GB, 1),
+                        "size_gb": round(st.st_size / GB, 1),
+                        "written_minutes_ago": max(0, round((at - st.st_mtime) / 60))})
+    return out
+
+
+def vm_warnings(level: str, vms: list[dict]) -> list[dict]:
+    """At `low` and `critical` pressure, a VM that wrote its disk in the last hour is at risk (OBS-529)."""
+    if level not in ("low", "critical"):
+        return []
+    writing = [v for v in vms if v["written_minutes_ago"] <= VM_WRITING_MINUTES]
+    if not writing:
+        return []
+    return [{"code": "vm-disk-at-risk", "level": level, "vms": [v["path"] for v in writing],
+             "allocated_gb": round(sum(v["allocated_gb"] for v in writing), 1)}]
 
 
 def running_vms(argv: list[str], timeout: float) -> list[str] | None:
@@ -1709,6 +1760,7 @@ def run(argv: list[str]) -> dict:
     last_commands = dict((previous or {}).get("commands_last") or {})
     holders_mode = "unknown"
     holders_by_phase: dict = {}
+    holders_warmup: dict = {}
     with cleanup_lock() as mine:
         if not mine:
             return {**base, "busy": True, "acting": False,
@@ -1728,6 +1780,15 @@ def run(argv: list[str]) -> dict:
             state = service_state(cfg, degraded, deadline=mark + max(1.0, min(30.0, left() / 10)))
             phases["service-state"] = round(time.monotonic() - mark)
             at = time.time()
+            # The first `lsof` a scheduled pass runs is slow: under launchd on 2026-11-13 it took 13 to 41 s while each
+            # one after it took 0.25 s, so every class's listing (a quarter of its share, about 15 s) timed out and the
+            # guard removed nothing on a disk at 0.2 GB (OBS-534). One listing first, given room, warms it; its result
+            # proves nothing for any class and is not kept.
+            mark = time.monotonic()
+            warm = Holders.take(max(1.0, min(WARMUP_SECONDS, (left() - reserve) / 4)), complete=True)
+            phases["holders-warmup"] = round(time.monotonic() - mark)
+            holders_warmup = {"seconds": round(time.monotonic() - mark, 1), "observation": warm.observation,
+                              "reason": getattr(warm, "reason", None)}
             classes = list(CLASSES)
             # The git tier's own share, kept back before the classes split the rest: as the last
             # comer it got only what they left, and on the first scheduled 0.24.0 pass (critical,
@@ -1749,6 +1810,7 @@ def run(argv: list[str]) -> dict:
                            else Holders.take(max(1.0, min(60.0, share / 4)), complete=True))
                 holders_by_phase[name] = {"mode": holders.mode, "known": holders.known,
                                           "observation": holders.observation,
+                                          "reason": getattr(holders, "reason", None),
                                           "measured_at": now() if holders.observation in ("partial", "complete")
                                           else None}
                 if name != "cache-command":
@@ -1756,7 +1818,8 @@ def run(argv: list[str]) -> dict:
                 if not holders.known and name != "cache-command":
                     if not any(d.get("source") == "holders" for d in degraded):
                         degraded.append({"source": "holders", "reason": "what processes hold could not be read; "
-                                                                        "no path is removed"})
+                                                                        "no path is removed",
+                                         "detail": getattr(holders, "reason", None)})
                     phases[name] = round(time.monotonic() - mark)
                     continue
                 planner = dict(planners(cfg, level, holders, at, degraded, last_commands, kept, state))[name]
@@ -1818,7 +1881,7 @@ def run(argv: list[str]) -> dict:
             doc = {**base, "at": now(), "free_gb_after": round(free1 / GB, 1),
                    "freed_gb": round((free1 - free0) / GB, 2), "seconds": round(time.monotonic() - started),
                    "budget_seconds": round(budget), "phases": phases, "holders": holders_mode,
-                   "holders_by_phase": holders_by_phase,
+                   "holders_by_phase": holders_by_phase, "holders_warmup": holders_warmup,
                    "build_cursor": _read(paths.STATE / "disk-guard-build-cursor.json"),
                    "planned": {cls: sum(1 for a in plan if a["class"] == cls) for cls in CLASSES},
                    "planned_gb": round(sum(a.get("bytes") or 0 for a in plan) / GB, 1),
@@ -1830,6 +1893,11 @@ def run(argv: list[str]) -> dict:
                    "service_state": ({k: state[k] for k in ("complete", "refused", "seconds", "unknown_services")}
                                      | {"paths": len(state["paths"])}) if state else None,
                    "surveys": surveys, "large_files": found, "memory": memory_report(), "degraded": degraded}
+            try:
+                doc["vms"] = vm_disks(time.time())
+                doc["warnings"] = vm_warnings(level, doc["vms"])
+            except Exception as exc:  # noqa: BLE001 - a VM that cannot be measured is named, never stops the report
+                doc["degraded"].append({"source": "vms", "reason": f"VM disks could not be read ({type(exc).__name__})"})
             if acting:
                 journal([{"at": doc["at"], "kind": "summary", "mode": "guard", "level": level, **results,
                           "freed_mb": round((free1 - free0) / 1048576), "seconds": doc["seconds"],

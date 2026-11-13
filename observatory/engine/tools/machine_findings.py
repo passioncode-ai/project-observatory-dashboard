@@ -53,6 +53,53 @@ def _guard_receipt(path: pathlib.Path) -> dict | None:
     return {**doc, "degraded": valid + ([unknown] if len(valid) != len(notes) else [])}
 
 
+def hung_findings(receipt: dict | None) -> list[dict]:
+    """OBS-530: commands an agent session left reading an input nobody writes, for over an hour."""
+    hung = [h for h in (receipt or {}).get("hung") or [] if isinstance(h, dict) and h.get("name")]
+    if not hung:
+        return []
+    stopped = {s.get("pid") for s in (receipt or {}).get("stopped") or [] if isinstance(s, dict) and s.get("result") == "stopped"}
+    left = [h for h in hung if h.get("pid") not in stopped]
+    # A command reading a pipe, or with a live neighbour in its process group, may wait by design (a watcher's
+    # `| head -1`).
+    stuck = [h for h in left if h.get("stdin") != "pipe" and h.get("alone", True)]
+    named = ", ".join(f"{h['name']} (pid {h.get('pid')}, {h.get('age_hours')} h, "
+                      f"{h.get('agent') or 'agent'} session in {h.get('folder') or 'an unknown folder'})"
+                      for h in hung[:LISTED])
+    return [{"type": "machine.hung_commands", "subject": "machine:agents",
+             "severity": "warning" if stuck else "info",
+             **titled("{n} commands of agent sessions hang on their input", n=len(hung)),
+             "detail": (f"Older than an hour, idle between two samples, reading a terminal, a socket or a pipe "
+                        f"nobody writes to; the session that started each waits on it: {named}."
+                        + (f" {len(left) - len(stuck)} of them read a pipe or share their process group with a live "
+                           "neighbour: a watcher waiting for its event looks the same, so those are never stopped."
+                           if len(left) > len(stuck) else "")
+                        + (f" {len(hung) - len(left)} leaf command(s) were stopped with SIGTERM." if stopped else "")),
+             "action": ("`project-observatory full machine --explain PID` names the session; end the command in that "
+                        "session, or stop it if nothing waits on it" if left else "nothing to do; the journal "
+                        "store/logs/hung-commands.jsonl names what was stopped"),
+             "evidence": ["store:raw/hung-commands.json"]}]
+
+
+def vm_findings(guard: dict | None) -> list[dict]:
+    """OBS-529: a VM writing into its disk file while the host disk is low is the next thing to break."""
+    out = []
+    for w in (guard or {}).get("warnings") or []:
+        if not isinstance(w, dict) or w.get("code") != "vm-disk-at-risk" or not isinstance(w.get("vms"), list):
+            continue
+        out.append({"type": "machine.vm_disk_at_risk", "subject": "machine:vm",
+                    "severity": "critical" if w.get("level") == "critical" else "warning",
+                    **titled("a virtual machine is writing to a nearly full disk"),
+                    "detail": (f"{len(w['vms'])} VM disk file(s) written in the last hour ({w.get('allocated_gb')} GB "
+                               f"allocated): {', '.join(str(v) for v in w['vms'][:5])}. A VM's file system fails with "
+                               "input/output errors when the host disk reaches zero, and every service inside it "
+                               "stops; cleaning inside the VM frees nothing on the host."),
+                    "action": "free space on the host now (the Machine page's disk table); `docker info` tells whether "
+                              "the VM's daemon still answers",
+                    "evidence": ["store:raw/disk-guard.json"]})
+    return out
+
+
 def _age_hours(stamp: str | None, now: datetime) -> float | None:
     try:
         return (now - datetime.strptime(stamp or "", "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)).total_seconds() / 3600
@@ -76,6 +123,8 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
     hygiene = _load(scratch / "git-hygiene.json")
     guard = _guard_receipt(scratch / "disk-guard.json")
     auto = _auto_cleanup() if auto_cleanup is None else auto_cleanup
+    out.extend(hung_findings(_load(scratch / "hung-commands.json")))
+    out.extend(vm_findings(guard))
 
     # THE GUARD ITSELF. On 2026-10-11 the self-cleaning had not run for a day and nothing
     # said so: its steps were "not started" in a tick too long to reach them. A guard that

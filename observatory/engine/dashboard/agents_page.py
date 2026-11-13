@@ -65,7 +65,7 @@ def _who(executor: dict | None) -> str:
 #: can agree its own words; a status no sentence knows reads the bare one.
 DOT_TITLE = "step {step}, {at}"
 DOT_TITLES = {"in_progress": "step {step} in progress, {at}", "done": "step {step} done, {at}",
-              "blocked": "step {step} blocked, {at}"}
+              "blocked": "step {step} blocked, {at}", "failed": "step {step} failed, {at}"}
 
 
 #: Words this page shows that other pages use in another sense ("missing" is a
@@ -298,7 +298,7 @@ DYNAMIC = (DOT_TITLE, *DOT_TITLES.values(), "Sessions working", "turn in the las
            # `_chip` takes its label as an argument, which the catalog scan does not see.
            "working",
            *(f"handoff@@{r}" for r in ("limit", "plan_route", "operator", "crash", "restart")),
-           *(f"step@@{x}" for x in ("in_progress", "done", "blocked")),
+           *(f"step@@{x}" for x in ("in_progress", "done", "blocked", "failed")),
            *(f"key-state@@{x}" for x in ("vault", "env-only", "missing", "unknown")),
            *(f"lease-end@@{x}" for x in ("handed-off", "closed", "lapsed", "superseded", "ended")),
            *(f"workflow@@{x}" for x in ("active", "stalled", "handoff waiting", "closed")))

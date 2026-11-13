@@ -41,7 +41,12 @@ class ClientRefused(Exception):
 
 
 def node_url() -> str:
-    return f"http://127.0.0.1:{int(os.environ.get('OBSERVATORY_SERVER_PORT', '47311'))}/mcp"
+    """This OS account's server (OBS-354): never a bare default on a host several accounts share."""
+    import local_ports
+    try:
+        return f"http://127.0.0.1:{local_ports.port('server')}/mcp"
+    except local_ports.PortError as exc:
+        raise ClientRefused(exc.code, str(exc), step=exc.step) from None
 
 
 def agent_name() -> str | None:

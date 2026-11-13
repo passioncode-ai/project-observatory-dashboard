@@ -122,6 +122,23 @@ if not WINDOWS:
     def owned_by_me(target: Target) -> bool:
         return _stat(target).st_uid == os.getuid()
 
+    def only_my_group_may_write(target: Target) -> bool:
+        """This account's own target whose only write bit beyond the owner's is its group's, where the group is this
+        account's private group: named as the account, with no other member (a person's account on Ubuntu, whose umask
+        002 leaves that bit on every folder it makes). Nobody else can write there, so tightening it loses nothing."""
+        info = _stat(target)
+        mode = stat.S_IMODE(info.st_mode)
+        if info.st_uid != os.getuid() or mode & 0o002 or not mode & 0o020:
+            return False
+        try:
+            import grp
+            import pwd
+            group = grp.getgrgid(info.st_gid)
+            return group.gr_name == pwd.getpwuid(os.getuid()).pw_name and not [m for m in group.gr_mem
+                                                                               if m != group.gr_name]
+        except (KeyError, ImportError):
+            return False
+
     def make_private(target: Target) -> None:
         """0700 for a folder, 0600 for anything else."""
         info = _stat(target)
@@ -149,6 +166,15 @@ if not WINDOWS:
         asks it of every entry of a tree before removing the tree: a folder this account owns
         can hold another account's files (one created with sudo), and those are not ours."""
         return info.st_uid == os.getuid()
+
+    def owned_by(path: Path, account: str) -> bool:
+        """Whether `account` (a uid as text) owns `path`, read without following a link. A world-readable
+        file in a shared folder names its owner in its own name (OBS-354's port claims); this is the check
+        that the name does not lie."""
+        try:
+            return account.isdigit() and os.lstat(path).st_uid == int(account)
+        except OSError:
+            return False
 
     def _console_fd(fd: int) -> bool:
         return False
@@ -369,6 +395,10 @@ else:  # pragma: no cover - exercised by the Windows CI job
     def owned_by_me(target: Target) -> bool:
         return _owner(target) in _trusted()
 
+    def only_my_group_may_write(target: Target) -> bool:
+        """POSIX's private-group case has no Windows form: an access list is checked as it stands."""
+        return False
+
     def make_private(target: Target) -> None:
         """A protected list: this account, LocalSystem, Administrators; inherited inside a folder."""
         folder = stat.S_ISDIR(_stat(target).st_mode)
@@ -426,6 +456,13 @@ else:  # pragma: no cover - exercised by the Windows CI job
         """Windows keeps no uid in a stat result; ownership there is the ACL's, and the guard's
         rename probe (holders.py) refuses what another account holds."""
         return True
+
+    def owned_by(path: Path, account: str) -> bool:
+        """Whether the SID `account` owns `path` (OBS-354's port claims)."""
+        try:
+            return bool(account) and _owner(path) == account
+        except OSError:
+            return False
 
     _kernel32.GetFileType.argtypes = [wintypes.HANDLE]
     _kernel32.GetFileType.restype = wintypes.DWORD

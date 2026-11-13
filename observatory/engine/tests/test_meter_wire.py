@@ -50,7 +50,7 @@ class GrantCheckOverHttp(Base):
         (self.ws.home / "jwks.json").write_text(json.dumps(self.estate.jwks))
         (paths.CONFIG / "meter.json").write_text(json.dumps(
             {"issuer": ISSUER, "jwks": str(self.ws.home / "jwks.json"), "grantsDir": str(grants)}))
-        self.svc = Service(free_port())
+        self.svc = Service()
 
     def token(self, **over) -> str:
         now = int(time.time())

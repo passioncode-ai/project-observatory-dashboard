@@ -20,11 +20,15 @@ DESKTOP = ROOT / "desktop"
 TOKENS = ROOT / "observatory/engine/dashboard/brand/passioncode-tokens.css"
 
 
-def dark_tokens() -> dict[str, str]:
-    """The first (dark) block of the vendored tokens."""
+def light_tokens() -> dict[str, str]:
+    """The light block of the vendored tokens (OBS-523: light is the default)."""
     text = TOKENS.read_text(encoding="utf-8")
-    first = text[text.index("{") + 1:text.index("}")]
-    return dict(re.findall(r"(--pc-[a-z-]+):\s*([^;]+);", first))
+    dark = text[text.index("{") + 1:text.index("}")]
+    at = text.index(':root[data-theme="light"]')
+    light = text[text.index("{", at) + 1:text.index("}", at)]
+    tokens = dict(re.findall(r"(--pc-[a-z-]+):\s*([^;]+);", dark))
+    tokens.update(re.findall(r"(--pc-[a-z-]+):\s*([^;]+);", light))
+    return tokens
 
 
 class DesktopApp(unittest.TestCase):
@@ -32,9 +36,15 @@ class DesktopApp(unittest.TestCase):
         css = (DESKTOP / "ui/app.css").read_text(encoding="utf-8")
         declared = dict(re.findall(r"(--pc-[a-z-]+):\s*(#[0-9a-fA-F]{3,8})", css[:css.index("}")]))
         self.assertGreaterEqual(len(declared), 10)
-        tokens = dark_tokens()
+        tokens = light_tokens()
         for name, value in declared.items():
             self.assertEqual(value.lower(), tokens[name].strip().lower(), name)
+
+    def test_no_line_takes_the_gold_fill_colour(self):
+        # Gold on white fails contrast: an outline or a border in the accent role reads --pc-focus.
+        for sheet in (DESKTOP / "ui").glob("*.css"):
+            css = sheet.read_text(encoding="utf-8")
+            self.assertNotRegex(css, r"(?:outline|border(?:-[a-z]+)*):[^;{}]*var\(--pc-accent\)", sheet.name)
 
     def test_no_page_carries_an_inline_script(self):
         for page in (DESKTOP / "ui").glob("*.html"):

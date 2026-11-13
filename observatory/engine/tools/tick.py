@@ -518,11 +518,18 @@ class Tick:
         not retry a state that has been reported. `first` is what the step printed (its first line
         decides `not_started` from `stopped` under the watchdog's 124)."""
         log(message)
+        # A step that REFUSED says why and what lets it through on a line of its own (the emit's
+        # wholesale-change guard names the counts and OBSERVATORY_ALLOW_BULK=1). The log and the
+        # report carry that line, not only this generic message: for ten days in 2026-10 every
+        # tick logged "emit failed or REFUSED" and nothing said which, or what to run.
+        refusal = next((line.strip() for line in (first or "").splitlines() if " REFUSED: " in line), "")
+        if refusal:
+            log(refusal)
         self.failed.append((name, rc))
         self.outcomes[name] = outcome_of(rc, (first or "").splitlines()[0] if first else None)
         self.registry_refreshed = False
         self.registry_went_on = []
-        self.registry_note = f"the tick stopped at `{name}`: {message}"
+        self.registry_note = f"the tick stopped at `{name}`: {refusal or message}"
         self.write_report()
         log(f"tick stopped at {name}")
         raise SystemExit(0)
@@ -573,6 +580,23 @@ def run(t: Tick, scratch: Path, dashboard: Path) -> int:
         for line in out.splitlines():
             log(f"lease: {line}")
     return 0
+
+
+def smoke_verdict(outcome: str) -> tuple[bool, str]:
+    """What the tick does with how `smoke` ended: (build the findings again, the line to log).
+
+    Only a smoke that FAILED says the page is blank: the findings are built again, so the notifier carries
+    `dashboard.blank` THIS tick, not the next. One the watchdog stopped at its limit, or did not start for want of
+    time, measured nothing: it stays in the report's `failed_steps` with its outcome (read as "stopped at its time
+    limit", a warning), the log says the render was not measured, and nothing is rebuilt for it (OBS-513: the
+    2026-11-11 06:47Z tick stopped smoke at its 6 s limit on a loaded machine and logged a blank page)."""
+    if outcome == "failed":
+        return True, "dashboard SMOKE FAILED — the page would render blank"
+    if outcome in ("stopped", "not_started"):
+        how = "stopped at its time limit" if outcome == "stopped" else "not started for want of time"
+        return False, (f"smoke: {how}, so whether the page renders was not measured this tick; "
+                       f"the findings are not built again for it")
+    return False, ""
 
 
 def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
@@ -736,13 +760,13 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     step("findings", PY, "tools/build_findings.py")
     step("dashboard", PY, "dashboard/build_dashboard.py")
 
-    # Smoke renders the page the way a browser would; a blank page is recorded, and findings
-    # are built again so the notifier carries `dashboard.blank` THIS tick, not the next.
+    # Smoke renders the page the way a browser would; how it ended decides whether findings are built again
+    # (`smoke_verdict`: only a failed smoke is a blank page, OBS-513).
     if shutil.which("node"):
-        before = list(t.failed)
-        step("smoke", "node", "dashboard/smoke.js", DASHBOARD)
-        if t.failed != before:
-            log("dashboard SMOKE FAILED — the page would render blank")
+        recheck, said = smoke_verdict(step("smoke", "node", "dashboard/smoke.js", DASHBOARD))
+        if said:
+            log(said)
+        if recheck:
             step("findings-recheck", PY, "tools/build_findings.py")
     else:
         log("smoke: node is absent, so whether the page renders was not measured")

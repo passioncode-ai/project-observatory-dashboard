@@ -69,8 +69,10 @@ from store import ledger as L                                                   
 
 #: Statuses a step can be left in. `closed` is not one of them: closing is a
 #: separate act on the workflow, because "the last step is done" and "nobody
-#: may continue this" are different claims.
-STATUSES = ("in_progress", "done", "blocked")
+#: may continue this" are different claims. `failed` (OBS-525): the step ended
+#: and did not do what it was for, as memory/0.1 has always declared; a run
+#: that cannot continue writes it rather than `blocked`, which waits on someone.
+STATUSES = ("in_progress", "done", "blocked", "failed")
 
 #: Why a workflow changes executor. `limit`: the account ran out; `plan_route`:
 #: the plan assigns the next step elsewhere; `operator`: a person moved it;

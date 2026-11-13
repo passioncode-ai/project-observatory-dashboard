@@ -51,6 +51,10 @@ the design that replaces those patches with one set of rules. The run record is
 2. For each class in turn — cache folders, build output, temporary entries, Trash, browser
    clones, the tools' commands — take a **fresh holders listing**, plan within the class's fair
    share, and act; every removal re-checks the target.
+   Before the first class, one warm-up listing with up to 60 s (OBS-534): the first `lsof` a
+   scheduled pass runs took 13 to 41 s under launchd on 2026-11-13 and every later one 0.25 s, so
+   without it each class's listing timed out and nothing was removed. It proves nothing for any
+   class and is not kept; an unknown listing names its cause in the report.
 3. The git tier, with the same lock held, the same holders and the remaining time.
 4. Survey refreshes and the large-file walk, only with the time left.
 5. Write the summary row and the report — always, in `finally`.
@@ -138,6 +142,31 @@ operating system's grammar (a drive letter on macOS or Linux) names nothing here
 
 The report carries `kept` (class, path, reason; at most 200), and the Machine page shows it as
 "Kept by the guard". `tests/test_disk_guard.py::LiveStateUnderCacheRoots` pins each rule.
+
+A coding agent's session folder that the guard passes over because its transcript is recent (OBS-500)
+is named in `kept` too, with how many hours ago the transcript changed and the project folder it sits
+under (OBS-527). On 2026-11-12 two live sessions held several gigabytes of a 2 GB free disk this way
+and nothing in the report said where the space was.
+
+A survey or a cleanup that cannot write its own record on a full disk (`ENOSPC`) says so and goes on:
+`scan_git_hygiene.py` keeps its last snapshot, and `full cleanup` acts on the plan in memory instead of
+stopping before it frees anything (OBS-527).
+
+## A virtual machine is a victim of a full disk too (OBS-529, 2026-11-12)
+
+On 2026-11-12 the MacBook's disk reached zero twice. Colima's VM was writing its data disk; at zero its file system
+returned input/output errors, `colima status` failed with `empty value`, and Fabric's database inside it stopped
+answering for five hours while `docker info` still answered. Cleaning inside the VM does not help the host: after
+8.7 GB of images were removed the VM's file system held 17 of 24 GB, but its disk file stayed 25 GB (`fstrim`
+returned 70 MiB), so the space is reused by the VM rather than returned to macOS.
+
+So the report carries `vms`: each Colima or Lima disk file (`~/.colima/_lima/_disks/*/datadisk`,
+`~/.colima/_lima/*/disk` and `diffdisk`, `~/.lima/...`), the space it takes now (allocated blocks, a sparse file's
+real size), its size and how many minutes ago the VM last wrote it. At `low` and `critical` pressure, a VM that
+wrote its disk in the last hour raises `warnings: [{code: "vm-disk-at-risk", ...}]`, and the findings show it as
+`machine.vm_disk_at_risk` (critical at `critical`), before the disk reaches zero. Reading the files' metadata starts
+and asks nothing. Tests: `VirtualMachineDisks` in `tests/test_disk_guard.py`, `VirtualMachineAtRisk` in
+`tests/test_machine_findings.py`.
 
 ## Space inside a Docker VM at `critical` (OBS-305, 2026-11-03)
 

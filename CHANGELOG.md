@@ -3,6 +3,96 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.35.17 (2026-11-12)
+
+A checkpoint step may be left `failed`, as the memory/0.1 schema has always declared; a node stops checking in to a
+server that no longer lists the device protocol; and the tests that start the memory-http door no longer fail when
+another process takes their port first. No setting or migration changes. The
+observatory-log plugin moves to 0.35.17 with the release.
+
+### Fixed
+
+- **A checkpoint step may be left `failed`** (OBS-525, #514). The store shared by `observatory_checkpoint_write` and
+  `memory.checkpoint.write` took only `in_progress`, `done` and `blocked`, so a board run that failed had to close as
+  `blocked` although memory/0.1 offers `failed`. The store, the MCP tool and the Agents page take and show it; a test
+  holds the store to every status the schema declares.
+- **A check-in goes only to a server that still lists `fabric-device/0.1`** (OBS-524), contract CT-67's pair rule.
+  A held `protocols` list that names other revisions and not this one stops check-ins: nothing is sent, the events wait
+  in the outbox, `lastCheckIn` and the node's journal read `protocol-not-listed`, and the answer names the update as
+  the next step. An empty or absent list (a server before DEC-0067) changes nothing.
+- **The memory-http tests take a fresh port when theirs was taken** (OBS-526). `free_port()` releases the number it
+  found before the door binds it; on a CI runner on 2026-11-12 another process took it (`address already in use`) and
+  failed `test_ops_digest_record.py` on `main`. The tests' service tries another port, up to five times.
+
+## 0.35.16 (2026-11-12)
+
+Every Observatory surface now opens in the light theme: the dashboard pages (with a Light / Dark switch beside the
+language), the Mac app and the Windows and Linux app. The wiki projection is pushed to the wiki's origin instead of
+left as a local commit, and a checkout marked as a read mirror is never written. Two contributed fixes land: the vault's own lock and journals no longer read as leak-scan
+holes, and three silent stops of the local server and the tick now say why. No setting or migration changes; an
+installed server takes its new supervisor marker the next time `serverd.py --install` runs. The observatory-log plugin
+moves to 0.35.16 with the release.
+
+### Changed
+
+- **Light theme by default** (OBS-523). The dashboard pages open with the PassionCode token file's light palette and
+  offer Light / Dark beside the language; the choice is kept in the browser (`observatory.theme`) and applied before
+  the first paint. The Mac app (Aqua, the light palette in `Palette.swift`) and the Windows and Linux app
+  (`desktop/ui/app.css`) are light. Gold stays the fill of the primary action and selection; focus rings, accent lines
+  and links take the readable gold-brown (`--pc-focus`, `--pc-link`), because gold on white fails contrast. Every text
+  pair the Mac app draws holds WCAG AA in the light palette (`PaletteTests`).
+- **google-auth 2.62.1** in the `[full]` pins and both lock copies (supersedes Dependabot #499, which moved only
+  the pin in `pyproject.toml` and could not resolve; OBS-183).
+
+### Fixed
+
+- **The wiki projection no longer splits the wiki** (OBS-516, #507). `tools/commit_projection.py` committed the
+  projection to the local branch and never pushed, so an unpushed commit left the operator's wiki checkout ahead and
+  behind its origin at once. The projection commit is now built in a temporary index on top of the upstream branch and
+  pushed (three tries against a racing writer); the local branch follows only by a fast forward that overwrites nothing
+  local. A checkout marked `git config observatory.wikiMirror true` is never projected into or committed to. The
+  outcome reads `pushed`, `push-failed` or `mirror`, and `push-failed` counts in `projection.uncommitted`.
+- **The vault's own files are not leak-scan holes** (OBS-519, #509, contributed as #412). The leak scan expected only
+  project folders at the vault root, so `.vault.lock`, `movements.jsonl` and `leaks.jsonl`, which `vault.py` writes
+  there itself, kept `leak-scan:source-unreadable` and a degraded `/health` on any vault with one slot. A regular file
+  under those three names is passed by; a symlink, a FIFO or any other stray entry at the root is still a hole.
+- **Three silent stops say why** (OBS-520, #510, contributed as #398). A vanished interpreter: `tools/tick.sh` names the
+  missing `OBSERVATORY_PYTHON` and exits 78 instead of running another `python3`, and `full doctor` and the maintenance
+  warning read each job's `pid` and last exit (78 named as a missing interpreter). A registry the emit's guard refused:
+  the refusal reaches `tick.log` and a `registry-refused` row in `degraded` (doctor, `/health`, the service card, every
+  MCP answer) with the counts and the command that lets it through; the guard itself is not relaxed. The server's
+  launchd document sets `FABRIC_SERVICE_SUPERVISOR=launchd`.
+- **The restart-budget tests no longer fail on a slow Windows runner** (OBS-518). They gave a process one second to
+  become ready; a loaded runner took longer and the portable verdict read a new failing check. They now allow five.
+
+## 0.35.15 (2026-11-11)
+
+Two follow-ups of the 2026-11-11 fixes: the node's lifecycle package loads where `tools/node.py` shadows the engine's
+package, and the tick no longer reads a smoke check stopped at its time limit as a blank page. A lock of the shipped
+MCP tools and capabilities keeps what callers use from being changed or removed under its name. No setting or
+migration changes. The observatory-log plugin moves to 0.35.15 with the release.
+
+### Added
+
+- **What shipped to callers is added to, never changed under its name** (OBS-515, #504). `tools/shipped.lock.json`
+  holds the MCP tools `mcp/server.py` declares (their parameters and the required ones) and the capabilities of
+  `fabric-agent.json` (their effect); `tools/check_add_only.py` refuses a tool or capability no longer served without
+  a retired row, a dropped parameter, a newly required one, a changed effect, and a lock edited to hide them.
+
+### Fixed
+
+- **The lifecycle package loads wherever `tools/node.py` took the name `node`** (OBS-512). `node/lifecycle/` imported
+  its siblings by the absolute name `node.lifecycle`, so the engine's loader of OBS-507 could not serve it: in a process
+  with `tools/` ahead of the engine on the import path, `full doctor` read every workspace's lifecycle helper as
+  `unknown` (ModuleNotFoundError) and the key prompt could not check the signed app. The package now imports its
+  siblings relatively and its callers load it through the engine's loader; `node/lifecycle/macos.py` still runs as a
+  script.
+- **A smoke check stopped at its time limit is not a blank page** (OBS-513). The tick logged "dashboard SMOKE FAILED,
+  the page would render blank" and built the findings again whenever smoke did not exit cleanly, including when the
+  watchdog stopped it at its limit on a loaded machine (the 06:47Z tick of 2026-11-11). Only a smoke that failed does
+  that now; one stopped or not started is logged as not measured, stays in the report's failed steps with its outcome
+  (read as stopped at its time limit, a warning) and rebuilds nothing.
+
 ## 0.35.14 (2026-11-11)
 
 The last five findings of the 2026-11-11 scenario walk: the tick keeps the dashboard its time and the pages say when

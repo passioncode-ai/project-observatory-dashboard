@@ -84,10 +84,19 @@ def _loopback(host: str) -> bool:
         return False
 
 
+def _account_port() -> int:
+    """This OS account's relay port (OBS-354), recorded when the account has none."""
+    import local_ports
+    try:
+        return local_ports.resolve("relay", allocate_missing=True)
+    except local_ports.PortError as exc:
+        raise RelayConfigError(f"{exc} ({exc.code}); run: {exc.step}") from None
+
+
 def checked(origin: str | None, host: str | None, port: int | None, trusted_proxy: bool = False) -> dict:
     """`{origin, host, port}` the relay can serve, or RelayConfigError. An `http://` origin is this machine's own
     address: a loopback bind on the same port. An `https://` origin is a TLS terminator in front of the bind."""
-    port = DEFAULT_PORT if port is None else port
+    port = _account_port() if port is None else port
     if not isinstance(port, int) or not 1 <= port <= 65535:
         raise RelayConfigError("--port is 1 to 65535")
     host = host or "127.0.0.1"

@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The application release is **0.35.14**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
+The application release is **0.35.17**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
 
 ## SQLite runtime prerequisite
 
@@ -324,6 +324,57 @@ repositories is in `degraded`, and a curated file the emit has not turned into
 the registry document yet is named there too. New command `project-observatory full copies list|plan
 COPY`, which reads only and prints the sync steps; it writes nothing. An older engine ignores both
 files; deleting `registry/derivations.json` loses nothing the next emit does not rebuild.
+
+## Machine-local settings (OBS-353)
+
+`config/local.json` (schema `observatory-local/1`, owner-only, no symbolic link) holds what this machine and this OS
+account decide: `scheduler`, `storage.backups`, and the keys other rows own (`ports`, `apps.location`,
+`loopback.peerCheck`; `session` and `context` are reserved). `features.scheduler` and `storage.backups` are written
+there and MIRRORED into `config/settings.json` on every write, in three atomic steps (local.json with the old mirror,
+settings.json, local.json with the new mirror), so an older engine reads the same values from `settings.json` and a
+crash between the steps loses none. `configuration.load()` takes the local value while `settings.json` still equals the
+recorded mirror, and adopts a `settings.json` changed since (a rollback's writes, a hand edit) at the next write. An
+older engine never reads `local.json`. A profile never carries it; a second-machine restore rewrites it (ports and app
+location dropped, scheduler off, backups root kept, place set to this machine). `settings.json` keeps `schema_version`
+1 and gains no `must_understand` entry. Tests: `tests/test_local_settings.py`.
+
+## Ports per OS account (OBS-354)
+
+`project-observatory full ports show|allocate|set|release` records the port of each listener (server,
+memory over HTTP, relay, keyserver) for this OS account in `config/local.json` under `ports`
+(`{scheme: legacy|allocated|chosen, server, memory_http, relay, keyserver, allocatedAt}`), valid only at
+the place it was written. On a host with one person's account the scheme is `legacy` (47311, 47313,
+47317, 7717) and nothing else changes. On a host with several, an account whose historical ports are free
+or its own keeps them; any other takes a block of 8 from 47400 to 47999 (server, +2, +6, +7). Each account
+also writes a world-readable claim, `.passioncode-ports.project-observatory.<uid>.json`, in `/Users/Shared`
+(macOS), `/var/tmp` (Linux) or `%ProgramData%\PassionCode\port-claims` (Windows), so the next account's
+allocation skips it; a claim holds only the account number, the ports and a time. `full doctor` carries the
+same answer as `full ports show` under `ports`. An older engine ignores both files and keeps its defaults.
+In this release nothing reads the record yet except `full ports` and doctor; the listeners and their clients
+move to it in the next one. Tests: `tests/test_local_ports.py`.
+
+## The place id (OBS-357, part 1)
+
+Two OS accounts of one computer share its machine id, so an id that names only the host cannot tell one account's
+records from another's. The place id names both: `<machine id>.a-<10 hex>` (a hash of the account, 39 characters,
+inside the id shape every reader accepts). `config/local.json` records it as its `place`; a file written before
+it, with the bare machine id, still matches this computer (and on a computer several accounts share it is read as
+"this host, account unknown"). `full doctor` names the host, the place and how many accounts share the host under
+`place`. Machine bundles (`MANIFEST.json`) and workspace snapshots (`manifest.json`) carry the place id in
+`machine_id` and the bare machine id in a new `host_id`; the restore receipt and a second-machine restore's
+placement name places too. A restore compares with `machine_identity.match`: this place restores whole
+(`same-place`), another account of this computer or another computer as a second machine (`another-account`,
+`another-machine`), and an older bundle naming only this computer as before on a one-account computer, else by its
+home (`same-host-same-home`, `same-host-account-unknown`). An older engine compares `machine_id` with its bare id,
+never finds them equal and restores a newer bundle as a second machine (the safe way); the same person going back
+to an older engine gives `--same-machine` at a terminal. `full machine-move` works across accounts of one computer:
+`show` prints `place`, `host` and `accountsOnHost`; `leave --to` takes another account's place and refuses a bare
+id of this computer where several accounts share it (`to-names-this-host`); the facts file's `machine` is the place
+(with `host` and `accountsOnHost`), and `status` reads a peer of this computer and another account as another place
+(`sameHost`), an older peer naming only this computer as another account's (`same-host-account-unknown`). A clone
+shares the platform identifier and so the place; a bundle carries its agent-network `device`, and a bundle of this
+place from another device is refused until `--second-machine` or `--same-machine` decides (`clone-suspected`), as a
+peer's facts naming this place with another device are named in `status` instead of dropped. A workspace snapshot's `manifest.json` carries `device` too (additive; absent without device keys), and its restore makes the same check against the running workspace's device. Doctor's `place` block lists `warnings`: `clone-suspected` when a peer's facts name this place with another device, and `digest-name-shared` when, on a computer several accounts share (or whose count is unknown), this workspace publishes its vault digests under the bare host name. Tests: `tests/test_place_id.py`, `tests/test_machine_backup.py`, `tests/test_workspace_upgrade.py`.
 
 ## Machine placement (0.30.1, OBS-283, OBS-284; 0.31.0, OBS-282, OBS-286)
 

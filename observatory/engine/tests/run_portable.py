@@ -79,7 +79,7 @@ BOUNDARY = (
     'workspace_scheduler', 'schema_compatibility', 'keyserver_boundary',
     'private_sources', 'public_contracts', 'vault_boundaries', 'provider_secret_boundaries', 'cli_compatibility', 'handed_commands', 'dashboard_portability',
     'agent_plugin', 'audit_regressions', 'identity_map', 'zone_accounts', 'deployed_commit', 'scrub_incremental', 'leak_scan_incremental', 'tick_health', 'accounts', 'environments', 'credential_bindings', 'local_keys', 'trap_anchors', 'leak_coverage', 'backup_vault', 'organizations', 'org_selection', 'machine', 'local_folders', 'config_locations', 'dashboard_stop',
-    'engine_update', 'workspace_profile', 'release_signature',
+    'engine_update', 'workspace_profile', 'local_settings', 'local_ports', 'place_id', 'release_signature',
     # Ported suites, first batch: each builds its own temporary workspace.
     'delta_fold', 'mcp_inventory', 'openrouter_keys', 'scan_ids', 'secrets', 'signature',
     'skill_check', 'use_secret', 'validator_rules',
@@ -256,6 +256,8 @@ BOUNDARY += ('maintenance',)
 BOUNDARY += ('maintain_app',)
 # The disk guard: pressure, the lsof rule, each class; synthetic roots only (2026-10-11).
 BOUNDARY += ('disk_guard',)
+# Commands an agent session left hanging on their input: injected tables only (OBS-530).
+BOUNDARY += ('hung_commands',)
 # The DigitalOcean door against a fake `doctl` and a scratch vault (PLN-142).
 BOUNDARY += ('digitalocean_door', 'digitalocean_safety')
 # The Heroku door against a fake Platform API: authorizations and team membership (OBS-156).
@@ -378,8 +380,12 @@ ROOT_FILES = (
     'machine_identity.py', 'machine_move.py', 'machine_forward.py',
     # The native secret prompt's node queue and the agent's job (OBS-260): serverd and the job runner import them.
     'secret_prompt.py', 'secret_client.py',
+    # A share between one person's own two machines, finished by their agent (OBS-531, CT-298).
+    'own_share.py',
     # Who owns each end of a loopback connection, the account count, and the servers' peer check (OBS-355).
     'peer_owner.py', 'host_accounts.py', 'peer_check.py',
+    # The port of each listener for this OS account (OBS-354).
+    'local_ports.py',
     # The organization's signature on a release, checked before any update (audit A04).
     'release_signature.py',
     # The standing review policy (OBS-227): read by review.py, the findings, doctor and Health.
@@ -390,7 +396,7 @@ ROOT_FILES = (
     'ed25519_order.py',
     # The engine's own `node` package wherever `tools/node.py` took the name (OBS-507).
     'engine_node.py',
-    'fabric_service.py', 'dispatch_packet.py', 'ops_digest.py', 'ops_digest_store.py', 'learning_review.py', 'service_connections.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'observatory-profile.lock.json', 'contract_lock.py', 'public-profile.json',
+    'fabric_service.py', 'dispatch_packet.py', 'ops_digest.py', 'ops_digest_store.py', 'learning_review.py', 'service_connections.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'wiki_checkout.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'observatory-profile.lock.json', 'contract_lock.py', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',
 )

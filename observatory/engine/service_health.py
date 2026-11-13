@@ -171,6 +171,10 @@ def snapshot(leaks: dict, *, extra_degraded: list[dict] | None = None,
         # Ticks that keep stopping at their ceiling while the last one happened to finish:
         # the same alert the MCP survey raises, on the card (0.20.1).
         degraded.append({"source": "tick-history", "reason": _clip(tick["history_warning"], REASON_LIMIT)})
+    if tick.get("registry_refused"):
+        # The emit's guard keeps refusing the registry: the card names the command that lets a
+        # genuine change through, which the tick-history row cannot.
+        degraded.append({"source": "registry-refused", "reason": _clip(tick["registry_refused"], REASON_LIMIT)})
 
     projects, why = CACHE.load(paths.REGISTRY / "projects.json")
     if why:

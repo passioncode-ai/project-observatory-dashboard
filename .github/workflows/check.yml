@@ -3,7 +3,25 @@ name: observatory-release-check
 # on every pull request, so moving it to the nightly cadence would block every merge. The nightly
 # cadence (RULES.md, CI section) applies to the heavy suites, not to these required checks.
 # release.yml's guard requires this workflow and desktop.yml green on a release tag's commit.
-on: [push, pull_request, workflow_dispatch]
+# It also runs every night at 22:00 UTC over `main` (GitHub's cron may start late), so a check that turns red without a push (a
+# runner image, a dependency, the calendar) is seen the next morning rather than on the next pull
+# request, and the Windows portable job reads main once a day.
+# A branch push runs nothing of its own: its pull request runs the checks branch protection requires, and a push
+# to a branch with a pull request used to run them twice (2026-11-12: 25 runs queued for four branches, holding
+# every runner of the organization). `main` and release tags keep their push runs: the release guard reads this
+# workflow on the tagged commit. A newer push to a pull request cancels the run it supersedes; runs of `main`, a
+# tag, the schedule or a dispatch are never cancelled.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 22 * * *'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 permissions:
   contents: read
 # No git a step runs, the root tests' included (`unittest discover -s tests` runs outside the
@@ -252,7 +270,9 @@ jobs:
           project-observatory --home "$ws" full configure features scheduler true
           export OBSERVATORY_HOME="$ws"
           python observatory/engine/tools/serverd.py --install || { echo "--- server logs"; tail -n 60 "$ws"/store/logs/serverd.* 2>/dev/null; ls -la "$ws/store/logs" || true; exit 1; }
-          python -c "import json, sys, urllib.request; d = json.load(urllib.request.urlopen('http://127.0.0.1:47311/.well-known/fabric-service', timeout=10)); print(d['service']['id'], d['service']['instance'], d['status'])"
+          # The port this account took (OBS-354): 47311 on a one-account host, its own block where the runner has several.
+          port="$(project-observatory --home "$ws" full ports show | python -c "import json, sys; print(json.load(sys.stdin)['listeners']['server']['port'])")"
+          python -c "import json, sys, urllib.request; d = json.load(urllib.request.urlopen(f'http://127.0.0.1:{sys.argv[1]}/.well-known/fabric-service', timeout=10)); print(d['service']['id'], d['service']['instance'], d['status'])" "$port"
           python observatory/engine/tools/serverd.py --uninstall
           python observatory/engine/tools/install_launchd.py install
           python observatory/engine/tools/install_launchd.py status

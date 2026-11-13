@@ -60,9 +60,9 @@ import access_binding as AB
 import osprivacy
 import paths
 
-from node.lifecycle import broker
-from node.lifecycle import service as S
-from node.lifecycle.broker import TOOLS, LifecycleError
+from . import broker
+from . import service as S
+from .broker import TOOLS, LifecycleError
 
 SOURCE_REGISTRY = 'registry.json'
 SOURCE_CALLERS = 'callers.json'
@@ -278,7 +278,7 @@ def default_derive(adapter) -> Callable[[str], tuple]:
     def derive(path):
         if getattr(adapter, 'platform', None) != 'darwin' or not hasattr(adapter, 'run'):
             raise LifecycleError('unsupported_platform')
-        from node.lifecycle import macos
+        from . import macos
         return macos.inspect_app(path, run=adapter.run, roots=adapter.roots)
     return derive
 

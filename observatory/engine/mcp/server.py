@@ -740,13 +740,14 @@ def observatory_machine(
                                                         "witr's service/port detail when witr is installed. "
                                                         "The answer is then that explanation alone.")] = None,
     section: Annotated[Literal["overview", "memory", "processes", "disk", "git", "cleanup", "guard", "coverage", "move",
-                               "skills"],
+                               "skills", "accounts"],
                        Field(description="overview = totals and the top few of each (default); "
                                          "a named section = that section in full, except coverage which always stays bounded; "
                                          "move = the checklist of a move between machines, as "
                                          "`full machine-move status --json` gives it; skills = every skill and plugin "
                                          "each agent loads, with version, scope and findings, as `full machine --skills` "
-                                         "gives it.")] = "overview",
+                                         "gives it; accounts = how many OS accounts share this host and the port of "
+                                         "each listener for this one, as `full ports show --json` gives it.")] = "overview",
     limit: Annotated[int | None, Field(ge=1, le=100, description="skills only: rows per page, findings, then plugins, "
                                                                   "then skills (at most and by default 100); counts "
                                                                   "are always whole")] = None,
@@ -781,10 +782,22 @@ def observatory_machine(
     the same function `full machine-move status` runs. It writes nothing and makes no
     machine id; every step it names is a CLI verb a person or an agent runs.
 
+    `section="accounts"` (OBS-354): how many people's OS accounts share this host, and each listener's port
+    for this one with where it came from and who listens there.
+
     `section="skills"`: every skill and plugin here with version, scope and agent, a plugin's
     enabled state and its marketplace's newest LOCAL version, findings (`plugin-behind`), `open`
     (OBS-359) and `degraded`; from the last harness scan; 100 rows a page (`cursor`).
     """
+    if section == "accounts" and explainPid is None:
+        # OBS-354: the account count and this account's ports, read only; no account name.
+        import local_ports
+        from datetime import datetime, timezone
+        shown = local_ports.show()
+        return {"measuredAt": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "degraded": [{"source": "ports", "reason": n["code"]} for n in shown["notes"]
+                             if n["code"] in ("claims-folder-unreadable", "port-record-stale")],
+                "accounts": shown}
     if section == "skills" and explainPid is None:
         import machine_view
         skills = machine_view.skills_section(limit=limit or SKILLS_PAGE, cursor=cursor)
@@ -1788,7 +1801,7 @@ def observatory_checkpoint_write(
                                                      "with the same key and request returns the "
                                                      "first answer.")],
     stepId: Annotated[str, Field(description="The step this checkpoint closes or reports.")],
-    status: Annotated[Literal["in_progress", "done", "blocked"], Field()],
+    status: Annotated[Literal["in_progress", "done", "blocked", "failed"], Field()],
     body: Annotated[dict[str, Any], Field(description=(
         "Typed state, not prose: goal (required), plan [{step_id,title,needs}], done "
         "[{step_id,result,evidence}], open [{step_id,next_action}], decisions "

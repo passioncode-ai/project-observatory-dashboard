@@ -8,7 +8,7 @@ description: >-
   changes (observatory_propose).
 license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 metadata:
-  version: "0.35.14"
+  version: "0.35.17"
 compatibility: >-
   Requires an initialized full Project Observatory installation to persist
   records. Uses its MCP server when available in the current host; the bundled

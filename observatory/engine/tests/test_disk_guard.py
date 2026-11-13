@@ -229,6 +229,56 @@ class CheapHolderAdmission(Base):
         self.assertTrue(all(c.kwargs.get("complete") is True for c in take.call_args_list))
         self.assertTrue(self.t1.exists())
 
+    def test_the_first_listing_is_a_warm_up_given_room(self):
+        """OBS-534: the pass's first `lsof` under launchd took 13 to 41 s and every later one 0.25 s; the guard
+        takes one listing first, with up to WARMUP_SECONDS, before any class's own, and reports it."""
+        import holders
+        complete = holders.Holders([], "lsof", scope=[str(self.base)])
+        complete.observation = "complete"
+        with self.no_inventory(), patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g, "refresh", return_value="fresh"), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g.Holders, "take", return_value=complete) as take, \
+                patch.object(self.g, "planners", return_value=[(n, lambda b: []) for n in self.g.CLASSES]):
+            doc = self.g.run([])
+        first = take.call_args_list[0]
+        self.assertTrue(first.kwargs.get("complete"))
+        self.assertGreater(first.args[0], take.call_args_list[1].args[0])
+        self.assertLessEqual(first.args[0], self.g.WARMUP_SECONDS)
+        self.assertEqual(doc["holders_warmup"]["observation"], "complete")
+        self.assertIn("holders-warmup", doc["phases"])
+
+    def test_an_unknown_listing_says_why(self):
+        """OBS-534: a guard that removed nothing names the listing's failure, not only that it failed."""
+        unknown = self.g.Holders(None)
+        unknown.reason = "command-timeout"
+        with self.no_inventory(), patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g, "refresh", return_value="fresh"), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g.Holders, "take", return_value=unknown), \
+                patch.object(self.g, "planners", return_value=[(n, lambda b: []) for n in self.g.CLASSES]):
+            doc = self.g.run([])
+        self.assertEqual(doc["holders_by_phase"]["temp"]["reason"], "command-timeout")
+        self.assertEqual(doc["holders_warmup"]["reason"], "command-timeout")
+        (row,) = [d for d in doc["degraded"] if d.get("source") == "holders"]
+        self.assertEqual(row["detail"], "command-timeout")
+
+    @unittest.skipIf(os.name == "nt", "take_complete answers `windows` there before any listing")
+    def test_take_complete_names_each_failure(self):
+        import holders
+        def capture(result):
+            return patch.object(holders, "_capture", return_value={"complete": True, "returncode": 0,
+                                                                   "stderr_seen": False, "stdout": b"", **result})
+        cases = [({"complete": False, "reason": "command-timeout"}, "command-timeout"),
+                 ({"returncode": 1, "stdout": b"n/x\n"}, "lsof-exit-1"),
+                 ({"stderr_seen": True, "stdout": b"n/x\n"}, "lsof-warnings"),
+                 ({}, "lsof-no-output")]
+        for result, reason in cases:
+            with self.subTest(reason), capture(result), patch.object(holders.shutil, "which", return_value="/usr/sbin/lsof"):
+                observed = holders.Holders.take_complete(5, roots=[str(self.base)])
+            self.assertFalse(observed.known)
+            self.assertEqual(observed.reason, reason)
+
     def test_default_positive_hint_contract_remains_incomplete(self):
         import holders
         with patch.object(holders, "lsof_paths", return_value=["/srv/held/file"]), \
@@ -314,6 +364,12 @@ class Temp(Base):
                                      for a in self.g.plan_temp(cfg, level, self.free(), time.time()))
         self.assertEqual(names("normal"), [])
         self.assertEqual(names("critical"), ["ended", "no-talk"])
+        kept = []
+        self.g.plan_temp(cfg, "critical", self.free(), time.time(), kept=kept)
+        live = [k for k in kept if Path(k["target"]).name == "live"]
+        self.assertEqual(len(live), 1, "OBS-527: the live session's folder is named, not silently passed over")
+        self.assertIn("live coding-agent session", live[0]["reason"])
+        self.assertIn("project -proj", live[0]["reason"])
         unreadable = self.cfg(temp_roots=[{"path": str(root), "depth": 2, "transcripts": str(self.base / "absent"),
                                            "hours": {"normal": 24, "low": 6, "critical": 2}}])
         self.assertEqual(self.g.plan_temp(unreadable, "critical", self.free(), time.time()), [])
@@ -3144,6 +3200,30 @@ class DockerDaemonIsLocal(Base):
         with patch.object(self.g, "docker_daemon", return_value="remote"), \
                 patch.object(self.g.subprocess, "run", side_effect=AssertionError("nothing runs")):
             self.assertEqual(self.g.act(a, self.free())["reason_code"], "remote-docker-context")
+
+
+class VirtualMachineDisks(unittest.TestCase):
+    """OBS-529: VM disk files are measured, and a VM that writes on a low disk is warned about."""
+
+    def test_disks_are_measured_and_a_writing_vm_warns_only_under_pressure(self):
+        import tempfile
+        sys.path.insert(0, str(ROOT / "tools"))
+        import disk_guard as g
+        with tempfile.TemporaryDirectory() as raw:
+            disk = Path(raw) / "_disks" / "colima" / "datadisk"
+            disk.parent.mkdir(parents=True)
+            with open(disk, "wb") as fh:
+                fh.truncate(4 * 1024 ** 3)                 # sparse: 4 GB in size, almost nothing allocated
+                fh.write(b"x" * 4096)
+            now = time.time()
+            vms = g.vm_disks(now, globs=(str(Path(raw) / "_disks" / "*" / "datadisk"),))
+            self.assertEqual(len(vms), 1)
+            self.assertEqual(vms[0]["size_gb"], 4.0)
+            self.assertLess(vms[0]["allocated_gb"], 1.0, "a sparse file's real size, not its length")
+            self.assertEqual(g.vm_warnings("normal", vms), [])
+            self.assertEqual(g.vm_warnings("low", vms)[0]["code"], "vm-disk-at-risk")
+            old = [dict(vms[0], written_minutes_ago=g.VM_WRITING_MINUTES + 1)]
+            self.assertEqual(g.vm_warnings("critical", old), [], "a VM that has not written in an hour is not at risk")
 
 
 if __name__ == "__main__":

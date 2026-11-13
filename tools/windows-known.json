@@ -234,6 +234,7 @@
         "FAIL"
       ],
       "failing": [
+        "BeforeUpdateInventory.test_leftovers_of_a_failed_export_go_with_the_next_working_one",
         "BeforeUpdateInventory.test_local_update_is_counted_with_and_without_passphrase",
         "BeforeUpdateInventory.test_update_migrates_encrypted_and_restores_while_foreign_kind_stays",
         "ForeignPassphrase.test_a_snapshot_of_another_workspace_opens_with_a_value_on_stdin_and_nothing_is_stored",
@@ -944,6 +945,7 @@
         "ApfsFrees.test_no_file_answering_is_not_measured_rather_than_zero",
         "ApfsFrees.test_the_sum_is_each_files_private_size_and_unread_files_count_in_full",
         "Estate.test_a_checkout_with_no_remote_is_surveyed_too",
+        "Estate.test_a_full_disk_neither_stops_the_survey_nor_the_cleanup",
         "Estate.test_a_pass_the_deadline_cuts_short_carries_the_last_measurement_and_resumes",
         "Estate.test_auto_off_removes_nothing_and_plans",
         "Estate.test_auto_removes_only_what_loses_nothing",
@@ -1934,6 +1936,7 @@
         "WorkspaceUpgrade.test_a_settings_file_changed_while_staged_still_refuses",
         "WorkspaceUpgrade.test_a_snapshot_names_the_machine_it_was_taken_on",
         "WorkspaceUpgrade.test_a_snapshot_naming_no_machine_is_another_machines_unless_asked",
+        "WorkspaceUpgrade.test_a_snapshot_of_this_place_from_another_device_is_a_clones",
         "WorkspaceUpgrade.test_a_write_while_the_upgrade_is_staged_is_kept_not_refused",
         "WorkspaceUpgrade.test_another_machine_never_takes_the_analytics_install_id_or_queue",
         "WorkspaceUpgrade.test_another_machine_never_takes_the_node_identity_or_the_schedules",

@@ -136,7 +136,7 @@ python tools/check_public_release.py --history
 ```sh
 observatory                              # the short name; with no arguments it opens the dashboard
 project-observatory full open            # builds the pages if needed, opens them as local files
-project-observatory full open --serve    # serves them on 127.0.0.1:47311 (GET only, except the lifecycle tools at POST /mcp)
+project-observatory full open --serve    # serves them on 127.0.0.1:47311 (GET only, except the lifecycle tools at POST /mcp); `full ports show` names the port where several OS accounts share the computer
 project-observatory full open --stop     # stops that server; it runs detached, so closing the terminal does not
 ```
 
@@ -247,7 +247,7 @@ available for use that does not meet the AGPL's terms — [passioncode.ai/busine
 Versions up to and including v0.9.1 were released under PolyForm Noncommercial or Internal Use (v0.8.2–v0.9.1) and the MIT License (v0.8.1 and earlier); those releases keep their licence.
 Contributions are accepted under the [CLA](CLA.md).
 
-Part of [PassionCode.ai](https://passioncode.ai/) — the design system is [PassionCode 1.1.0](https://passioncode.ai/design-system/), dark theme. Observatory is also the observation component of the [ssheleg harness](https://skills.sshlg.me/harness/): skills guide the work; Observatory records and checks the state around it.
+Part of [PassionCode.ai](https://passioncode.ai/): the design system is [PassionCode 1.1.0](https://passioncode.ai/design-system/), light theme by default and dark on the reader's choice. Observatory is also the observation component of the [ssheleg harness](https://skills.sshlg.me/harness/): skills guide the work; Observatory records and checks the state around it.
 
 ## Windows and Linux app
 

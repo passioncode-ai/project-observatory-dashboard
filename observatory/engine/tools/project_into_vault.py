@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import atomic
 import paths
+import wiki_checkout
 
 HEADER = {
     "_generated": True,
@@ -103,6 +104,20 @@ def main() -> int:
     if not dest.parent.is_dir():
         print(f"vault not found at {paths.VAULT} — set OBSERVATORY_VAULT", file=sys.stderr)
         return 1
+    # A read mirror of a wiki another machine writes is left alone (OBS-516): a written projection
+    # would turn its tree dirty, and a dirty mirror stops following origin.
+    refused = wiki_checkout.mirror(paths.VAULT)
+    if refused:
+        print(f"not projecting: {refused}")
+        try:
+            paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+            atomic.write_json(paths.SCRATCH / "projection.json", {
+                "ran_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "written": 0, "skipped": [], "pages": [], "refused": refused,
+                "destination": str(dest)})
+        except OSError as exc:
+            print(f"could not write the projection report: {exc}", file=sys.stderr)
+        return 0
     dest.mkdir(parents=True, exist_ok=True)
     written, skipped, pages = 0, [], []
     for src in sorted(paths.REGISTRY.glob("*.json")):

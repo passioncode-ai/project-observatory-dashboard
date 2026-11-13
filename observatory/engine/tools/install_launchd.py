@@ -344,7 +344,14 @@ SERVER_EXIT_TIMEOUT = 30
 
 
 def default_server_port() -> int:
-    return int(os.environ.get("OBSERVATORY_SERVER_PORT", "47311"))
+    """This account's server port (OBS-354): the environment, the record, the receipt, the historical default on a
+    host with one account. A shared host with no record falls back to the historical default here, because the
+    pass that rebuilds a job must not stop; `full ports allocate` records a port, and doctor names the gap."""
+    try:
+        import local_ports
+        return local_ports.port("server")
+    except Exception:  # noqa: BLE001
+        return int(os.environ.get("OBSERVATORY_SERVER_PORT", "47311"))
 
 
 def server_document(port: int, python: str | None = None) -> dict:
@@ -370,7 +377,12 @@ def server_document(port: int, python: str | None = None) -> dict:
         "ProcessType": "Standard",
         "StandardErrorPath": str(paths.STATE / "logs/serverd.err"),
         "StandardOutPath": str(paths.STATE / "logs/serverd.out"),
-        "EnvironmentVariables": environment(python),
+        # FABRIC_SERVICE_SUPERVISOR=launchd: a copy KeepAlive starts while the instance lock is still
+        # held (the previous one draining) backs off in-process instead of exiting 75 into a respawn
+        # every ThrottleInterval (`fabric_service.hold_single_instance`). `fabric_service.launchd_plist`
+        # sets it; this plist is built here, so it never had it, and the fabric-service/0.1 probe
+        # `lifecycle.supervisor-marker` failed on every installed server.
+        "EnvironmentVariables": {**environment(python), "FABRIC_SERVICE_SUPERVISOR": "launchd"},
         "Umask": 0o077,
     }
 
@@ -410,6 +422,43 @@ BOOTOUT_WAIT_SECONDS = 45
 #: (5, EIO "Input/output error"; 37, EALREADY "Operation already in progress"; 125, our own timeout).
 BOOTSTRAP_ATTEMPTS = 5
 BOOTSTRAP_TRANSIENT = frozenset({5, 37, 125})
+
+
+#: Exit codes a job that never started leaves (`launchctl print` "last exit code"): 78 is EX_CONFIG,
+#: which launchd records when the program the plist names cannot be executed — a package manager
+#: removed the Python a virtual environment was made from, and `loaded` still read true (2026-10-29).
+EXIT_MEANING = {78: "it could not start: the interpreter its plist names (the program, or OBSERVATORY_PYTHON for "
+                    "the tick's tick.sh) is missing or not executable"}
+
+
+def job_state(label: str) -> dict:
+    """{"loaded", "pid", "last_exit"} from one `launchctl print`; `pid` while it runs, `last_exit`
+    None before its first exit. A signal is a negative code (`kickstart -k` leaves -9)."""
+    code, out = _launchctl("print", f"gui/{uid()}/{label}")
+    if code != 0:
+        return {"loaded": False, "pid": None, "last_exit": None}
+    pid = re.search(r"^\s*pid = (\d+)\s*$", out, re.M)
+    last = re.search(r"^\s*last exit code = (-?\d+)", out, re.M)
+    return {"loaded": True, "pid": int(pid[1]) if pid else None, "last_exit": int(last[1]) if last else None}
+
+
+def job_problem(name: str, state: dict) -> str | None:
+    """One sentence when a loaded job is not running and its last run exited with a code above 0."""
+    last = state.get("last_exit")
+    if not state.get("loaded") or state.get("pid") or not isinstance(last, int) or last <= 0:
+        return None
+    meaning = EXIT_MEANING.get(last, "see its .err log under store/logs")
+    return f"the {name} job's last run exited {last}; {meaning}"
+
+
+def job_report() -> list[dict]:
+    """This workspace's tick and server jobs for `full doctor`: state, and a problem when one cannot run."""
+    out = []
+    for job in managed_jobs():
+        state = job_state(job["label"])
+        problem = job_problem(job["name"], state)
+        out.append({"name": job["name"], "label": job["label"], **state, **({"problem": problem} if problem else {})})
+    return out
 
 
 def stop_job(label: str) -> tuple[bool, str]:

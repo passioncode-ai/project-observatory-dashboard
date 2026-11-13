@@ -102,7 +102,12 @@ Adding a project or two to a small workspace, or removing one, passes. When the 
 genuine (you pointed `projects` at a new folder of many checkouts, or deleted several on
 purpose), run it once with `OBSERVATORY_ALLOW_BULK=1 project-observatory full local`; the
 next run compares against the new registry. The first emit into an empty workspace is never
-refused.
+refused. An engine update that regroups projects is such a change too (0.25.0 folded remoteless
+worktrees into their main checkout's project), and the guard does not tell it from a failure, so a
+person decides. A scheduled tick that stops at the guard logs the emit's own line (the counts and
+the command) in `store/logs/tick.log` and in `tick.json` `registry_note`, and while the newest
+ticks keep stopping there `full doctor` (`tick.registry_refused`), `/health`, the service card and
+every MCP answer's `degraded` list carry a `registry-refused` row naming the counts and the command.
 
 A workspace path must not pass through a symbolic link (on macOS `/tmp` is one):
 `init` refuses such a path and prints the resolved `OBSERVATORY_HOME` to use instead.
@@ -207,7 +212,17 @@ so even if the last one did. A run that reached its end without refreshing the r
 at a step, or its merge or emit ran out of time and the findings and the dashboard were built over
 the registry as it stood) is recorded as `partial` and counted with them.
 The dashboard server's `/health`, the service card and every MCP answer's `degraded` list say the
-same (`tick` and `tick-history` rows). Its findings cannot: they are built by the tick itself, so a
+same (`tick` and `tick-history` rows, and `registry-refused` while the emit's wholesale-change guard
+keeps stopping the ticks). On macOS `full doctor` also lists the tick and server jobs as launchd holds
+them (`jobs`: `loaded`, `pid`, `last_exit`), with a `problem` when a loaded job is not running and its
+last run exited above 0; exit 78 means launchd could not start the interpreter the plist names (a
+package manager removed the Python the virtual environment was made from). The maintenance and
+update-check jobs say the same in `maintenance.warnings` (`job-exit`) and on Health. When
+`OBSERVATORY_PYTHON` names an interpreter that is gone, `tools/tick.sh` writes one line to
+`store/logs/tick.err` naming it and the Python its virtual environment was made from, and exits 78;
+it no longer runs the first `python3` on `PATH`, which lacks the engine's dependencies. Reinstall
+that Python (with Homebrew, `brew install python@3.X` for the version `pyvenv.cfg` names), or
+recreate the environment and install the jobs again. Its findings cannot: they are built by the tick itself, so a
 dead tick leaves the last report looking current.
 
 The old 0.1 commands remain available without `full`. They use their previous
@@ -702,7 +717,7 @@ Known-value scanning finds occurrences of values already known locally. It
 cannot prove the absence of unknown, encoded or previously deleted values.
 Rotation changes the local slot; provider revocation is a separate action.
 
-Vault slot discovery reports unreadable ancestors and excludes symbolic links or special files as unmeasured. Session directory links are likewise unmeasured and are never followed.
+Vault slot discovery reports unreadable ancestors and excludes symbolic links or special files as unmeasured. The vault's own lock and journals at its root (`.vault.lock`, `movements.jsonl`, `leaks.jsonl`), names and places only, are not projects and are passed by; under those names anything but a regular file is still unmeasured. Session directory links are likewise unmeasured and are never followed.
 
 The leak scan reads the transcripts of every agent CLI it knows, each from the tool's own
 location (`paths.transcript_homes`):
@@ -1179,6 +1194,18 @@ how to create one, on stderr, and exits 2, because nothing was opened. Open it e
 lifecycle tools of [node.lifecycle](#which-apps-an-agent-may-wake-stop-and-restart-nodelifecycle),
 which serve only callers you allowed).
 
+### Ports on a computer several people share
+
+The listeners use 47311 (server), 47313 (memory over HTTP), 47317 (relay) and 7717 (keyserver) on a computer with
+one person's OS account, and every port named below is that case. Loopback is shared by every account of a computer,
+so where several accounts run Observatory, each records its own ports (OBS-354): an account whose historical ports
+are free or its own keeps them, any other takes a block of eight from 47400 to 47999, and every client of the account
+(agents, `full open`, the apps) reads that record instead of a default. `project-observatory full ports show` names
+this account's ports, where each came from and who listens there; `full ports allocate` records them (the maintenance
+pass does it by itself for an installed server), `full ports set NAME PORT` records a person's choice, and
+`full ports release` removes the record once the server job is uninstalled. `full doctor` carries the same answer
+under `ports`, and the `accounts` section of `observatory_machine` gives it to an agent.
+
 The Keys and ENV pages' buttons — mint, cap or revoke a provider key, mark a leak,
 reveal one inventoried value — act only when the pages are served by the
 token-guarded credential server, `python "$(project-observatory full-path)/tools/keyserver.py"`
@@ -1214,6 +1241,16 @@ project-observatory full configure model chain VENDOR/MODEL[,VENDOR/MODEL...]   
 project-observatory full configure budget daily_ceiling AMOUNT                 # also monthly_ceiling, velocity_ceiling
 ```
 
+The wiki projection commits only its `inventory/` folder. When the wiki's branch tracks an upstream,
+the commit is built on that upstream branch and pushed, and the local branch follows by a fast
+forward that overwrites no local edit (a branch with local commits stays and the report says so); a
+branch with no upstream gets a local commit. On a machine that only reads a wiki another machine
+writes, mark the checkout and nothing is projected or committed there:
+
+```sh
+git -C <wiki checkout> config observatory.wikiMirror true
+```
+
 Ceilings are non-negative numbers in the wallet's denomination, written to
 `config/models.json`; all three must be above zero. To use the assistant (the Mac
 app's assistant window, `full assistant`, or the MCP `observatory_assistant_ask`):
@@ -1238,8 +1275,11 @@ descriptor (`project-observatory.<instance>.json`, in
 `~/Library/Application Support/ai.passioncode.fabric/services/` or
 `FABRIC_SERVICES_DIR`) so a local host such as Fabric Dashboards can find the
 server; `--uninstall` removes it. The server keeps one copy per workspace
-(`service.lock`; a second copy exits 75) and creates `service.token` for its
-events feed. See the [service design](design/FABRIC-SERVICE.md).
+(`service.lock`; a second copy started by hand exits 75) and creates `service.token` for its
+events feed. Its plist sets `FABRIC_SERVICE_SUPERVISOR=launchd`, so a copy launchd starts while
+the previous one still holds the lock waits for it in-process instead of exiting 75 into a respawn
+every ten seconds. A server installed before this marker existed keeps its old plist (an update
+restarts the job, it does not rewrite it): run `serverd.py --install` once to write the new one. See the [service design](design/FABRIC-SERVICE.md).
 
 Its well-known document also says what Observatory uses (`extensions/connections/0.1`),
 so a host can draw the chain from one agent to the next: Fabric's hub (asked which Fabric
@@ -1254,6 +1294,11 @@ collector has stopped running, and the tick's log says why. With `OBSERVATORY_OF
 server no provider is listed, as no collector runs. Fabric's hub reads `unknown` when Fabric is not
 installed and `degraded` when the hub refused anything else. No key, URL with a
 key, path or name is in it. Not declared yet (OBS-338): git remotes (`ls-remote`), remote environments, GA4, Search Console, Cloudflare analytics, the assistant's model provider, the organization server, relay and mailbox, and release downloads (only the feed is declared).
+
+The scheduler switch and the backups root are this machine's and this OS account's own (OBS-353): `configure`
+writes them to `config/local.json` and mirrors them into `config/settings.json` for an older engine; a profile never
+carries them. `full configure apps location auto|user|system` and `full configure loopback peerCheck auto|always`
+write `config/local.json` only. `full doctor` shows each with its source in `local_settings`.
 
 ```sh
 project-observatory full configure features scheduler true
@@ -1664,6 +1709,19 @@ python "$(project-observatory full-path)/tools/use_secret.py" run --share SHARE-
   code is kept so `confirm` can compare it: on this machine, a program running as you can do what
   you can. The comparison moves into Observatory's signed app window in a later release (OBS-280).
   `create` prints the link only to a terminal, or with `--show-link`.
+- **Your own two machines, finished by your agent** (OBS-531, contract CT-298). When both machines
+  are yours (two estates in the personal context, neither enrolled in an organization) and you
+  told your agent to finish, it may do the three acts without a terminal, each with your words as
+  `--decision` (DEC-0121: `by`, `via`, `action`, `target` the share id, `instruction`, `at`) and
+  each run on the machine it acts on (over its own SSH, never the relay or the mailbox): `full share
+  accept SHARE-ID --agent NAME --decision JSON` on the recipient, for a link it handed over pinned
+  in your words; `full share read-code SHARE-ID --agent NAME --decision JSON` on the recipient,
+  which prints the six digits once the exchange completed; and `full share confirm SHARE-ID --agent
+  NAME --decision JSON` on the sender, with those digits on standard input. The sender's node
+  compares them with its own code: equal seals, different spends the link as `differ` does, and
+  there is no second try. `--without-comparing` is never an agent's. Each act is recorded with your
+  words in `node/shares/own-decisions.jsonl` (owner-only), never the digits. Outside these
+  conditions each answers `human-step-required` with the step you take at a terminal.
 - **Using it.** The recipient's agents take the key through `use_secret.py run --share ID NAME`
   (flags before the names; `--consumer NAME` names the agent in the report). The key stays sealed
   on disk under `node/shares/received/`, apart from every vault, and is opened in memory for that
@@ -2632,6 +2690,10 @@ use the same snapshot kinds, including snapshots left by engine updates. Migrati
 exports verified copies under the existing three-per-kind policy; an unverifiable
 copy is reported and retained. Unrecognized kinds are outside this inventory and
 remain untouched by migration; the count is not a survey of every backup-like directory.
+A local copy an export could not take (no passphrase yet, a root that did not answer) no longer
+stays for good: the next export of the same kind that works carries it into the root encrypted
+and removes it here, and the root's rotation keeps the newest, never an old copy over it
+(OBS-532). Its report lists `carried`, and `left_local` with the reason for one it could not.
 
 The format is `OBSENC1`: AES-256-GCM in authenticated chunks, key derived from
 the passphrase by scrypt (N=2^17, r=8, p=1), header bound as associated data,
@@ -3018,7 +3080,8 @@ The plan and every answer carry paths, counts and reasons, never a file's conten
 **Which machine a bundle or snapshot came from (0.30.1).** Each bundle and each workspace
 snapshot names the machine it was taken on (`machine_id`: `m-` and 24 hex digits of a SHA-256
 over the platform's own machine identifier, which is never written; `full machine-move show`
-prints this machine's). Restored on the machine that took it, both behave as above. Restored on
+prints this machine's). Since OBS-357 they name the place instead: that id with `.a-` and a hash of
+the OS account, so another account of the same computer is another place. Restored on the machine that took it, both behave as above. Restored on
 another machine, or when they name no machine (taken before 0.30.1), they restore as a **second
 machine**, below. `--same-machine` restores whole anyway and is accepted only at a terminal:
 use it when you replace a machine and want its identity back, never for a machine that keeps
@@ -3028,7 +3091,17 @@ running. `full machine-restore --second-machine` asks for the second-machine way
 machines keep running, a whole restore would give the second one this machine's SSH key, start
 every one of its launchd jobs at the next login (a bot polling one token on two machines, a
 scheduler acting twice) and copy its agent-network identity. A second-machine restore does none
-of that:
+of that. Which restore a bundle or snapshot gets is decided by the place it names (OBS-357): the
+host and the OS account it was taken under. This very place restores whole (`same-place`); another
+OS account of the same computer (`another-account`) and another computer (`another-machine`) restore
+as a second machine. A bundle from an engine before place ids names only the computer: on a computer
+with one account it is this place, as before; on a computer several accounts share, it is this
+account's only when its home is this home (`same-host-same-home`), else a second machine
+(`same-host-account-unknown`). A copy of this machine (a cloned disk or virtual machine) shares the
+place; a bundle or snapshot of this place taken on another agent-network device is refused until you
+choose (`clone-suspected`), and `full doctor`'s `place` block names a peer's facts that do the same,
+and a vault-digest name every account of a shared computer would publish (`digest-name-shared`).
+`--second-machine` and `--same-machine` (at a terminal) still decide by hand:
 
 - **SSH.** `~/.ssh/config` (and `config.d/`), `known_hosts`, `authorized_keys`,
   `allowed_signers` and each `*.pub` whose private half is not in the bundle are written (the
@@ -3089,7 +3162,7 @@ project-observatory full ssh-keys rekey NAME --fingerprint SHA256:... --apply  #
 project-observatory full machine-restore --latest --clone
 project-observatory full restore --latest                         # the workspace, without the node identity; asks once for the first machine's passphrase
 project-observatory full node --init                              # this machine's own device id
-project-observatory full machine-move show                        # this machine's id and the staged jobs
+project-observatory full machine-move show                        # this place's id (what --to takes) and the staged jobs
 ```
 
 The key comes before `--clone` because the other machine's private key was not written: a
@@ -3649,6 +3722,19 @@ to the shared update log. Each maintenance run does only what is due:
 
 - With `features.auto_cleanup` on, first the disk guard (see [The disk guard](#the-disk-guard)): hourly while space
   is normal, on every pass below the `low` line.
+- Every pass it samples the commands coding-agent sessions started (OBS-530). A command below a
+  session's shell (never the session itself, nor its MCP servers or `sleep`), older than an hour,
+  whose CPU time did not grow between two samples and whose input is a pipe or a terminal rather
+  than `/dev/null`, is waiting on input nobody writes, and its session waits on it: the finding
+  `machine.hung_commands` names it with its session's folder (receipt `hung-commands.json` in the
+  store's `raw` folder). With `features.auto_cleanup` on, only `wc`, `cat`, `grep` or `head`
+  reading no file, whose input is a terminal or a unix socket (a coding agent hands a background
+  command its input as a socket it never writes to) and whose process group holds nothing else but
+  shells, is stopped, with SIGTERM, and journalled in `store/logs/hung-commands.jsonl`; any other
+  command is left for you or its session. A command reading a pipe, or with a live neighbour in its
+  group, is named but never stopped: a watcher waiting for its event (`tail -f log | grep X | head -1`)
+  looks the same. `project-observatory full machine --explain PID`
+  names the session. Not read on Windows yet.
 
 - Every five minutes it runs `full update --check` (the same static read); at login the first
   check waits 90 seconds after the job starts. When a newer **stable** release exists, it runs `full update --apply

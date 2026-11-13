@@ -507,6 +507,23 @@ def path_form(value: str) -> str:
     return "home-relative" if value == "~" or value.startswith(("~/", "~\\")) else "absolute"
 
 
+def _jobs() -> list[dict] | dict:
+    if sys.platform != "darwin":
+        return {"probed": False, "detail": "launchd jobs are read on macOS; `full maintain status` covers the timers"}
+    if not __import__("maintenance").probes_allowed():
+        # The same rule as `maintenance.status`: a sandboxed or OBSERVATORY_SYSTEM_SETUP=0 process
+        # does not ask launchd about a machine it must not touch (audit A25).
+        return {"probed": False, "detail": "OBSERVATORY_SYSTEM_SETUP=0 or a sandbox home: launchd not asked"}
+    try:
+        tools = str(config.SOURCE / "tools")
+        if tools not in sys.path:
+            sys.path.insert(0, tools)
+        import install_launchd
+        return install_launchd.job_report()
+    except Exception as exc:  # noqa: BLE001 — a status never fails doctor
+        return {"probed": False, "detail": f"launchd not read: {type(exc).__name__}"}
+
+
 def _switches(doc: dict, section: str) -> dict:
     """{name: on} for every known name, sorted; a switch is on only when `true`,
     the rule `configuration.enabled` applies."""
@@ -541,6 +558,12 @@ def doctor(base: Path) -> dict:
                            if not doc.get("sources", {}).get(k)}},
             "integrations": _switches(doc, "integrations"),
             "features": _switches(doc, "features"),
+            # What this machine and OS account decide (OBS-353): config/local.json, each setting with its source.
+            "local_settings": config.local(base),
+            # The port of each listener for this OS account, and who listens there (OBS-354).
+            "ports": _ports(base),
+            # This host and this OS account (OBS-357): the id bundles, receipts and placement carry.
+            "place": _place(base),
             "interface": {"locale": doc.get("interface", {}).get("locale", "en")},
             "coverage_warnings": coverage_warnings(doc),
             "tracked": __import__("tracked").health(),
@@ -559,6 +582,9 @@ def doctor(base: Path) -> dict:
             "analytics": _analytics(base),
             # PB-132: a dead or interrupted tick cannot report itself.
             "tick": _tick_health(base, doc),
+            # The tick and server jobs as launchd holds them: loaded, running, and the last exit with
+            # its meaning when one cannot start (78: the interpreter its plist names is gone).
+            "jobs": _jobs(),
             # OBS-159: which session MCP servers moved onto an installed release by
             # themselves, and which were refused (they answer `stale-server` with the reason).
             "session_servers": __import__("session_reload").summary(base),
@@ -739,7 +765,9 @@ def _lifecycle_helper(base: Path) -> dict:
     if str(config.SOURCE) not in sys.path:
         sys.path.insert(0, str(config.SOURCE))
     try:
-        from node.lifecycle import macos, service
+        import engine_node
+        macos = engine_node.module("lifecycle.macos")           # OBS-512: the engine's package, never tools/node.py
+        service = engine_node.module("lifecycle.service")
         if not service.read_config(path)["targets"]:
             return {"state": "inert"}
         return macos.helper_choice()
@@ -787,7 +815,7 @@ def _parser() -> argparse.ArgumentParser:
     migration.add_argument("--writers-stopped", action="store_true")
     conf = sub.add_parser("configure", help="set one setting in config/settings.json; model and budget write config/models.json")
     conf.add_argument("section", choices=["sources", "integrations", "features", "interface", "storage",
-                                                 "learning_review", "model", "budget"])
+                                                 "learning_review", "model", "budget", "apps", "loopback"])
     conf.add_argument("name")
     conf.add_argument("value")
     phrase = sub.add_parser("backup-passphrase", help="the passphrase that encrypts backups (stdin)")
@@ -891,7 +919,29 @@ def parse(argv: list[str]) -> argparse.Namespace:
     if name == "machine-move":
         import machine_move
         return machine_move.parser().parse_args(rest)
+    if name == "ports":
+        import local_ports
+        return local_ports.parser().parse_args(rest)
     return _parser().parse_args(argv)
+
+
+def _place(base: Path) -> dict:
+    """Doctor's `place` block (OBS-357): the host, this place, the accounts sharing the host, and what to fix: a
+    clone of this machine named by a peer's facts, or a vault-digest name the host's accounts would share."""
+    block = __import__("machine_identity").place_summary()
+    try:
+        warnings = __import__("machine_move").place_warnings(None, base)
+    except Exception as exc:  # noqa: BLE001 - doctor reads what it can
+        warnings = [{"code": "unreadable", "reason": f"the place could not be checked ({type(exc).__name__})"}]
+    return {**block, **({"warnings": warnings} if warnings else {})}
+
+
+def _ports(base: Path) -> dict:
+    try:
+        import local_ports
+        return local_ports.show(base)
+    except Exception as exc:  # noqa: BLE001 - doctor names a block it could not read, never fails on it
+        return {"error": f"{type(exc).__name__}: {exc}"[:200]}
 
 
 def main(argv: list[str]) -> int:
@@ -924,6 +974,9 @@ def main(argv: list[str]) -> int:
     if argv and argv[0] == "machine-move":
         import machine_move
         return machine_move.main(argv[1:])
+    if argv and argv[0] == "ports":
+        import local_ports
+        return local_ports.main(argv[1:])
     a = _parser().parse_args(argv)
     try:
         base = config.home()
@@ -961,6 +1014,19 @@ def main(argv: list[str]) -> int:
         else:
             config.validate_workspace(base, required=True)
             doc = config.load(base)
+            if a.section in config.LOCAL_SECTIONS:   # exact names from a closed list (peerCheck is the spec's)
+                # Settings of this machine and OS account only (OBS-353): config/local.json, never settings.json.
+                choices = config.LOCAL_SECTIONS[a.section].get(a.name)
+                if choices is None:
+                    raise config.ConfigurationError(
+                        f"Unknown {a.section} setting: {a.name}; known: {', '.join(config.LOCAL_SECTIONS[a.section])}")
+                if a.value not in choices:
+                    raise config.ConfigurationError(f"{a.section} {a.name} must be one of: {', '.join(choices)}")
+                with lock(base):
+                    config.write_local(base, {a.section: {a.name: a.value}})
+                print(json.dumps({"status": "configured", "section": a.section, "name": a.name,
+                                  "file": "config/local.json"}, indent=2))
+                return 0
             if not re_safe_name(a.name):
                 raise config.ConfigurationError("Invalid configuration name")
             if a.section in ("integrations", "features", "sources") and a.name not in config.known_names(a.section):
@@ -999,11 +1065,20 @@ def main(argv: list[str]) -> int:
                 if a.value not in {"true", "false"}:
                     raise config.ConfigurationError("Use true or false")
                 value = a.value == "true"
+            local_key = config.LOCAL_MOVED.get((a.section, a.name))
             with lock(base):
-                doc = config.load(base)
-                doc.setdefault(a.section, {})[a.name] = value
-                write_json(base / "config/settings.json", doc)
+                if local_key:
+                    # Decided per machine and OS account (OBS-353): local.json, mirrored into settings.json so an older
+                    # engine reads the same value.
+                    change = {local_key[0]: value} if len(local_key) == 1 else {local_key[0]: {local_key[1]: value}}
+                    config.write_local(base, change)
+                else:
+                    doc = config.load(base)
+                    doc.setdefault(a.section, {})[a.name] = value
+                    write_json(base / "config/settings.json", doc)
             result = {"status": "configured", "section": a.section, "name": a.name}
+            if local_key:
+                result["file"] = "config/local.json"
             if stored_as:
                 result["stored_as"] = stored_as
             if a.section == "interface":

@@ -936,6 +936,37 @@ class LoopbackServer(http.server.ThreadingHTTPServer):
         self.server_port = port
 
 
+def _holder_sentence(port: int) -> str:
+    """Who holds the port the server could not bind (OBS-354): another OS account's listener is not a stale copy of
+    this one, and the step that moves this account off it is not the step that frees it."""
+    import local_ports
+    kind = local_ports.listener_kind(port)
+    if kind == "another-account":
+        return ("The port is held by another OS account on this host (port-held-by-another-account); "
+                "to move this account to its own block, run project-observatory full ports allocate --reinstall.")
+    if kind == "this-account":
+        return "A process of this account holds the port; pass --port, or stop it."
+    if kind in ("unknown", "system"):
+        return ("A process whose owner could not be read holds the port (port-held-by-unknown-owner); "
+                "to see it, run project-observatory full ports show.")
+    return "Another program holds the port; pass --port."
+
+
+def _port_for(a) -> int:
+    """The port this run listens on or names (OBS-354): --port, else OBSERVATORY_SERVER_PORT (as before), else this
+    account's record; an install with neither allocates one. --install with --port is checked against the other
+    accounts of the host and recorded as this account's choice. Raises local_ports.PortError."""
+    import local_ports
+    if a.port is not None:
+        if a.install:
+            local_ports.set_port("server", a.port)
+        return a.port
+    env = os.environ.get("OBSERVATORY_SERVER_PORT", "")
+    if env.isdigit():
+        return int(env)
+    return local_ports.resolve("server", allocate_missing=a.install)
+
+
 def serve(port: int) -> int:
     """Lock, token, bind, beat — in that order, and the order is the point.
 
@@ -963,8 +994,7 @@ def serve(port: int) -> int:
     try:
         srv = LoopbackServer(("127.0.0.1", port), Handler)
     except OSError as exc:
-        print(f"Cannot listen on 127.0.0.1:{port}: {exc.strerror or exc}. "
-              f"Another program holds the port; pass --port.", file=sys.stderr)
+        print(f"Cannot listen on 127.0.0.1:{port}: {exc.strerror or exc}. {_holder_sentence(port)}", file=sys.stderr)
         lock.release()
         return 1
     # After the lock and the bind: a second copy, or one that could not listen, never takes the lifecycle state
@@ -1250,8 +1280,17 @@ def main(argv: list[str]) -> int:  # noqa: PLW0603 — PORT set via globals()
     g.add_argument("--install", action="store_true")
     g.add_argument("--uninstall", action="store_true")
     g.add_argument("--status", action="store_true")
-    ap.add_argument("--port", type=int, default=PORT)
+    ap.add_argument("--port", type=int, default=None,
+                    help="default: this OS account's recorded port (`full ports show`)")
     a = ap.parse_args(argv[1:])
+    import local_ports
+    try:
+        a.port = _port_for(a)
+    except local_ports.PortError as exc:
+        if a.install or a.run:
+            print(json.dumps(exc.answer()), file=sys.stderr)
+            return 1
+        a.port = local_ports.LEGACY["server"]           # status, --once and --uninstall name nothing to listen on
     globals()["PORT"] = a.port
     if a.once:
         doc = heartbeat()

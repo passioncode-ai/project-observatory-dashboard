@@ -195,6 +195,89 @@ def valid_id(value) -> bool:
     return isinstance(value, str) and bool(ID_SHAPE.fullmatch(value))
 
 
+# --- the place: this host and this OS account (OBS-357) ---------------------------------------------
+#
+# Two OS accounts of one host share the host id, so an id that names only the host cannot tell this
+# account's bundle, placement or receipt from another account's. The place id is the host id with a
+# hash of the account appended: `<host id>.a-<10 hex>`, 39 characters, inside ID_SHAPE, so every reader
+# that checks the shape accepts it. It names no account, and two accounts of one host share its prefix.
+
+PLACE_PREFIX = "observatory-place-id/1\0"
+ACCOUNT_ENV = "OBSERVATORY_ACCOUNT_FOR_TESTS"
+_PLACE = re.compile(r"(?P<host>[A-Za-z0-9][A-Za-z0-9._:-]{7,116})\.a-(?P<account>[0-9a-f]{10})")
+
+
+def _account() -> str:
+    """This OS account as text (the uid, the SID on Windows). A sandbox or a test may fake it, under the rule
+    that guards OBSERVATORY_MACHINE_ID."""
+    testing = os.environ.get("OBSERVATORY_SYSTEM_SETUP") == "0" or os.environ.get(TEST_MARKER) == "1"
+    if testing and os.environ.get(ACCOUNT_ENV):
+        return os.environ[ACCOUNT_ENV]
+    import osprivacy
+    return osprivacy.account()
+
+
+def is_place(value) -> bool:
+    return valid_id(value) and bool(_PLACE.fullmatch(value))
+
+
+def host_of(value) -> str | None:
+    """The host part of a place id, or a bare host id itself; None for what is not an id."""
+    if not valid_id(value):
+        return None
+    m = _PLACE.fullmatch(value)
+    return m.group("host") if m else value
+
+
+def place_id(home: Path | None = None, *, runner=subprocess.run, create: bool = True) -> str | None:
+    """This place: the host id and this OS account. None when the host id is None (`create=False`)."""
+    host = machine_id(home, runner=runner, create=create)
+    if host is None:
+        return None
+    if is_place(host):                                   # a sandbox's override that already names a place
+        return host
+    digest = hashlib.sha256((PLACE_PREFIX + host + "\0" + _account()).encode()).hexdigest()[:10]
+    return f"{host}.a-{digest}"
+
+
+def match(recorded, here: str | None = None, *, accounts=...) -> str:
+    """How an id written somewhere compares with this place: `same`, `other`, or `same-host-account-unknown`
+    (a bare host id of this host, written by an engine before place ids, on a host several accounts share or whose
+    account count cannot be told). A bare id of this host on a one-account host is `same`, as before."""
+    here = here or place_id(create=False)
+    if not valid_id(recorded) or not here:
+        return "other"
+    if recorded == here:                                 # the very same id is the very same place
+        return "same"
+    if is_place(recorded):
+        return "same" if recorded == here else "other"
+    if recorded != host_of(here):
+        return "other"
+    if accounts is ...:                                  # not given: read the host (None is "cannot be told")
+        accounts = accounts_on_host()
+    return "same" if accounts == 1 else "same-host-account-unknown"
+
+
+def accounts_on_host() -> int | None:
+    """People's accounts on this host. A sandbox is a one-account host unless OBSERVATORY_HOST_ACCOUNTS says
+    otherwise, so a suite's verdicts never depend on the CI runner's accounts."""
+    testing = os.environ.get("OBSERVATORY_SYSTEM_SETUP") == "0" or os.environ.get(TEST_MARKER) == "1"
+    if testing:
+        told = os.environ.get("OBSERVATORY_HOST_ACCOUNTS", "1")
+        return int(told) if told.isdigit() else None
+    import host_accounts
+    return host_accounts.count()
+
+
+def place_summary(home: Path | None = None) -> dict:
+    """Doctor's `place` block: the host, this place and how many accounts share the host."""
+    try:
+        place = place_id(home, create=False)
+    except MachineIdentityError as exc:
+        return {"error": str(exc)[:200]}
+    return {"host": host_of(place), "place": place, "accountsOnHost": accounts_on_host()}
+
+
 def now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -331,7 +414,7 @@ def record_restore(parts: dict, home: Path | None = None) -> Path:
             doc = read_restore_receipt(home) or {}
         except MachineIdentityError:
             doc = {}
-        out = {"schema": RECEIPT_SCHEMA, "machine": machine_id(home), "updatedAt": now()}
+        out = {"schema": RECEIPT_SCHEMA, "machine": place_id(home), "updatedAt": now()}
         for name in RECEIPT_PARTS:
             if name in parts:
                 out[name] = {"at": now(), **parts[name]}
@@ -375,17 +458,21 @@ def job_label(path: Path, data: bytes | None = None) -> str:
 
 
 def restore_mode(recorded, *, asked: str | None = None, here: str | None = None,
-                 home: Path | None = None, unknown: str = "second") -> dict:
-    """Whether a bundle or snapshot taken on machine `recorded` is restored here as the same machine.
+                 home: Path | None = None, unknown: str = "second", home_path: str | None = None,
+                 clone: bool = False) -> dict:
+    """Whether a bundle or snapshot taken at place `recorded` is restored here as the same machine.
 
     `asked` is the person's choice: `second` (always safe) or `same` (a terminal-only override the
-    caller checks). Otherwise the ids decide, and a bundle or snapshot that names no machine (taken
-    before 0.30.1) is treated as another machine's: the safe reading of an unknown. `unknown="keep"`
-    is `full init`'s reading on an empty home: such a snapshot is most often this machine's own
-    (taken by the engine before an update), so it is restored whole and the answer says `unknown`."""
+    caller checks). Otherwise `match` decides (OBS-357): this very place is the same machine; another account
+    of this host, or another host, is a second machine. An id an engine wrote before place ids names only the
+    host: on a host with one account it is this place, as before; on a host several accounts share, a bundle
+    whose `home_path` is this home is this account's (`same-host-same-home`), anything else is a second machine.
+    A bundle or snapshot that names no machine (taken before 0.30.1) is another machine's, the safe reading of
+    an unknown; `unknown="keep"` is `full init`'s reading on an empty home, where such a snapshot is most often
+    this machine's own (taken before an update), restored whole with the answer `unknown`."""
     if asked not in (None, "second", "same"):
         raise MachineIdentityError("the restore mode is `second` or `same`")
-    here = here or machine_id(home)
+    here = here or place_id(home)
     recorded = recorded if valid_id(recorded) else None
     if asked:
         why = "asked"
@@ -393,7 +480,24 @@ def restore_mode(recorded, *, asked: str | None = None, here: str | None = None,
     elif recorded is None:
         why, same = "names-no-machine", unknown == "keep"
     else:
-        same = recorded == here
-        why = "same-machine" if same else "another-machine"
+        verdict = match(recorded, here)
+        if verdict == "same" and clone:
+            # A clone shares the platform identifier, so the place too; what differs is the agent-network device.
+            # Restoring whole would give the clone this machine's identity: a person decides (OBS-357).
+            raise MachineIdentityError(
+                "clone-suspected: the bundle names this place but another device; restore it as a second machine "
+                "(--second-machine), or, when this really is the same machine, --same-machine at a terminal; a clone "
+                "needs its own identifier (systemd-machine-id-setup on Linux, a new machine identifier for the virtual "
+                "machine on macOS), then `project-observatory full node --init`")
+        if verdict == "same":
+            why, same = "same-place", True
+        elif verdict == "same-host-account-unknown":
+            same = bool(home_path) and Path(home_path) == (home or Path.home())
+            why = "same-host-same-home" if same else "same-host-account-unknown"
+        else:
+            same = False
+            why = "another-account" if host_of(recorded) == host_of(here) else "another-machine"
     mode = "unknown" if why == "names-no-machine" and same else ("same-machine" if same else "second-machine")
-    return {"mode": mode, "why": why, "this_machine": here, "taken_on": recorded}
+    return {"mode": mode, "why": why, "this_machine": here, "taken_on": recorded,
+            "this_host": host_of(here), "taken_on_host": host_of(recorded) if recorded else None,
+            "same_host": bool(recorded) and host_of(recorded) == host_of(here)}

@@ -21,6 +21,7 @@ sys.path.insert(0,str(ROOT))
 import configuration as config
 import workspace
 import workspace_upgrade as upgrade
+import machine_identity as MI  # noqa: E402  OBS-357: ids carry the place
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from secret_store_fixture import VALUES, all_values, make_external_store  # noqa: E402
 
@@ -629,7 +630,8 @@ class WorkspaceUpgrade(unittest.TestCase):
         workspace.write_json(self.home/'config/settings.json',settings)
 
     def test_a_snapshot_names_the_machine_it_was_taken_on(self):
-        self.assertEqual(config.read_json(self.snapshot()/'manifest.json')['machine_id'],ALPHA)
+        self.assertEqual(MI.host_of(config.read_json(self.snapshot()/'manifest.json')['machine_id']),ALPHA)
+        self.assertEqual(config.read_json(self.snapshot()/'manifest.json')['host_id'],ALPHA)
 
     def test_another_machine_never_takes_the_node_identity_or_the_schedules(self):
         self.identity()
@@ -646,7 +648,7 @@ class WorkspaceUpgrade(unittest.TestCase):
                             config.read_json(self.home/'workspace.json')['instance_id'],
                             'its own backup label, so the two machines never rotate each other\'s backups')
         machine=result['machine']
-        self.assertEqual((machine['mode'],machine['why'],machine['taken_on'],machine['this_machine']),
+        self.assertEqual((machine['mode'],machine['why'],MI.host_of(machine['taken_on']),MI.host_of(machine['this_machine'])),
                          ('second-machine','another-machine',ALPHA,BETA))
         self.assertEqual(machine['left_out'],['node/device/','node/orgs/','node/records/','node/shares/','store/maintenance.json'])
         self.assertIn('turned off',machine['scheduler'])
@@ -676,6 +678,27 @@ class WorkspaceUpgrade(unittest.TestCase):
         self.assertEqual(result['machine']['held_off'],['app.always'])
         self.assertIn('project-observatory full lifecycle policy app.always --desired always_on',
                       ' '.join(result['machine']['next']))
+
+    def set_device(self, home, device):
+        path=home/'node/device/device.json'
+        path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+        path.write_text(json.dumps({'id':device}))
+        path.chmod(0o600)
+
+    def test_a_snapshot_of_this_place_from_another_device_is_a_clones(self):
+        """OBS-357: a cloned disk shares the place; the agent-network device tells the clone apart."""
+        self.set_device(self.home,'dev-original-0001')
+        source=self.snapshot()
+        self.assertEqual(config.read_json(source/'manifest.json')['device'],'dev-original-0001')
+        self.set_device(self.home,'dev-clone-0002')                  # this machine is now another device
+        with self.assertRaises(config.ConfigurationError) as caught:
+            upgrade.restore(source,self.base/'clone')
+        self.assertIn('clone-suspected',str(caught.exception))
+        self.assertFalse((self.base/'clone').exists(),'a refusal writes nothing')
+        result=upgrade.restore(source,self.base/'as second',second_machine=True)
+        self.assertEqual(result['machine']['mode'],'second-machine')
+        self.set_device(self.home,'dev-original-0001')               # the same device: restored whole, as before
+        self.assertEqual(upgrade.restore(source,self.base/'same')['machine']['mode'],'same-machine')
 
     def test_second_machine_is_asked_anywhere(self):
         self.identity()
@@ -1495,7 +1518,7 @@ class RestoreSecretStore(unittest.TestCase):
         rows=self.movements()
         self.assertEqual(rows[0],{'event':'put','secret':'alpha/prod/API_KEY'},'the carried journal comes first')
         [line]=[r for r in rows if r.get('event')=='restore-store']
-        self.assertEqual((line['secret'],line['tool'],line['state'],line['snapshot'],line['taken_on']),
+        self.assertEqual((line['secret'],line['tool'],line['state'],line['snapshot'],MI.host_of(line['taken_on'])),
                          ('store/*','workspace_upgrade.py','written',snapshot.name,ALPHA))
         self.assertNotIn('value',line)
         self.assertEqual(block['journal'],'written')

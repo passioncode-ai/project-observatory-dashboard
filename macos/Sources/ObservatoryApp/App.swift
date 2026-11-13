@@ -30,9 +30,9 @@ import ObservatoryCore
         // to a child that already exited must fail a write, never end the app.
         signal(SIGPIPE, SIG_IGN)
         NSApp.setActivationPolicy(.regular)
-        // One dark PassionCode product: menus, alerts, sheets and the Settings window
-        // follow the dashboard's dark pages whatever the system appearance is.
-        NSApp.appearance = NSAppearance(named: .darkAqua)
+        // One light PassionCode product (OBS-523): menus, alerts, sheets and the Settings
+        // window follow the dashboard's light pages whatever the system appearance is.
+        NSApp.appearance = NSAppearance(named: .aqua)
         // At every launch: open at login as the person chose (on by default), and whatever
         // the app needs and lacks is named in the dashboard window, never left silent.
         loginItem.apply()
@@ -178,8 +178,8 @@ extension DashboardReopen.Seen {
         // window per ⌘1 / Overview / Dashboard click, all but one blank (they
         // share one web view). SwiftUI lists it in the Window menu as Dashboard, ⌘1.
         Window(model.t("Dashboard"), id: WindowID.dashboard) {
-            // The pages are dark by design (PassionCode tokens, `color-scheme: dark`):
-            // the window's chrome matches them instead of framing them in light grey.
+            // The pages open light (OBS-523, the token file's light palette), and so does
+            // the window's chrome around them.
             DashboardView().environmentObject(model).environmentObject(web).environmentObject(appDelegate.updates)
                 .environmentObject(appDelegate.loginItem)
                 // The secret prompt's watch (OBS-260): started once, it outlives this window.

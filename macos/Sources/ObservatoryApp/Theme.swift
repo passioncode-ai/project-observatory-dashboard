@@ -30,6 +30,8 @@ enum Theme {
     static let accentHover = Color(Palette.accentHover)
     static let onAccent = Color(Palette.onAccent)
     static let accentSoft = Color(Palette.accentSoft)
+    /// The accent role as a line, a ring or text (gold-brown): gold on white is not readable.
+    static let focus = Color(Palette.focus)
 
     static let radiusControl = CGFloat(Palette.radiusControl)
     static let radiusPanel = CGFloat(Palette.radiusPanel)
@@ -114,7 +116,7 @@ struct SecondaryButtonStyle: ButtonStyle {
 }
 
 /// A text field on the panel: the design system's control edge at rest, the 2 px
-/// accent ring when focused (the system ring would be the user's own accent colour).
+/// focus ring when focused (the system ring would be the user's own accent colour).
 struct FieldChrome: ViewModifier {
     var focused: Bool
     func body(content: Content) -> some View {
@@ -124,14 +126,14 @@ struct FieldChrome: ViewModifier {
             .padding(.horizontal, 10).padding(.vertical, 7)
             .background(RoundedRectangle(cornerRadius: Theme.radiusControl).fill(Theme.panel))
             .overlay(RoundedRectangle(cornerRadius: Theme.radiusControl)
-                .strokeBorder(focused ? Theme.accent : Theme.borderStrong, lineWidth: focused ? 2 : 1))
+                .strokeBorder(focused ? Theme.focus : Theme.borderStrong, lineWidth: focused ? 2 : 1))
     }
 }
 extension View {
     func fieldChrome(focused: Bool) -> some View { modifier(FieldChrome(focused: focused)) }
-    /// One window of the product: dark, gold-tinted, on the PassionCode ground.
+    /// One window of the product: light (OBS-523), tinted with the readable accent, on the PassionCode ground.
     func passionCodeWindow() -> some View {
-        self.preferredColorScheme(.dark).tint(Theme.accent).foregroundStyle(Theme.text)
+        self.preferredColorScheme(.light).tint(Theme.focus).foregroundStyle(Theme.text)
             .background(Theme.bg)
             .toolbarBackground(Theme.panel, for: .windowToolbar)
             .toolbarBackground(.visible, for: .windowToolbar)

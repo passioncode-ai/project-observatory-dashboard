@@ -206,7 +206,9 @@
  "MCP server needs sign-in": "MCP-серверу нужен вход",
  "MCP server not answering": "MCP-сервер не отвечает",
  "Machine": "Машина",
+ "Agent commands hanging on their input": "Команды агентов, зависшие на вводе",
  "Machine disk low": "Мало места на диске машины",
+ "Virtual machine at risk on a full disk": "Виртуальная машина под угрозой из-за полного диска",
  "Managed database": "Управляемая база данных",
  "Month to date": "С начала месяца",
  "No account is connected.": "Ни один аккаунт не подключён.",
@@ -2173,6 +2175,8 @@
  "installed": "установлено",
  "a background job did not start again after the last backup or update": "фоновое задание не запустилось после последней резервной копии или обновления",
  "the Mac app update was refused: {detail}": "обновление приложения для Mac отклонено: {detail}",
+ "the {job} job cannot start (exit 78): the interpreter its plist names is missing": "задание {job} не может запуститься (код 78): интерпретатора из его plist нет",
+ "the {job} job's last run exited {code}; its .err log under store/logs says why": "последний запуск задания {job} завершился с кодом {code}; причина — в его .err-журнале в store/logs",
  "the last automatic update needs a person": "последнему автоматическому обновлению нужен человек",
  "the last automatic update did not complete ({result}: {detail}); tried again within 15 minutes": "последнее автоматическое обновление не завершилось ({result}: {detail}); повтор в течение 15 минут",
  "the last automatic update did not complete ({result}: {detail}); tried again within six hours": "последнее автоматическое обновление не завершилось ({result}: {detail}); повтор в течение шести часов",
@@ -2251,7 +2255,14 @@
  "low": "мало места",
  "normal": "норма",
  "temp": "временные файлы",
+ "{n} commands of agent sessions hang on their input": {
+  "one": "{n} команда сессии агента зависла на вводе",
+  "few": "{n} команды сессий агентов зависли на вводе",
+  "many": "{n} команд сессий агентов зависли на вводе",
+  "other": "{n} команды сессий агентов зависли на вводе"
+ },
  "the disk guard has never run": "контроль диска ни разу не запускался",
+ "a virtual machine is writing to a nearly full disk": "виртуальная машина пишет на почти полный диск",
  "the disk guard has not run for {hours} hours": "контроль диска не запускался {hours} ч",
  "trash": "корзина",
  "Disk guard ran {at}: free {before} → {after} GB, {n} removed": {
@@ -2477,5 +2488,11 @@
   "other": "{n} новых элемента могут относиться к {organization}"
  },
  "Plugin behind its marketplace's newest version": "Плагин отстаёт от новейшей версии своего маркетплейса",
- "plugin {plugin} is at {installed}, its marketplace publishes {latest}": "плагин {plugin} на версии {installed}, его маркетплейс публикует {latest}"
+ "plugin {plugin} is at {installed}, its marketplace publishes {latest}": "плагин {plugin} на версии {installed}, его маркетплейс публикует {latest}",
+ "step@@failed": "не удался",
+ "step {step} failed, {at}": "шаг {step} не удался, {at}",
+ "Theme": "Тема",
+ "theme@@Light": "Светлая",
+ "theme@@Dark": "Тёмная",
+ "Your browser keeps no settings here, so the next page opens in the light theme.": "Браузер здесь не хранит настройки, поэтому следующая страница откроется в светлой теме."
 }

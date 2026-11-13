@@ -368,14 +368,19 @@ def test_the_shell_names_the_page_and_offers_the_language() -> None:
         check(f"{name}: navigation precedes the workspace heading",
               html.index('id="topbar"') < html.index("<header>"),
               "the navigation remains the first way out of each screen")
-        # 0.4.0: one fixed PassionCode dark theme; the rail's switch is the
-        # reader's LANGUAGE, one button per supported locale.
+        # The rail's switches are the reader's LANGUAGE, one button per supported
+        # locale, and the THEME: light by default since OBS-523, dark on choice.
         check(f"{name}: the language switch offers every locale",
-              all(f'data-locale="{m}"' in html for m in ("en", "ru")) and 'data-theme="dark"' in html, "")
+              all(f'data-locale="{m}"' in html for m in ("en", "ru")), "")
+        check(f"{name}: the page opens light and offers dark",
+              'data-theme="light"' in html and 'data-theme-choice="dark"' in html, "")
     src = (ROOT / "dashboard/build_dashboard.py").read_text(encoding="utf-8")
     check("the stored language is applied in the head, before first paint",
           src.index('localStorage.getItem("observatory.locale")') < src.index("<style>"),
           "applied from the bottom script, the page would paint one language and read in another")
+    check("the stored theme is applied in the head, before first paint",
+          src.index('localStorage.getItem("observatory.theme")') < src.index("<style>"),
+          "applied from the bottom script, a reader who chose dark would see a light flash")
     check("«/» focuses the search from anywhere on a table page",
           'ev.key !== "/"' in src and 'q.focus()' in src, "the pack's keyboard-first rule")
 

@@ -257,6 +257,39 @@ class Outcome(unittest.TestCase):
         self.assertEqual(doc["failed_steps"], [{"step": "emit", "exit": 1, "outcome": "failed"}])
 
 
+class SmokeOutcome(unittest.TestCase):
+    """OBS-513: only a smoke that failed says the page is blank and builds the findings again; one stopped at its
+    time limit, or not started for want of time, measured nothing and says so."""
+
+    def test_a_failed_smoke_says_blank_and_builds_the_findings_again(self):
+        recheck, said = load_tick().smoke_verdict("failed")
+        self.assertTrue(recheck)
+        self.assertIn("SMOKE FAILED", said)
+
+    def test_a_smoke_stopped_or_not_started_measured_nothing(self):
+        tick = load_tick()
+        for outcome, words in (("stopped", "stopped at its time limit"),
+                               ("not_started", "not started for want of time")):
+            recheck, said = tick.smoke_verdict(outcome)
+            self.assertFalse(recheck, outcome)
+            self.assertNotIn("SMOKE FAILED", said, outcome)
+            self.assertNotIn("blank", said, outcome)
+            self.assertIn(words, said, outcome)
+            self.assertIn("not measured", said, outcome)
+
+    def test_a_clean_smoke_says_nothing(self):
+        self.assertEqual(load_tick().smoke_verdict("ran"), (False, ""))
+
+    def test_the_tail_acts_on_the_verdict_where_it_runs_smoke(self):
+        """The verdict is read at the smoke step itself, between the dashboard and the notifier, so the step order
+        the budget and the pipeline read from this file is unchanged."""
+        src = (ROOT / "tools/tick.py").read_text(encoding="utf-8")
+        at = src.index('smoke_verdict(step("smoke", "node", "dashboard/smoke.js", DASHBOARD))')
+        recheck = src.index('step("findings-recheck"', at)
+        self.assertLess(src.index('step("dashboard", PY'), at)
+        self.assertLess(recheck, src.index('step("notify"'))
+
+
 class BoundedRotation(unittest.TestCase):
     """ENG-007: `rotation_order` moved writers before readers in an unbounded `while moved` loop, so
     a cycle in READS_FROM hung the tick (exit 142 in the audit). It now gives up, says which names
@@ -507,6 +540,46 @@ class RotationRecord(unittest.TestCase):
                          "the schema-1 time seeds the last run, so an upgrade does not read as starvation")
 
 
+@unittest.skipIf(sys.platform == "win32", "tools/tick.sh is the launchd and systemd entry; Windows runs tick.py")
+class TickWrapper(unittest.TestCase):
+    """2026-10-29: a package manager removed the Python the engine's virtual environment was made
+    from. Every job launchd started directly exited 78; `tick.sh` took the first `python3` on PATH
+    instead, which lacks the [full] dependencies, and ten ticks ran half-broken with no line saying
+    why. An interpreter the installer named and that is gone is now a stop with one sentence."""
+
+    def run_wrapper(self, python: str, *, venv_home: str | None = None):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            ran = base / "bare-python-ran"
+            fake = base / "bin"
+            fake.mkdir()
+            (fake / "python3").write_text(f"#!/bin/sh\ntouch '{ran}'\n", encoding="utf-8")
+            (fake / "python3").chmod(0o755)
+            if venv_home is not None:
+                venv = Path(python).parent.parent
+                venv.mkdir(parents=True)
+                (venv / "pyvenv.cfg").write_text(f"home = {venv_home}\nversion = 3.99.1\n", encoding="utf-8")
+            env = {"PATH": f"{fake}:/usr/bin:/bin", "HOME": str(base), "OBSERVATORY_PYTHON": python}
+            p = subprocess.run(["/bin/bash", str(ROOT / "tools/tick.sh")], env=env, capture_output=True,
+                               text=True, timeout=30)
+            return p, ran.exists()
+
+    def test_a_vanished_engine_interpreter_stops_with_its_name_and_never_runs_another(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            python = str(Path(tmp).resolve() / "venv/bin/python3")
+            p, bare_ran = self.run_wrapper(python, venv_home="/opt/homebrew/opt/python@3.99/bin")
+        self.assertEqual(p.returncode, 78, p.stderr)
+        self.assertFalse(bare_ran, "a bare python3 lacks the engine's dependencies")
+        self.assertIn(python, p.stderr)
+        self.assertIn("/opt/homebrew/opt/python@3.99/bin", p.stderr, "the interpreter the environment was made from")
+        self.assertEqual(len(p.stderr.strip().splitlines()), 1, p.stderr)
+
+    def test_without_a_named_interpreter_the_fallback_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            p, bare_ran = self.run_wrapper("")
+        self.assertTrue(bare_ran, (p.returncode, p.stderr))
+
+
 class TailBail(unittest.TestCase):
     """Verification round 2: merge, emit and validate bailed with a literal exit 1, so a merge the
     watchdog stopped or never started read as `failed`/1. Their own exit and first line now decide."""
@@ -527,6 +600,29 @@ class TailBail(unittest.TestCase):
         self.assertEqual(self.bail_row("emit", 3, "REFUSED\n"), [{"step": "emit", "exit": 3, "outcome": "failed"}])
         self.assertEqual(self.bail_row("validate", 137, ""),
                          [{"step": "validate", "exit": 137, "outcome": "stopped"}])
+
+    def test_an_emit_refusal_names_its_reason_in_the_log_and_the_report(self):
+        # 2026-10-29: the tick logged only "emit failed or REFUSED a wholesale change" for ten days,
+        # while the emit's own line — the counts and OBSERVATORY_ALLOW_BULK=1 — went nowhere.
+        refusal = ("emit REFUSED: projects.json would go from 94 to 52 (-45%, limit ±25% and more than 1 lost). "
+                   "Nothing was written. If you removed those projects on purpose, re-run with "
+                   "OBSERVATORY_ALLOW_BULK=1.")
+        tick = load_tick()
+        import paths
+        said: list[str] = []
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp).resolve()
+            t = tick.Tick(base)
+            t.step = lambda *a, **k: "ran"
+            t.bounded = lambda step, *argv: ((1, "rebuilding 8 derived relation(s)\n" + refusal + "\n")
+                                             if step == "emit" else (0 if step != "backup-due" else 1, ""))
+            with mock.patch.object(paths, "STATE", base), mock.patch.object(tick, "log", said.append), \
+                    self.assertRaises(SystemExit):
+                tick.steps(t, base, base / "page.html")
+            report = json.loads((base / "tick.json").read_text(encoding="utf-8"))
+        self.assertIn(refusal, said)
+        self.assertIn("projects.json would go from 94 to 52", report["registry_note"])
+        self.assertIn("OBSERVATORY_ALLOW_BULK=1", report["registry_note"])
 
 
 class OutOfTimeGoesOn(unittest.TestCase):

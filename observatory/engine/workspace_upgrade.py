@@ -332,7 +332,10 @@ def _snapshot(base: Path, output: Path, *, carry_stores: bool = False,
         manifest = {'format_version':SNAPSHOT_FORMAT, 'application_version':config.VERSION,
                     'minimum_reader':marker['minimum_reader'], 'minimum_writer':marker['minimum_writer'],
                     'created_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                    'machine_id':machine_identity.machine_id(),
+                    'machine_id':machine_identity.place_id(),'host_id':machine_identity.machine_id(),
+                    # The agent-network device it was taken on (OBS-357): a restore of this place from another
+                    # device is a clone's. Additive; absent when the workspace has no device keys yet.
+                    **({'device':device} if (device := _device(base)) else {}),
                     # The home the paths in settings were written under (OBS-347): a restore under
                     # another home rewrites that prefix. Additive; an older reader ignores it.
                     # Absent when this process has no home (`this_home`): nothing is rewritten then.
@@ -595,6 +598,58 @@ def _left_out(name: str) -> bool:
     return any(name == p or name.startswith(p + '/') for p in ANOTHER_MACHINE_LEAVES)
 
 
+def _reset_local_settings(stage: Path, settings: dict) -> str:
+    """The other machine's config/local.json made this place's own (OBS-353): its ports and app location dropped (this
+    place allocates its own), the scheduler off, the backups root kept, the place set to this one, and the mirror
+    re-read from the restored settings.json. Rewritten, never deleted. Returns `reset`, `absent` or `unreadable`."""
+    file = stage / 'config' / config.LOCAL_FILE
+    if not os.path.lexists(file):
+        return 'absent'
+    doc, notes = config.read_local(stage)
+    if doc is None:
+        path = stage / 'config' / config.LOCAL_FILE
+        path.unlink()
+        return 'unreadable'
+    doc.pop('ports', None)
+    doc.pop('apps', None)
+    doc['scheduler'] = False
+    try:
+        import machine_identity
+        place = machine_identity.place_id(create=False)
+    except Exception:
+        place = None
+    if place:
+        doc['place'] = place
+    else:
+        doc.pop('place', None)
+    mirrored = {}
+    for key, _where in config.LOCAL_MOVED.items():
+        value = (settings.get(key[0]) or {}).get(key[1])
+        if value is not None:
+            mirrored['.'.join(key)] = value
+    doc['mirrored'] = mirrored
+    workspace.write_json(file, doc)
+    return 'reset'
+
+
+def _device(base: Path | None) -> str | None:
+    """A workspace's public device id in the agent network, or None (OBS-357's clone check)."""
+    try:
+        import machine_move
+        return machine_move.device_id(base)[0]
+    except Exception:  # noqa: BLE001 - no device is no evidence
+        return None
+
+
+def _this_device(destination: Path) -> str | None:
+    """This machine's device: the running workspace's, never the restore's destination (which is empty)."""
+    try:
+        current = config.home().resolve()
+    except (config.ConfigurationError, OSError):
+        return None
+    return None if current == destination.resolve() else _device(current)
+
+
 def _as_another_machine(stage: Path) -> dict:
     """Make a restored copy this machine's own (OBS-284): leave out the other machine's identity
     and schedule state, turn its scheduler off, and give the workspace its own instance id."""
@@ -614,6 +669,7 @@ def _as_another_machine(stage: Path) -> dict:
         doc['features']['scheduler'] = False
         workspace.write_json(settings_file, doc)
         scheduler = 'turned off: `project-observatory full configure features scheduler true` on the one machine that runs it'
+    local_settings = _reset_local_settings(stage, config.read_json(settings_file))
     held = []
     lifecycle_file = stage / LIFECYCLE
     if lifecycle_file.is_file():
@@ -632,6 +688,7 @@ def _as_another_machine(stage: Path) -> dict:
     marker['instance_id'] = str(uuid.uuid4())
     workspace.write_json(marker_file, marker)
     return {'left_out': left, 'scheduler': scheduler, 'new_instance_id': True, 'held_off': held,
+            'local_settings': local_settings,
             'previous_instance_label': str(previous or '').replace('-', '')[:8] or None,
             'notes': [OTHER_PASSPHRASE_NOTE],
             'next': ['project-observatory full node --init  (this machine\'s own device id)',
@@ -998,9 +1055,11 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
     source, destination = source.resolve(), destination.resolve()
     manifest = verify_snapshot(source)
     try:
+        theirs, mine = manifest.get('device'), _this_device(destination)
         placing = machine_identity.restore_mode(
             manifest.get('machine_id'), unknown=unknown,
-            asked='same' if same_machine else ('second' if second_machine else None))
+            asked='same' if same_machine else ('second' if second_machine else None),
+            clone=bool(mine and isinstance(theirs, str) and theirs != mine))
     except machine_identity.MachineIdentityError as exc:
         raise config.ConfigurationError(str(exc)) from None
     another = placing['mode'] == 'second-machine'
