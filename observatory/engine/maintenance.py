@@ -1157,6 +1157,24 @@ def step_hung(base: Path, at: datetime.datetime, survey=None) -> dict:
             **({"degraded": receipt["degraded"]} if receipt.get("degraded") else {})}
 
 
+def step_ops_digests(base: Path, collect=None) -> dict:
+    """The daily operations digests the local products declare where they write (`ops_digest_folders.py`, DEC-0153
+    OD-9, OBS-533): read every pass in this OS account, each day's first line recorded once under the product's
+    project. Never raises: a pass does not stop for it."""
+    try:
+        import ops_digest_folders
+        receipt = (collect or ops_digest_folders.collect)()
+    except Exception as exc:  # noqa: BLE001
+        return {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
+    if not receipt.get("services") and not receipt.get("notDeclared") and not receipt.get("unattributed"):
+        return {"result": "none-declared"}
+    out = {"result": "ran", **{k: receipt[k] for k in ("services", "folders", "recorded", "repeated")}}
+    for key in ("skipped", "refused", "notDeclared", "unattributed"):
+        if receipt.get(key):
+            out[key] = receipt[key]
+    return out
+
+
 def configuration_enabled(base: Path, name: str) -> bool:
     """A feature switch of THIS workspace, read from its own settings file."""
     try:
@@ -1278,6 +1296,7 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
             if services is not None:
                 report["jobs"] = step_jobs(base=base)
         if not report["update"]["result"].startswith("updated"):
+            report["opsDigests"] = step_ops_digests(base)
             report["org"] = step_org(base, commands or Commands(base))
             try:
                 report["shares"] = step_shares(base, state, at, commands or Commands(base))

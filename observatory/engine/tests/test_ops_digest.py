@@ -99,7 +99,7 @@ class TheFixtures(unittest.TestCase):
                 self.assertEqual({f["code"] for f in findings}, {"schema"})
 
     def test_semantic_lines_report_the_contracts_codes(self) -> None:
-        paths = sorted((VENDORED / "semantic").glob("*.json"))
+        paths = sorted(p for p in (VENDORED / "semantic").glob("*.json") if not p.name.startswith("ops-digest-folders-"))
         self.assertEqual(len(paths), 14)
         for path in paths:
             doc = json.loads(path.read_text(encoding="utf-8"))

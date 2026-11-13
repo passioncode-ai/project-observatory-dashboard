@@ -1489,6 +1489,17 @@ at most 16 revisions (`revisions-exhausted`), a project's day at most 8 source l
 dropped. In those counts, the `ok` of a host's `retro-after-work` operation counts the
 retro requests answered by a retro the host saw written, never the retros themselves.
 
+**Read from the products' own folders (OBS-533).** A product whose local service descriptor names, under
+`extensions/ops-digest/0.1`, the folders inside its `paths.data` that hold its `daily-YYYY-MM.jsonl` files (DEC-0153
+OD-9) needs no sender: every maintenance pass (`full maintain run`, each 15 minutes) reads those folders in this OS
+account, line by line, and records each day's first line once, as written, under the project the registry attributes
+that service to, with the declared `source` and the descriptor's `{id, instance}`. A line that is not JSON, names
+another schema or fails the checks above is skipped and counted. A declaration the contract refuses (`FAC-SEM-168`: a
+remote placement, no `paths.data`, a folder or label named twice, a home folder or a key's shape in a folder's name) is
+read as not declared, and the pass's report names it under `opsDigests.notDeclared`; so is a service the registry
+attributes to no project or to two (`unattributed`). A folder that is a symbolic link, or that leads outside
+`paths.data`, is not read.
+
 The daily learning review (next section) is the reader of these lines.
 
 ### The daily learning review: what agents learned, what failed
