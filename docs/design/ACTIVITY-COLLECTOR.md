@@ -66,7 +66,7 @@ from the same attribution. Which organization a project is in is the registry's 
 server id is `fabric_org` in `config/organizations.json` (the id `full org enroll --org` names), and without it the
 session is personal. `account.class` is `unknown` in OE-01a (OE-02 reads Switchboard's provenance).
 
-A personal session's events stay on the device, in the local journal the owner reads (`full activity`, OE-03), and are
+A personal session's events stay on the device, in the local journal the owner reads (OE-03), and are
 counted in the receipt as `kept-personal`; they are never put in an outbox.
 
 ## A5. The outbox and the stream
@@ -82,7 +82,7 @@ carries them; nothing new is sent another way. A burst past the outbox bound end
 - OE-01a: tests over synthetic transcripts of both runtimes, the contract's telemetry fixtures (schema and the
   semantic rules `FAC-SEM-037`, `-038`, `-039`, `-100`), a personal folder's session never enqueued, a line written in
   two halves read once, a rotated file read from the start without counting a call twice.
-- OE-01b: `full activity reconcile --day DATE` rebuilds the day's interval sums from the transcripts' raw timestamps
+- OE-01b: a reconcile command (`reconcile --day DATE`, its name decided with OE-03's command) rebuilds the day's interval sums from the transcripts' raw timestamps
   and compares them with what was emitted; on the operator's machine the difference is at most 5 %, the command's
   output kept in the pilot's report (the plan's gate).
 - Then Vesta's `events_raw` holds the pilot device's first events (VES-FIRST-EVENTS).
