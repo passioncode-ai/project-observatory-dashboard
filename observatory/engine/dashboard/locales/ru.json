@@ -206,6 +206,7 @@
  "MCP server needs sign-in": "MCP-серверу нужен вход",
  "MCP server not answering": "MCP-сервер не отвечает",
  "Machine": "Машина",
+ "Agent commands hanging on their input": "Команды агентов, зависшие на вводе",
  "Machine disk low": "Мало места на диске машины",
  "Virtual machine at risk on a full disk": "Виртуальная машина под угрозой из-за полного диска",
  "Managed database": "Управляемая база данных",
@@ -2254,6 +2255,12 @@
  "low": "мало места",
  "normal": "норма",
  "temp": "временные файлы",
+ "{n} commands of agent sessions hang on their input": {
+  "one": "{n} команда сессии агента зависла на вводе",
+  "few": "{n} команды сессий агентов зависли на вводе",
+  "many": "{n} команд сессий агентов зависли на вводе",
+  "other": "{n} команды сессий агентов зависли на вводе"
+ },
  "the disk guard has never run": "контроль диска ни разу не запускался",
  "a virtual machine is writing to a nearly full disk": "виртуальная машина пишет на почти полный диск",
  "the disk guard has not run for {hours} hours": "контроль диска не запускался {hours} ч",

@@ -563,7 +563,7 @@ def doctor(base: Path) -> dict:
             # The port of each listener for this OS account, and who listens there (OBS-354).
             "ports": _ports(base),
             # This host and this OS account (OBS-357): the id bundles, receipts and placement carry.
-            "place": __import__("machine_identity").place_summary(),
+            "place": _place(base),
             "interface": {"locale": doc.get("interface", {}).get("locale", "en")},
             "coverage_warnings": coverage_warnings(doc),
             "tracked": __import__("tracked").health(),
@@ -923,6 +923,17 @@ def parse(argv: list[str]) -> argparse.Namespace:
         import local_ports
         return local_ports.parser().parse_args(rest)
     return _parser().parse_args(argv)
+
+
+def _place(base: Path) -> dict:
+    """Doctor's `place` block (OBS-357): the host, this place, the accounts sharing the host, and what to fix: a
+    clone of this machine named by a peer's facts, or a vault-digest name the host's accounts would share."""
+    block = __import__("machine_identity").place_summary()
+    try:
+        warnings = __import__("machine_move").place_warnings(None, base)
+    except Exception as exc:  # noqa: BLE001 - doctor reads what it can
+        warnings = [{"code": "unreadable", "reason": f"the place could not be checked ({type(exc).__name__})"}]
+    return {**block, **({"warnings": warnings} if warnings else {})}
 
 
 def _ports(base: Path) -> dict:

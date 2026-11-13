@@ -67,6 +67,7 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import socket
 import shlex
 import shutil
 import subprocess
@@ -983,6 +984,53 @@ def load_peers(home: Path, files: list[Path] | None = None) -> tuple[list[dict],
             # A shape the checks above did not foresee: the file is refused and named, status still runs.
             bad.append({"file": name, "reason": f"its content is malformed ({type(exc).__name__})"})
     return good, bad
+
+
+def place_warnings(home: Path | None, base: Path | None, *, peers: list[dict] | None = None,
+                   published: str | None = None, accounts=...) -> list[dict]:
+    """What doctor's `place` block warns about (OBS-357): a peer's facts naming this place with another device (a
+    clone of this machine), and, on a host several OS accounts share, a vault-digest name that is the bare host name
+    (the name every account of the host would publish under). `published` is the name this workspace's manifest
+    carries; read here when not given. Never raises: what cannot be read warns about nothing."""
+    out: list[dict] = []
+    try:
+        me = mi.place_id(home, create=False)
+    except mi.MachineIdentityError:
+        return out
+    if me is None:
+        return out
+    try:
+        facts = peers if peers is not None else load_peers(home or Path.home())[0]
+    except Exception:  # noqa: BLE001 - unreadable peers are machine-move's own finding
+        facts = []
+    mine = device_id(base)[0] if facts else None
+    for peer in facts:
+        if mine and mi.match(peer.get("machine"), me) == "same" and isinstance(peer.get("device"), str) \
+                and peer["device"] != mine:
+            out.append({"code": "clone-suspected",
+                        "reason": f"a machine-move facts file names this place with another device ({peer['device']}): "
+                                  "a copy of this machine; give it its own identifier, then "
+                                  "`project-observatory full node --init` on the copy"})
+    count = mi.accounts_on_host() if accounts is ... else accounts
+    if count != 1:
+        if published is None:
+            try:
+                tools = str(Path(__file__).resolve().parent / "tools")
+                if tools not in sys.path:
+                    sys.path.insert(0, tools)
+                import vault_digests as vd
+                path = vd.local_manifest_path()
+                published = vd.read_manifest(path).get("machine") if path.is_file() else None
+            except Exception:  # noqa: BLE001 - no manifest is no warning
+                published = None
+        host = socket.gethostname().split(".")[0]
+        if isinstance(published, str) and published == host:
+            out.append({"code": "digest-name-shared",
+                        "reason": f"this workspace publishes its vault digests as `{host}`, the host's name, on a host "
+                                  "several OS accounts share: another account publishing the same name reads as this "
+                                  "one to every peer; publish under a name of this place: "
+                                  "`project-observatory full vault-digests write --machine NAME`"})
+    return out
 
 
 def _vault_view(max_age_hours: float) -> tuple[dict | None, str | None]:

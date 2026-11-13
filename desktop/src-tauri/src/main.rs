@@ -116,7 +116,7 @@ fn show_dashboard(app: &AppHandle) {
                 let port = doc.get("port").and_then(Value::as_u64).map(|p| p as u16);
                 let mut shown = Shown {
                     port,
-                    port_busy: doc.get("server").and_then(Value::as_str) == Some("other-workspace"),
+                    port_busy: matches!(doc.get("server").and_then(Value::as_str), Some("other-workspace") | Some("other-account")),
                     built_at: doc.get("built_at").and_then(Value::as_str).map(str::to_string),
                     ..Shown::default()
                 };
@@ -190,7 +190,7 @@ fn banner_script(app: &AppHandle) -> String {
     let shown = shown.shown.lock().unwrap();
     let built = shown.built_at.clone().unwrap_or_default();
     let (text, can_start) = if shown.port_busy {
-        (l10n::t(l, "Port {port} is held by another workspace's server; stop it there first.",
+        (l10n::t(l, "Port {port} is held by another server (another workspace's, or another account's on this computer); stop it there, or run `project-observatory full ports allocate --reinstall`.",
                  &[("port", &shown.port.unwrap_or(0).to_string())]), false)
     } else {
         (l10n::t(l, "Saved pages from {built}. The live dashboard needs this workspace's server.", &[("built", &built)]), true)

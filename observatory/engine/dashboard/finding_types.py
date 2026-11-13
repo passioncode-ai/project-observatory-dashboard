@@ -135,6 +135,7 @@ LABELS: dict[str, str] = {
     "machine.guard_stopping": "Disk guard Git cleanup keeps stopping",
     "machine.guard_degraded": "Disk guard measurement incomplete",
     "machine.guard_idle": "Disk guard not running",
+    "machine.hung_commands": "Agent commands hanging on their input",
     "machine.heavy_origin": "Heavy memory use by one origin",
     "machine.memory_pressure": "Memory pressure",
     "machine.stale": "Machine survey out of date",

@@ -1136,6 +1136,27 @@ def step_guard(base: Path, state: dict, at: datetime.datetime, runner=None) -> d
     return result
 
 
+def step_hung(base: Path, at: datetime.datetime, survey=None) -> dict:
+    """Commands an agent session left hanging (tools/hung_commands.py, OBS-530): sampled every pass, so
+    two samples are fifteen minutes apart; the leaf commands of its short list are stopped only when
+    `features.auto_cleanup` is on. Never raises: a pass does not stop for it."""
+    apply = configuration_enabled(base, "auto_cleanup")
+    try:
+        tools = str(Path(__file__).resolve().parent / "tools")
+        if tools not in sys.path:
+            sys.path.insert(0, tools)
+        import hung_commands
+        receipt = (survey or hung_commands.run)(
+            base / "store" / "raw" / "hung-commands.json",  # paths-check: allow — the workspace `base` passed in, which need not be this process's paths.HOME
+            base / "store" / "logs" / "hung-commands.jsonl",  # paths-check: allow — the same workspace's journal
+            apply)
+    except Exception as exc:  # noqa: BLE001
+        return {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
+    return {"result": "degraded" if receipt.get("degraded") else "ran", "hung": len(receipt.get("hung") or []),
+            "stopped": sum(1 for s in receipt.get("stopped") or [] if s.get("result") == "stopped"),
+            **({"degraded": receipt["degraded"]} if receipt.get("degraded") else {})}
+
+
 def configuration_enabled(base: Path, name: str) -> bool:
     """A feature switch of THIS workspace, read from its own settings file."""
     try:
@@ -1192,7 +1213,7 @@ def step_shares(base: Path, state: dict, at: datetime.datetime, commands: "Comma
 
 def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Commands | None = None,
              services=..., store=None, app=None, sleep=time.sleep, first_check_delay: float = 0,
-             clock=time.monotonic, guard=step_guard, machine=None) -> dict:
+             clock=time.monotonic, guard=step_guard, machine=None, hung=None) -> dict:
     """One pass of everything that is due. Never raises for a step's own failure: each
     is recorded in store/maintenance.json and named in the answer.
 
@@ -1222,6 +1243,7 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
             report["guard"] = guard(base, state, at)
         except Exception as exc:  # noqa: BLE001 — the guard never stops an update or a backup
             report["guard"] = {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
+        report["hung"] = step_hung(base, at, hung)
         def settle() -> None:
             wait = first_check_delay - (clock() - PROCESS_STARTED)
             if wait > 0:
@@ -1252,6 +1274,7 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
                     report["app"] = {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
             report["snapshot"] = step_snapshot(base, state, at, services, sleep=sleep)
             report["machine"] = step_machine(base, at, machine)
+            report["ports"] = step_ports(base)
             if services is not None:
                 report["jobs"] = step_jobs(base=base)
         if not report["update"]["result"].startswith("updated"):
@@ -1269,6 +1292,30 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
         write_state(base, state)
         report["schedule_reload"] = _reload_after_pass(base)
         return report
+
+
+def step_ports(base: Path) -> dict:
+    """This OS account's ports (OBS-354). An account with a record refreshes its host claim, so a cleaner that ages
+    the shared folder never drops it. An installed server with no record is the migration: on a host with one account,
+    or where the historical ports are this account's or free, they are recorded as they are and nothing moves; where
+    another account holds them, this account takes a block and its server job is reinstalled on it (`moved`).
+    Never raises: a port never stops a backup."""
+    try:
+        import local_ports
+        have = local_ports.record(base)
+        if have:
+            return {"result": "kept", "scheme": have["scheme"],
+                    "claim": "written" if local_ports.write_claim(have) else "not-written"}
+        if local_ports.current_server_port(base) is None:
+            return {"result": "no-server"}
+        out = local_ports.allocate(base, reinstall=True)
+        moved = (out.get("reinstall") or {}).get("status") == "reinstalled"
+        return {"result": "moved" if moved else "recorded", "scheme": out["scheme"],
+                "server": out["ports"]["server"], "claim": out["claim"],
+                **({"reinstall": out["reinstall"]} if "reinstall" in out else {})}
+    except Exception as exc:  # noqa: BLE001
+        return {"result": "error", "code": getattr(exc, "code", type(exc).__name__),
+                "detail": str(exc)[:200]}
 
 
 def step_analytics(base: Path) -> dict:
