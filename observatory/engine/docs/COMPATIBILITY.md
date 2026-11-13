@@ -374,7 +374,7 @@ id of this computer where several accounts share it (`to-names-this-host`); the 
 (`sameHost`), an older peer naming only this computer as another account's (`same-host-account-unknown`). A clone
 shares the platform identifier and so the place; a bundle carries its agent-network `device`, and a bundle of this
 place from another device is refused until `--second-machine` or `--same-machine` decides (`clone-suspected`), as a
-peer's facts naming this place with another device are named in `status` instead of dropped. Tests: `tests/test_place_id.py`, `tests/test_machine_backup.py`, `tests/test_workspace_upgrade.py`.
+peer's facts naming this place with another device are named in `status` instead of dropped. A workspace snapshot's `manifest.json` carries `device` too (additive; absent without device keys), and its restore makes the same check against the running workspace's device. Doctor's `place` block lists `warnings`: `clone-suspected` when a peer's facts name this place with another device, and `digest-name-shared` when, on a computer several accounts share (or whose count is unknown), this workspace publishes its vault digests under the bare host name. Tests: `tests/test_place_id.py`, `tests/test_machine_backup.py`, `tests/test_workspace_upgrade.py`.
 
 ## Machine placement (0.30.1, OBS-283, OBS-284; 0.31.0, OBS-282, OBS-286)
 
