@@ -1136,6 +1136,27 @@ def step_guard(base: Path, state: dict, at: datetime.datetime, runner=None) -> d
     return result
 
 
+def step_hung(base: Path, at: datetime.datetime, survey=None) -> dict:
+    """Commands an agent session left hanging (tools/hung_commands.py, OBS-530): sampled every pass, so
+    two samples are fifteen minutes apart; the leaf commands of its short list are stopped only when
+    `features.auto_cleanup` is on. Never raises: a pass does not stop for it."""
+    apply = configuration_enabled(base, "auto_cleanup")
+    try:
+        tools = str(Path(__file__).resolve().parent / "tools")
+        if tools not in sys.path:
+            sys.path.insert(0, tools)
+        import hung_commands
+        receipt = (survey or hung_commands.run)(
+            base / "store" / "raw" / "hung-commands.json",  # paths-check: allow — the workspace `base` passed in, which need not be this process's paths.HOME
+            base / "store" / "logs" / "hung-commands.jsonl",  # paths-check: allow — the same workspace's journal
+            apply)
+    except Exception as exc:  # noqa: BLE001
+        return {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
+    return {"result": "degraded" if receipt.get("degraded") else "ran", "hung": len(receipt.get("hung") or []),
+            "stopped": sum(1 for s in receipt.get("stopped") or [] if s.get("result") == "stopped"),
+            **({"degraded": receipt["degraded"]} if receipt.get("degraded") else {})}
+
+
 def configuration_enabled(base: Path, name: str) -> bool:
     """A feature switch of THIS workspace, read from its own settings file."""
     try:
@@ -1192,7 +1213,7 @@ def step_shares(base: Path, state: dict, at: datetime.datetime, commands: "Comma
 
 def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Commands | None = None,
              services=..., store=None, app=None, sleep=time.sleep, first_check_delay: float = 0,
-             clock=time.monotonic, guard=step_guard, machine=None) -> dict:
+             clock=time.monotonic, guard=step_guard, machine=None, hung=None) -> dict:
     """One pass of everything that is due. Never raises for a step's own failure: each
     is recorded in store/maintenance.json and named in the answer.
 
@@ -1222,6 +1243,7 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
             report["guard"] = guard(base, state, at)
         except Exception as exc:  # noqa: BLE001 — the guard never stops an update or a backup
             report["guard"] = {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
+        report["hung"] = step_hung(base, at, hung)
         def settle() -> None:
             wait = first_check_delay - (clock() - PROCESS_STARTED)
             if wait > 0:
