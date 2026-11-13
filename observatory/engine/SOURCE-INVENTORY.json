@@ -631,8 +631,8 @@
       "path": "dashboard/finding_types.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1e269ce513c14ae0248e39ea851effba55147c5c1787ddf14db63c32a9632507",
-      "bytes": 15100
+      "export_sha256": "26be58332d49aded6a5f04d32c5785d63756779eec0beb55574984fc06827b73",
+      "bytes": 15173
     },
     {
       "path": "dashboard/home_page.py",
@@ -666,8 +666,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9f33d574940659e149a6551a28e600b510a9a5868ed2fb5e28eb586976dcec5e",
-      "bytes": 204042
+      "export_sha256": "b15f55c2cb65560ded5879231bae5f6029fdb4d24f268b3463997b6b487777ab",
+      "bytes": 204325
     },
     {
       "path": "dashboard/machine_page.py",
@@ -4899,8 +4899,8 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ff660edaa9d278bef833adcc0d20e1fede4846ae200c12bf1a31d2eb750abbeb",
-      "bytes": 174901
+      "export_sha256": "5970594e022dc93fc55b22eef2f2b204f140097c3dc87cf26b95bdea57b53989",
+      "bytes": 176244
     },
     {
       "path": "tests/test_dispatch_packet.py",
@@ -5464,8 +5464,8 @@
       "path": "tests/test_machine_findings.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "91c94c795b25ab88bd9dca73c5789e10a1743b94eb3b3591329fa567b342c559",
-      "bytes": 8633
+      "export_sha256": "87b58d44184cdfe90fb04885744ad916aab42d8198aa1e8d33dd3ff75ce4ea6d",
+      "bytes": 9587
     },
     {
       "path": "tests/test_machine_forward.py",
@@ -7055,8 +7055,8 @@
       "path": "tools/disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f0a2f85b69e445e8f2ea774ebf911901a790777a203fe88168060bd61ae15793",
-      "bytes": 99376
+      "export_sha256": "b648591896b9f8c2d6edfc03abc16eb9d75ece6900e1a8da7bfb01c17e250ce2",
+      "bytes": 101651
     },
     {
       "path": "tools/embedding_policy_cli.py",
@@ -7239,8 +7239,8 @@
       "path": "tools/machine_findings.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8449c989efdb5f3293f4a42d6e4801238658959e1fc14f97e01cd4ab61ee5920",
-      "bytes": 22000
+      "export_sha256": "a36a190e16fd0f8732d3d782fb347dd671881c4bdd820718981efdbc00d910fd",
+      "bytes": 23355
     },
     {
       "path": "tools/maintain.py",
