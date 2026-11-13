@@ -69,6 +69,11 @@ class PortError(RuntimeError):
 # --- what the host says (each a module function, so a test replaces it) -----------------------------
 
 def accounts() -> int | None:
+    """People's accounts on the host. A sandbox is a one-account host unless it says otherwise
+    (OBSERVATORY_HOST_ACCOUNTS), so a suite's expectations never depend on the CI runner's accounts."""
+    if _testing():
+        told = os.environ.get("OBSERVATORY_HOST_ACCOUNTS", "1")
+        return int(told) if told.isdigit() else None
     return host_accounts.count()
 
 
@@ -140,9 +145,10 @@ def _testing() -> bool:
 def claims_dir() -> Path:
     """The host's shared folder for claims. A sandbox or a test may point it elsewhere; a variable carried in a
     shell profile alone never does (the rule `machine_identity.machine_id` applies to the machine id)."""
-    override = os.environ.get(CLAIMS_ENV) if _testing() else None
-    if override:
-        return Path(override)
+    if _testing():
+        # A sandbox never writes into the host's shared folder: its own claims live in its workspace.
+        override = os.environ.get(CLAIMS_ENV)
+        return Path(override) if override else config.home() / "store" / "port-claims"
     if sys.platform == "darwin":
         return Path("/Users/Shared")
     if os.name == "nt":  # pragma: no cover - exercised on Windows only
@@ -160,6 +166,8 @@ def read_claims(folder: Path | None = None) -> tuple[list[dict], bool]:
     me = account()
     try:
         names = [n for n in os.listdir(folder) if n.startswith(CLAIM_PREFIX) and n.endswith(".json")]
+    except FileNotFoundError:
+        return [], True                                 # nobody has claimed yet (a sandbox's folder, first use)
     except OSError:
         return [], False
     out = []
@@ -206,7 +214,7 @@ def write_claim(ports: dict, folder: Path | None = None) -> str:
            "ports": sorted({int(ports[n]) for n in NAMES}), "updatedAt": stamp}
     target = claim_path(folder=folder)
     try:
-        if os.name == "nt":  # pragma: no cover - exercised on Windows only
+        if os.name == "nt" or _testing():
             folder.mkdir(parents=True, exist_ok=True)
         if target.is_symlink():
             return ""

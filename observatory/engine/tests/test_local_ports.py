@@ -3,7 +3,7 @@
 
 Everything the host would say is injected: the account count, this account, whether a uid exists, who
 listens on a port, whether it binds, and the descriptors' ports. Other accounts' claims are written in a
-temporary folder under the real uid's name (so the owner check holds) while this process plays account 900.
+temporary folder under the real owner's name (the uid, or the SID on Windows, so the owner check holds) while this process plays account 900.
 """
 from __future__ import annotations
 import importlib
@@ -22,11 +22,25 @@ import local_ports as lp
 import workspace
 
 ME = "900"                       # this process, as the allocator sees it: uid 900 starts at block 900 % 75 = 0
-OTHER = str(os.getuid()) if hasattr(os, "getuid") else "501"
+
+
+def _owner_of_a_new_file() -> str:
+    """The account a claim this process writes is owned by: the uid on POSIX, and on Windows the owner SID
+    the file system records (the user's SID, or Administrators where policy makes that the default owner)."""
+    if hasattr(os, "getuid"):
+        return str(os.getuid())
+    import osprivacy
+    with tempfile.TemporaryDirectory() as folder:
+        probe = Path(folder) / "probe"
+        probe.write_text("")
+        return osprivacy._owner(probe)
+
+
+OTHER = _owner_of_a_new_file()
 FIRST_BLOCK = {"server": 47400, "memory_http": 47402, "relay": 47406, "keyserver": 47407}
 
 
-class Ports(unittest.TestCase):
+class Fixture(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.base = Path(self.tmp.name).resolve()
@@ -72,6 +86,8 @@ class Ports(unittest.TestCase):
     def my_claim(self) -> dict:
         return json.loads((self.claims / f"{lp.CLAIM_PREFIX}{ME}.json").read_text())
 
+
+class Ports(Fixture):
     def test_one_account_records_legacy_and_changes_nothing(self):
         self.n, self.server = 1, 47311
         receipt = __import__("paths").SCRATCH / "serverd.json"
@@ -206,6 +222,100 @@ class Ports(unittest.TestCase):
         printed = "".join(c.args[0] for c in out.write.call_args_list)
         self.assertEqual(json.loads(printed)["ports"], FIRST_BLOCK)
         self.assertIn("ports", workspace.doctor(self.home))
+
+
+class Clients(Fixture):
+    """Each client of the record (spec 3.5) and the server's bind message (3.6)."""
+
+    def test_every_client_reads_the_record_and_refuses_on_a_shared_host_without_one(self):
+        import secret_client
+        from node.repair import LifecycleExecutor
+        sys.path.insert(0, str(ROOT / "tools"))
+        import dashboard_open
+        sys.path.insert(0, str(ROOT / "agent"))
+        import assistant
+        with self.assertRaises(secret_client.ClientRefused) as refused:
+            secret_client.node_url()
+        self.assertEqual(refused.exception.args[0], "port-unallocated")
+        with self.assertRaises(lp.PortError):
+            LifecycleExecutor(lambda: "")
+        with patch("sys.stderr"):
+            self.assertIsNone(dashboard_open.account_port(False))
+        with self.assertRaises(assistant.AssistantError):
+            assistant._port()
+        lp.allocate()
+        self.assertEqual(secret_client.node_url(), "http://127.0.0.1:47400/mcp")
+        self.assertEqual(LifecycleExecutor(lambda: "").port, 47400)
+        self.assertEqual(dashboard_open.account_port(False), 47400)
+        self.assertEqual(assistant._port(), 47400)
+
+    def test_the_server_names_who_holds_the_port(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        import serverd
+        for kind, code in (("another-account", "port-held-by-another-account"),
+                           ("unknown", "port-held-by-unknown-owner")):
+            self.listening = {47311: kind}
+            self.assertIn(code, serverd._holder_sentence(47311))
+        self.listening = {47311: "this-account"}
+        self.assertIn("this account", serverd._holder_sentence(47311))
+
+    def test_the_apps_see_another_accounts_server_and_never_probe_it(self):
+        sys.path.insert(0, str(ROOT / "agent"))
+        import assistant
+        lp.allocate()
+        self.listening = {47400: "another-account"}
+        with patch("tools.dashboard_open.served_workspace") as probe:
+            state = assistant.dashboard()
+        probe.assert_not_called()
+        self.assertEqual((state["server"], state.get("url")), ("other-account", None))
+        with self.assertRaises(assistant.AssistantError) as caught:
+            assistant.serve()
+        self.assertEqual(caught.exception.args[0], "dashboard-port-foreign")
+
+    def test_an_install_with_a_port_another_account_claims_is_refused(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        import serverd
+        self.other_claim([47500])
+        args = type("A", (), {"port": 47500, "install": True, "run": False})()
+        with self.assertRaises(lp.PortError) as caught:
+            serverd._port_for(args)
+        self.assertEqual(caught.exception.code, "port-claimed-by-another-account")
+        args.port = 47600
+        self.assertEqual(serverd._port_for(args), 47600)
+        self.assertEqual(lp.record()["scheme"], "chosen")
+
+
+class Pass(Fixture):
+    """The maintenance pass records an installed server's ports once and refreshes the claim (spec 3.4, 3.11)."""
+
+    def test_the_pass_records_an_install_once_then_keeps_it(self):
+        import maintenance
+        self.assertEqual(maintenance.step_ports(self.home)["result"], "no-server")
+        self.n, self.server = 1, 47311
+        first = maintenance.step_ports(self.home)
+        self.assertEqual((first["result"], first["scheme"], first["server"]), ("recorded", "legacy", 47311))
+        again = maintenance.step_ports(self.home)
+        self.assertEqual((again["result"], again["claim"]), ("kept", "written"))
+
+    def test_the_pass_moves_a_server_off_another_accounts_port(self):
+        import maintenance
+        self.server = 47311
+        self.listening = {47311: "another-account"}
+        with patch("subprocess.run") as run:
+            run.return_value.returncode, run.return_value.stderr, run.return_value.stdout = 0, "", ""
+            out = maintenance.step_ports(self.home)
+        self.assertEqual((out["result"], out["server"]), ("moved", 47400))
+
+    def test_the_machine_tool_answers_the_accounts_section(self):
+        sys.path.insert(0, str(ROOT / "mcp"))
+        try:
+            import server
+        except ImportError as exc:                      # the MCP runtime is not installed in this interpreter
+            self.skipTest(f"mcp runtime: {exc}")
+        fn = getattr(server.observatory_machine, "fn", server.observatory_machine)
+        out = fn(section="accounts")
+        self.assertEqual(out["accounts"]["accountsOnHost"], 2)
+        self.assertIn("server", out["accounts"]["listeners"])
 
 
 if __name__ == "__main__":

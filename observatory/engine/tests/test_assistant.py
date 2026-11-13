@@ -16,6 +16,11 @@ class AssistantTests(unittest.TestCase):
         self.home = Path(self.tmp.name).resolve()
         self.env = patch.dict(os.environ, {'HOME': str(self.home), 'USERPROFILE': str(self.home), 'OBSERVATORY_HOME': str(self.home/'ws')}, clear=True)
         self.env.start()
+        # One person's account on this host (OBS-354): the default port, whatever the runner's accounts are.
+        import local_ports
+        accounts = patch.object(local_ports, 'accounts', lambda: 1)
+        accounts.start()
+        self.addCleanup(accounts.stop)
         import workspace
         workspace.initialize(self.home/'ws')
         import paths
