@@ -73,8 +73,8 @@
       "path": "backup_vault.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d9d868304d13094f3c582577ae53b0daa8fcd7a38d1b83bd1a5eeb965998b742",
-      "bytes": 76295
+      "export_sha256": "ab791cf46af46c6dc2669f3ebc233f3fc71737654e9b474bb38d03993d466326",
+      "bytes": 77637
     },
     {
       "path": "cache_coverage.py",
@@ -968,8 +968,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "57c8422ef6fef46e381fabf8baec91523ae630cbe5ae7f5599a5c637d02d5765",
-      "bytes": 327800,
+      "export_sha256": "f20512c02b872e7cb8569e0527453e5772b6663db91f282a2fb4477dc74dedc7",
+      "bytes": 328174,
       "upstream_modified": true
     },
     {
@@ -4565,8 +4565,8 @@
       "path": "tests/test_backup_vault.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d3a62892bc77d6005c5d4ba238a6f121ad00a0a54e60771043d9fa7d7b1143d3",
-      "bytes": 64027
+      "export_sha256": "a9cab0fd48e78860ec3737160380c883aa4710ca5aec989440c5afc77eb4909e",
+      "bytes": 65332
     },
     {
       "path": "tests/test_blank_page.py",
