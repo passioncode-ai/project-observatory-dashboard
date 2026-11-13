@@ -4489,8 +4489,8 @@
       "path": "tests/test_activity_collector.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e1c9216b719224bfca85f219dc9357a4e80f1087a62298654f797ad520d10593",
-      "bytes": 12370
+      "export_sha256": "ea119ea821e671794535074b1237a21ae5e76e6ae28627746eef7a4350422eb7",
+      "bytes": 12388
     },
     {
       "path": "tests/test_agent.py",

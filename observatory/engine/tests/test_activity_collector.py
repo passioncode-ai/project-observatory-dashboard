@@ -7,14 +7,15 @@ from __future__ import annotations
 import json
 import os
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import activity_collector as ac  # noqa: E402
+import tmp as tmpdir  # noqa: E402  a temporary folder that goes away
 
 VECTORS = ROOT / 'fabric' / 'node-vectors'
 T0 = 1_800_000_000.0          # 2027-01-15, any fixed moment
@@ -60,8 +61,7 @@ class Emit:
 
 class Base(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix='activity-'))
-        self.addCleanup(lambda: __import__('shutil').rmtree(self.tmp, ignore_errors=True))
+        self.tmp = Path(tmpdir.mkdtemp(prefix='activity-'))
         self.claude_root = self.tmp / 'claude' / 'projects'
         self.codex_root = self.tmp / 'codex' / 'sessions'
         self.state = self.tmp / 'state'
