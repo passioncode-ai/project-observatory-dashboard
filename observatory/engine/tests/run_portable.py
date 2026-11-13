@@ -256,6 +256,8 @@ BOUNDARY += ('maintenance',)
 BOUNDARY += ('maintain_app',)
 # The disk guard: pressure, the lsof rule, each class; synthetic roots only (2026-10-11).
 BOUNDARY += ('disk_guard',)
+# Commands an agent session left hanging on their input: injected tables only (OBS-530).
+BOUNDARY += ('hung_commands',)
 # The DigitalOcean door against a fake `doctl` and a scratch vault (PLN-142).
 BOUNDARY += ('digitalocean_door', 'digitalocean_safety')
 # The Heroku door against a fake Platform API: authorizations and team membership (OBS-156).
