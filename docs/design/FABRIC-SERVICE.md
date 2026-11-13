@@ -18,7 +18,7 @@ Observatory in advance.
 |---|---|
 | `id` | `project-observatory` |
 | `instance` | `default` for the standard workspace (`~/.local/share/project-observatory-full`), else `ws-<sha16>` of the resolved workspace path — the digest the launchd label already carries |
-| Port | `47311` (`OBSERVATORY_SERVER_PORT`, `--port`); the installer claims it in the descriptor |
+| Port | `47311` on a computer with one OS account, else this account's recorded port (`full ports show`, OBS-354); `OBSERVATORY_SERVER_PORT` and `--port` override it; the installer claims it in the descriptor |
 | Who calls it | the operator's browser (the dashboard); a local host reading the well-known document and the events feed; agents keep using the MCP server over stdio, unchanged |
 | What it stores | nothing of its own: the lock and the events token in the workspace root, the heartbeat receipt `store/raw/serverd.json` as before. Uninstall keeps the workspace |
 | What it tells the operator | a newly opened finding, as a notification-worthy event; commits, agent sessions and resolved findings as routine events |

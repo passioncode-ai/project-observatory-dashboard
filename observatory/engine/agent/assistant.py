@@ -245,11 +245,17 @@ def project_choices():
                 for p in doc.get('projects',[]) if isinstance(p,dict) and isinstance(p.get('id'),str)][:1000]
     except (ValueError,OSError,AttributeError):return []
 
+def _account_port():
+    # This OS account's server (OBS-354): never the historical default on a host several accounts share.
+    import local_ports
+    try:return local_ports.port('server')
+    except local_ports.PortError:raise AssistantError('dashboard-unavailable') from None
+
 def _port():
     try:
         state=json.loads((paths.SCRATCH/'serverd.json').read_text())
-        port=state.get('port',47311)
-    except FileNotFoundError:port=47311
+        port=state.get('port') or _account_port()
+    except FileNotFoundError:port=_account_port()
     except (ValueError,OSError,AttributeError):raise AssistantError('dashboard-unavailable') from None
     if type(port) is not int or not 1<=port<=65535:raise AssistantError('dashboard-unavailable')
     return port
@@ -262,9 +268,13 @@ def dashboard():
     app shows the dashboard either way and says which one it is."""
     from tools import dashboard_open
     port=_port()
-    served=dashboard_open.served_workspace(port,timeout=3)
+    import local_ports
+    # Another OS account's server on this port (OBS-354): never probed, never shown as ours.
+    if local_ports.listener_kind(port)=='another-account':served='other-account'
+    else:served=dashboard_open.served_workspace(port,timeout=3)
     index=(paths.DASHBOARD_DIR/'index.html')
-    out={'port':port,'server':'verified' if served==str(paths.HOME) else 'absent' if served is None else 'other-workspace',
+    out={'port':port,'server':'verified' if served==str(paths.HOME) else 'absent' if served is None
+         else 'other-account' if served=='other-account' else 'other-workspace',
          'always_on':dashboard_open._always_on(),'files':None,'built_at':None}
     if out['server']=='verified':out['url']=f'http://127.0.0.1:{port}/dashboard/index.html'
     if index.is_file():
@@ -282,6 +292,7 @@ def serve(wait=45.0):
     state=dashboard()
     if state['server']=='verified':return state
     if state['server']=='other-workspace':raise AssistantError('dashboard-port-busy')
+    if state['server']=='other-account':raise AssistantError('dashboard-port-foreign')
     try:
         if state['always_on']:
             if sys.platform=='darwin':

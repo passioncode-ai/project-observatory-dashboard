@@ -880,11 +880,19 @@ class Server(socketserver.ThreadingMixIn, socketserver.TCPServer):
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--port", type=int, default=7717)
+    ap.add_argument("--port", type=int, default=None,
+                    help="default: this OS account's recorded port (7717 on a host with one account)")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--once", action="store_true",
                     help="answer one request and exit")
     a = ap.parse_args(argv[1:])
+    if a.port is None:
+        import local_ports                         # this OS account's port, recorded when it has none (OBS-354)
+        try:
+            a.port = local_ports.resolve("keyserver", allocate_missing=True)
+        except local_ports.PortError as exc:
+            print(f"keyserver: {exc} ({exc.code}); run: {exc.step}", file=sys.stderr)
+            return 2
     if a.host not in ("127.0.0.1", "localhost", "::1"):
         print(f"refusing to bind {a.host}: this holds a provisioning key and answers "
               f"only to this machine", file=sys.stderr)

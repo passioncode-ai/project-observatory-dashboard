@@ -188,8 +188,8 @@ enum DashboardMode: Equatable {
         case "backend-cancelled": return t("The request was stopped before it finished.")
         case "backend-invalid-response", "backend-response-too-large":
             return t("The engine returned an answer this app cannot read. Check that Settings point at a project-observatory program.")
-        case "dashboard-port-busy":
-            return t("The dashboard port is held by another workspace's server. Stop it, or choose that workspace in Settings.")
+        case "dashboard-port-busy", "dashboard-port-foreign":
+            return t("The dashboard port is held by another server: another workspace's, or another account's on this computer. Stop it, choose that workspace in Settings, or move this account to its own port with `project-observatory full ports allocate --reinstall`.")
         case "dashboard-start-failed":
             return t("The dashboard server did not start. Its log is store/logs/serverd.out in the workspace; `project-observatory full open --serve` shows the reason.")
         case "dashboard-build-failed":
@@ -474,7 +474,8 @@ enum DashboardMode: Equatable {
         } catch { if g == generation { dashboardFailure = failure(of: error) } }
     }
     nonisolated static func mode(_ doc: [String: Any], workspace: String) -> DashboardMode {
-        let busy = doc["server"] as? String == "other-workspace"
+        // Another workspace's server, or another OS account's on this computer (OBS-354): the port is not ours.
+        let busy = ["other-workspace", "other-account"].contains(doc["server"] as? String ?? "")
         if doc["server"] as? String == "verified", let raw = doc["url"] as? String, let url = URL(string: raw),
            let origin = DashboardOrigin.live(url) { return .live(origin) }
         if let path = doc["files"] as? String, let origin = DashboardOrigin.files(path, workspace: workspace) {

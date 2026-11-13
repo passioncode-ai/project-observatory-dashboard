@@ -17,7 +17,7 @@
   "About Project Observatory": "О Project Observatory",
   "Open": "Открыть",
   "Saved pages from {built}. The live dashboard needs this workspace's server.": "Сохранённые страницы от {built}. Для дашборда в реальном времени нужен сервер этой папки данных.",
-  "Port {port} is held by another workspace's server; stop it there first.": "Порт {port} занят сервером другой папки данных: сначала остановите его там.",
+  "Port {port} is held by another server (another workspace's, or another account's on this computer); stop it there, or run `project-observatory full ports allocate --reinstall`.": "Порт {port} занят другим сервером (другой папки данных или другой учётной записи на этом компьютере): остановите его там или выполните `project-observatory full ports allocate --reinstall`",
   "Starting the server…": "Сервер запускается…",
   "Building the dashboard…": "Дашборд собирается…",
   "Observatory is not installed yet": "Observatory ещё не установлен",

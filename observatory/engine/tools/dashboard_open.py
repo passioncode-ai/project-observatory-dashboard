@@ -25,7 +25,18 @@ sys.path.insert(0, str(ROOT))
 import configuration  # noqa: E402
 import osproc  # noqa: E402
 
-DEFAULT_PORT = int(os.environ.get("OBSERVATORY_SERVER_PORT", "47311"))
+DEFAULT_PORT = int(os.environ.get("OBSERVATORY_SERVER_PORT", "47311"))  # the help's example; main reads the record
+
+
+def account_port(serve: bool) -> int | None:
+    """This OS account's server port (OBS-354); `--serve` records one when the account has none. None, with the
+    step printed, when a host shared by several accounts has no record."""
+    import local_ports
+    try:
+        return local_ports.resolve("server", allocate_missing=serve) if serve else local_ports.port("server")
+    except local_ports.PortError as exc:
+        print(f"Observatory: {exc} ({exc.code}); run: {exc.step}", file=sys.stderr)
+        return None
 
 
 def _paths():
@@ -268,7 +279,9 @@ def served_port() -> int | None:
 def main(argv: list[str] | None = None) -> int:
     a = parser().parse_args(argv)
     if a.port is None:
-        a.port = (served_port() if a.stop else None) or DEFAULT_PORT
+        a.port = (served_port() if a.stop else None) or account_port(bool(a.serve))
+        if a.port is None:
+            return 2
     if not 0 < a.port < 65536:
         print("Observatory: port must be between 1 and 65535", file=sys.stderr)
         return 2

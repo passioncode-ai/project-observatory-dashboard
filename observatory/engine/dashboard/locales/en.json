@@ -349,6 +349,10 @@
   "one": "{n} idle branch holds the only copy of its commits",
   "other": "{n} idle branches hold the only copy of their commits"
  },
+ "{n} commands of agent sessions hang on their input": {
+  "one": "{n} command of an agent session hangs on its input",
+  "other": "{n} commands of agent sessions hang on their input"
+ },
  "{n} idle worktrees hold uncommitted work": {
   "one": "{n} idle worktree holds uncommitted work",
   "other": "{n} idle worktrees hold uncommitted work"

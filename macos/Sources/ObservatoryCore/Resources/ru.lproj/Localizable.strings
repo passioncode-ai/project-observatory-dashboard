@@ -149,7 +149,7 @@
 "The configured model budget has been reached." = "Лимит расходов на модель исчерпан.";
 "The dashboard cannot be opened" = "Дашборд не открывается";
 "The dashboard could not be built. Run `project-observatory full local` once; it measures this machine and builds the pages." = "Дашборд не удалось собрать. Один раз выполните `project-observatory full local`: команда измерит машину и соберёт страницы.";
-"The dashboard port is held by another workspace's server. Stop it, or choose that workspace in Settings." = "Порт дашборда занят сервером другой папки данных. Остановите его или выберите ту папку в настройках.";
+"The dashboard port is held by another server: another workspace's, or another account's on this computer. Stop it, choose that workspace in Settings, or move this account to its own port with `project-observatory full ports allocate --reinstall`." = "Порт дашборда занят другим сервером: другой папки данных или другой учётной записи на этом компьютере. Остановите его, выберите ту папку в настройках или переведите эту учётную запись на свой порт: `project-observatory full ports allocate --reinstall`.";
 "The dashboard server did not start. Its log is store/logs/serverd.out in the workspace; `project-observatory full open --serve` shows the reason." = "Сервер дашборда не запустился. Его журнал — store/logs/serverd.out в папке данных; причину покажет `project-observatory full open --serve`.";
 "The dashboard server is not running — these are the saved pages from {time}." = "Сервер дашборда не запущен; показаны сохранённые страницы от {time}.";
 "The dashboard server is not running — these are the saved pages." = "Сервер дашборда не запущен; показаны сохранённые страницы.";
