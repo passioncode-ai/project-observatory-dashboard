@@ -332,7 +332,7 @@ def _snapshot(base: Path, output: Path, *, carry_stores: bool = False,
         manifest = {'format_version':SNAPSHOT_FORMAT, 'application_version':config.VERSION,
                     'minimum_reader':marker['minimum_reader'], 'minimum_writer':marker['minimum_writer'],
                     'created_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                    'machine_id':machine_identity.machine_id(),
+                    'machine_id':machine_identity.place_id(),'host_id':machine_identity.machine_id(),
                     # The home the paths in settings were written under (OBS-347): a restore under
                     # another home rewrites that prefix. Additive; an older reader ignores it.
                     # Absent when this process has no home (`this_home`): nothing is rewritten then.
