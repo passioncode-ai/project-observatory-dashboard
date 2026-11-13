@@ -3084,8 +3084,11 @@ OS account of the same computer (`another-account`) and another computer (`anoth
 as a second machine. A bundle from an engine before place ids names only the computer: on a computer
 with one account it is this place, as before; on a computer several accounts share, it is this
 account's only when its home is this home (`same-host-same-home`), else a second machine
-(`same-host-account-unknown`). `--second-machine` and `--same-machine` (at a terminal) still decide
-by hand:
+(`same-host-account-unknown`). A copy of this machine (a cloned disk or virtual machine) shares the
+place; a bundle or snapshot of this place taken on another agent-network device is refused until you
+choose (`clone-suspected`), and `full doctor`'s `place` block names a peer's facts that do the same,
+and a vault-digest name every account of a shared computer would publish (`digest-name-shared`).
+`--second-machine` and `--same-machine` (at a terminal) still decide by hand:
 
 - **SSH.** `~/.ssh/config` (and `config.d/`), `known_hosts`, `authorized_keys`,
   `allowed_signers` and each `*.pub` whose private half is not in the bundle are written (the
@@ -3706,6 +3709,19 @@ to the shared update log. Each maintenance run does only what is due:
 
 - With `features.auto_cleanup` on, first the disk guard (see [The disk guard](#the-disk-guard)): hourly while space
   is normal, on every pass below the `low` line.
+- Every pass it samples the commands coding-agent sessions started (OBS-530). A command below a
+  session's shell (never the session itself, nor its MCP servers or `sleep`), older than an hour,
+  whose CPU time did not grow between two samples and whose input is a pipe or a terminal rather
+  than `/dev/null`, is waiting on input nobody writes, and its session waits on it: the finding
+  `machine.hung_commands` names it with its session's folder (receipt `hung-commands.json` in the
+  store's `raw` folder). With `features.auto_cleanup` on, only `wc`, `cat`, `grep` or `head`
+  reading no file, whose input is a terminal or a unix socket (a coding agent hands a background
+  command its input as a socket it never writes to) and whose process group holds nothing else but
+  shells, is stopped, with SIGTERM, and journalled in `store/logs/hung-commands.jsonl`; any other
+  command is left for you or its session. A command reading a pipe, or with a live neighbour in its
+  group, is named but never stopped: a watcher waiting for its event (`tail -f log | grep X | head -1`)
+  looks the same. `project-observatory full machine --explain PID`
+  names the session. Not read on Windows yet.
 
 - Every five minutes it runs `full update --check` (the same static read); at login the first
   check waits 90 seconds after the job starts. When a newer **stable** release exists, it runs `full update --apply

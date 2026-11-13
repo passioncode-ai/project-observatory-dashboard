@@ -122,6 +122,23 @@ if not WINDOWS:
     def owned_by_me(target: Target) -> bool:
         return _stat(target).st_uid == os.getuid()
 
+    def only_my_group_may_write(target: Target) -> bool:
+        """This account's own target whose only write bit beyond the owner's is its group's, where the group is this
+        account's private group: named as the account, with no other member (a person's account on Ubuntu, whose umask
+        002 leaves that bit on every folder it makes). Nobody else can write there, so tightening it loses nothing."""
+        info = _stat(target)
+        mode = stat.S_IMODE(info.st_mode)
+        if info.st_uid != os.getuid() or mode & 0o002 or not mode & 0o020:
+            return False
+        try:
+            import grp
+            import pwd
+            group = grp.getgrgid(info.st_gid)
+            return group.gr_name == pwd.getpwuid(os.getuid()).pw_name and not [m for m in group.gr_mem
+                                                                               if m != group.gr_name]
+        except (KeyError, ImportError):
+            return False
+
     def make_private(target: Target) -> None:
         """0700 for a folder, 0600 for anything else."""
         info = _stat(target)
@@ -377,6 +394,10 @@ else:  # pragma: no cover - exercised by the Windows CI job
 
     def owned_by_me(target: Target) -> bool:
         return _owner(target) in _trusted()
+
+    def only_my_group_may_write(target: Target) -> bool:
+        """POSIX's private-group case has no Windows form: an access list is checked as it stands."""
+        return False
 
     def make_private(target: Target) -> None:
         """A protected list: this account, LocalSystem, Administrators; inherited inside a folder."""

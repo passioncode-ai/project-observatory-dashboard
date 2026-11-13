@@ -52,6 +52,12 @@ def _directory(path: Path, kind: str, initialize: bool):
         return folder
     fd = osprivacy.open(path.parent, os.O_RDONLY | osprivacy.DIRECTORY | osprivacy.NOFOLLOW)
     try:
+        if initialize and osprivacy.only_my_group_may_write(fd):
+            # This account's own folder made under umask 002 (Ubuntu's default for a person's account), its group
+            # this account's private group: `full init` failed on its own `store/` (OBS-354, the two-accounts job of
+            # #528). Only at initialization, and only that case: a folder others or a shared group may write to is
+            # still refused, since something may have been put there.
+            osprivacy.make_private(fd)
         if not osprivacy.owned_by_me(fd) or osprivacy.others_may_write(fd):
             raise failure(path, kind, 'state directory owner or permissions are unsafe '
                                       f'({osprivacy.explain(fd)})')
