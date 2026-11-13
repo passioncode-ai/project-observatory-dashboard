@@ -628,6 +628,16 @@ def fresh_busy(target: str, timeout: float = 5.0) -> bool | None:
     return probe(target, timeout)
 
 
+#: `SF_NOUNLINK`, `SF_IMMUTABLE` and `UF_IMMUTABLE` (`sys/stat.h`): the system refuses to remove such an entry.
+PROTECTED_FLAGS = 0x00100000 | 0x00020000 | 0x00000002
+PROTECTED_REASON = "protected by the system (sunlnk or immutable); macOS refuses to remove it"
+
+
+def protected(st) -> bool:
+    """An entry the system will not let anyone remove; `st_flags` exists on macOS and BSD only."""
+    return bool(getattr(st, "st_flags", 0) & PROTECTED_FLAGS)
+
+
 def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget | None = None,
               degraded: list | None = None, kept: list | None = None, state: dict | None = None) -> list[dict]:
     """Entries of the temporary roots nobody touched for `temp_days`, held by nobody.
@@ -667,7 +677,15 @@ def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget
             entries = []
             for e in _scan(d):
                 with contextlib.suppress(OSError):
-                    entries.append((e.stat(follow_symlinks=False).st_mtime, e))
+                    st = e.stat(follow_symlinks=False)
+                    if protected(st):
+                        # macOS keeps its own services' folders in the user temporary root with
+                        # `sunlnk` (SIP): removing one fails every time, so it is passed over and
+                        # named once it is as old as an entry the pass would take, never planned (OBS-537).
+                        if st.st_mtime < cutoff:
+                            _note_kept(kept, "temp", e.path, PROTECTED_REASON)
+                        continue
+                    entries.append((st.st_mtime, e))
             # OLDEST FIRST; an entry whose own time is recent is not walked at all.
             for top, e in sorted(entries, key=lambda x: x[0]):
                 if top >= cutoff:

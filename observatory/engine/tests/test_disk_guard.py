@@ -313,6 +313,32 @@ class Temp(Base):
         self.assertEqual([Path(a["target"]).name for a in plan], ["old"])
         self.assertEqual(plan[0]["bytes"], 100)
 
+    def test_a_folder_the_system_protects_is_passed_over_and_named(self):
+        """OBS-537: macOS keeps its services' folders in the user temporary root with `sunlnk`; removing one
+        failed on every pass (14 times each on 2026-11-11 and 12). They are named as kept, never planned."""
+        for name in ("old", "talagent"):
+            (self.t1 / name).mkdir()
+            (self.t1 / name / "f").write_text("x")
+            age(self.t1 / name, 5)
+        original = self.g.protected
+        self.g.protected = lambda st: getattr(st, "st_ino", None) == (self.t1 / "talagent").stat().st_ino
+        try:
+            kept = []
+            plan = self.g.plan_temp(self.cfg(), "normal", self.free(), time.time(), kept=kept)
+        finally:
+            self.g.protected = original
+        self.assertEqual([Path(a["target"]).name for a in plan], ["old"])
+        self.assertTrue(any("talagent" in str(k) and "protected" in str(k) for k in kept), kept)
+
+    def test_the_protected_flags_are_read_from_st_flags(self):
+        class St:
+            def __init__(self, flags):
+                self.st_flags = flags
+        self.assertTrue(self.g.protected(St(0x00100000)))
+        self.assertTrue(self.g.protected(St(0x00000002)))
+        self.assertFalse(self.g.protected(St(0)))
+        self.assertFalse(self.g.protected(object()))
+
     def test_pressure_shortens_the_age(self):
         (self.t1 / "two-days").mkdir()
         age(self.t1 / "two-days", 2)
