@@ -456,6 +456,27 @@ class BeforeUpdateInventory(Base):
         self.assertTrue(any('1 unencrypted snapshot(s)' in w for w in report['warnings']))
         self.assertTrue(directory.is_dir())  # status is read-only
 
+    def test_leftovers_of_a_failed_export_go_with_the_next_working_one(self):
+        """OBS-532: copies an export could not take stayed local for good (rotate_local kept three); the next working
+        export carries them into the root, and the root still keeps the newest, never an old leftover over it."""
+        import time
+        left = []
+        for i in range(2):
+            d = self.make_update(f'left-{i}')
+            vault.after_snapshot(self.home, d, 'before-update')          # no passphrase: kept local
+            left.append(d)
+            time.sleep(1.1)
+        self.assertEqual(len(vault.local_snapshots(self.home, 'before-update')), 2)
+        vault.set_passphrase(self.home, PASS)
+        newest = self.make_update('newest')
+        report = vault.after_snapshot(self.home, newest, 'before-update')
+        self.assertTrue(report['encrypted'])
+        self.assertEqual(sorted(report['carried']), sorted(d.name for d in left))
+        self.assertEqual(vault.local_snapshots(self.home, 'before-update'), [], 'no plaintext copy stays')
+        root = vault.artifacts(self.target(), 'before-update', vault.SNAPSHOT_SUFFIX)
+        self.assertLessEqual(len(root), vault.KEEP)
+        self.assertIn(Path(report['snapshot']), root, 'the newest is never pushed out by an old leftover')
+
     def test_update_migrates_encrypted_and_restores_while_foreign_kind_stays(self):
         directory = self.make_update()
         foreign = self.home / 'backups' / 'foreign-kind-fixture'

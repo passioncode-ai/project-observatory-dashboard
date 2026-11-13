@@ -1709,6 +1709,19 @@ python "$(project-observatory full-path)/tools/use_secret.py" run --share SHARE-
   code is kept so `confirm` can compare it: on this machine, a program running as you can do what
   you can. The comparison moves into Observatory's signed app window in a later release (OBS-280).
   `create` prints the link only to a terminal, or with `--show-link`.
+- **Your own two machines, finished by your agent** (OBS-531, contract CT-298). When both machines
+  are yours (two estates in the personal context, neither enrolled in an organization) and you
+  told your agent to finish, it may do the three acts without a terminal, each with your words as
+  `--decision` (DEC-0121: `by`, `via`, `action`, `target` the share id, `instruction`, `at`) and
+  each run on the machine it acts on (over its own SSH, never the relay or the mailbox): `full share
+  accept SHARE-ID --agent NAME --decision JSON` on the recipient, for a link it handed over pinned
+  in your words; `full share read-code SHARE-ID --agent NAME --decision JSON` on the recipient,
+  which prints the six digits once the exchange completed; and `full share confirm SHARE-ID --agent
+  NAME --decision JSON` on the sender, with those digits on standard input. The sender's node
+  compares them with its own code: equal seals, different spends the link as `differ` does, and
+  there is no second try. `--without-comparing` is never an agent's. Each act is recorded with your
+  words in `node/shares/own-decisions.jsonl` (owner-only), never the digits. Outside these
+  conditions each answers `human-step-required` with the step you take at a terminal.
 - **Using it.** The recipient's agents take the key through `use_secret.py run --share ID NAME`
   (flags before the names; `--consumer NAME` names the agent in the report). The key stays sealed
   on disk under `node/shares/received/`, apart from every vault, and is opened in memory for that
@@ -2688,6 +2701,10 @@ use the same snapshot kinds, including snapshots left by engine updates. Migrati
 exports verified copies under the existing three-per-kind policy; an unverifiable
 copy is reported and retained. Unrecognized kinds are outside this inventory and
 remain untouched by migration; the count is not a survey of every backup-like directory.
+A local copy an export could not take (no passphrase yet, a root that did not answer) no longer
+stays for good: the next export of the same kind that works carries it into the root encrypted
+and removes it here, and the root's rotation keeps the newest, never an old copy over it
+(OBS-532). Its report lists `carried`, and `left_local` with the reason for one it could not.
 
 The format is `OBSENC1`: AES-256-GCM in authenticated chunks, key derived from
 the passphrase by scrypt (N=2^17, r=8, p=1), header bound as associated data,

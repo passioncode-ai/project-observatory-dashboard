@@ -97,6 +97,8 @@ PATH_PREFIX_ALLOWLIST = {
     "store/review/": "the review batch file `review.py batch prepare` writes into the workspace (OBS-227)",
     "store/analytics/": "the anonymous usage events' install id, queue, counters and notice record, written into "
                         "the workspace by usage_analytics.py (OBS-324)",
+    "node/shares/": "a share's files and the own-machines decision journal, written into the node's folder by "
+                    "share_cli.py and own_share.py (OBS-531)",
 }
 
 PATH_ALLOWLIST = {

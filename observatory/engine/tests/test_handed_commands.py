@@ -65,6 +65,7 @@ STOP_WORDS = {"then", "and", "or", "to", "if", "for", "with", "—", "–", "-",
 SAMPLES = {
     "PATH": "/srv/example-ws/projects", "PID": "4242", "FILE": "/srv/example-ws/profile.json",
     "ID": "alpha-plugin", "AMOUNT": "5", "VENDOR/MODEL": "example/model-a", "X.Y.Z": "0.12.0",
+    "JSON": '{"by": "operator"}',  # the operator's decision as one JSON argument (OBS-531)
     "PORT": "8765", "NAME": "github", "SNAPSHOT": "/srv/example-ws/snapshot", "OUTPUT": "/srv/example-ws/out",
     "ID,ID": "example/model-a,example/model-b", "CEILING": "daily_ceiling", "ACTION": "status",
     "{p['id']}": "alpha-plugin", "{release.version}": "0.12.0", "{latest}": "0.12.0",
