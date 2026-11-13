@@ -229,6 +229,55 @@ class CheapHolderAdmission(Base):
         self.assertTrue(all(c.kwargs.get("complete") is True for c in take.call_args_list))
         self.assertTrue(self.t1.exists())
 
+    def test_the_first_listing_is_a_warm_up_given_room(self):
+        """OBS-534: the pass's first `lsof` under launchd took 13 to 41 s and every later one 0.25 s; the guard
+        takes one listing first, with up to WARMUP_SECONDS, before any class's own, and reports it."""
+        import holders
+        complete = holders.Holders([], "lsof", scope=[str(self.base)])
+        complete.observation = "complete"
+        with self.no_inventory(), patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g, "refresh", return_value="fresh"), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g.Holders, "take", return_value=complete) as take, \
+                patch.object(self.g, "planners", return_value=[(n, lambda b: []) for n in self.g.CLASSES]):
+            doc = self.g.run([])
+        first = take.call_args_list[0]
+        self.assertTrue(first.kwargs.get("complete"))
+        self.assertGreater(first.args[0], take.call_args_list[1].args[0])
+        self.assertLessEqual(first.args[0], self.g.WARMUP_SECONDS)
+        self.assertEqual(doc["holders_warmup"]["observation"], "complete")
+        self.assertIn("holders-warmup", doc["phases"])
+
+    def test_an_unknown_listing_says_why(self):
+        """OBS-534: a guard that removed nothing names the listing's failure, not only that it failed."""
+        unknown = self.g.Holders(None)
+        unknown.reason = "command-timeout"
+        with self.no_inventory(), patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g, "refresh", return_value="fresh"), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g.Holders, "take", return_value=unknown), \
+                patch.object(self.g, "planners", return_value=[(n, lambda b: []) for n in self.g.CLASSES]):
+            doc = self.g.run([])
+        self.assertEqual(doc["holders_by_phase"]["temp"]["reason"], "command-timeout")
+        self.assertEqual(doc["holders_warmup"]["reason"], "command-timeout")
+        (row,) = [d for d in doc["degraded"] if d.get("source") == "holders"]
+        self.assertEqual(row["detail"], "command-timeout")
+
+    def test_take_complete_names_each_failure(self):
+        import holders
+        def capture(result):
+            return patch.object(holders, "_capture", return_value={"complete": True, "returncode": 0,
+                                                                   "stderr_seen": False, "stdout": b"", **result})
+        cases = [({"complete": False, "reason": "command-timeout"}, "command-timeout"),
+                 ({"returncode": 1, "stdout": b"n/x\n"}, "lsof-exit-1"),
+                 ({"stderr_seen": True, "stdout": b"n/x\n"}, "lsof-warnings"),
+                 ({}, "lsof-no-output")]
+        for result, reason in cases:
+            with self.subTest(reason), capture(result), patch.object(holders.shutil, "which", return_value="/usr/sbin/lsof"):
+                observed = holders.Holders.take_complete(5, roots=[str(self.base)])
+            self.assertFalse(observed.known)
+            self.assertEqual(observed.reason, reason)
+
     def test_default_positive_hint_contract_remains_incomplete(self):
         import holders
         with patch.object(holders, "lsof_paths", return_value=["/srv/held/file"]), \
