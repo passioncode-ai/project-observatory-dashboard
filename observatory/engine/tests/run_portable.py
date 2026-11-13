@@ -378,6 +378,8 @@ ROOT_FILES = (
     'machine_identity.py', 'machine_move.py', 'machine_forward.py',
     # The native secret prompt's node queue and the agent's job (OBS-260): serverd and the job runner import them.
     'secret_prompt.py', 'secret_client.py',
+    # A share between one person's own two machines, finished by their agent (OBS-531, CT-298).
+    'own_share.py',
     # Who owns each end of a loopback connection, the account count, and the servers' peer check (OBS-355).
     'peer_owner.py', 'host_accounts.py', 'peer_check.py',
     # The port of each listener for this OS account (OBS-354).

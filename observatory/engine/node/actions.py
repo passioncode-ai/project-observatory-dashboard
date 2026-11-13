@@ -33,6 +33,17 @@ SHARE_OPEN = {'id': 'share.open', 'title': 'Open a share', 'tool': 'share.open',
 #: The recipient's "Accept", its consent to the reports (PS-5, PS-8): the person's step, never an agent's.
 SHARE_ACCEPT = {'id': 'share.accept', 'title': 'Accept', 'tool': 'share.accept', 'gate': 'human',
                 'humanStep': 'consent'}
+#: The sender's comparison of the codes (PS-6): the person's step, never an agent's, outside CT-298's case.
+SHARE_CONFIRM = {'id': 'share.confirm', 'title': 'Confirm the codes', 'tool': 'share.confirm', 'gate': 'human',
+                 'humanStep': 'comparison'}
+#: CT-298 (OBS-531): one person's own two machines, finished by their agent. Three ids of their own beside the human
+#: ones (OM-2: FAC-SEM-142 takes one gate per id), admitted only under OM-1 (`own_share.py`).
+SHARE_ACCEPT_OWN = {'id': 'share.accept-own', 'title': 'Accept on my own machine', 'tool': 'share.accept-own',
+                    'gate': 'relayed'}
+SHARE_READ_CODE = {'id': 'share.read-code', 'title': 'Read the code on my own machine', 'tool': 'share.read-code',
+                   'gate': 'relayed'}
+SHARE_CONFIRM_OWN = {'id': 'share.confirm-own', 'title': 'Confirm the codes on my own machine',
+                     'tool': 'share.confirm-own', 'gate': 'relayed'}
 
 _REQUEST_KEY = re.compile(r'[A-Za-z0-9_.-]{1,64}')                 # interop-common.schema.json#/$defs/requestKey
 _CAPABILITY = re.compile(r'[a-z][a-z0-9._-]{1,127}')               # common.schema.json#/$defs/capabilityName

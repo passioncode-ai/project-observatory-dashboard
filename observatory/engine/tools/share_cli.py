@@ -13,6 +13,9 @@ Sender:
         (a terminal)
     project-observatory full share confirm ID --without-comparing
         seal without comparing: trust on first use (a terminal, and a typed phrase)
+    project-observatory full share confirm ID --agent NAME --decision JSON
+        one person's own two machines (CT-298, OBS-531): the recipient's six digits on standard input, compared by
+        this node; only under OM-1 (`own_share.py`), else the person's step is named
     project-observatory full share revoke ID
         take it back: the mailbox refuses from now on
     project-observatory full share provider-ended ID
@@ -24,6 +27,10 @@ Recipient:
         open a link the sender gave you: it asks for the link, which keeps it out of your shell history (a terminal)
     project-observatory full share accept ID
         accept a link an agent handed to this machine (its "Open a share"): nothing is claimed before you do
+    project-observatory full share accept ID --agent NAME --decision JSON
+        one person's own two machines: their agent accepts a pinned link it handed over (OM-1)
+    project-observatory full share read-code ID --agent NAME --decision JSON
+        one person's own two machines: the code, read on this machine for the sender's node (OM-3)
     project-observatory full share status ID
         the code to read to the sender, then the keys you received
     python "$(project-observatory full-path)/tools/use_secret.py" run --share ID SLOT -- COMMAND
@@ -81,6 +88,15 @@ def require_terminal(action: str) -> None:
         raise SystemExit(f"share: refusing to {action} without a terminal. It is a person's act (DEC-0142: comparing "
                          f"codes, consenting to the reports, stating the provider ended a key), and an agent must not "
                          f"do it for you. Run it yourself; there is no --yes.")
+
+
+def node_folder() -> pathlib.Path:
+    return paths.setting_path("OBSERVATORY_NODE", paths.HOME / "node").resolve()
+
+
+def _outside(exc) -> int:
+    print(json.dumps(exc.answer, indent=1, sort_keys=True))
+    return 2
 
 
 def mailbox_origin(explicit: str | None) -> str | None:
@@ -257,6 +273,8 @@ def cmd_sync(args) -> int:
 
 
 def cmd_confirm(args) -> int:
+    if args.agent is not None:
+        return confirm_own(args)
     require_terminal("confirm a comparison code")
     SH, s = store()
     found = _find(s, SH, args.id)
@@ -287,6 +305,77 @@ def cmd_confirm(args) -> int:
               "share and send its link again.")
         return 1
     _print("sent", record, SH, False)
+    return 0
+
+
+def confirm_own(args) -> int:
+    """`share.confirm-own` (CT-298 OM-4): the recipient's digits on standard input, never argv; this node compares."""
+    import own_share
+    from node import actions
+    SH, s = store()
+    found = _find(s, SH, args.id)
+    if found is None:
+        return 1
+    side, share_id = found
+    step = f"{PROG} confirm {share_id[:8]}"
+    if args.without_comparing:
+        return _outside(own_share.Outside(actions.SHARE_CONFIRM, step,
+                                          "sharing without comparing is the person's act and is never relayed"))
+    if side != "sent":
+        print("share: only the sender confirms; read your code with `read-code` on the recipient's machine",
+              file=sys.stderr)
+        return 2
+    decision = own_share.parse_decision(args.decision)
+    node = node_folder()
+    try:
+        record_as = own_share.gate(actions.SHARE_CONFIRM_OWN, actions.SHARE_CONFIRM, agent=args.agent,
+                                   decision=decision, share_id=share_id, node=node, step=step,
+                                   project=s._sent(share_id).record().get("project"))
+    except own_share.Outside as exc:
+        return _outside(exc)
+    digits = sys.stdin.readline().strip()
+    try:
+        record = s.confirm(share_id, code=digits)
+    except SH.ShareError as exc:
+        print(f"share: {exc.code}: {exc}", file=sys.stderr)
+        return 1
+    outcome = "confirmed" if record.get("confirmed") and record["state"] != "burnt" else "they-differ"
+    own_share.journal(node, act="share.confirm-own", share_id=share_id, record_as=record_as, decision=decision,
+                      outcome=outcome)
+    view = SH.summary("sent", record)
+    print(json.dumps({"shareId": share_id, "outcome": outcome, "state": view.get("state")}, indent=1, sort_keys=True))
+    return 0 if outcome == "confirmed" else 1
+
+
+def cmd_read_code(args) -> int:
+    """`share.read-code` (CT-298 OM-3): the recipient's six digits, for the sender's node, under OM-1 only."""
+    import own_share
+    from node import actions
+    SH, s = store()
+    found = _find(s, SH, args.id)
+    if found is None:
+        return 1
+    side, share_id = found
+    step = f"{PROG} status {share_id[:8]}"
+    if side != "received":
+        print("share: the code is read on the recipient's machine; the sender's own code never leaves it",
+              file=sys.stderr)
+        return 2
+    decision = own_share.parse_decision(args.decision)
+    node = node_folder()
+    try:
+        record_as = own_share.gate(actions.SHARE_READ_CODE, actions.SHARE_CONFIRM, agent=args.agent,
+                                   decision=decision, share_id=share_id, node=node, step=step)
+    except own_share.Outside as exc:
+        return _outside(exc)
+    record = s.sync_received(share_id)
+    if record["state"] != "comparing" or not record.get("code"):
+        print(f"share: not-comparing: the exchange of {share_id[:8]} is not complete, or it was already confirmed, "
+              f"aborted or sealed (state {record['state']})", file=sys.stderr)
+        return 1
+    own_share.journal(node, act="share.read-code", share_id=share_id, record_as=record_as, decision=decision,
+                      outcome="read")
+    print(json.dumps({"shareId": share_id, "code": record["code"]}, sort_keys=True))
     return 0
 
 
@@ -328,6 +417,8 @@ def cmd_provider_ended(args) -> int:
 
 
 def cmd_accept(args) -> int:
+    if args.agent is not None:
+        return accept_own(args)
     require_terminal("accept a share")
     SH, s = store()
     handed = None
@@ -379,6 +470,47 @@ def cmd_accept(args) -> int:
     return 0
 
 
+def accept_own(args) -> int:
+    """`share.accept-own` (CT-298): the agent accepts, by its id, a link it handed over with the operator's words."""
+    import own_share
+    from node import actions
+    if args.link in (None, "-") or "://" in args.link:
+        print("share: an agent accepts only by its id a link it handed over (`full share open` or the node's "
+              "\"Open a share\"), never a link on a command line", file=sys.stderr)
+        return 2
+    SH, s = store()
+    try:
+        side, share_id = s.find(args.link)
+    except SH.ShareError as exc:
+        print(f"share: {exc.code}: {exc}", file=sys.stderr)
+        return 1
+    step = f"{PROG} accept {share_id[:8]}"
+    held = s._handed(s._received(share_id), s.clock()) if side == "received" else None
+    if held is None or held["state"] != "handed-over":
+        print(f"share: not-handed-over: {share_id[:8]} is no link an agent handed over and nobody answered yet",
+              file=sys.stderr)
+        return 1
+    decision = own_share.parse_decision(args.decision)
+    node = node_folder()
+    try:
+        record_as = own_share.gate(actions.SHARE_ACCEPT_OWN, actions.SHARE_ACCEPT, agent=args.agent,
+                                   decision=decision, share_id=share_id, node=node, step=step,
+                                   pinned=bool(held.get("pinned")))
+    except own_share.Outside as exc:
+        return _outside(exc)
+    try:
+        record = s.accept_handed(share_id, label=args.label)
+    except SH.ShareError as exc:
+        print(f"share: {exc.code}: {exc}", file=sys.stderr)
+        return 1
+    own_share.journal(node, act="share.accept-own", share_id=share_id, record_as=record_as, decision=decision,
+                      outcome="accepted")
+    print(json.dumps({"shareId": share_id, "state": record["state"],
+                      "next": f"once the exchange completes: {PROG} read-code {share_id[:8]} --agent NAME "
+                              f"--decision JSON"}, indent=1, sort_keys=True))
+    return 0
+
+
 def cmd_mailbox_trial(args) -> int:
     """A loopback mailbox for a trial between two workspaces on this machine (never for another person)."""
     from node import mailbox as MB
@@ -391,6 +523,12 @@ def cmd_mailbox_trial(args) -> int:
     except KeyboardInterrupt:
         pass
     return 0
+
+
+def _own_arguments(q) -> None:
+    q.add_argument("--agent", help="one person's own two machines (CT-298): the agent relaying the operator's words")
+    q.add_argument("--decision", help="the operator's decision as JSON (DEC-0121): by, via, action, target (the share "
+                                      "id), instruction, at")
 
 
 def parser() -> argparse.ArgumentParser:
@@ -430,7 +568,13 @@ def parser() -> argparse.ArgumentParser:
     q = sub.add_parser("confirm", help="type the code the recipient read to you; a match seals and sends (a terminal)")
     q.add_argument("id")
     q.add_argument("--without-comparing", action="store_true", help="seal without comparing (trust on first use)")
+    _own_arguments(q)
     q.set_defaults(fn=cmd_confirm)
+    q = sub.add_parser("read-code", help="one person's own machines: the recipient's code for the sender's node "
+                                         "(CT-298 OM-3; --agent and --decision)")
+    q.add_argument("id")
+    _own_arguments(q)
+    q.set_defaults(fn=cmd_read_code)
     for name, fn, text in (("differ", cmd_differ, "the codes differ: stop this share"),
                            ("revoke", cmd_revoke, "take a share back: the mailbox refuses from now on"),
                            ("provider-ended", cmd_provider_ended,
@@ -442,6 +586,7 @@ def parser() -> argparse.ArgumentParser:
                                       "for the link), or accept by its ID a link an agent handed over")
     q.add_argument("link", nargs="?", help="the link, -, or the ID of a share an agent handed over")
     q.add_argument("--label", help="your name for this share (default share-<id>)")
+    _own_arguments(q)
     q.set_defaults(fn=cmd_accept)
     q = sub.add_parser("mailbox-trial", help="a loopback mailbox for a trial between two workspaces on this machine")
     q.add_argument("--origin", default="https://mailbox.localhost")
