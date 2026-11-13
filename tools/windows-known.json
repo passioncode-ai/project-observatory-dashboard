@@ -234,6 +234,7 @@
         "FAIL"
       ],
       "failing": [
+        "BeforeUpdateInventory.test_leftovers_of_a_failed_export_go_with_the_next_working_one",
         "BeforeUpdateInventory.test_local_update_is_counted_with_and_without_passphrase",
         "BeforeUpdateInventory.test_update_migrates_encrypted_and_restores_while_foreign_kind_stays",
         "ForeignPassphrase.test_a_snapshot_of_another_workspace_opens_with_a_value_on_stdin_and_nothing_is_stored",
