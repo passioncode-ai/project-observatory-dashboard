@@ -1180,14 +1180,32 @@ def _mark_owner(root: Path, base: Path) -> None:
         pass  # an unmarked folder is still found by its exact label
 
 
-def export_snapshot(base: Path, directory: Path, kind: str, secret: str) -> Path:
+def export_snapshot(base: Path, directory: Path, kind: str, secret: str, protect: Path | None = None) -> Path:
+    """Encrypt one local snapshot into the backup root, remove the local copy, rotate the root. The root's rotation
+    protects the copy just written, or `protect` when given: an older leftover carried after a newer export must
+    not push that newer one out (OBS-532)."""
     root = root_info(base)["path"]
     _mark_owner(root, base)
     dest = root / f"{kind}-{_snapshot_stamp(directory)}-{uuid.uuid4().hex[:8]}{SNAPSHOT_SUFFIX}"
     encrypt_tree(directory, dest, secret, kind=kind)
     shutil.rmtree(directory)
-    rotate(root, kind, SNAPSHOT_SUFFIX, protect=dest)
+    rotate(root, kind, SNAPSHOT_SUFFIX, protect=protect or dest)
     return dest
+
+
+def _carry_leftovers(base: Path, kind: str, secret: str, newest: Path) -> dict:
+    """Local copies of `kind` an earlier failed export left behind (OBS-532), carried into the backup root now that
+    an export works: each encrypted there, then removed here, and the root's rotation keeps the newest KEEP. Before,
+    `rotate_local` kept up to KEEP of them beside the exports for good: on 2026-11-13 four plaintext copies of the
+    workspace (2.1 GB, vault included) sat in `backups/` on a full disk. One that cannot be carried stays and is named."""
+    carried, kept = [], []
+    for old in local_snapshots(base, kind):
+        try:
+            export_snapshot(base, old, kind, secret, protect=newest)
+            carried.append(old.name)
+        except (BackupError, OSError, tarfile.TarError) as exc:
+            kept.append({"snapshot": old.name, "why": f"{type(exc).__name__}: {str(exc)[:200]}"})
+    return {**({"carried": carried} if carried else {}), **({"left_local": kept} if kept else {})}
 
 
 def after_snapshot(base: Path, directory: Path, kind: str) -> dict:
@@ -1202,10 +1220,10 @@ def after_snapshot(base: Path, directory: Path, kind: str) -> dict:
     if secret:
         try:
             dest = export_snapshot(base, directory, kind, secret)
-            rotate_local(base, kind)
-            return {"snapshot": str(dest), "encrypted": True}
         except (BackupError, OSError, tarfile.TarError) as exc:
             problem = f"{type(exc).__name__}: {exc}"
+        else:
+            return {"snapshot": str(dest), "encrypted": True, **_carry_leftovers(base, kind, secret, dest)}
     rotate_local(base, kind)
     out = {"snapshot": str(directory), "encrypted": False}
     if problem:
