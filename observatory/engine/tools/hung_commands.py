@@ -18,9 +18,12 @@ machine saying so. A peer project's rule, taken as it stands: a process is a hun
   a terminal nobody writes to does not).
 
 What is done about one: a finding names it with its session's folder (`machine.hung_commands`).
-Only a leaf command of the short list `LEAVES` (`wc`, `cat`, `grep`, `head`) reading no file is
-stopped, with SIGTERM, and only with `--apply` (the maintenance pass gives it when
-`features.auto_cleanup` is on). A session, a service or any other command is never signalled.
+Only a command of the short list `LEAVES` (`wc`, `cat`, `grep`, `head`) that reads no file and whose
+input is a TERMINAL is stopped, with SIGTERM, and only with `--apply` (the maintenance pass gives it
+when `features.auto_cleanup` is on): nothing will ever type into a session's terminal. A command
+reading a pipe waits on the process writing it, and may be a watcher waiting by design
+(`tail -f log | grep X | head -1`, measured on this machine on 2026-11-13): it is named, never
+stopped. A session, a service or any other command is never signalled.
 Each stop is journalled. Argument lists are read only to decide "no file"; none is stored.
 
     hung_commands.py [--receipt PATH] [--journal PATH] [--apply] [--json]
@@ -265,13 +268,15 @@ def survey(previous: dict | None, *, uid: int | None = None, now: float | None =
         words = (args or args_of)(pid)
         if words is not None and any("mcp" in w.lower() for w in words):
             continue
+        source = inputs[pid]
+        stdin_kind = ("terminal" if source.startswith(("/dev/tty", "/dev/pts", "/dev/console"))
+                      else "pipe" if "pipe" in source or source.startswith("->") else "other")
         receipt["hung"].append({
             "pid": pid, "name": name, "agent": _agent(table[session]["exe"]), "session_pid": session,
             "folder": folder_name(folders.get(session, "")) or None,
             "age_hours": round(row["age_s"] / 3600, 1), "cpu_seconds": row["cpu_s"],
-            "stdin": "terminal" if inputs[pid].startswith("/dev/tty") or inputs[pid].startswith("/dev/pts")
-            else "pipe" if "pipe" in inputs[pid] or inputs[pid].startswith("->") else "other",
-            "leaf": name in LEAVES and words is not None and reads_no_file(name, words)})
+            "stdin": stdin_kind,
+            "leaf": stdin_kind == "terminal" and name in LEAVES and words is not None and reads_no_file(name, words)})
     return receipt
 
 

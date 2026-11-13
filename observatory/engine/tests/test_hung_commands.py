@@ -127,6 +127,12 @@ class Survey(unittest.TestCase):
         self.assertEqual(receipt["hung"], [])
         self.assertEqual(receipt["degraded"][0]["source"], "lsof")
 
+    def test_a_leaf_reading_a_pipe_is_reported_and_never_a_stop_candidate(self):
+        """A watcher's `tail -f log | grep X | head -1` waits by design (measured 2026-11-13)."""
+        t = table()
+        receipt = self.survey(t, previous(t), stdin=lambda pids: {p: "->0xaeda324001f5e31c" for p in pids})
+        self.assertEqual([(h["pid"], h["stdin"], h["leaf"]) for h in receipt["hung"]], [(300, "pipe", False)])
+
     def test_a_leaf_with_a_file_is_reported_but_not_a_stop_candidate(self):
         t = table()
         receipt = self.survey(t, previous(t), args=lambda pid: ["-l", "big.log"])
@@ -189,6 +195,9 @@ class Finding(unittest.TestCase):
         self.assertIn("some-project", found[0]["detail"])
         receipt["stopped"] = [{"pid": 300, "result": "stopped"}]
         self.assertEqual(F.hung_findings(receipt)[0]["severity"], "info")
+        piped = {"hung": [{"pid": 9, "name": "head", "stdin": "pipe", "folder": "some-project"}]}
+        self.assertEqual(F.hung_findings(piped)[0]["severity"], "info", "a pipe reader may be a watcher")
+        self.assertIn("never stopped", F.hung_findings(piped)[0]["detail"])
         self.assertEqual(F.hung_findings(None), [])
         self.assertEqual(F.hung_findings({"hung": ["x", {}]}), [])
 
