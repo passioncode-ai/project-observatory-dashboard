@@ -1252,6 +1252,7 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
                     report["app"] = {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
             report["snapshot"] = step_snapshot(base, state, at, services, sleep=sleep)
             report["machine"] = step_machine(base, at, machine)
+            report["ports"] = step_ports(base)
             if services is not None:
                 report["jobs"] = step_jobs(base=base)
         if not report["update"]["result"].startswith("updated"):
@@ -1269,6 +1270,30 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
         write_state(base, state)
         report["schedule_reload"] = _reload_after_pass(base)
         return report
+
+
+def step_ports(base: Path) -> dict:
+    """This OS account's ports (OBS-354). An account with a record refreshes its host claim, so a cleaner that ages
+    the shared folder never drops it. An installed server with no record is the migration: on a host with one account,
+    or where the historical ports are this account's or free, they are recorded as they are and nothing moves; where
+    another account holds them, this account takes a block and its server job is reinstalled on it (`moved`).
+    Never raises: a port never stops a backup."""
+    try:
+        import local_ports
+        have = local_ports.record(base)
+        if have:
+            return {"result": "kept", "scheme": have["scheme"],
+                    "claim": "written" if local_ports.write_claim(have) else "not-written"}
+        if local_ports.current_server_port(base) is None:
+            return {"result": "no-server"}
+        out = local_ports.allocate(base, reinstall=True)
+        moved = (out.get("reinstall") or {}).get("status") == "reinstalled"
+        return {"result": "moved" if moved else "recorded", "scheme": out["scheme"],
+                "server": out["ports"]["server"], "claim": out["claim"],
+                **({"reinstall": out["reinstall"]} if "reinstall" in out else {})}
+    except Exception as exc:  # noqa: BLE001
+        return {"result": "error", "code": getattr(exc, "code", type(exc).__name__),
+                "detail": str(exc)[:200]}
 
 
 def step_analytics(base: Path) -> dict:
