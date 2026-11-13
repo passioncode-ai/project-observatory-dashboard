@@ -22,8 +22,8 @@
       "path": "activity_collector.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a05dadc75a287d336eb3e7a2a068a7beb04e99fdabc7c8800e981b09293cbcac",
-      "bytes": 21864
+      "export_sha256": "e152f34ba0645f00a1b63bd0b9de9ac65581a4823a6dda1f6e7b5dca16febbf8",
+      "bytes": 22076
     },
     {
       "path": "agent/assistant.py",
@@ -4489,8 +4489,8 @@
       "path": "tests/test_activity_collector.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ea119ea821e671794535074b1237a21ae5e76e6ae28627746eef7a4350422eb7",
-      "bytes": 12388
+      "export_sha256": "aef40ba6efd567600546890c6da108706641c5822d3cccda6067fe67d9d0e411",
+      "bytes": 13409
     },
     {
       "path": "tests/test_agent.py",
