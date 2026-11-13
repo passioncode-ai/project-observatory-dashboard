@@ -88,6 +88,17 @@ class Parsing(unittest.TestCase):
         self.assertFalse(H.reads_no_file("grep", ["-e", "needle", "file"]))
 
 
+class AgentRule(unittest.TestCase):
+    def test_the_agent_rule_is_scan_machines(self):
+        try:
+            import scan_machine
+        except Exception as exc:  # noqa: BLE001 - a platform where the collector does not load
+            self.skipTest(f"scan_machine does not load here ({type(exc).__name__})")
+        for exe in (CLAUDE, "/usr/local/bin/claude", "/opt/agents/.codex/bin/codex", "codex",
+                    "/Applications/Codex.app/Contents/Frameworks/Codex Framework.framework/x", "/bin/zsh", "wc", "node"):
+            self.assertEqual(H._agent(exe), scan_machine.agent_of(exe), exe)
+
+
 class Survey(unittest.TestCase):
     def survey(self, t, prev, stdin=None, args=None):
         with patch.object(H.os, "name", "posix"):

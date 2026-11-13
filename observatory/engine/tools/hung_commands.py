@@ -113,8 +113,14 @@ def read_table() -> dict[int, dict] | None:
 
 
 def _agent(exe: str) -> str | None:
-    import scan_machine
-    return scan_machine.agent_of(exe)
+    """`collectors/scan_machine.agent_of`, the same rule (the test holds them equal): importing that module brings
+    `paths` and the workspace with it, which this check needs neither of."""
+    base = os.path.basename(exe)
+    if "/claude/versions/" in exe or base == "claude":
+        return "claude-code"
+    if "/.codex/" in exe or base == "codex" or "Codex Framework" in exe:
+        return "codex"
+    return None
 
 
 def session_of(pid: int, table: dict[int, dict]) -> int | None:

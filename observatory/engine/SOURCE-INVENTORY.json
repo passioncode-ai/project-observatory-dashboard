@@ -5234,8 +5234,8 @@
       "path": "tests/test_hung_commands.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "605d8327681f3ac1e23c87b2b7eb1f80a350c23e318f2684eb488765545dce64",
-      "bytes": 13159
+      "export_sha256": "44c472bcca21a0296a021224dc202794413b497319599f82a1e54942ed475737",
+      "bytes": 13768
     },
     {
       "path": "tests/test_i18n.py",
@@ -7178,8 +7178,8 @@
       "path": "tools/hung_commands.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e2c01bd63ec2f66215b1bc441f05609a87c09632d9b2a941033e3a6e5fc81d6a",
-      "bytes": 16584
+      "export_sha256": "36f89ec6524098886e4f7286b8387421b4d97fb8798f7f25c71698f46979be95",
+      "bytes": 16943
     },
     {
       "path": "tools/install_key.py",
