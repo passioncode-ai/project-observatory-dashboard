@@ -3,7 +3,7 @@
 
 Everything the host would say is injected: the account count, this account, whether a uid exists, who
 listens on a port, whether it binds, and the descriptors' ports. Other accounts' claims are written in a
-temporary folder under the real uid's name (so the owner check holds) while this process plays account 900.
+temporary folder under the real owner's name (the uid, or the SID on Windows, so the owner check holds) while this process plays account 900.
 """
 from __future__ import annotations
 import importlib
@@ -22,7 +22,21 @@ import local_ports as lp
 import workspace
 
 ME = "900"                       # this process, as the allocator sees it: uid 900 starts at block 900 % 75 = 0
-OTHER = str(os.getuid()) if hasattr(os, "getuid") else "501"
+
+
+def _owner_of_a_new_file() -> str:
+    """The account a claim this process writes is owned by: the uid on POSIX, and on Windows the owner SID
+    the file system records (the user's SID, or Administrators where policy makes that the default owner)."""
+    if hasattr(os, "getuid"):
+        return str(os.getuid())
+    import osprivacy
+    with tempfile.TemporaryDirectory() as folder:
+        probe = Path(folder) / "probe"
+        probe.write_text("")
+        return osprivacy._owner(probe)
+
+
+OTHER = _owner_of_a_new_file()
 FIRST_BLOCK = {"server": 47400, "memory_http": 47402, "relay": 47406, "keyserver": 47407}
 
 
