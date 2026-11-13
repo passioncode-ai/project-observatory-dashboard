@@ -3108,8 +3108,8 @@
       "path": "holders.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5a3902b244d21bc51008ed524313945655888b61754467293f03a482501aefba",
-      "bytes": 22604
+      "export_sha256": "4d90f8ff458a9bf00b195b7491e66ae02a40de5dd8c3475526be21668b91e539",
+      "bytes": 23345
     },
     {
       "path": "host_accounts.py",
@@ -4948,8 +4948,8 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5970594e022dc93fc55b22eef2f2b204f140097c3dc87cf26b95bdea57b53989",
-      "bytes": 176244
+      "export_sha256": "2a859025d9789ed731e57ebeb5044e028109c25d1939737432705a03b0de95b7",
+      "bytes": 179545
     },
     {
       "path": "tests/test_dispatch_packet.py",
@@ -7111,8 +7111,8 @@
       "path": "tools/disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b648591896b9f8c2d6edfc03abc16eb9d75ece6900e1a8da7bfb01c17e250ce2",
-      "bytes": 101651
+      "export_sha256": "b2933f76288c749ada8b91eb4dcd039bb47be4e3be97341f4c848953a1e8b944",
+      "bytes": 102833
     },
     {
       "path": "tools/embedding_policy_cli.py",
