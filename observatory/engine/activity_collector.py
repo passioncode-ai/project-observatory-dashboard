@@ -195,7 +195,7 @@ def _db(folder: Path):
     try:
         if fresh:
             os.chmod(path, 0o600)
-        conn.execute("""CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, dev INTEGER, ino INTEGER,
+        conn.execute("""CREATE TABLE IF NOT EXISTS files (path TEXT PRIMARY KEY, dev TEXT, ino TEXT,
             head_len INTEGER, head TEXT, offset INTEGER NOT NULL DEFAULT 0, session TEXT, cwd TEXT, model TEXT,
             version TEXT, branch TEXT, pending TEXT, start REAL, last REAL, ended REAL)""")
         yield conn
@@ -208,8 +208,15 @@ def _head(path: Path, length: int) -> str:
         return hashlib.sha256(stream.read(length)).hexdigest()
 
 
+def _identity(st) -> tuple:
+    # Text, not INTEGER: Windows reports a 64-bit unsigned (ReFS: 128-bit) file id that SQLite's signed
+    # 64-bit INTEGER cannot hold.
+    return str(st.st_dev), str(st.st_ino)
+
+
 def _fresh_row(path: str, st) -> dict:
-    return {'path': path, 'dev': st.st_dev, 'ino': st.st_ino, 'head_len': 0, 'head': None, 'offset': 0,
+    dev, ino = _identity(st)
+    return {'path': path, 'dev': dev, 'ino': ino, 'head_len': 0, 'head': None, 'offset': 0,
             'session': None, 'cwd': None, 'model': None, 'version': None, 'branch': None, 'pending': None,
             'start': None, 'last': None, 'ended': None}
 
@@ -316,7 +323,7 @@ class Pass:
             return
         found = conn.execute('SELECT * FROM files WHERE path = ?', (path,)).fetchone()
         row = dict(found) if found else _fresh_row(path, st)
-        if found and (row['dev'] != st.st_dev or row['ino'] != st.st_ino or st.st_size < row['offset']
+        if found and ((row['dev'], row['ino']) != _identity(st) or st.st_size < row['offset']
                       or (row['head_len'] and _head(file, row['head_len']) != row['head'])):
             row = _fresh_row(path, st)
         parse = PARSERS[runtime]

@@ -162,6 +162,33 @@ class Claude(Base):
         self.assertEqual(len(self.emit.events), count)
         self.assertEqual(receipt['readBytes'], 0)
 
+    def test_a_file_id_beyond_a_signed_64_bit_integer_keeps_its_place(self):
+        """Windows reports an unsigned 64-bit file id (ReFS: 128-bit); the cursor holds it as text (#532's Windows
+        job: OverflowError at the cursor's INSERT)."""
+        real = Path.stat
+
+        class Wide:
+            def __init__(self, st):
+                self._st = st
+
+            def __getattr__(self, name):
+                return {'st_ino': 2 ** 64 - 1, 'st_dev': 2 ** 63 + 7}.get(name, getattr(self._st, name))
+
+        def stat(path, *args, **kwargs):
+            st = real(path, *args, **kwargs)
+            return Wide(st) if str(path).endswith('.jsonl') else st
+
+        Path.stat = stat
+        try:
+            self.run_pass(now=T0 + 5000)
+            count = len(self.emit.events)
+            self.assertTrue(count)
+            receipt = self.run_pass(now=T0 + 6000)
+        finally:
+            Path.stat = real
+        self.assertEqual(len(self.emit.events), count)
+        self.assertEqual(receipt['readBytes'], 0)
+
     def test_a_personal_session_is_counted_and_never_enqueued(self):
         self.context = ('personal', None)
         receipt = self.run_pass(now=T0 + 5000)
