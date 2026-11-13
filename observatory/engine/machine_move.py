@@ -13,7 +13,8 @@ then moves one at a time, the old machine first:
         moves the staged definition into the job folder, enables and loads it here, and removes it
         from this machine's placement file
     on either:                      project-observatory full machine-move show
-        this machine's id (what `--to` takes), the placement file and the staged jobs
+        this machine's id, this place's id (what `--to` takes: the host and this OS account, OBS-357; another
+        account of the same computer is another place), the placement file and the staged jobs
 
 A STAGED COPY CAN BE STALE (OBS-390). A restore stages the other machine's definitions, possibly days
 before `cutover`; a service released anew since then lives in a new release folder. Before a staged
@@ -278,7 +279,9 @@ def show(home: Path, *, platform: str = sys.platform, runner=subprocess.run, uid
             label = mi.job_label(p) if p.is_file() else p.stem
             background.append({"label": label, "file": p.name,
                                "daemon": _daemon_state(runner, label, uid, ask=_commands_allowed())})
-    return {"machine": mi.machine_id(home), "placement": str(mi.placement_path(home)),
+    # `place` is what another machine's or another account's `leave --to` takes (OBS-357).
+    return {"machine": mi.machine_id(home), "place": mi.place_id(home), "host": mi.machine_id(home),
+            "accountsOnHost": mi.accounts_on_host(), "placement": str(mi.placement_path(home)),
             "elsewhere": doc["elsewhere"], "staging": str(staging),
             "staged": [{"label": mi.job_label(p) if p.is_file() else p.stem, "file": p.name}
                        for p in _definitions(staging, system)],
@@ -352,7 +355,7 @@ def cutover(label: str, home: Path, *, runner=subprocess.run, platform: str = sy
     staging, folder = mi.staging_dir(home, system), job_folder(home, system)
     staged = _find(staging, system, label)
     live = _find(folder, system, label)
-    me = mi.machine_id(home)
+    me = mi.place_id(home)  # this place: what another space's `leave --to` names (OBS-357)
     # OBS-361: an account with no GUI session cannot load an agent; its jobs run as system daemons.
     headless = system == "launchd" and _commands_allowed() and not gui_session(uid, runner)
     background = _find(mi.background_dir(home), system, label) if headless else None
@@ -512,8 +515,13 @@ def leave(label: str, to: str, home: Path, *, runner=subprocess.run, platform: s
     system = _system(platform)
     uid = int(osprivacy.account()) if uid is None else uid
     me = mi.machine_id(home)
-    if to == me:
+    here = mi.place_id(home)
+    if to == here or (to == me and mi.accounts_on_host() == 1):
         raise MachineMoveError("--to names this machine; run `leave` on the machine the job leaves")
+    if to == me:
+        # A bare id of this host where several OS accounts share it cannot say which account (OBS-357).
+        raise MachineMoveError("--to names this host, not one of its accounts (to-names-this-host): name the place "
+                               "`project-observatory full machine-move show` prints under the other account; nothing moved")
     service = mf.service_of(home, label)
     user = host = None
     if via is not None:
@@ -573,8 +581,8 @@ def leave(label: str, to: str, home: Path, *, runner=subprocess.run, platform: s
         # holding the port), so `cutover` still refuses and `return` still finds it.
     else:
         forward = _forward_without_via(label, home, system, service)
-    path = mi.place_elsewhere([entry], home, machine=me)
-    return {"label": label, "machine": me, "placed_on": to, "stop": stopped, "staging": str(staging),
+    path = mi.place_elsewhere([entry], home, machine=here)
+    return {"label": label, "machine": here, "placed_on": to, "stop": stopped, "staging": str(staging),
             "placement": str(path), "forward": forward,
             "next": [f"on {to}: project-observatory full machine-move cutover {label}"]}
 
@@ -623,7 +631,7 @@ def return_job(label: str, home: Path, *, runner=subprocess.run, platform: str =
     if _system(platform) != "launchd":
         raise MachineMoveError(f"{mf.macos_only()}; nothing to remove on this system")
     uid = int(osprivacy.account()) if uid is None else uid
-    me = mi.machine_id(home)
+    me = mi.place_id(home)  # this place: what another space's `leave --to` names (OBS-357)
     entry = next((e for e in mi.read_placement(home)["elsewhere"] if e["label"] == label), None)
     if entry is None:
         raise MachineMoveError(f"{label} is not placed elsewhere here ({mi.placement_path(home)}); nothing to "
@@ -897,7 +905,10 @@ def facts(home: Path, base: Path | None, *, platform: str = sys.platform, at: da
     summary = restore_summary(receipt)
     if summary is not None:
         summary["gaps"] = [g[:200] for g in summary["gaps"]][:20]
-    return {"schema": FACTS_SCHEMA, "machine": mi.machine_id(home), "generated_at": _iso(at or _now()),
+    # `machine` is the place (OBS-357): an older engine compares it with its bare host id and reads another account
+    # of its own host as another machine, which it is. `host` and `accountsOnHost` are additive.
+    return {"schema": FACTS_SCHEMA, "machine": mi.place_id(home), "host": mi.machine_id(home),
+            "accountsOnHost": mi.accounts_on_host(), "generated_at": _iso(at or _now()),
             "engine_version": config.VERSION, "platform": platform, "ssh": ssh, "device": device,
             "jobs": shaped["jobs"], "elsewhere": shaped["elsewhere"], "restore": summary, "omitted": omitted}
 
@@ -1089,7 +1100,8 @@ def status(home: Path, base: Path | None, *, peers: list[dict] | None = None, un
     at = at or _now()
     # Read-only: a machine with no platform identifier and no kept id gets none here (any restore,
     # `machine-move show` or `facts` makes it), and the checklist says so.
-    me = mi.machine_id(home, create=False)
+    me = mi.place_id(home, create=False)                 # this place (OBS-357)
+    host = mi.host_of(me) if me else None
     degraded = [{"source": "peers", "code": "unreadable-facts", "reason": f"{b['file']}: {b['reason']}"}
                 for b in unreadable or []]
     if me is None:
@@ -1098,10 +1110,25 @@ def status(home: Path, base: Path | None, *, peers: list[dict] | None = None, un
                                    "`project-observatory full machine-move show` makes one"})
     newest: dict[str, dict] = {}
     for peer in peers or []:
-        if peer["machine"] == me:
+        verdict = mi.match(peer["machine"], me) if me else "other"
+        if verdict == "same":
+            mine = device_id(base)[0]
+            if mine and isinstance(peer.get("device"), str) and peer["device"] != mine:
+                # A clone shares the place and differs in its device (OBS-357): named, never dropped as this machine.
+                degraded.append({"source": "peers", "code": "clone-suspected",
+                                 "reason": f"a facts file names this place with another device ({peer['device']}): "
+                                           "a copy of this machine; give it its own identifier "
+                                           "(systemd-machine-id-setup on Linux, a new machine identifier for the "
+                                           "virtual machine on macOS), then `project-observatory full node --init`"})
+                continue
             degraded.append({"source": "peers", "code": "this-machine",
                              "reason": "a facts file names this machine; it is not another machine's and is ignored"})
             continue
+        if verdict == "same-host-account-unknown":
+            # An older engine's facts name this host and no account: another account's, read as another place.
+            degraded.append({"source": "peers", "code": "same-host-account-unknown",
+                             "reason": f"a facts file names this host ({peer['machine']}) but not its account; it is "
+                                       "read as another account's"})
         held = newest.get(peer["machine"])
         if held is not None:
             degraded.append({"source": "peers", "code": "duplicate-machine",
@@ -1143,7 +1170,8 @@ def status(home: Path, base: Path | None, *, peers: list[dict] | None = None, un
     # M2: the restore complete.
     receipt, receipt_problem = _receipt(home)
     mine = restore_summary(receipt)
-    theirs = [p for p in others if me and p.get("restore") and p["restore"].get("taken_on") == me]
+    # A receipt names where its bundle was taken: this host's bare id before place ids, this place since (OBS-357).
+    theirs = [p for p in others if me and p.get("restore") and p["restore"].get("taken_on") in (me, host)]
     if receipt_problem:
         items.append(_item("restore", UNKNOWN, [receipt_problem]))
     elif mine:
@@ -1324,7 +1352,8 @@ def status(home: Path, base: Path | None, *, peers: list[dict] | None = None, un
     summary = ("The move is done: " if all_ok else "The move is not done yet: ") + \
         f"{counts[OK]} of {len(items)} items ok, {counts[MISSING]} missing, {counts[UNKNOWN]} unknown."
     return {"schema": STATUS_SCHEMA, "machine": me, "generated_at": _iso(at), "engine_version": ours,
-            "other_machines": [{"machine": p["machine"], "generated_at": p["generated_at"], "age_hours": p["age_hours"],
+            "other_machines": [{"machine": p["machine"], "sameHost": bool(host) and mi.host_of(p["machine"]) == host,
+                                "generated_at": p["generated_at"], "age_hours": p["age_hours"],
                                 **({"stale": p["stale"]} if p.get("stale") else {})} for p in others],
             "items": items, "counts": counts, "all_ok": all_ok, "summary": summary, "degraded": degraded}
 

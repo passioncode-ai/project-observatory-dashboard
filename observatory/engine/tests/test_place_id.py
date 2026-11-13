@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """OBS-357, part 1: the place id of this host and this OS account, and how a recorded id matches it."""
 from __future__ import annotations
+import json
 import os
 from pathlib import Path
 import sys
@@ -10,6 +11,9 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import machine_identity as mi
+import configuration as config  # noqa: E402  imported before any test puts tools/ first on sys.path
+import workspace  # noqa: E402
+import runtime_identity  # noqa: E402,F401  the root module, before tools/ (its CLI of the same name) can shadow it
 
 HOST = "m-" + "a" * 24
 OTHER_HOST = "m-" + "b" * 24
@@ -72,9 +76,7 @@ class LocalSettingsPlace(unittest.TestCase):
     """config/local.json records the place id; a record from before (a bare host id) still matches this host."""
 
     def test_a_bare_host_record_still_matches_and_a_neighbours_does_not(self):
-        import configuration as config
         import tempfile
-        import workspace
         with tempfile.TemporaryDirectory() as raw, env("501"), \
                 patch.dict(os.environ, {"OBSERVATORY_HOME": str(Path(raw).resolve() / "home"),
                                         "HOME": str(Path(raw).resolve() / "u")}):
@@ -88,6 +90,169 @@ class LocalSettingsPlace(unittest.TestCase):
             self.assertTrue(mi.is_place(config.local(home)["place"]["recorded"]))
             with env("502"):
                 self.assertFalse(config.local(home)["place"]["matches"], "another account's place is another place")
+
+
+class RestoreMode(unittest.TestCase):
+    """Spec M5 3.3: the restore mode from `match`, for bundles and snapshots."""
+
+    def setUp(self):
+        with env("501"):
+            self.here = mi.place_id()
+        with env("502"):
+            self.neighbour = mi.place_id()
+        with env("501", OTHER_HOST):
+            self.elsewhere = mi.place_id()
+
+    def mode(self, recorded, *, accounts=1, home_path=None, home=Path("/Users/a")):
+        with env("501"), patch.dict(os.environ, {"OBSERVATORY_HOST_ACCOUNTS": str(accounts)}):
+            got = mi.restore_mode(recorded, here=self.here, home=home, home_path=home_path)
+        return got["mode"], got["why"]
+
+    def test_the_table(self):
+        self.assertEqual(self.mode(self.here), ("same-machine", "same-place"))
+        self.assertEqual(self.mode(self.neighbour, accounts=2), ("second-machine", "another-account"))
+        self.assertEqual(self.mode(self.elsewhere), ("second-machine", "another-machine"))
+        self.assertEqual(self.mode(OTHER_HOST), ("second-machine", "another-machine"))
+        self.assertEqual(self.mode(HOST, accounts=1), ("same-machine", "same-place"), "a bare id, one account: as before")
+        self.assertEqual(self.mode(None), ("second-machine", "names-no-machine"))
+
+    def test_an_old_bundle_of_a_shared_host_is_this_accounts_only_by_its_home(self):
+        self.assertEqual(self.mode(HOST, accounts=2, home_path="/Users/a"), ("same-machine", "same-host-same-home"))
+        self.assertEqual(self.mode(HOST, accounts=2, home_path="/Users/b"),
+                         ("second-machine", "same-host-account-unknown"))
+        self.assertEqual(self.mode(HOST, accounts=2), ("second-machine", "same-host-account-unknown"),
+                         "a snapshot names no home")
+
+    def test_the_answer_names_the_hosts(self):
+        with env("501"):
+            got = mi.restore_mode(self.neighbour, here=self.here)
+        self.assertEqual((got["this_host"], got["taken_on_host"], got["same_host"]), (HOST, HOST, True))
+
+    def test_an_older_reader_restores_a_new_bundle_as_a_second_machine(self):
+        def restore_mode_0_33(recorded, here):           # the comparison of the engine before place ids
+            same = recorded == here
+            return "same-machine" if same else "second-machine"
+        self.assertEqual(restore_mode_0_33(self.here, HOST), "second-machine",
+                         "a new bundle never reads as the same machine to an older engine: the safe way")
+
+
+class MoveAcrossAccounts(unittest.TestCase):
+    """Spec M5 3.5: `leave --to` another account of this host; `status` reads such a peer as another place."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.TemporaryDirectory()
+        self.home = Path(self.tmp.name).resolve()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def leave(self, to, accounts):
+        import machine_move as mm
+        with env("501"), patch.dict(os.environ, {"OBSERVATORY_HOST_ACCOUNTS": str(accounts)}):
+            try:
+                mm.leave("com.example.bot", to, self.home, platform="linux", uid=501)
+            except mm.MachineMoveError as exc:
+                return str(exc)
+        return "moved"
+
+    def test_leave_to_another_account_of_this_host_passes_the_checks(self):
+        with env("502"):
+            neighbour = mi.place_id()
+        self.assertIn("no job com.example.bot is defined", self.leave(neighbour, 2),
+                      "the --to checks pass; only the missing job stops it")
+
+    def test_leave_to_a_bare_id_of_this_host_is_refused_with_several_accounts(self):
+        self.assertIn("to-names-this-host", self.leave(HOST, 2))
+        self.assertIn("names this machine", self.leave(HOST, 1), "one account: the bare id is this machine, as before")
+        with env("501"):
+            here = mi.place_id()
+        self.assertIn("names this machine", self.leave(here, 2))
+
+    def test_status_reads_a_same_host_peer_as_another_place(self):
+        import machine_move as mm
+        with env("502"):
+            neighbour = mi.place_id()
+        peer = {"machine": neighbour, "generated_at": "2026-11-12T10:00:00Z", "engine_version": "0", "platform": "linux",
+                "ssh": [], "device": None, "jobs": [], "elsewhere": [], "restore": None}
+        old = dict(peer, machine=HOST)
+        with env("501"), patch.dict(os.environ, {"OBSERVATORY_HOST_ACCOUNTS": "2"}):
+            view = mm.status(self.home, None, peers=[peer, old], platform="linux")
+        machines = {m["machine"]: m["sameHost"] for m in view["other_machines"]}
+        self.assertEqual(machines, {neighbour: True, HOST: True}, "both are other places of this host")
+        self.assertIn("same-host-account-unknown", [d["code"] for d in view["degraded"]])
+
+
+class DigestName(unittest.TestCase):
+    """Spec M5 3.7: vault digests published under a host name two accounts share."""
+
+    def setUp(self):
+        # vault_digests brings the tools' own modules; they leave with this test, so a later test imports the
+        # engine's modules of the same names, never these.
+        self._modules, self._path = set(sys.modules), list(sys.path)
+
+    def tearDown(self):
+        for name in set(sys.modules) - self._modules:
+            del sys.modules[name]
+        sys.path[:] = self._path                          # vault_digests puts tools/ first on import
+
+    def name(self, accounts, manifest=None):
+        import tempfile
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("vault_digests_for_place_test", ROOT / "tools" / "vault_digests.py")
+        vd = importlib.util.module_from_spec(spec)
+        added = str(ROOT / "tools") not in sys.path
+        if added:
+            sys.path.append(str(ROOT / "tools"))          # its own imports (vault), never ahead of the engine's root
+        try:
+            spec.loader.exec_module(vd)
+        finally:
+            if added:
+                sys.path.remove(str(ROOT / "tools"))
+        with tempfile.TemporaryDirectory() as raw, env("501"), \
+                patch.dict(os.environ, {"OBSERVATORY_HOST_ACCOUNTS": str(accounts)}), \
+                patch.object(vd.socket, "gethostname", lambda: "studio.local"):
+            path = Path(raw) / "manifest.json"
+            if manifest:
+                path.write_text(json.dumps(manifest))
+            with patch.object(vd, "local_manifest_path", lambda: path), \
+                    patch.object(vd, "read_manifest", lambda p: json.loads(Path(p).read_text())):
+                return vd.machine_name()
+
+    def test_one_account_keeps_the_host_name(self):
+        self.assertEqual(self.name(1), "studio")
+
+    def test_a_new_workspace_on_a_shared_host_gets_its_own_name(self):
+        name = self.name(2)
+        self.assertRegex(name, r"^studio-[0-9a-f]{6}$")
+
+    def test_a_workspace_that_published_keeps_its_name(self):
+        self.assertEqual(self.name(2, {"machine": "studio"}), "studio")
+
+
+class CloneCheck(unittest.TestCase):
+    """Spec M5 3.4: the same place with another device is a clone, refused or named, never restored whole."""
+
+    def test_a_bundle_of_this_place_from_another_device_is_refused_until_asked(self):
+        with env("501"):
+            here = mi.place_id()
+            with self.assertRaises(mi.MachineIdentityError) as caught:
+                mi.restore_mode(here, here=here, clone=True)
+            self.assertIn("clone-suspected", str(caught.exception))
+            self.assertEqual(mi.restore_mode(here, here=here, clone=True, asked="second")["mode"], "second-machine")
+            self.assertEqual(mi.restore_mode(here, here=here, clone=False)["mode"], "same-machine")
+
+    def test_clone_facts_are_named_not_dropped(self):
+        import machine_move as mm
+        import tempfile
+        with env("501"):
+            here = mi.place_id()
+        peer = {"machine": here, "generated_at": "2026-11-12T10:00:00Z", "engine_version": "0", "platform": "linux",
+                "ssh": [], "device": "dev-other-0001", "jobs": [], "elsewhere": [], "restore": None}
+        with tempfile.TemporaryDirectory() as raw, env("501"), \
+                patch.object(mm, "device_id", lambda base: ("dev-this-0001", None)):
+            view = mm.status(Path(raw), None, peers=[peer], platform="linux")
+        self.assertIn("clone-suspected", [d["code"] for d in view["degraded"]])
 
 
 if __name__ == "__main__":

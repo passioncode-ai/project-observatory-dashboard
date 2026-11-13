@@ -75,7 +75,8 @@ default; the `vault-digests` folder is created at mode 700 and tightened to 700 
 ```
 
 It holds no value and no unkeyed hash. `machine` is `--machine`, else `OBSERVATORY_MACHINE_NAME`,
-else the host name; `rotated_at` is the slot's last `vault.py rotate`. A peer manifest is read only
+else the host name (on a computer several OS accounts share, a workspace that has not written its manifest yet
+takes `<host name>-<6 hex of its place>`, and one that has keeps its name, OBS-357); `rotated_at` is the slot's last `vault.py rotate`. A peer manifest is read only
 if it is a regular file of at most 4 MiB (read with that limit, never whole; a FIFO is refused, not
 waited on) that parses as this schema (nesting too deep for the parser
 is refused like any other unreadable JSON), with a plain machine name, an ISO-8601 `generated_at` (every time in a manifest must fall in the

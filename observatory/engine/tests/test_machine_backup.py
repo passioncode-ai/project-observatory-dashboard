@@ -12,6 +12,7 @@ import datetime
 import importlib
 import io
 import json
+import re
 import os
 from pathlib import Path
 import shutil
@@ -1158,14 +1159,16 @@ class SecondMachine(Machine):
     def test_a_bundle_names_the_machine_it_was_taken_on(self):
         stage, manifest = self.open(self.bundle)
         self.addCleanup(shutil.rmtree, stage, True)
-        self.assertEqual(manifest['machine_id'], ALPHA)
+        self.assertEqual(MI.host_of(manifest['machine_id']), ALPHA)
+        self.assertTrue(MI.is_place(manifest['machine_id']), 'OBS-357: the place of host and account')
+        self.assertEqual(manifest['host_id'], ALPHA)
 
     def test_another_machine_gets_no_private_key_and_no_loaded_job(self):
         with self.on(BETA):
             planned = MB.restore(self.bundle, self.fresh, secret=PASS)
             self.assertEqual((planned['machine']['mode'], planned['machine']['why']),
                              ('second-machine', 'another-machine'))
-            self.assertEqual((planned['machine']['taken_on'], planned['machine']['this_machine']), (ALPHA, BETA))
+            self.assertEqual((MI.host_of(planned['machine']['taken_on']), MI.host_of(planned['machine']['this_machine'])), (ALPHA, BETA))
             rows = {r['source']: r for r in planned['plan']}
             self.assertEqual(rows['~/.ssh/id_example']['state'], 'withheld')
             self.assertIn('ssh-private', rows['~/.ssh/id_example']['reason'])
@@ -1228,9 +1231,10 @@ class SecondMachine(Machine):
         self.assertEqual(stat.S_IMODE(placement.stat().st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(placement.parent.stat().st_mode), 0o700)
         doc = json.loads(placement.read_text())
-        self.assertEqual((doc['schema'], doc['machine']), ('observatory-placement/1', BETA))
+        self.assertEqual((doc['schema'], MI.host_of(doc['machine'])), ('observatory-placement/1', BETA))
         nested = 'com.example.nested'
-        self.assertEqual(sorted(([{k: e[k] for k in ('label', 'serviceId', 'placedOn', 'by')} for e in doc['elsewhere']]),
+        self.assertEqual(sorted(([{k: MI.host_of(e[k]) if k == 'placedOn' else e[k]
+                                   for k in ('label', 'serviceId', 'placedOn', 'by')} for e in doc['elsewhere']]),
                                 key=lambda e: e['label']),
                          sorted([{'label': job_label(), 'serviceId': 'alpha-bot.default', 'placedOn': ALPHA,
                                   'by': 'machine-restore'},
@@ -1242,7 +1246,7 @@ class SecondMachine(Machine):
 
     def test_the_same_machine_keeps_todays_behaviour(self):
         planned = MB.restore(self.bundle, self.fresh, secret=PASS)
-        self.assertEqual((planned['machine']['mode'], planned['machine']['why']), ('same-machine', 'same-machine'))
+        self.assertEqual((planned['machine']['mode'], planned['machine']['why']), ('same-machine', 'same-place'))
         self.assertEqual(set(planned['counts']), {'missing', 'same', 'conflict'})
         self.assertFalse([r for r in planned['plan'] if r.get('staged') or r['state'] == 'withheld'])
         self.assertNotIn(MB.SECOND_MACHINE_NEXT[0], planned['next'])
@@ -1405,8 +1409,8 @@ class SecondMachine(Machine):
         self.assertEqual(applied['receipt'], '~/.local/share/project-observatory/machine-move/restore.json')
         self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
         part = receipt['apply']
-        self.assertEqual((receipt['schema'], receipt['machine']), ('observatory-machine-restore/1', BETA))
-        self.assertEqual((part['mode'], part['taken_on'], part['this_machine']), ('second-machine', ALPHA, BETA))
+        self.assertEqual((receipt['schema'], MI.host_of(receipt['machine'])), ('observatory-machine-restore/1', BETA))
+        self.assertEqual((part['mode'], MI.host_of(part['taken_on']), MI.host_of(part['this_machine'])), ('second-machine', ALPHA, BETA))
         self.assertEqual((part['skip'], part['only'], part['failed']), (['claude'], [], 0))
         self.assertIn('claude', part['left_out'])
         self.assertIn({'key': 'id_work', 'fingerprint': fp, 'in_ssh': True}, part['other_keys'])
@@ -1625,7 +1629,7 @@ class MachineMove(Base):
         self.assertFalse(live.exists(), 'the next login does not start it')
         self.assertTrue((MI.staging_dir(self.home) / live.name).is_file())
         doc = json.loads(MI.placement_path(self.home).read_text())
-        self.assertEqual(doc['machine'], ALPHA)
+        self.assertEqual(MI.host_of(doc['machine']), ALPHA)
         self.assertEqual([{k: e[k] for k in ('label', 'serviceId', 'placedOn', 'by')} for e in doc['elsewhere']],
                          [{'label': JOB_LABEL, 'serviceId': 'alpha-bot.default', 'placedOn': BETA,
                            'by': 'machine-move leave'}])
@@ -2112,7 +2116,7 @@ class MoveStatus(Base):
         self.assertEqual({k: i['state'] for k, i in items.items()}, dict.fromkeys(items, 'ok'), items)
         self.assertTrue(view['all_ok'])
         self.assertEqual(view['counts'], {'ok': 6, 'missing': 0, 'unknown': 0})
-        self.assertEqual(view['other_machines'][0]['machine'], BETA)
+        self.assertEqual(MI.host_of(view['other_machines'][0]['machine']), BETA)
         self.assertIn(f'runs {config.VERSION}', items['release']['evidence'][1])
         self.assertIn('device-beta-0002', ' '.join(items['device-id']['evidence']))
         self.assertTrue(view['summary'].startswith('The move is done'))
@@ -2125,7 +2129,7 @@ class MoveStatus(Base):
         for key in ('release', 'ssh-key', 'device-id', 'jobs'):
             self.assertEqual(items[key]['state'], 'missing', items[key])
             self.assertTrue(items[key].get('next'), key)
-        self.assertIn(f'{BETA} (facts of', items['release']['evidence'][1])
+        self.assertRegex(items['release']['evidence'][1], re.escape(BETA) + r'(\.a-[0-9a-f]{10})? \(facts of')
         self.assertIn('runs 0.29.0', items['release']['evidence'][1])
         self.assertIn(f'~/.ssh/id_ed25519 ({self.alpha_fp}) is the same key as ~/.ssh/id_ed25519 on {BETA}',
                       items['ssh-key']['evidence'][0])
@@ -2177,7 +2181,7 @@ class MoveStatus(Base):
                                          'counts': {'kept': 0}}, 'clone': {'failed': 0}}, self.other)
         _, items = self.check(self.facts_of_beta())
         self.assertEqual(items['restore']['state'], 'ok', items['restore'])
-        self.assertIn(f'{BETA} (facts of', items['restore']['evidence'][0])
+        self.assertRegex(items['restore']['evidence'][0], re.escape(BETA) + r'(\.a-[0-9a-f]{10})? \(facts of')
 
     def test_a_key_the_restore_withheld_is_the_other_machines(self):
         self.receipt(other_keys=[{'key': 'id_ed25519', 'fingerprint': self.alpha_fp}])
@@ -2299,7 +2303,7 @@ class MoveStatus(Base):
     def test_facts_are_public_owner_only_and_never_replace_a_file(self):
         out = self.base / 'alpha-facts.json'
         doc = MM.facts(self.user, self.ws)
-        self.assertEqual((doc['schema'], doc['machine'], doc['device']), ('observatory-machine-facts/1', ALPHA,
+        self.assertEqual((doc['schema'], MI.host_of(doc['machine']), doc['device']), ('observatory-machine-facts/1', ALPHA,
                                                                           'device-alpha-0001'))
         self.assertEqual(doc['ssh'], [{'file': '~/.ssh/id_ed25519', 'fingerprint': self.alpha_fp}])
         self.assertEqual(doc['jobs'], [label_of('com.example.alpha-bot')])
@@ -2323,7 +2327,7 @@ class MoveStatus(Base):
         reasons = ' '.join(d['reason'] for d in view['degraded'])
         self.assertIn('broken.json: its machine id is malformed', reasons)
         self.assertIn('names this machine', reasons)
-        self.assertEqual([m['machine'] for m in view['other_machines']], [BETA])
+        self.assertEqual([MI.host_of(m['machine']) for m in view['other_machines']], [BETA])
         self.assertEqual(items['release']['state'], 'ok')
 
     def test_a_hostile_facts_file_is_refused_by_name_and_status_still_runs(self):
@@ -2354,7 +2358,7 @@ class MoveStatus(Base):
         (folder / 'beta.json').write_text(json.dumps(good))
         peers, bad = MM.load_peers(self.user)
         self.assertEqual(sorted(b['file'] for b in bad), sorted(f'{n}.json' for n in hostile), bad)
-        self.assertEqual([p['machine'] for p in peers], [BETA])
+        self.assertEqual([MI.host_of(p['machine']) for p in peers], [BETA])
         view, items = self.check()
         self.assertEqual(len([d for d in view['degraded'] if d['code'] == 'unreadable-facts']), len(hostile))
         self.assertIn('restore-gaps-int.json: its restore summary is malformed: gaps', json.dumps(view['degraded']))
@@ -2398,7 +2402,7 @@ class MoveStatus(Base):
         doc = MM.facts(self.user, self.ws)
         out = self.base / 'facts.json'
         MM.write_facts(doc, out)
-        self.assertEqual(json.loads(out.read_text())['machine'], ALPHA)
+        self.assertEqual(MI.host_of(json.loads(out.read_text())['machine']), ALPHA)
         self.assertEqual(stat.S_IMODE(out.stat().st_mode), 0o600)
         self.assertEqual([p.name for p in self.base.iterdir() if p.name.startswith('.facts.json.')], [],
                          'no temporary file is left')
