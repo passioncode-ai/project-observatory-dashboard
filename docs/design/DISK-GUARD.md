@@ -51,6 +51,10 @@ the design that replaces those patches with one set of rules. The run record is
 2. For each class in turn — cache folders, build output, temporary entries, Trash, browser
    clones, the tools' commands — take a **fresh holders listing**, plan within the class's fair
    share, and act; every removal re-checks the target.
+   Before the first class, one warm-up listing with up to 60 s (OBS-534): the first `lsof` a
+   scheduled pass runs took 13 to 41 s under launchd on 2026-11-13 and every later one 0.25 s, so
+   without it each class's listing timed out and nothing was removed. It proves nothing for any
+   class and is not kept; an unknown listing names its cause in the report.
 3. The git tier, with the same lock held, the same holders and the remaining time.
 4. Survey refreshes and the large-file walk, only with the time left.
 5. Write the summary row and the report — always, in `finally`.
