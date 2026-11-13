@@ -53,6 +53,25 @@ def _guard_receipt(path: pathlib.Path) -> dict | None:
     return {**doc, "degraded": valid + ([unknown] if len(valid) != len(notes) else [])}
 
 
+def vm_findings(guard: dict | None) -> list[dict]:
+    """OBS-529: a VM writing into its disk file while the host disk is low is the next thing to break."""
+    out = []
+    for w in (guard or {}).get("warnings") or []:
+        if not isinstance(w, dict) or w.get("code") != "vm-disk-at-risk" or not isinstance(w.get("vms"), list):
+            continue
+        out.append({"type": "machine.vm_disk_at_risk", "subject": "machine:vm",
+                    "severity": "critical" if w.get("level") == "critical" else "warning",
+                    **titled("a virtual machine is writing to a nearly full disk"),
+                    "detail": (f"{len(w['vms'])} VM disk file(s) written in the last hour ({w.get('allocated_gb')} GB "
+                               f"allocated): {', '.join(str(v) for v in w['vms'][:5])}. A VM's file system fails with "
+                               "input/output errors when the host disk reaches zero, and every service inside it "
+                               "stops; cleaning inside the VM frees nothing on the host."),
+                    "action": "free space on the host now (the Machine page's disk table); `docker info` tells whether "
+                              "the VM's daemon still answers",
+                    "evidence": ["store:raw/disk-guard.json"]})
+    return out
+
+
 def _age_hours(stamp: str | None, now: datetime) -> float | None:
     try:
         return (now - datetime.strptime(stamp or "", "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)).total_seconds() / 3600
@@ -76,6 +95,7 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
     hygiene = _load(scratch / "git-hygiene.json")
     guard = _guard_receipt(scratch / "disk-guard.json")
     auto = _auto_cleanup() if auto_cleanup is None else auto_cleanup
+    out.extend(vm_findings(guard))
 
     # THE GUARD ITSELF. On 2026-10-11 the self-cleaning had not run for a day and nothing
     # said so: its steps were "not started" in a tick too long to reach them. A guard that

@@ -129,5 +129,21 @@ class BackupLeftBehind(unittest.TestCase):
         self.assertIn('machine.backup_not_carried', finding_types.LABELS)
 
 
+class VirtualMachineAtRisk(unittest.TestCase):
+    """OBS-529: a VM writing its disk while the host disk is low is named before it breaks."""
+
+    def test_a_writing_vm_on_a_low_disk_is_a_finding(self):
+        guard = {"warnings": [{"code": "vm-disk-at-risk", "level": "critical", "vms": ["/x/.colima/_lima/_disks/colima/datadisk"],
+                               "allocated_gb": 25.0}]}
+        found = F.vm_findings(guard)
+        self.assertEqual([(f["type"], f["severity"]) for f in found], [("machine.vm_disk_at_risk", "critical")])
+        self.assertIn("datadisk", found[0]["detail"])
+        self.assertEqual(F.vm_findings({"warnings": [dict(guard["warnings"][0], level="low")]})[0]["severity"], "warning")
+
+    def test_nothing_without_a_warning_or_with_a_malformed_one(self):
+        self.assertEqual(F.vm_findings(None), [])
+        self.assertEqual(F.vm_findings({"warnings": [{"code": "vm-disk-at-risk", "vms": "not a list"}, "x"]}), [])
+
+
 if __name__ == '__main__':
     unittest.main()

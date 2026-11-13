@@ -207,6 +207,7 @@
  "MCP server not answering": "MCP-сервер не отвечает",
  "Machine": "Машина",
  "Machine disk low": "Мало места на диске машины",
+ "Virtual machine at risk on a full disk": "Виртуальная машина под угрозой из-за полного диска",
  "Managed database": "Управляемая база данных",
  "Month to date": "С начала месяца",
  "No account is connected.": "Ни один аккаунт не подключён.",
@@ -2254,6 +2255,7 @@
  "normal": "норма",
  "temp": "временные файлы",
  "the disk guard has never run": "контроль диска ни разу не запускался",
+ "a virtual machine is writing to a nearly full disk": "виртуальная машина пишет на почти полный диск",
  "the disk guard has not run for {hours} hours": "контроль диска не запускался {hours} ч",
  "trash": "корзина",
  "Disk guard ran {at}: free {before} → {after} GB, {n} removed": {
