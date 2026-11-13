@@ -6908,8 +6908,8 @@
     {
       "path": "tools/check_docs.py",
       "source_sha256": "6070802532aabac8233f07023015e5d5b4e8e19f625a46001209ad251d65fcce",
-      "export_sha256": "ff4d6af59a170211e638a1c8436fef90ed2f852654584f53818bc695c4b3e567",
-      "bytes": 34612,
+      "export_sha256": "1136adbb2c24f11af50106d7e77f89418a5c5f6c4c3ae8d17a6f578f578ff261",
+      "bytes": 34787,
       "python_comments_removed": 148,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
