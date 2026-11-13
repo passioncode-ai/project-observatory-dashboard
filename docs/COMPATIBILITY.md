@@ -360,8 +360,21 @@ records from another's. The place id names both: `<machine id>.a-<10 hex>` (a ha
 inside the id shape every reader accepts). `config/local.json` records it as its `place`; a file written before
 it, with the bare machine id, still matches this computer (and on a computer several accounts share it is read as
 "this host, account unknown"). `full doctor` names the host, the place and how many accounts share the host under
-`place`. Bundles, snapshots, receipts, placement and `full machine-move` still carry the machine id; they move to
-the place id, compared by `machine_identity.match`, in the next part. Tests: `tests/test_place_id.py`.
+`place`. Machine bundles (`MANIFEST.json`) and workspace snapshots (`manifest.json`) carry the place id in
+`machine_id` and the bare machine id in a new `host_id`; the restore receipt and a second-machine restore's
+placement name places too. A restore compares with `machine_identity.match`: this place restores whole
+(`same-place`), another account of this computer or another computer as a second machine (`another-account`,
+`another-machine`), and an older bundle naming only this computer as before on a one-account computer, else by its
+home (`same-host-same-home`, `same-host-account-unknown`). An older engine compares `machine_id` with its bare id,
+never finds them equal and restores a newer bundle as a second machine (the safe way); the same person going back
+to an older engine gives `--same-machine` at a terminal. `full machine-move` works across accounts of one computer:
+`show` prints `place`, `host` and `accountsOnHost`; `leave --to` takes another account's place and refuses a bare
+id of this computer where several accounts share it (`to-names-this-host`); the facts file's `machine` is the place
+(with `host` and `accountsOnHost`), and `status` reads a peer of this computer and another account as another place
+(`sameHost`), an older peer naming only this computer as another account's (`same-host-account-unknown`). A clone
+shares the platform identifier and so the place; a bundle carries its agent-network `device`, and a bundle of this
+place from another device is refused until `--second-machine` or `--same-machine` decides (`clone-suspected`), as a
+peer's facts naming this place with another device are named in `status` instead of dropped. Tests: `tests/test_place_id.py`, `tests/test_machine_backup.py`, `tests/test_workspace_upgrade.py`.
 
 ## Machine placement (0.30.1, OBS-283, OBS-284; 0.31.0, OBS-282, OBS-286)
 

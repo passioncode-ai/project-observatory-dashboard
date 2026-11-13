@@ -168,9 +168,30 @@ def peers_dir(explicit: str | None = None) -> pathlib.Path:
     return folder.resolve()
 
 
+def default_name() -> str:
+    """The host name, on a host with one OS account. Where several share it (OBS-357), two accounts' manifests
+    would read as one machine: a workspace that has written its manifest keeps its name (a new one would make every
+    peer read it as a new machine), and one that has not takes `<host>-<6 hex of its place's account part>`."""
+    host = socket.gethostname().split(".")[0]
+    try:
+        import machine_identity as mi
+        if mi.accounts_on_host() == 1:
+            return host
+        if local_manifest_path().is_file():
+            kept = read_manifest(local_manifest_path()).get("machine")
+            if isinstance(kept, str) and MACHINE.fullmatch(kept):
+                return kept
+        place = mi.place_id(create=False)
+        if place and mi.is_place(place):
+            return f"{host}-{place.rsplit('.a-', 1)[1][:6]}"
+    except Exception:  # noqa: BLE001 - a name that cannot be told better stays the host name
+        pass
+    return host
+
+
 def machine_name(explicit: str | None = None) -> str:
-    """This machine's name in manifests: `--machine`, `OBSERVATORY_MACHINE_NAME`, the host name."""
-    name = explicit or os.environ.get("OBSERVATORY_MACHINE_NAME") or socket.gethostname().split(".")[0]
+    """This machine's name in manifests: `--machine`, `OBSERVATORY_MACHINE_NAME`, else `default_name()`."""
+    name = explicit or os.environ.get("OBSERVATORY_MACHINE_NAME") or default_name()
     if not MACHINE.fullmatch(name or "") or credential_shape.shaped(name):
         raise Refused("the machine name must be one plain identifier (letters, digits, . _ -)")
     return name
