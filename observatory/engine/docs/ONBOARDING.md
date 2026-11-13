@@ -2690,6 +2690,10 @@ use the same snapshot kinds, including snapshots left by engine updates. Migrati
 exports verified copies under the existing three-per-kind policy; an unverifiable
 copy is reported and retained. Unrecognized kinds are outside this inventory and
 remain untouched by migration; the count is not a survey of every backup-like directory.
+A local copy an export could not take (no passphrase yet, a root that did not answer) no longer
+stays for good: the next export of the same kind that works carries it into the root encrypted
+and removes it here, and the root's rotation keeps the newest, never an old copy over it
+(OBS-532). Its report lists `carried`, and `left_local` with the reason for one it could not.
 
 The format is `OBSENC1`: AES-256-GCM in authenticated chunks, key derived from
 the passphrase by scrypt (N=2^17, r=8, p=1), header bound as associated data,
