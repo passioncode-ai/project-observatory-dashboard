@@ -333,6 +333,9 @@ def _snapshot(base: Path, output: Path, *, carry_stores: bool = False,
                     'minimum_reader':marker['minimum_reader'], 'minimum_writer':marker['minimum_writer'],
                     'created_at':datetime.datetime.now(datetime.timezone.utc).isoformat(),
                     'machine_id':machine_identity.place_id(),'host_id':machine_identity.machine_id(),
+                    # The agent-network device it was taken on (OBS-357): a restore of this place from another
+                    # device is a clone's. Additive; absent when the workspace has no device keys yet.
+                    **({'device':device} if (device := _device(base)) else {}),
                     # The home the paths in settings were written under (OBS-347): a restore under
                     # another home rewrites that prefix. Additive; an older reader ignores it.
                     # Absent when this process has no home (`this_home`): nothing is rewritten then.
@@ -627,6 +630,24 @@ def _reset_local_settings(stage: Path, settings: dict) -> str:
     doc['mirrored'] = mirrored
     workspace.write_json(file, doc)
     return 'reset'
+
+
+def _device(base: Path | None) -> str | None:
+    """A workspace's public device id in the agent network, or None (OBS-357's clone check)."""
+    try:
+        import machine_move
+        return machine_move.device_id(base)[0]
+    except Exception:  # noqa: BLE001 - no device is no evidence
+        return None
+
+
+def _this_device(destination: Path) -> str | None:
+    """This machine's device: the running workspace's, never the restore's destination (which is empty)."""
+    try:
+        current = config.home().resolve()
+    except (config.ConfigurationError, OSError):
+        return None
+    return None if current == destination.resolve() else _device(current)
 
 
 def _as_another_machine(stage: Path) -> dict:
@@ -1034,9 +1055,11 @@ def restore(source: Path, destination: Path, *, secret: str | None = None, same_
     source, destination = source.resolve(), destination.resolve()
     manifest = verify_snapshot(source)
     try:
+        theirs, mine = manifest.get('device'), _this_device(destination)
         placing = machine_identity.restore_mode(
             manifest.get('machine_id'), unknown=unknown,
-            asked='same' if same_machine else ('second' if second_machine else None))
+            asked='same' if same_machine else ('second' if second_machine else None),
+            clone=bool(mine and isinstance(theirs, str) and theirs != mine))
     except machine_identity.MachineIdentityError as exc:
         raise config.ConfigurationError(str(exc)) from None
     another = placing['mode'] == 'second-machine'

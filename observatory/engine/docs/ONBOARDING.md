@@ -3080,8 +3080,11 @@ OS account of the same computer (`another-account`) and another computer (`anoth
 as a second machine. A bundle from an engine before place ids names only the computer: on a computer
 with one account it is this place, as before; on a computer several accounts share, it is this
 account's only when its home is this home (`same-host-same-home`), else a second machine
-(`same-host-account-unknown`). `--second-machine` and `--same-machine` (at a terminal) still decide
-by hand:
+(`same-host-account-unknown`). A copy of this machine (a cloned disk or virtual machine) shares the
+place; a bundle or snapshot of this place taken on another agent-network device is refused until you
+choose (`clone-suspected`), and `full doctor`'s `place` block names a peer's facts that do the same,
+and a vault-digest name every account of a shared computer would publish (`digest-name-shared`).
+`--second-machine` and `--same-machine` (at a terminal) still decide by hand:
 
 - **SSH.** `~/.ssh/config` (and `config.d/`), `known_hosts`, `authorized_keys`,
   `allowed_signers` and each `*.pub` whose private half is not in the bundle are written (the

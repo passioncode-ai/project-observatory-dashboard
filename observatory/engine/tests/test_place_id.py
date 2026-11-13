@@ -255,5 +255,44 @@ class CloneCheck(unittest.TestCase):
         self.assertIn("clone-suspected", [d["code"] for d in view["degraded"]])
 
 
+class DoctorWarnings(unittest.TestCase):
+    """OBS-357's last part: doctor names a clone of this machine, and a digest name the host's accounts would share."""
+
+    def setUp(self):
+        import machine_move
+        self.mm = machine_move
+        with env("501"):
+            self.here = mi.place_id()
+
+    def peer(self, device):
+        return {"machine": self.here, "device": device}
+
+    def warnings(self, *, peers=(), published=None, accounts=1):
+        with env("501"), patch.object(self.mm, "device_id", lambda base: ("dev-this-0001", None)), \
+                patch.object(self.mm.socket, "gethostname", lambda: "studio.local"):
+            return [w["code"] for w in self.mm.place_warnings(Path("/nonexistent"), None, peers=list(peers),
+                                                               published=published, accounts=accounts)]
+
+    def test_a_peer_naming_this_place_with_another_device_is_a_clone(self):
+        self.assertEqual(self.warnings(peers=[self.peer("dev-other-0001")]), ["clone-suspected"])
+        self.assertEqual(self.warnings(peers=[self.peer("dev-this-0001")]), [], "this very machine's facts")
+
+    def test_the_bare_host_name_is_shared_only_where_several_accounts_are(self):
+        self.assertEqual(self.warnings(published="studio", accounts=2), ["digest-name-shared"])
+        self.assertEqual(self.warnings(published="studio", accounts=None), ["digest-name-shared"], "unknown is several")
+        self.assertEqual(self.warnings(published="studio", accounts=1), [])
+        self.assertEqual(self.warnings(published="studio-1a2b3c", accounts=2), [])
+
+    def test_doctor_carries_them(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as raw, env("501"), \
+                patch.object(self.mm, "place_warnings", lambda home, base: [{"code": "clone-suspected", "reason": "x"}]):
+            home = Path(raw).resolve() / "ws"
+            workspace.initialize(home)
+            block = workspace.doctor(home)["place"]
+        self.assertEqual([w["code"] for w in block["warnings"]], ["clone-suspected"])
+        self.assertEqual(block["host"], HOST)
+
+
 if __name__ == "__main__":
     unittest.main()
