@@ -24,15 +24,16 @@ NOW = 1_800_000_000.0
 CLAUDE = "/opt/agents/claude/versions/2.3.4"
 
 
-def row(pid, ppid, exe, *, age=7200.0, cpu=0.01, uid=UID):
-    return {"pid": pid, "ppid": ppid, "uid": uid, "age_s": age, "cpu_s": cpu, "exe": exe}
+def row(pid, ppid, exe, *, age=7200.0, cpu=0.01, uid=UID, pgid=None):
+    return {"pid": pid, "ppid": ppid, "pgid": pgid if pgid is not None else pid, "uid": uid, "age_s": age, "cpu_s": cpu,
+            "exe": exe}
 
 
 def table(over=None):
     rows = {
         100: row(100, 1, CLAUDE, cpu=900.0),                 # the session
         200: row(200, 100, "/bin/zsh"),                      # its shell, waiting on 300
-        300: row(300, 200, "wc"),                            # the hung leaf
+        300: row(300, 200, "wc", pgid=200),                  # the hung leaf, alone in its shell's group
         400: row(400, 100, "node", cpu=5.0),                 # a stdio MCP server: the agent's child
         410: row(410, 100, "npm", cpu=1.0),
         420: row(420, 410, "node"),                         # an MCP server started through npx
@@ -61,12 +62,20 @@ class Parsing(unittest.TestCase):
         self.assertIsNone(H.parse_duration("1:2:3:4"))
 
     def test_the_table_keeps_the_full_command_name(self):
-        out = H.parse_table("  300   200   501   1-09:00:00     0:00.01 /usr/bin/wc\n bad line\n")
-        self.assertEqual(out[300]["exe"], "/usr/bin/wc")
+        out = H.parse_table("  300   200   200   501   1-09:00:00     0:00.01 /usr/bin/wc\n bad line\n")
+        self.assertEqual((out[300]["exe"], out[300]["pgid"]), ("/usr/bin/wc", 200))
         self.assertEqual(out[300]["age_s"], 33 * 3600)
 
     def test_lsof_names_by_pid(self):
         self.assertEqual(H.parse_lsof("p300\nf0\nn/dev/ttys003\np301\nn->0x12\n"), {300: "/dev/ttys003", 301: "->0x12"})
+
+    def test_an_input_is_classified_by_its_type(self):
+        typed = H.parse_lsof_typed("p1\nf0\ntCHR\nn/dev/ttys003\np2\nf0\ntunix\nn->0xaa\np3\nf0\ntPIPE\nn->0xbb\n"
+                                   "p4\nf0\ntCHR\nn/dev/null\n")
+        self.assertEqual({p: H.classify(*v) for p, v in typed.items()},
+                         {1: "terminal", 2: "socket", 3: "pipe", 4: "null"})
+        self.assertEqual([H.classify("", n) for n in ("/dev/pts/2", "socket:[9]", "pipe:[9]", "/tmp/x")],
+                         ["terminal", "socket", "pipe", "other"])
 
     def test_a_leaf_reads_no_file_only_when_nothing_could_be_one(self):
         self.assertTrue(H.reads_no_file("wc", ["-l"]))
@@ -83,7 +92,7 @@ class Survey(unittest.TestCase):
     def survey(self, t, prev, stdin=None, args=None):
         with patch.object(H.os, "name", "posix"):
             return H.survey(prev, uid=UID, now=NOW, table=t,
-                            stdin=stdin or (lambda pids: {p: "/dev/ttys003" for p in pids}),
+                            stdin=stdin or (lambda pids: {p: "terminal" for p in pids}),
                             cwd=lambda pids: {p: "/srv/work/some-project" for p in pids},
                             args=args or (lambda pid: ["mcp-server-x", "--stdio"] if pid == 420 else ["-l"]))
 
@@ -118,7 +127,7 @@ class Survey(unittest.TestCase):
 
     def test_input_from_dev_null_is_not_hung(self):
         t = table()
-        receipt = self.survey(t, previous(t), stdin=lambda pids: {p: "/dev/null" for p in pids})
+        receipt = self.survey(t, previous(t), stdin=lambda pids: {p: "null" for p in pids})
         self.assertEqual(receipt["hung"], [])
 
     def test_unreadable_input_is_degraded_never_a_guess(self):
@@ -130,8 +139,21 @@ class Survey(unittest.TestCase):
     def test_a_leaf_reading_a_pipe_is_reported_and_never_a_stop_candidate(self):
         """A watcher's `tail -f log | grep X | head -1` waits by design (measured 2026-11-13)."""
         t = table()
-        receipt = self.survey(t, previous(t), stdin=lambda pids: {p: "->0xaeda324001f5e31c" for p in pids})
+        receipt = self.survey(t, previous(t), stdin=lambda pids: {p: "pipe" for p in pids})
         self.assertEqual([(h["pid"], h["stdin"], h["leaf"]) for h in receipt["hung"]], [(300, "pipe", False)])
+
+    def test_a_socket_from_the_agent_is_a_stop_candidate_when_nothing_else_lives_in_the_group(self):
+        """The 2026-11-12 case: a background `wc -l` whose stdin is the agent's unix socket."""
+        t = table()
+        receipt = self.survey(t, previous(t), stdin=lambda pids: {p: "socket" for p in pids})
+        self.assertEqual([(h["pid"], h["stdin"], h["alone"], h["leaf"]) for h in receipt["hung"]],
+                         [(300, "socket", True, True)])
+
+    def test_a_live_neighbour_in_the_group_makes_it_a_watcher(self):
+        t = table({310: row(310, 200, "ugrep", cpu=0.3, pgid=200)})   # `... | ugrep | wc` in the same group
+        receipt = self.survey(t, previous(t), stdin=lambda pids: {p: "socket" for p in pids})
+        self.assertEqual([(h["pid"], h["alone"], h["leaf"]) for h in receipt["hung"]],
+                         [(300, False, False), (310, False, False)], "both are named, neither is stopped")
 
     def test_a_leaf_with_a_file_is_reported_but_not_a_stop_candidate(self):
         t = table()
@@ -196,6 +218,8 @@ class Finding(unittest.TestCase):
         receipt["stopped"] = [{"pid": 300, "result": "stopped"}]
         self.assertEqual(F.hung_findings(receipt)[0]["severity"], "info")
         piped = {"hung": [{"pid": 9, "name": "head", "stdin": "pipe", "folder": "some-project"}]}
+        crowded = {"hung": [{"pid": 9, "name": "head", "stdin": "socket", "alone": False}]}
+        self.assertEqual(F.hung_findings(crowded)[0]["severity"], "info")
         self.assertEqual(F.hung_findings(piped)[0]["severity"], "info", "a pipe reader may be a watcher")
         self.assertIn("never stopped", F.hung_findings(piped)[0]["detail"])
         self.assertEqual(F.hung_findings(None), [])

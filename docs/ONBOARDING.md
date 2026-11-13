@@ -3696,10 +3696,12 @@ to the shared update log. Each maintenance run does only what is due:
   than `/dev/null`, is waiting on input nobody writes, and its session waits on it: the finding
   `machine.hung_commands` names it with its session's folder (receipt `hung-commands.json` in the
   store's `raw` folder). With `features.auto_cleanup` on, only `wc`, `cat`, `grep` or `head`
-  reading no file, with a terminal as its input, is stopped, with SIGTERM, and journalled in
-  `store/logs/hung-commands.jsonl`; any other command is left for you or its session. A command
-  reading a pipe is named but never stopped: a watcher waiting for its event
-  (`tail -f log | grep X | head -1`) looks the same. `project-observatory full machine --explain PID`
+  reading no file, whose input is a terminal or a unix socket (a coding agent hands a background
+  command its input as a socket it never writes to) and whose process group holds nothing else but
+  shells, is stopped, with SIGTERM, and journalled in `store/logs/hung-commands.jsonl`; any other
+  command is left for you or its session. A command reading a pipe, or with a live neighbour in its
+  group, is named but never stopped: a watcher waiting for its event (`tail -f log | grep X | head -1`)
+  looks the same. `project-observatory full machine --explain PID`
   names the session. Not read on Windows yet.
 
 - Every five minutes it runs `full update --check` (the same static read); at login the first

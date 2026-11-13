@@ -60,18 +60,20 @@ def hung_findings(receipt: dict | None) -> list[dict]:
         return []
     stopped = {s.get("pid") for s in (receipt or {}).get("stopped") or [] if isinstance(s, dict) and s.get("result") == "stopped"}
     left = [h for h in hung if h.get("pid") not in stopped]
-    # A command reading a pipe waits on its writer and may wait by design (a watcher's `| head -1`).
-    stuck = [h for h in left if h.get("stdin") != "pipe"]
+    # A command reading a pipe, or with a live neighbour in its process group, may wait by design (a watcher's
+    # `| head -1`).
+    stuck = [h for h in left if h.get("stdin") != "pipe" and h.get("alone", True)]
     named = ", ".join(f"{h['name']} (pid {h.get('pid')}, {h.get('age_hours')} h, "
                       f"{h.get('agent') or 'agent'} session in {h.get('folder') or 'an unknown folder'})"
                       for h in hung[:LISTED])
     return [{"type": "machine.hung_commands", "subject": "machine:agents",
              "severity": "warning" if stuck else "info",
              **titled("{n} commands of agent sessions hang on their input", n=len(hung)),
-             "detail": (f"Older than an hour, idle between two samples, reading a terminal nobody types into or a "
-                        f"pipe whose writer is idle; the session that started each waits on it: {named}."
-                        + (f" {len(left) - len(stuck)} of them read a pipe: a watcher waiting for its event looks "
-                           "the same, so those are never stopped." if len(left) > len(stuck) else "")
+             "detail": (f"Older than an hour, idle between two samples, reading a terminal, a socket or a pipe "
+                        f"nobody writes to; the session that started each waits on it: {named}."
+                        + (f" {len(left) - len(stuck)} of them read a pipe or share their process group with a live "
+                           "neighbour: a watcher waiting for its event looks the same, so those are never stopped."
+                           if len(left) > len(stuck) else "")
                         + (f" {len(hung) - len(left)} leaf command(s) were stopped with SIGTERM." if stopped else "")),
              "action": ("`project-observatory full machine --explain PID` names the session; end the command in that "
                         "session, or stop it if nothing waits on it" if left else "nothing to do; the journal "

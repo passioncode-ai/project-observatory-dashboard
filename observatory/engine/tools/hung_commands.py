@@ -18,12 +18,14 @@ machine saying so. A peer project's rule, taken as it stands: a process is a hun
   a terminal nobody writes to does not).
 
 What is done about one: a finding names it with its session's folder (`machine.hung_commands`).
-Only a command of the short list `LEAVES` (`wc`, `cat`, `grep`, `head`) that reads no file and whose
-input is a TERMINAL is stopped, with SIGTERM, and only with `--apply` (the maintenance pass gives it
-when `features.auto_cleanup` is on): nothing will ever type into a session's terminal. A command
-reading a pipe waits on the process writing it, and may be a watcher waiting by design
-(`tail -f log | grep X | head -1`, measured on this machine on 2026-11-13): it is named, never
-stopped. A session, a service or any other command is never signalled.
+Only a command of the short list `LEAVES` (`wc`, `cat`, `grep`, `head`) is stopped, with SIGTERM and
+only with `--apply` (the maintenance pass gives it when `features.auto_cleanup` is on), and only when
+all hold: it reads no file; its input is a terminal or a unix socket (a coding agent hands a
+background command its stdin as a socket it never writes to: the 2026-11-12 `wc -l`); and nothing
+else lives in its process group but shells. A command reading a pipe, or one with a live neighbour in
+its group, may be a watcher waiting by design (`tail -f log | grep X | head -1`, measured here on
+2026-11-13): it is named, never stopped. A session, a service or any other command is never
+signalled.
 Each stop is journalled. Argument lists are read only to decide "no file"; none is stored.
 
     hung_commands.py [--receipt PATH] [--journal PATH] [--apply] [--json]
@@ -83,17 +85,17 @@ def parse_duration(text: str) -> float | None:
 
 
 def parse_table(text: str) -> dict[int, dict]:
-    """`ps -axo pid=,ppid=,uid=,etime=,time=,comm=`."""
+    """`ps -axo pid=,ppid=,pgid=,uid=,etime=,time=,comm=`."""
     table: dict[int, dict] = {}
     for line in text.splitlines():
-        parts = line.split(None, 5)
-        if len(parts) < 6 or not (parts[0].isdigit() and parts[1].isdigit() and parts[2].isdigit()):
+        parts = line.split(None, 6)
+        if len(parts) < 7 or not all(x.isdigit() for x in parts[:4]):
             continue
-        age, cpu = parse_duration(parts[3]), parse_duration(parts[4])
+        age, cpu = parse_duration(parts[4]), parse_duration(parts[5])
         if age is None or cpu is None:
             continue
-        table[int(parts[0])] = {"pid": int(parts[0]), "ppid": int(parts[1]), "uid": int(parts[2]),
-                                "age_s": age, "cpu_s": cpu, "exe": parts[5].strip()}
+        table[int(parts[0])] = {"pid": int(parts[0]), "ppid": int(parts[1]), "pgid": int(parts[2]),
+                                "uid": int(parts[3]), "age_s": age, "cpu_s": cpu, "exe": parts[6].strip()}
     return table
 
 
@@ -106,7 +108,7 @@ def _run(argv: list[str], timeout: int = 30) -> str | None:
 
 
 def read_table() -> dict[int, dict] | None:
-    out = _run(["ps", "-axo", "pid=,ppid=,uid=,etime=,time=,comm="])
+    out = _run(["ps", "-axo", "pid=,ppid=,pgid=,uid=,etime=,time=,comm="])
     return parse_table(out) if out is not None else None
 
 
@@ -158,30 +160,64 @@ def still_idle(row: dict, prev: dict | None, now: float, prev_at: float | None) 
 
 def parse_lsof(text: str) -> dict[int, str]:
     """`lsof -Fpn` output: {pid: name of the file}."""
-    out: dict[int, str] = {}
-    pid = None
+    return {pid: name for pid, (_kind, name) in parse_lsof_typed(text).items()}
+
+
+def parse_lsof_typed(text: str) -> dict[int, tuple[str, str]]:
+    """`lsof -Fptn` output: {pid: (type, name)} of the first file listed for each pid."""
+    out: dict[int, tuple[str, str]] = {}
+    pid, kind = None, ""
     for line in text.splitlines():
         if line.startswith("p"):
-            pid = int(line[1:]) if line[1:].isdigit() else None
+            pid, kind = (int(line[1:]) if line[1:].isdigit() else None), ""
+        elif line.startswith("t"):
+            kind = line[1:]
         elif line.startswith("n") and pid is not None:
-            out.setdefault(pid, line[1:])
+            out.setdefault(pid, (kind, line[1:]))
     return out
 
 
+def classify(kind: str, name: str) -> str:
+    """What a standard input is: null, terminal, socket, pipe or other. `kind` is lsof's TYPE (empty on Linux,
+    where `name` is the fd's link: `/dev/pts/3`, `socket:[123]`, `pipe:[123]`)."""
+    if name == "/dev/null":
+        return "null"
+    if name.startswith(("/dev/tty", "/dev/pts/", "/dev/console")):
+        return "terminal"
+    if kind.lower() == "unix" or name.startswith("socket:"):
+        return "socket"
+    if kind.upper() in ("PIPE", "FIFO") or name.startswith("pipe:"):
+        return "pipe"
+    return "other"
+
+
 def stdin_of(pids: list[int]) -> dict[int, str] | None:
-    """{pid: what fd 0 is}; None when it cannot be read at all."""
+    """{pid: what fd 0 is, as `classify` names it}; None when it cannot be read at all."""
     if not pids:
         return {}
     if sys.platform.startswith("linux"):
         out = {}
         for pid in pids:
             try:
-                out[pid] = os.readlink(f"/proc/{pid}/fd/0")
+                out[pid] = classify("", os.readlink(f"/proc/{pid}/fd/0"))
             except OSError:
                 continue
         return out
-    text = _run(["lsof", "-a", "-p", ",".join(str(p) for p in pids), "-d", "0", "-Fpn"])
-    return parse_lsof(text) if text is not None else None
+    text = _run(["lsof", "-a", "-p", ",".join(str(p) for p in pids), "-d", "0", "-Fptn"])
+    return {pid: classify(*v) for pid, v in parse_lsof_typed(text).items()} if text is not None else None
+
+
+#: Processes a command's group may hold beside it without being a neighbour that feeds or reads it.
+SHELLS = ("sh", "bash", "zsh", "dash", "fish", "ksh")
+
+
+def alone_in_group(pid: int, table: dict[int, dict]) -> bool:
+    """Whether nothing but shells shares the process group of `pid` (a watcher's pipeline does not)."""
+    group = table[pid].get("pgid")
+    if group is None:
+        return False
+    return not any(q != pid and r.get("pgid") == group and os.path.basename(r["exe"]).lstrip("-") not in SHELLS
+                   for q, r in table.items())
 
 
 def cwd_of(pids: list[int]) -> dict[int, str]:
@@ -260,7 +296,7 @@ def survey(previous: dict | None, *, uid: int | None = None, now: float | None =
     if inputs is None:
         receipt["degraded"].append({"source": "lsof", "reason": "standard input of the idle commands could not be read"})
         return receipt
-    idle = [pid for pid in idle if pid in inputs and inputs[pid] != "/dev/null"]
+    idle = [pid for pid in idle if pid in inputs and inputs[pid] != "null"]
     folders = (cwd or cwd_of)(sorted({found[pid] for pid in idle}))
     for pid in sorted(idle):
         row, session = table[pid], found[pid]
@@ -268,15 +304,15 @@ def survey(previous: dict | None, *, uid: int | None = None, now: float | None =
         words = (args or args_of)(pid)
         if words is not None and any("mcp" in w.lower() for w in words):
             continue
-        source = inputs[pid]
-        stdin_kind = ("terminal" if source.startswith(("/dev/tty", "/dev/pts", "/dev/console"))
-                      else "pipe" if "pipe" in source or source.startswith("->") else "other")
+        stdin_kind = inputs[pid]
         receipt["hung"].append({
             "pid": pid, "name": name, "agent": _agent(table[session]["exe"]), "session_pid": session,
             "folder": folder_name(folders.get(session, "")) or None,
             "age_hours": round(row["age_s"] / 3600, 1), "cpu_seconds": row["cpu_s"],
             "stdin": stdin_kind,
-            "leaf": stdin_kind == "terminal" and name in LEAVES and words is not None and reads_no_file(name, words)})
+            "alone": alone_in_group(pid, table),
+            "leaf": (stdin_kind in ("terminal", "socket") and name in LEAVES and words is not None
+                     and reads_no_file(name, words) and alone_in_group(pid, table))})
     return receipt
 
 

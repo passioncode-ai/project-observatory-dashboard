@@ -968,8 +968,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "bb07ec1f47d2ae28e6a0a3baa9542fa1668f1af53e8b0c47b7482470b0119636",
-      "bytes": 327737,
+      "export_sha256": "43a040836343b150623c3038a2e79617ddc7b0a2f8d98404a3540db4163aed35",
+      "bytes": 327934,
       "upstream_modified": true
     },
     {
@@ -5234,8 +5234,8 @@
       "path": "tests/test_hung_commands.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9661def31bdbfe834afa17b97c2c23aed766922d606baeb7981636e968e5c03e",
-      "bytes": 11400
+      "export_sha256": "605d8327681f3ac1e23c87b2b7eb1f80a350c23e318f2684eb488765545dce64",
+      "bytes": 13159
     },
     {
       "path": "tests/test_i18n.py",
@@ -7178,8 +7178,8 @@
       "path": "tools/hung_commands.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e588f60d971ca43fe7f336798c6dae9a9416b3eafa99e1ec69cf1302686d3e52",
-      "bytes": 14948
+      "export_sha256": "e2c01bd63ec2f66215b1bc441f05609a87c09632d9b2a941033e3a6e5fc81d6a",
+      "bytes": 16584
     },
     {
       "path": "tools/install_key.py",
@@ -7253,8 +7253,8 @@
       "path": "tools/machine_findings.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9795d551d79edc70dba8bbc49a3d790e46df1f9aa7d02f5d63c96f0af207411e",
-      "bytes": 24100
+      "export_sha256": "9d02140bfa5d75e405e5582f4b74c192a304378839bedab6063fbccc2d30aef1",
+      "bytes": 24221
     },
     {
       "path": "tools/maintain.py",
