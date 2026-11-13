@@ -77,6 +77,8 @@ WALK_LIMIT = 50_000
 #: The class order of a run. Paths first, the tools' commands last (a lock wait in one
 #: command once spent a whole run with nothing removed).
 CLASSES = ("cache-dir", "build-output", "temp", "trash", "browser-clone", "cache-command")
+#: The most the pass's first holder listing may take (OBS-534): the first `lsof` of a scheduled pass is the slow one.
+WARMUP_SECONDS = 60.0
 #: Set by the guard for the cleanup it starts, which then does not take the lock again.
 LOCK_HELD_ENV = "OBSERVATORY_CLEANUP_LOCK_HELD"   # = cleanup_lock.HELD_ENV
 
@@ -1758,6 +1760,7 @@ def run(argv: list[str]) -> dict:
     last_commands = dict((previous or {}).get("commands_last") or {})
     holders_mode = "unknown"
     holders_by_phase: dict = {}
+    holders_warmup: dict = {}
     with cleanup_lock() as mine:
         if not mine:
             return {**base, "busy": True, "acting": False,
@@ -1777,6 +1780,15 @@ def run(argv: list[str]) -> dict:
             state = service_state(cfg, degraded, deadline=mark + max(1.0, min(30.0, left() / 10)))
             phases["service-state"] = round(time.monotonic() - mark)
             at = time.time()
+            # The first `lsof` a scheduled pass runs is slow: under launchd on 2026-11-13 it took 13 to 41 s while each
+            # one after it took 0.25 s, so every class's listing (a quarter of its share, about 15 s) timed out and the
+            # guard removed nothing on a disk at 0.2 GB (OBS-534). One listing first, given room, warms it; its result
+            # proves nothing for any class and is not kept.
+            mark = time.monotonic()
+            warm = Holders.take(max(1.0, min(WARMUP_SECONDS, (left() - reserve) / 4)), complete=True)
+            phases["holders-warmup"] = round(time.monotonic() - mark)
+            holders_warmup = {"seconds": round(time.monotonic() - mark, 1), "observation": warm.observation,
+                              "reason": getattr(warm, "reason", None)}
             classes = list(CLASSES)
             # The git tier's own share, kept back before the classes split the rest: as the last
             # comer it got only what they left, and on the first scheduled 0.24.0 pass (critical,
@@ -1798,6 +1810,7 @@ def run(argv: list[str]) -> dict:
                            else Holders.take(max(1.0, min(60.0, share / 4)), complete=True))
                 holders_by_phase[name] = {"mode": holders.mode, "known": holders.known,
                                           "observation": holders.observation,
+                                          "reason": getattr(holders, "reason", None),
                                           "measured_at": now() if holders.observation in ("partial", "complete")
                                           else None}
                 if name != "cache-command":
@@ -1805,7 +1818,8 @@ def run(argv: list[str]) -> dict:
                 if not holders.known and name != "cache-command":
                     if not any(d.get("source") == "holders" for d in degraded):
                         degraded.append({"source": "holders", "reason": "what processes hold could not be read; "
-                                                                        "no path is removed"})
+                                                                        "no path is removed",
+                                         "detail": getattr(holders, "reason", None)})
                     phases[name] = round(time.monotonic() - mark)
                     continue
                 planner = dict(planners(cfg, level, holders, at, degraded, last_commands, kept, state))[name]
@@ -1867,7 +1881,7 @@ def run(argv: list[str]) -> dict:
             doc = {**base, "at": now(), "free_gb_after": round(free1 / GB, 1),
                    "freed_gb": round((free1 - free0) / GB, 2), "seconds": round(time.monotonic() - started),
                    "budget_seconds": round(budget), "phases": phases, "holders": holders_mode,
-                   "holders_by_phase": holders_by_phase,
+                   "holders_by_phase": holders_by_phase, "holders_warmup": holders_warmup,
                    "build_cursor": _read(paths.STATE / "disk-guard-build-cursor.json"),
                    "planned": {cls: sum(1 for a in plan if a["class"] == cls) for cls in CLASSES},
                    "planned_gb": round(sum(a.get("bytes") or 0 for a in plan) / GB, 1),
