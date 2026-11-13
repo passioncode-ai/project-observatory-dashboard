@@ -4468,8 +4468,8 @@
       "path": "tests/test_agent_plugin.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1fe56e9884a18c18173ba3b3b05d8d9de3d96697968dd414d8924f2841514386",
-      "bytes": 28934
+      "export_sha256": "650b8c2a4e7bf4454855deb31acf3c8e6cee8955112c7bac008af06ad84deeb5",
+      "bytes": 29168
     },
     {
       "path": "tests/test_agent_queue.py",
