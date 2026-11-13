@@ -959,6 +959,44 @@ def docker_daemon(docker: str, timeout: float) -> str:
     return endpoint_kind(host)
 
 
+# The disk files of local virtual machines (Colima's and Lima's), which grow as the VM writes: a VM is a VICTIM of
+# a full host disk as much as a cause. At zero free space its file system fails with input/output errors and every
+# service inside stops (2026-11-12: Fabric's database in Colima for five hours), while the guard itself still runs.
+VM_DISK_GLOBS = ("~/.colima/_lima/_disks/*/datadisk", "~/.colima/_lima/*/disk", "~/.colima/_lima/*/diffdisk",
+                 "~/.lima/_disks/*/datadisk", "~/.lima/*/diffdisk")
+VM_WRITING_MINUTES = 60
+
+
+def vm_disks(at: float, globs=VM_DISK_GLOBS) -> list[dict]:
+    """Each VM disk file: its path, the space it takes now (allocated, a sparse file's real size), its size, and
+    how long ago the VM last wrote it. Reads metadata only; starts and asks nothing."""
+    import glob
+    out = []
+    for pattern in globs:
+        for path in sorted(glob.glob(os.path.expanduser(pattern))):
+            try:
+                st = os.lstat(path)
+            except OSError:
+                continue
+            if not stat.S_ISREG(st.st_mode):
+                continue
+            out.append({"path": path, "allocated_gb": round(getattr(st, "st_blocks", 0) * 512 / GB, 1),
+                        "size_gb": round(st.st_size / GB, 1),
+                        "written_minutes_ago": max(0, round((at - st.st_mtime) / 60))})
+    return out
+
+
+def vm_warnings(level: str, vms: list[dict]) -> list[dict]:
+    """At `low` and `critical` pressure, a VM that wrote its disk in the last hour is at risk (OBS-529)."""
+    if level not in ("low", "critical"):
+        return []
+    writing = [v for v in vms if v["written_minutes_ago"] <= VM_WRITING_MINUTES]
+    if not writing:
+        return []
+    return [{"code": "vm-disk-at-risk", "level": level, "vms": [v["path"] for v in writing],
+             "allocated_gb": round(sum(v["allocated_gb"] for v in writing), 1)}]
+
+
 def running_vms(argv: list[str], timeout: float) -> list[str] | None:
     """The virtual machines a VM tool lists as running (`colima list --json`, `limactl list
     --json`: one JSON object per line, or one array), by name. None when the list cannot be
@@ -1841,6 +1879,11 @@ def run(argv: list[str]) -> dict:
                    "service_state": ({k: state[k] for k in ("complete", "refused", "seconds", "unknown_services")}
                                      | {"paths": len(state["paths"])}) if state else None,
                    "surveys": surveys, "large_files": found, "memory": memory_report(), "degraded": degraded}
+            try:
+                doc["vms"] = vm_disks(time.time())
+                doc["warnings"] = vm_warnings(level, doc["vms"])
+            except Exception as exc:  # noqa: BLE001 - a VM that cannot be measured is named, never stops the report
+                doc["degraded"].append({"source": "vms", "reason": f"VM disks could not be read ({type(exc).__name__})"})
             if acting:
                 journal([{"at": doc["at"], "kind": "summary", "mode": "guard", "level": level, **results,
                           "freed_mb": round((free1 - free0) / 1048576), "seconds": doc["seconds"],

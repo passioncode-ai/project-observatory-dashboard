@@ -679,6 +679,27 @@ class WorkspaceUpgrade(unittest.TestCase):
         self.assertIn('project-observatory full lifecycle policy app.always --desired always_on',
                       ' '.join(result['machine']['next']))
 
+    def set_device(self, home, device):
+        path=home/'node/device/device.json'
+        path.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
+        path.write_text(json.dumps({'id':device}))
+        path.chmod(0o600)
+
+    def test_a_snapshot_of_this_place_from_another_device_is_a_clones(self):
+        """OBS-357: a cloned disk shares the place; the agent-network device tells the clone apart."""
+        self.set_device(self.home,'dev-original-0001')
+        source=self.snapshot()
+        self.assertEqual(config.read_json(source/'manifest.json')['device'],'dev-original-0001')
+        self.set_device(self.home,'dev-clone-0002')                  # this machine is now another device
+        with self.assertRaises(config.ConfigurationError) as caught:
+            upgrade.restore(source,self.base/'clone')
+        self.assertIn('clone-suspected',str(caught.exception))
+        self.assertFalse((self.base/'clone').exists(),'a refusal writes nothing')
+        result=upgrade.restore(source,self.base/'as second',second_machine=True)
+        self.assertEqual(result['machine']['mode'],'second-machine')
+        self.set_device(self.home,'dev-original-0001')               # the same device: restored whole, as before
+        self.assertEqual(upgrade.restore(source,self.base/'same')['machine']['mode'],'same-machine')
+
     def test_second_machine_is_asked_anywhere(self):
         self.identity()
         source=self.snapshot()
