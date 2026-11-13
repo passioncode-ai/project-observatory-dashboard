@@ -3063,7 +3063,8 @@ The plan and every answer carry paths, counts and reasons, never a file's conten
 **Which machine a bundle or snapshot came from (0.30.1).** Each bundle and each workspace
 snapshot names the machine it was taken on (`machine_id`: `m-` and 24 hex digits of a SHA-256
 over the platform's own machine identifier, which is never written; `full machine-move show`
-prints this machine's). Restored on the machine that took it, both behave as above. Restored on
+prints this machine's). Since OBS-357 they name the place instead: that id with `.a-` and a hash of
+the OS account, so another account of the same computer is another place. Restored on the machine that took it, both behave as above. Restored on
 another machine, or when they name no machine (taken before 0.30.1), they restore as a **second
 machine**, below. `--same-machine` restores whole anyway and is accepted only at a terminal:
 use it when you replace a machine and want its identity back, never for a machine that keeps
@@ -3073,7 +3074,14 @@ running. `full machine-restore --second-machine` asks for the second-machine way
 machines keep running, a whole restore would give the second one this machine's SSH key, start
 every one of its launchd jobs at the next login (a bot polling one token on two machines, a
 scheduler acting twice) and copy its agent-network identity. A second-machine restore does none
-of that:
+of that. Which restore a bundle or snapshot gets is decided by the place it names (OBS-357): the
+host and the OS account it was taken under. This very place restores whole (`same-place`); another
+OS account of the same computer (`another-account`) and another computer (`another-machine`) restore
+as a second machine. A bundle from an engine before place ids names only the computer: on a computer
+with one account it is this place, as before; on a computer several accounts share, it is this
+account's only when its home is this home (`same-host-same-home`), else a second machine
+(`same-host-account-unknown`). `--second-machine` and `--same-machine` (at a terminal) still decide
+by hand:
 
 - **SSH.** `~/.ssh/config` (and `config.d/`), `known_hosts`, `authorized_keys`,
   `allowed_signers` and each `*.pub` whose private half is not in the bundle are written (the
@@ -3134,7 +3142,7 @@ project-observatory full ssh-keys rekey NAME --fingerprint SHA256:... --apply  #
 project-observatory full machine-restore --latest --clone
 project-observatory full restore --latest                         # the workspace, without the node identity; asks once for the first machine's passphrase
 project-observatory full node --init                              # this machine's own device id
-project-observatory full machine-move show                        # this machine's id and the staged jobs
+project-observatory full machine-move show                        # this place's id (what --to takes) and the staged jobs
 ```
 
 The key comes before `--clone` because the other machine's private key was not written: a
