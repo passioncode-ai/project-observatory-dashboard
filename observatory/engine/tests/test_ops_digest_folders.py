@@ -9,14 +9,15 @@ import json
 import os
 import shutil
 import sys
-import tempfile
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import ops_digest_folders as F  # noqa: E402
+import tmp as tmpdir  # noqa: E402  a temporary folder that goes away
 
 SEMANTIC = ROOT / "fabric" / "ops-digest" / "semantic"
 DAILY = json.loads((ROOT / "fabric" / "ops-digest" / "positive" / "ops-digest-daily.json").read_text(encoding="utf-8"))
@@ -70,8 +71,7 @@ class Fold(unittest.TestCase):
 
 class Collector(unittest.TestCase):
     def setUp(self):
-        self.tmp = Path(tempfile.mkdtemp(prefix="od9-"))
-        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.tmp = Path(tmpdir.mkdtemp(prefix="od9-"))
         self.data = self.tmp / "data"
         (self.data / "digests").mkdir(parents=True)
         self.descriptor = copy.deepcopy(fixture("ops-digest-folders-ok.json")["input"])
@@ -138,8 +138,7 @@ class Collector(unittest.TestCase):
 class MaintenanceStep(unittest.TestCase):
     def test_the_pass_reports_what_it_read_and_never_raises(self):
         import maintenance
-        base = Path(tempfile.mkdtemp(prefix="od9-pass-"))
-        self.addCleanup(shutil.rmtree, base, True)
+        base = Path(tmpdir.mkdtemp(prefix="od9-pass-"))
         self.assertEqual(maintenance.step_ops_digests(base, lambda: {"services": 0, "notDeclared": [],
                                                                     "unattributed": []}), {"result": "none-declared"})
         ran = maintenance.step_ops_digests(base, lambda: {"services": 1, "folders": 1, "recorded": 2, "repeated": 0,

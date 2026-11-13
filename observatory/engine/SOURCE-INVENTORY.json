@@ -5862,8 +5862,8 @@
       "path": "tests/test_ops_digest_folders.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "df56b2174b339a972d1766905239bf250447cd2f7a9fb84cdc35adc1b2e88ff7",
-      "bytes": 7544
+      "export_sha256": "4cca892d690a30089037d0e20c10a1812aa6b7f467aa97fc5357ec06e54dffb4",
+      "bytes": 7545
     },
     {
       "path": "tests/test_ops_digest_record.py",
