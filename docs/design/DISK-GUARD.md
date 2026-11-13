@@ -148,6 +148,22 @@ A survey or a cleanup that cannot write its own record on a full disk (`ENOSPC`)
 `scan_git_hygiene.py` keeps its last snapshot, and `full cleanup` acts on the plan in memory instead of
 stopping before it frees anything (OBS-527).
 
+## A virtual machine is a victim of a full disk too (OBS-529, 2026-11-12)
+
+On 2026-11-12 the MacBook's disk reached zero twice. Colima's VM was writing its data disk; at zero its file system
+returned input/output errors, `colima status` failed with `empty value`, and Fabric's database inside it stopped
+answering for five hours while `docker info` still answered. Cleaning inside the VM does not help the host: after
+8.7 GB of images were removed the VM's file system held 17 of 24 GB, but its disk file stayed 25 GB (`fstrim`
+returned 70 MiB), so the space is reused by the VM rather than returned to macOS.
+
+So the report carries `vms`: each Colima or Lima disk file (`~/.colima/_lima/_disks/*/datadisk`,
+`~/.colima/_lima/*/disk` and `diffdisk`, `~/.lima/...`), the space it takes now (allocated blocks, a sparse file's
+real size), its size and how many minutes ago the VM last wrote it. At `low` and `critical` pressure, a VM that
+wrote its disk in the last hour raises `warnings: [{code: "vm-disk-at-risk", ...}]`, and the findings show it as
+`machine.vm_disk_at_risk` (critical at `critical`), before the disk reaches zero. Reading the files' metadata starts
+and asks nothing. Tests: `VirtualMachineDisks` in `tests/test_disk_guard.py`, `VirtualMachineAtRisk` in
+`tests/test_machine_findings.py`.
+
 ## Space inside a Docker VM at `critical` (OBS-305, 2026-11-03)
 
 A finding measured on a MacBook whose Docker daemon runs inside a Colima VM: the guard was at
