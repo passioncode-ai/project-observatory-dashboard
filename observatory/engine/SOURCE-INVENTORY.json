@@ -267,8 +267,8 @@
     {
       "path": "collectors/merge.py",
       "source_sha256": "832e43056d8f239ebe5184d9c2a20c12ef771d641064c2bee03365b1c75b5e69",
-      "export_sha256": "de15c510c04f2f9377fe5291166638ca34943a015ec6f835c3685ca99420f664",
-      "bytes": 43137,
+      "export_sha256": "f22f7da9037155a830d89a89f952b00af93fa4637be3b4d0be7151606f4214ab",
+      "bytes": 45089,
       "python_comments_removed": 202,
       "python_docstrings_removed": 3,
       "tool_descriptions_retained": 0,
@@ -5586,8 +5586,8 @@
       "path": "tests/test_merge_membership.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9246273faeadc3fced0c7563442104f54878d907c267ba57108dc30243142bc4",
-      "bytes": 22364
+      "export_sha256": "565a9f81a7c1c2f1af628c8b1765ad4cd1d1123023cc3bd54a98a8a16e136b3e",
+      "bytes": 25193
     },
     {
       "path": "tests/test_meter.py",
