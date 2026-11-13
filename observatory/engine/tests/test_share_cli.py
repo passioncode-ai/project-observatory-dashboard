@@ -220,5 +220,102 @@ class ShareBetweenTwoWorkspaces(unittest.TestCase):
         self.assertNotIn(VALUE.encode(), b''.join(self.box.seen_bodies))
 
 
+
+@unittest.skipUnless(HAVE_CRYPTO and HAVE_PTY, 'needs cryptography and a POSIX pseudo-terminal')
+class OwnMachines(ShareBetweenTwoWorkspaces):
+    """CT-298 (OBS-531): one person's own two machines, finished by their agent with the operator's words. Every act
+    runs without a terminal; outside OM-1 each answers `human-step-required` with the person's step."""
+
+    WORDS = 'У меня нету там терминала студии, давай через SSH все это делай, короче сам'
+
+    def decision(self, action, share_id, **over):
+        import datetime
+        at = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+        return json.dumps({'by': 'operator', 'via': 'relayed-instruction', 'action': action, 'target': share_id,
+                           'instruction': self.WORDS, 'at': at, **over}, ensure_ascii=False)
+
+    def handed(self, pinned=True):
+        created = self.share('sam', 'create', 'alpha-web', 'prod', 'OPENROUTER_API_KEY', '--to', 'Studio',
+                             '--mailbox', ORIGIN, '--show-link')
+        self.assertEqual(created.returncode, 0, created.stderr)
+        link = next(line for line in created.stdout.splitlines() if line.startswith(ORIGIN + '/s/'))
+        share_id = re.search(r'/s/([0-9a-f]{32})#', link).group(1)
+        from node import shares as SH
+        SH.Shares(self.homes['alex'] / 'node' / 'shares').hand_over(link, pinned=pinned)
+        return share_id
+
+    def own(self, who, act, share_id, action, *extra, decision=None, stdin_text=None):
+        args = [act, share_id[:8], '--agent', 'claude-code', *extra]
+        if decision is not False:
+            args += ['--decision', decision or self.decision(action, share_id)]
+        command = [sys.executable, str(ROOT / 'tools' / 'share_cli.py'), *args]
+        return subprocess.run(command, env=self.env(who), capture_output=True, text=True, timeout=60,
+                              input=stdin_text)
+
+    def test_the_agent_finishes_a_share_between_the_operators_machines(self):
+        share_id = self.handed()
+        # Without the operator's decision, or with one for another act, the accept stays the person's.
+        for decision in (False, self.decision('share.open', share_id)):
+            out = self.own('alex', 'accept', share_id, 'share.accept-own', decision=decision)
+            self.assertEqual(out.returncode, 2, out.stderr)
+            self.assertEqual(json.loads(out.stdout)['error'], 'human-step-required')
+            self.assertEqual(json.loads(out.stdout)['humanStep'], 'consent')
+        accepted = self.own('alex', 'accept', share_id, 'share.accept-own')
+        self.assertEqual(accepted.returncode, 0, accepted.stderr + accepted.stdout)
+        self.share('sam', 'status', share_id[:8])
+        self.share('alex', 'status', share_id[:8])
+        self.share('sam', 'status', share_id[:8])
+        read = self.own('alex', 'read-code', share_id, 'share.read-code')
+        self.assertEqual(read.returncode, 0, read.stderr + read.stdout)
+        code = json.loads(read.stdout)['code']
+        self.assertRegex(code, r'^[0-9]{6}$')
+        # The sender's own code never leaves it, and "Share without comparing" is never relayed.
+        refused = self.own('sam', 'read-code', share_id, 'share.read-code')
+        self.assertNotEqual(refused.returncode, 0)
+        blind = self.own('sam', 'confirm', share_id, 'share.confirm-own', '--without-comparing', stdin_text='')
+        self.assertEqual(json.loads(blind.stdout)['humanStep'], 'comparison')
+        confirmed = self.own('sam', 'confirm', share_id, 'share.confirm-own', stdin_text=code + '\n')
+        self.assertEqual(confirmed.returncode, 0, confirmed.stderr + confirmed.stdout)
+        self.assertEqual(json.loads(confirmed.stdout)['outcome'], 'confirmed')
+        self.assertNotIn(code, ' '.join(confirmed.args))                  # never in argv
+        # OM-5: each act journalled as the operator's decision, never the digits.
+        for who, acts in (('alex', ['share.accept-own', 'share.read-code']), ('sam', ['share.confirm-own'])):
+            text = (self.homes[who] / 'node' / 'shares' / 'own-decisions.jsonl').read_text()
+            rows = [json.loads(line) for line in text.splitlines()]
+            self.assertEqual([r['act'] for r in rows], acts)
+            self.assertTrue(all(r['recordAs']['by'] == 'operator' and r['shareId'] == share_id for r in rows))
+            self.assertNotIn(code, text)
+
+    def test_different_digits_burn_the_link(self):
+        share_id = self.handed()
+        self.assertEqual(self.own('alex', 'accept', share_id, 'share.accept-own').returncode, 0)
+        for who in ('sam', 'alex', 'sam'):
+            self.share(who, 'status', share_id[:8])
+        code = json.loads(self.own('alex', 'read-code', share_id, 'share.read-code').stdout)['code']
+        wrong = ('1' if code[0] != '1' else '2') + code[1:]
+        out = self.own('sam', 'confirm', share_id, 'share.confirm-own', stdin_text=wrong + '\n')
+        self.assertEqual(json.loads(out.stdout)['outcome'], 'they-differ')
+        again = self.own('sam', 'confirm', share_id, 'share.confirm-own', stdin_text=code + '\n')
+        self.assertNotEqual(again.returncode, 0, 'no second submission')
+
+    def test_outside_om1_the_acts_stay_the_persons(self):
+        unpinned = self.handed(pinned=False)
+        out = self.own('alex', 'accept', unpinned, 'share.accept-own')
+        self.assertEqual(json.loads(out.stdout)['humanStep'], 'consent')
+        self.assertIn('pinned', json.loads(out.stdout)['why'])
+        share_id = self.handed()
+        enrolled = self.homes['alex'] / 'node' / 'orgs' / 'org_example'
+        enrolled.mkdir(parents=True)
+        (enrolled / 'enrollment.json').write_text('{}')
+        out = self.own('alex', 'accept', share_id, 'share.accept-own')
+        self.assertEqual(json.loads(out.stdout)['error'], 'human-step-required')
+        self.assertIn('organization', json.loads(out.stdout)['why'])
+
+    # The base class's cases run there; only the setup is shared.
+    test_two_people = None
+    test_a_link_an_agent_handed_over_is_accepted_by_its_id = None
+    test_the_person_refuses_a_handed_over_link = None
+
+
 if __name__ == '__main__':
     unittest.main()
