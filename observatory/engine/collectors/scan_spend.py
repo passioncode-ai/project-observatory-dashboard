@@ -57,6 +57,12 @@ An account's unattributed residual is null too while any of its keys is unread, 
 apart. A pending rotation still holds `predecessor_hash` and is read like any key. A ledger entry that is not an
 object may be any project's key, so it nulls every project and the unattributed total.
 
+ONE ORGANIZATION, ONE ACCOUNT. The door may hold several provisioning keys of one OpenRouter organization
+(labels added over time); each answers the same activity report. A label whose non-empty report is exactly an
+earlier label's is not summed again: it goes to `same_organization` as `{account, same_as}`, and ledger rows and
+tombstones naming it count under the label it names, so the estate total and the unattributed residual hold the
+organization once (OBS-548). An empty report proves nothing, so two accounts that spent nothing stay two.
+
 WHAT IT RECORDS. Per account: the door's label, the month's USD and the last 30 days', the number of activity
 rows and the last day they cover (the provider's activity lags about a day). Per project: the two windows, its
 live and retired key counts, its folders, `through` (the earliest last-covered day among its accounts: the
@@ -69,6 +75,7 @@ total is not whole, and each `degraded` entry carries its `scope` (`account` or 
 """
 from __future__ import annotations
 
+import hashlib
 import http.client
 import json
 import math
@@ -139,6 +146,19 @@ def clean(rows) -> tuple[list[tuple[str, float]], int]:
             continue
         good.append((str(x.get("date") or "")[:10], usd))
     return good, bad
+
+
+def fingerprint(raw) -> str | None:
+    """A digest of a non-empty activity report, or None: two labels with one digest are one organization.
+
+    An empty report says nothing about whose it is, so two accounts that spent nothing stay two."""
+    if not isinstance(raw, list) or not raw:
+        return None
+    try:
+        body = json.dumps(sorted(json.dumps(x, sort_keys=True, default=str) for x in raw))
+    except (TypeError, ValueError):
+        return None
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
 def month_of(rows: list[tuple[str, float]], month: str) -> dict:
@@ -285,10 +305,18 @@ class Stop(Exception):
     """The scan stops reading keys: the step's deadline, or the provider is unreachable."""
 
 
-def per_project(seen: dict, month: str, start: str, end: str, degraded: list) -> tuple[dict, dict]:
-    """Every live and retired ledger key read by hash and summed under its project; the rest unattributed."""
+def per_project(seen: dict, month: str, start: str, end: str, degraded: list,
+                same_as: dict[str, str] | None = None) -> tuple[dict, dict]:
+    """Every live and retired ledger key read by hash and summed under its project; the rest unattributed.
+
+    `same_as` maps a label whose activity report is another label's (one organization, several provisioning
+    keys) to that label: its ledger rows are that organization's keys, and its spend is counted once."""
     import openrouter
     import vault_project
+    same_as = same_as or {}
+
+    def org(account):
+        return same_as.get(account, account) if isinstance(account, str) else account
 
     def attribution(source: str, reason: str) -> None:
         degraded.append({"source": source, "reason": reason, "scope": "attribution"})
@@ -327,7 +355,7 @@ def per_project(seen: dict, month: str, start: str, end: str, degraded: list) ->
     rows = []
     for name, rec in sorted(issued.items()):
         if isinstance(rec, dict):
-            rows.append((name, rec))
+            rows.append((name, {**rec, "account": org(rec.get("account"))} if "account" in rec else rec))
         else:
             malformed.append(f"issued:{name}")
     stones = []
@@ -335,6 +363,8 @@ def per_project(seen: dict, month: str, start: str, end: str, degraded: list) ->
         if not isinstance(tomb, dict):
             malformed.append(f"retired[{i}]")
             continue
+        if "account" in tomb:
+            tomb = {**tomb, "account": org(tomb.get("account"))}
         if windows_from(str(tomb.get("retired_on") or "")[:10], month, start):
             stones.append(tomb)                 # retired before either window began: no spend to find there
         elif tomb.get("deleted", True) is not True:
@@ -551,6 +581,8 @@ def main(argv: list[str]) -> int:
     import openrouter
     accounts, degraded = [], []
     seen: dict[str, dict] = {}
+    orgs: dict[str, str] = {}
+    same_organization: list[dict] = []
 
     def account(source: str, reason: str) -> None:
         degraded.append({"source": source, "reason": reason, "scope": "account"})
@@ -569,7 +601,8 @@ def main(argv: list[str]) -> int:
             account(f"spend:openrouter:{label}", f"unreadable: {type(exc).__name__}")
             continue
         try:
-            rows, bad = clean(activity(key, min(ACCOUNT_TIMEOUT_S, step_budget.remaining() - WRITE_MARGIN_S)))
+            raw = activity(key, min(ACCOUNT_TIMEOUT_S, step_budget.remaining() - WRITE_MARGIN_S))
+            rows, bad = clean(raw)
         except urllib.error.HTTPError as exc:
             account(f"spend:openrouter:{label}", f"GET /activity HTTP {exc.code}")
             continue
@@ -581,6 +614,14 @@ def main(argv: list[str]) -> int:
             continue
         finally:
             key = None
+        # Several provisioning keys of one organization answer one activity report: the first label stands for
+        # the organization and the others name it, so its spend is counted once (OBS-548).
+        print_ = fingerprint(raw)
+        if print_ is not None and print_ in orgs:
+            same_organization.append({"account": label, "same_as": orgs[print_]})
+            continue
+        if print_ is not None:
+            orgs[print_] = label
         if bad:
             account(f"spend:openrouter:{label}", f"{bad} activity row(s) not well formed and not counted")
         windows = sums(rows, month, start, end)
@@ -588,7 +629,8 @@ def main(argv: list[str]) -> int:
         seen[label] = {**windows, "latest": days[-1] if days else None, "whole": not bad}
         accounts.append({"provider": "openrouter", "account": label, "month": month, **month_of(rows, month),
                          "last30_usd": round(windows["last30"], 6)})
-    projects, unattributed = per_project(seen, month, start, end, degraded)
+    projects, unattributed = per_project(seen, month, start, end, degraded,
+                                         {a["account"]: a["same_as"] for a in same_organization})
     total = round(sum(a["usd"] for a in accounts), 6)
     estate_partial = any(d.get("scope") == "account" for d in degraded)
     attribution_partial = bool(unattributed.get("partial") or any(p.get("partial") for p in projects.values())
@@ -596,6 +638,7 @@ def main(argv: list[str]) -> int:
     atomic.write_json(out_path, {
         "schema_version": SCHEMA_VERSION, "scanned_at": now.isoformat(), "month": month,
         "window": {"last30_from": start, "last30_through": end}, "accounts": accounts,
+        "same_organization": same_organization,
         "total_usd": total, "projects": projects, "unattributed": unattributed,
         "partial": estate_partial, "attribution_partial": attribution_partial, "degraded": degraded,
     }, indent=1)
