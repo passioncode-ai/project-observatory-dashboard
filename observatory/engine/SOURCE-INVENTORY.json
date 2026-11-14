@@ -4022,8 +4022,8 @@
       "path": "sessions_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a29f217736d8155f73cc23df0a3fead11376210dc8df9c43233e9054c7cd41cb",
-      "bytes": 17359
+      "export_sha256": "d7070fa05df3f791349555651e8b50cbda1d5afc073f865a496166a4960d7257",
+      "bytes": 17587
     },
     {
       "path": "skill/.claude-plugin/marketplace.json",
@@ -6444,8 +6444,8 @@
       "path": "tests/test_sessions_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "49364d0b40cf061434c096c459c434df495e83f8a29c818bca7b0fd97bf19d72",
-      "bytes": 17448
+      "export_sha256": "33027cefeb89f879bfa625e760e131d386eb1a7f61626787a694997b90b42f9e",
+      "bytes": 17752
     },
     {
       "path": "tests/test_share_cli.py",
@@ -6950,8 +6950,8 @@
       "path": "tick_progress.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "01199d4883eb6672ddc1d9e42d68a0b320de1fdbbefd8f2a0181b3099d620736",
-      "bytes": 8116
+      "export_sha256": "d2bae6be7e23782f1555d87663a09d4500d23059f552332f1b9d524d842c6ce0",
+      "bytes": 8132
     },
     {
       "path": "tools/access_binding_cli.py",

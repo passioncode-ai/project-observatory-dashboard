@@ -228,8 +228,8 @@ def summary(home: pathlib.Path | None = None, *, now: datetime | None = None,
     injected by tests; by default the CLI is found, run once, and folders are attributed by
     the contract's path rules."""
     now = now or _now()
-    scratch = pathlib.Path(home) / "store" / "raw" if home else paths.SCRATCH
-    db = pathlib.Path(home) / "store" / "observatory.db" if home else paths.DB
+    scratch = pathlib.Path(home) / "store" / "raw" if home else paths.SCRATCH  # paths-check: allow: a workspace home the caller names, not this engine's
+    db = pathlib.Path(home) / "store" / "observatory.db" if home else paths.DB  # paths-check: allow: a workspace home the caller names, not this engine's
     degraded: list[dict] = []
     binary = find_manager() if manager is _UNSET else manager
     data, manager_source = _manager(binary, runner or _run, degraded)
@@ -308,7 +308,7 @@ def _empty(code: str, reason: str) -> dict:
 
 def load(home: pathlib.Path | None = None) -> dict:
     """What the tick last wrote; a missing or unreadable file is a summary that says so."""
-    path = (pathlib.Path(home) / "store" / "raw" if home else paths.SCRATCH) / FILE
+    path = (pathlib.Path(home) / "store" / "raw" if home else paths.SCRATCH) / FILE  # paths-check: allow: a workspace home the caller names, not this engine's
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:

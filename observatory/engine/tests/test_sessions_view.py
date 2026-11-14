@@ -75,11 +75,11 @@ class Workspace:
     def __init__(self, survey: dict | None = None, ledger_sessions: int = 0) -> None:
         self.dir = tempfile.TemporaryDirectory(prefix="observatory-sessions-")
         self.home = pathlib.Path(self.dir.name)
-        raw = self.home / "store" / "raw"
+        raw = self.home / "store" / "raw"  # paths-check: allow: a workspace home the caller names, not this engine's
         raw.mkdir(parents=True)
         if survey is not None:
             (raw / "machine.json").write_text(json.dumps(survey), encoding="utf-8")
-        db = self.home / "store" / "observatory.db"
+        db = self.home / "store" / "observatory.db"  # paths-check: allow: a workspace home the caller names, not this engine's
         conn = sqlite3.connect(db)
         conn.executescript((ROOT / "store/schema.sql").read_text(encoding="utf-8"))
         for i in range(ledger_sessions):
@@ -216,9 +216,9 @@ class File(unittest.TestCase):
         self.assertEqual([d["code"] for d in missing["degraded"]], ["not-collected"])
         doc = sessions_view.summary(ws.home, now=NOW, runner=Runner(manager_answer(SESSIONS)),
                                     manager="/usr/local/bin/switchboard", attribute=attribute)
-        sessions_view.write(doc, ws.home / "store" / "raw" / sessions_view.FILE)
+        sessions_view.write(doc, ws.home / "store" / "raw" / sessions_view.FILE)  # paths-check: allow: a workspace home the caller names, not this engine's
         self.assertEqual(sessions_view.load(ws.home), doc)
-        (ws.home / "store" / "raw" / sessions_view.FILE).write_text("{broken", encoding="utf-8")
+        (ws.home / "store" / "raw" / sessions_view.FILE).write_text("{broken", encoding="utf-8")  # paths-check: allow: a workspace home the caller names, not this engine's
         self.assertEqual([d["code"] for d in sessions_view.load(ws.home)["degraded"]], ["unreadable"])
 
     def test_find_manager_on_path_then_in_the_user_bin(self) -> None:
