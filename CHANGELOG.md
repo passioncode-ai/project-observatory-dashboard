@@ -3,16 +3,17 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## 0.36.0 (2026-11-13)
+## 0.36.0 (2026-11-14)
 
 Several people can now run Observatory on one computer, each in their own OS account: every listener takes a port of
 its own account, and a place id tells two accounts of one computer, and a cloned machine, apart. The settings that
 belong to this machine and account move into one owner-only file, `config/local.json`. A disk that fills up is handled
 better: the scheduled disk guard removes again (its first holder listing timed out under launchd), it names live
-sessions' folders and a VM writing on a nearly full disk, a snapshot an export could not take leaves with the next one,
-and a command an agent session left waiting on its input is found. An organization enrollment now sends the activity of
-its sessions in that organization's projects, and the digests a product declares in its own folders are read. The
-observatory-log plugin moves to 0.36.0 with the release.
+sessions' folders and a VM writing on a nearly full disk, a snapshot an export could not take leaves with the next
+one, a command an agent session left waiting on its input is found, macOS's protected folders are passed over, and the
+cleanup keeps the undo of a branch it removed even when its journal cannot be written. An organization enrollment now
+sends the activity of its sessions in that organization's projects, and the digests a product declares in its own
+folders are read. The observatory-log plugin moves to 0.36.0 with the release.
 
 ### Changed
 
@@ -64,6 +65,11 @@ observatory-log plugin moves to 0.36.0 with the release.
   their own record, and the guard names the live sessions' temporary folders it passes over.
 - **A VM writing on a nearly full disk is named** (OBS-529, #523): the guard's report lists Colima and Lima disks,
   and `machine.vm_disk_at_risk` warns at low and critical pressure.
+- **The disk guard tried to remove macOS's own service folders** (OBS-537, #534): an entry of the user temporary root
+  with `sunlnk` or an immutable flag is passed over and named as kept, never planned (it failed on every pass).
+- **The cleanup lost a removed branch's undo on a full disk** (OBS-539, #534): its journal line was written after the
+  removal and outside the `try`. A row the journal cannot take goes to the summary (`unjournalled`) and to stderr, and
+  removals whose undo lives only in the journal wait for a run that can record them.
 - **A recorded copy stands apart from its source's project** (OBS-535, #534). The wiki note rule and the repository
   name rule joined an organization's copy of a personal agent (recorded in `config/derivations.json`) to the agent's
   project, which then held two owners' repositories and had no organization. Only a submodule pin, the copy's own
