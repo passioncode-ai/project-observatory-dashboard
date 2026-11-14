@@ -331,6 +331,8 @@ for key in sorted(projs):
         e["organization"] = _org["organization"]
         e["organization_source"] = _org["source"]
         e["organization_why"] = _org["why"]
+    if i in ORGS.platform_products:
+        e["platform_product"] = True
     if p["sites"]: e["sites"]=p["sites"]
     if p.get("local_only"): e["local_only"]=p["local_only"]
     # `prev` is now read for ONE purpose: to say out loud when measurement has

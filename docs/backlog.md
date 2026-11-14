@@ -1,6 +1,6 @@
 # Local backlog
 
-**Next free ID:** `OBS-564`
+**Next free ID:** `OBS-565`
 
 **Vacant ids:** `OBS-91` (skipped when the OBS register began reserving: #277 wrote OBS-92 and OBS-93, and no row was ever written under 91); `OBS-422` (reserved on 2026-11-08 for the provider-account organization rules, which became OBS-412 part 1 when the organization onboarding rows OBS-411 to OBS-420 were written)
 
@@ -588,3 +588,4 @@ still open and needs nothing, and a reservation older than that with no row must
 | OBS-561 | Rotation never cuts a live consumer (M12, CP-11): OpenRouter, Cloudflare and Heroku revoke or roll the old key before a remote consumer is switched (one production bot answered 401 for three hours on 2026-11-13, board finding of that day); each door finds consumers by fingerprint (platform config vars, app environments, repository secrets, local services), delivers and reads back, then revokes, and names a consumer it cannot reach; `--force` revokes anyway and journals what it cut | open | [CONTROL-PLANE.md](design/CONTROL-PLANE.md), the person's request of 2026-11-14 |
 | OBS-562 | Disk and cleanup section (M13, CP-16): its own page with free space, the guard's last pass, what auto cleanup removes and keeps, and its switches changeable from the page and over MCP through the configuration door | open | [CONTROL-PLANE.md](design/CONTROL-PLANE.md), the person's request of 2026-11-14 |
 | OBS-563 | Configuration door (M14, CP-20): every setting and integration a declared, schema-checked entry; `configure` previews, applies and undoes with a journal line, from the CLI and `observatory_configure`, so the built-in agent or a coding agent adapts the engine on any machine within the person's switches | open | [CONTROL-PLANE.md](design/CONTROL-PLANE.md), the person's request of 2026-11-14 |
+| OBS-564 | Platform products named in the registry: an organization's `platform_products` (project ids) in `config/organizations.json` gives each project `platform_product: true` in `registry/projects.json` and `platformProduct: true` in its full project view, so a host (Fabric Dashboards, FD-252) tells the platform's own products apart without guessing from a repository's owner. Asked on the board on 2026-11-14 | open | fabric-dashboards' board message of 2026-11-14 (FD-252) |

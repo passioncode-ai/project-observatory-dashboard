@@ -190,8 +190,8 @@
     {
       "path": "collectors/emit_registry.py",
       "source_sha256": "ff8edc591196dd1278b0766ea8216973f5cc3951ff702b417bdb053305e8170d",
-      "export_sha256": "45435c9f5a8929148e419ae98c159334e0c6708c4ee9e41700a8e8a061214a1f",
-      "bytes": 65395,
+      "export_sha256": "af58065798a803dc7fce32c7d129a1592c9119109decbe03cd9a5c479da97801",
+      "bytes": 65468,
       "python_comments_removed": 213,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -968,8 +968,8 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "3606c1dda00bf6fd0d3f5f102ebd30c9f4964b3a95fc13f80a65e83300a6102d",
-      "bytes": 140776,
+      "export_sha256": "c10eea4147ab3b9e307bea80e6c5a20acdf7b83b486e180672a027c9180d1119",
+      "bytes": 141111,
       "upstream_modified": true
     },
     {
@@ -3663,8 +3663,8 @@
       "path": "organizations.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8a3894a64227427556d6247095e80ac648caeadf6e510239e78ced5e6914c3da",
-      "bytes": 27609
+      "export_sha256": "ad43e554580aa78832f8d46c0bb5896a9a141be7362caa8a0d844ba076181c18",
+      "bytes": 28676
     },
     {
       "path": "oslocks.py",
@@ -4225,8 +4225,8 @@
     {
       "path": "survey.py",
       "source_sha256": "2c692bcd4b6deac11f6608cce06abe134b748382d7037e43a6d2034d193aac0f",
-      "export_sha256": "bf4a1b7a711b480aefb3263fa9de9ed42fea907df06e3db410f0dc59ccd19850",
-      "bytes": 79708,
+      "export_sha256": "7b8f129f16d6f4f0a40bc3fc617f6ff3d61625c091e49fe53b7967a3e3ada806",
+      "bytes": 79844,
       "python_comments_removed": 210,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,
@@ -5925,8 +5925,8 @@
       "path": "tests/test_organizations.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d9ccb9605b8dc1dd9fcbe781760c9d0b75847698f13a07efd7bdff40d8958738",
-      "bytes": 66971
+      "export_sha256": "d1e2b7665be6f08348aaafb0b5128bc0619515f9151be277875232bfe15e3064",
+      "bytes": 68381
     },
     {
       "path": "tests/test_oslocks.py",

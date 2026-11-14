@@ -233,6 +233,8 @@ def _project_view(p: dict, repos: dict, members: dict) -> dict:
         view["organization"] = {"name": p.get("organization"), "source": p["organization_source"],
                                 "why": p.get("organization_why", ""), "state": r["state"],
                                 **(r.get("destinations") or {})}
+    if p.get("platform_product") is True:
+        view["platformProduct"] = True  # OBS-564: named in organizations.json, never guessed
     if p.get("resources"):
         view["resources"] = [dict(r) for r in p["resources"] if isinstance(r, dict)]
     return view
