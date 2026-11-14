@@ -60,8 +60,9 @@ def credential_kind(text: str) -> str | None:
 #: secret values inside them are still replaced. A board request, its thread and
 #: Fabric's project id are UUIDs too, in the packet of a session Fabric starts for
 #: a request (dispatch_packet.py, OBS-323): scrubbed, the run could not find its request.
+#: A run started for unread board messages names the message as board-message:<uuid> (OBS-517).
 KEEP = re.compile(r"session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
-                  r"|(?:board-request|board-thread|fabric-project):"
+                  r"|(?:board-request|board-message|board-thread|fabric-project):"
                   # The UUID ends the ref: one followed by more of a token's characters is not
                   # this reference, and none of it is set aside from the shape filter.
                   r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9A-Za-z_-])"
