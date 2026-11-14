@@ -95,6 +95,29 @@ class Collector(unittest.TestCase):
         return F.collect([(Path("x.json"), self.descriptor)], record=self.record,
                          projects=lambda service: set(owners))
 
+    def test_by_default_a_service_is_attributed_through_the_registry(self):
+        """CA-430: the default attribution read no registry, so every service had no project and nothing was sent."""
+        import identifiers
+        import ops_digest_store
+        from unittest.mock import patch
+        sentinel, seen, loads = object(), [], []
+
+        def load_registry():
+            loads.append(1)
+            return sentinel
+
+        def service_projects(service, registry):
+            seen.append(registry() if registry is not None else None)
+            return {"project:demo"}
+
+        self.write(json.dumps(DAILY) + "\n")
+        with patch.object(identifiers, "load_registry", load_registry), \
+                patch.object(ops_digest_store, "service_projects", service_projects):
+            receipt = F.collect([(Path("x.json"), self.descriptor)], record=self.record)
+        self.assertEqual(seen, [sentinel])
+        self.assertEqual(len(loads), 1)
+        self.assertEqual(receipt["recorded"], 1)
+
     def test_a_day_is_recorded_once_as_written_and_the_rest_is_skipped(self):
         later = dict(DAILY, total=DAILY["total"])
         self.write(json.dumps(DAILY) + "\n", "not json\n", json.dumps({"schema": "ops.digest.daily@2"}) + "\n",
