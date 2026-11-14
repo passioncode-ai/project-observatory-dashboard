@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import sqlite3
 import sys
 import tempfile
@@ -42,6 +43,7 @@ RUN = "agent:claude-code"
 REQUEST = "0b1e2c3d-1111-4222-8333-444455556666"
 THREAD = "1c2d3e4f-2222-4333-8444-555566667777"
 FPROJECT = "2d3e4f50-3333-4444-8555-666677778888"
+MESSAGE = "3e4f5061-4444-4555-8666-777788889999"
 NOW = datetime(2026, 11, 10, 12, 0, tzinfo=timezone.utc)
 DEADLINE = "2026-11-10T14:00:00Z"
 
@@ -113,6 +115,27 @@ class Packet(Store):
         self.assertIn("capability:analytics.ask", got)
         self.assertIn(f"deadline:{DEADLINE}", got)
         self.assertIn("run-ends-at:2026-11-10T13:00:00Z", got)
+
+    def test_a_board_inbox_packet_keeps_its_message_ref(self):
+        # OBS-517: a run Fabric starts for unread board messages (capability `board.inbox`) names the message as
+        # board-message:<uuid>; scrubbed, the packet no longer said which message started the run.
+        self.assertIsNotNone(memory_redact.KEEP.fullmatch(f"board-message:{MESSAGE}"))
+        self.assertIsNone(memory_redact.KEEP.search(f"board-message:{MESSAGE}abc"), "no part of a longer token")
+        artifacts = refs(capability="board.inbox", **{"board-request": None}) + [
+            {"kind": "other", "ref": f"board-message:{MESSAGE}"}]
+        wf = self.start(body=packet(artifacts, credentials=False))
+        latest = W.checkpoint_latest(self.conn, wf["workflowId"], credential_reader=lambda p: {"vault": [], "env": []})
+        got = {a["ref"] for a in latest["checkpoint"]["body"]["artifacts"]}
+        self.assertIn(f"board-message:{MESSAGE}", got, "a UUID inside a board-message ref is not scrubbed")
+        self.assertIsNotNone(re.fullmatch(D.KEEP_PATTERN, f"board-message:{MESSAGE}"))
+        # A run in flight copies its packet whole, the message ref scrubbed by an older engine: still accepted.
+        scrubbed = [a if not a["ref"].startswith("board-message:") else {"kind": "other", "ref": "board-message:[redacted]"}
+                    for a in artifacts]
+        W.checkpoint_write(self.conn, owner=FABRIC, idempotency_key=self.key(), step_id="run", status="in_progress",
+                           body=packet(scrubbed, credentials=False), workflow_id=wf["workflowId"],
+                           lease_token=wf["leaseId"], redactor=redactor())
+        text = redactor().scrub({"c": f"started for board-message:{MESSAGE} in board-thread:{THREAD}"})[0]["c"]
+        self.assertEqual(text, f"started for board-message:{MESSAGE} in board-thread:{THREAD}")
 
     def test_malformed_or_extended_refs_are_refused(self):
         bad = {

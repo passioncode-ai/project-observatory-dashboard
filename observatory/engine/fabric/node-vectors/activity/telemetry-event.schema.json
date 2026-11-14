@@ -1,0 +1,717 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/telemetry-event.schema.json",
+  "title": "Telemetry event (fabric-activity/0.1, DEC-0030)",
+  "description": "One record of when an agent session worked or waited and what one model call used, without content and without any person attribute. A reader ignores a kind it does not know.",
+  "type": "object",
+  "required": [
+    "protocol",
+    "eventId",
+    "kind",
+    "source",
+    "collector",
+    "seq",
+    "occurred",
+    "bootId",
+    "monotonicNs",
+    "data"
+  ],
+  "properties": {
+    "protocol": {
+      "$ref": "activity-common.schema.json#/$defs/protocol"
+    },
+    "eventId": {
+      "$ref": "activity-common.schema.json#/$defs/eventId"
+    },
+    "kind": {
+      "anyOf": [
+        {
+          "$ref": "activity-common.schema.json#/$defs/name"
+        },
+        {
+          "type": "string",
+          "pattern": "^x-[a-z][a-z0-9-]{0,31}\\.[a-z][a-z0-9_]{0,31}(\\.[a-z][a-z0-9_]{0,31}){0,3}$"
+        }
+      ]
+    },
+    "source": {
+      "$ref": "activity-common.schema.json#/$defs/name"
+    },
+    "sourceKey": {
+      "$ref": "activity-common.schema.json#/$defs/sourceKey"
+    },
+    "collector": {
+      "$ref": "activity-common.schema.json#/$defs/collector"
+    },
+    "seq": {
+      "$ref": "activity-common.schema.json#/$defs/seq"
+    },
+    "occurred": {
+      "$ref": "common.schema.json#/$defs/timestamp"
+    },
+    "bootId": {
+      "$ref": "activity-common.schema.json#/$defs/opaqueId"
+    },
+    "monotonicNs": {
+      "$ref": "activity-common.schema.json#/$defs/monotonicNs"
+    },
+    "received": {
+      "$ref": "common.schema.json#/$defs/timestamp",
+      "description": "Set by the receiver when it stores the event; a device never sends it."
+    },
+    "user": {
+      "$ref": "activity-common.schema.json#/$defs/user"
+    },
+    "account": {
+      "$ref": "activity-common.schema.json#/$defs/account"
+    },
+    "session": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "activity-common.schema.json#/$defs/opaqueId"
+        },
+        "parent": {
+          "$ref": "activity-common.schema.json#/$defs/opaqueId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "project": {
+      "type": "object",
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "activity-common.schema.json#/$defs/opaqueId"
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtime": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "activity-common.schema.json#/$defs/name"
+        },
+        "version": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9.+_-]{0,63}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "skill": {
+      "$ref": "activity-common.schema.json#/$defs/skill"
+    },
+    "launch": {
+      "type": "object",
+      "required": [
+        "via"
+      ],
+      "properties": {
+        "via": {
+          "$ref": "activity-common.schema.json#/$defs/launchVia"
+        }
+      },
+      "additionalProperties": false
+    },
+    "git": {
+      "type": "object",
+      "required": [
+        "branch"
+      ],
+      "properties": {
+        "branch": {
+          "$ref": "activity-common.schema.json#/$defs/branch"
+        }
+      },
+      "additionalProperties": false
+    },
+    "task": {
+      "type": "object",
+      "required": [
+        "ref"
+      ],
+      "properties": {
+        "ref": {
+          "$ref": "activity-common.schema.json#/$defs/taskRef"
+        }
+      },
+      "additionalProperties": false
+    },
+    "run": {
+      "type": "object",
+      "properties": {
+        "root": {
+          "$ref": "activity-common.schema.json#/$defs/opaqueId",
+          "description": "The root run id every hop of one execution carries (DEC-0052): a random per-run id, so a usage line and a result join on the device without naming a person."
+        },
+        "task": {
+          "$ref": "activity-common.schema.json#/$defs/opaqueId"
+        }
+      },
+      "additionalProperties": false,
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "root": true
+          },
+          "required": [
+            "root"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "task": true
+          },
+          "required": [
+            "task"
+          ]
+        }
+      ]
+    },
+    "data": {
+      "type": "object"
+    }
+  },
+  "unevaluatedProperties": false,
+  "allOf": [
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "pattern": "^sha256:"
+          }
+        },
+        "required": [
+          "eventId"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "sourceKey": true
+        },
+        "required": [
+          "sourceKey"
+        ]
+      },
+      "else": {
+        "type": "object",
+        "properties": {
+          "sourceKey": false
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "const": "session.interval"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "session": true,
+          "project": true,
+          "runtime": true,
+          "data": {
+            "$ref": "#/$defs/interval"
+          }
+        },
+        "required": [
+          "session",
+          "project",
+          "runtime"
+        ]
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "const": "usage.line"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "session": true,
+          "project": true,
+          "runtime": true,
+          "data": {
+            "$ref": "#/$defs/usageLine"
+          }
+        },
+        "required": [
+          "session",
+          "project",
+          "runtime"
+        ]
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "const": "buffer.overflow"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "#/$defs/overflow"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "const": "policy.violation"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "project": true,
+          "occurred": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T00:00:00(\\.0+)?Z$"
+          },
+          "monotonicNs": {
+            "const": "0"
+          },
+          "session": false,
+          "skill": false,
+          "launch": false,
+          "git": false,
+          "task": false,
+          "run": false,
+          "data": {
+            "$ref": "#/$defs/violation"
+          }
+        },
+        "required": [
+          "project"
+        ]
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "const": "grant.usage"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "occurred": {
+            "type": "string",
+            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T00:00:00(\\.0+)?Z$"
+          },
+          "monotonicNs": {
+            "const": "0"
+          },
+          "user": false,
+          "session": false,
+          "run": false,
+          "task": false,
+          "git": false,
+          "skill": false,
+          "launch": false,
+          "data": {
+            "$ref": "#/$defs/grantUsage"
+          }
+        },
+        "required": [
+          "data"
+        ]
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "const": "result"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "run": {
+            "type": "object",
+            "properties": {
+              "root": true
+            },
+            "required": [
+              "root"
+            ]
+          },
+          "user": false,
+          "session": false,
+          "data": {
+            "$ref": "#/$defs/result"
+          }
+        },
+        "required": [
+          "run"
+        ]
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "enum": [
+              "session.interval",
+              "usage.line",
+              "buffer.overflow",
+              "policy.violation",
+              "grant.usage",
+              "result",
+              "session.annotation"
+            ]
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "else": {
+        "type": "object",
+        "properties": {
+          "data": {
+            "$ref": "activity-common.schema.json#/$defs/extData"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "const": "session.annotation"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "session": true,
+          "runtime": true,
+          "data": {
+            "$ref": "#/$defs/annotation"
+          },
+          "user": false
+        },
+        "required": [
+          "session",
+          "runtime",
+          "data"
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "interval": {
+      "type": "object",
+      "required": [
+        "start",
+        "end",
+        "state",
+        "method"
+      ],
+      "properties": {
+        "start": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "end": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "state": {
+          "$ref": "activity-common.schema.json#/$defs/state"
+        },
+        "method": {
+          "$ref": "activity-common.schema.json#/$defs/name"
+        },
+        "idleThresholdSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 86400
+        },
+        "attended": {
+          "type": "boolean",
+          "description": "An estimate: whether the session's interface reported a person present, as the method can tell."
+        },
+        "outcome": {
+          "$ref": "activity-common.schema.json#/$defs/name",
+          "description": "On the last interval of a session: how the session ended (completed, failed, abandoned, interrupted, unknown)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "usageLine": {
+      "type": "object",
+      "required": [
+        "model",
+        "tokens",
+        "cost",
+        "dedupeKey"
+      ],
+      "properties": {
+        "model": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}$"
+        },
+        "tokens": {
+          "$ref": "activity-common.schema.json#/$defs/tokens"
+        },
+        "cost": {
+          "$ref": "activity-common.schema.json#/$defs/cost"
+        },
+        "dedupeKey": {
+          "$ref": "activity-common.schema.json#/$defs/sourceKey"
+        }
+      },
+      "additionalProperties": false
+    },
+    "overflow": {
+      "type": "object",
+      "required": [
+        "dropped"
+      ],
+      "properties": {
+        "dropped": {
+          "type": "object",
+          "required": [
+            "events",
+            "ranges"
+          ],
+          "properties": {
+            "events": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "ranges": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 32,
+              "items": {
+                "$ref": "activity-common.schema.json#/$defs/range"
+              }
+            },
+            "byKind": {
+              "type": "array",
+              "maxItems": 64,
+              "items": {
+                "type": "object",
+                "required": [
+                  "kind",
+                  "count"
+                ],
+                "properties": {
+                  "kind": {
+                    "type": "string",
+                    "pattern": "^(x-[a-z][a-z0-9-]{0,31}\\.)?[a-z][a-z0-9_]{0,31}(\\.[a-z][a-z0-9_]{0,31}){0,3}$"
+                  },
+                  "count": {
+                    "type": "integer",
+                    "minimum": 1
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "violation": {
+      "type": "object",
+      "required": [
+        "day",
+        "provider",
+        "accountClass",
+        "reason"
+      ],
+      "properties": {
+        "day": {
+          "$ref": "activity-common.schema.json#/$defs/day",
+          "description": "The UTC day of the violation, never a time (DEC-0052): the event's occurred is that day's midnight and its monotonicNs is 0."
+        },
+        "provider": {
+          "$ref": "activity-common.schema.json#/$defs/name"
+        },
+        "accountClass": {
+          "$ref": "activity-common.schema.json#/$defs/accountClass"
+        },
+        "reason": {
+          "$ref": "activity-common.schema.json#/$defs/name",
+          "description": "Open vocabulary; known: personal_account_in_work_folder, unknown_account, personal_key_shared."
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1000000,
+          "description": "How many times that day; one event per day, provider, account class and reason."
+        }
+      },
+      "additionalProperties": false
+    },
+    "grantUsage": {
+      "type": "object",
+      "required": [
+        "day",
+        "grantId",
+        "context",
+        "calls",
+        "unpricedCalls",
+        "costUsd"
+      ],
+      "properties": {
+        "day": {
+          "$ref": "activity-common.schema.json#/$defs/day",
+          "description": "The UTC day the usage was metered on, never a time (DEC-0082): the event's occurred is that day's midnight and its monotonicNs is 0."
+        },
+        "grantId": {
+          "$ref": "common.schema.json#/$defs/shareGrantId",
+          "description": "The share grant the usage was metered under: its meta.id, urn:fabric:share: and 32 lower-case hex digits (DEC-0086, FAC-SEM-117), which carries no revision, so one grant revised mid-day is one row. Compared as written: the pattern admits only its own normal form (DEC-0076). The collector on the issuer's own device derives it from the grant-check receipts its meter settled; the organization server joins it to the share registration it holds for the device's bound user (joinGrantUsage). A grant whose meta.id is of another form reports no grant.usage."
+        },
+        "context": {
+          "$ref": "common.schema.json#/$defs/orgContextId",
+          "description": "DEC-0086: the grant's own context, org:<orgId>, the value the collector passed to routeGrantUsage. The receiver refuses an event whose context is not org: and its certificate's org.id as written, as an attribution rejection (FAC-SEM-045)."
+        },
+        "calls": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 9007199254740991,
+          "description": "The calls the day's receipts settle under the grant; a day with none emits no event."
+        },
+        "unpricedCalls": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "Of calls, the calls of receipts whose cost is unknown; never more than calls (FAC-SEM-038)."
+        },
+        "costUsd": {
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The day's known cost in USD, or null when no call was priced: an unknown cost is null, never 0 (DEC-0021, FAC-SEM-038). A number with some calls unpriced is a lower bound."
+        }
+      },
+      "additionalProperties": false,
+      "description": "DEC-0082: one grant's metered usage for one UTC day — sums and states only, never a per-call line, because usage under a share grant is data about a person. Built from the meter's settled grant-check receipts, each counted once and assigned to the UTC day of its allowed answer's checkedAt (DEC-0037); a service's byGrant row (DEC-0045) only when it lists receipts the meter holds none of and its report covers one UTC day."
+    },
+    "result": {
+      "type": "object",
+      "required": [
+        "signal",
+        "outcome"
+      ],
+      "properties": {
+        "signal": {
+          "$ref": "activity-common.schema.json#/$defs/name",
+          "description": "The result signal the agent's package declares: what counts as done for that agent."
+        },
+        "outcome": {
+          "enum": [
+            "met",
+            "not_met"
+          ],
+          "description": "Whether the run met its result signal."
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000000,
+          "description": "How many units of the result, when the signal counts them."
+        }
+      },
+      "additionalProperties": false
+    },
+    "annotation": {
+      "type": "object",
+      "required": [
+        "by",
+        "label",
+        "at"
+      ],
+      "properties": {
+        "by": {
+          "$ref": "activity-common.schema.json#/$defs/name",
+          "description": "Who wrote the annotated event: fabric, switchboard, or another surface."
+        },
+        "label": {
+          "$ref": "activity-common.schema.json#/$defs/name",
+          "description": "What the surface reported, such as session.ended, terminal.opened or journal_launch."
+        },
+        "at": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        }
+      },
+      "additionalProperties": false,
+      "description": "DEC-0068 (CON-OE-08): a surface's event about a session, read by the device's collector. It carries no start, end, tokens or cost, so it is never counted: session.interval and usage.line are the collector's alone."
+    }
+  }
+}
