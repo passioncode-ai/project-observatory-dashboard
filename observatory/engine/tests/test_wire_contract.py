@@ -268,6 +268,8 @@ def test_the_served_instructions_describe_the_served_surface() -> None:
           str(tools))
     check("the instructions name the coding sessions beside the machine",
           "`observatory_machine` (`section`, `move`, `explainPid`); `_sessions`" in src.split("instructions=(", 1)[1][:2600])
+    check("the instructions name the configuration door's write rule",
+          "_configure" in src.split("instructions=(", 1)[1][:2600])
     check("the instructions name the organization selection's write rule",
           "_org_selection" in src.split("instructions=(", 1)[1][:2600])
     check("the instructions name the organization views",

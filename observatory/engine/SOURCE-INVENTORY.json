@@ -573,6 +573,13 @@
       "upstream_modified": true
     },
     {
+      "path": "configuration_door.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "1bf7305b1ec359e06986bb775b214e073a1708292f23049b3e077ad6e48a1eb1",
+      "bytes": 38012
+    },
+    {
       "path": "contract_lock.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -4824,6 +4831,13 @@
       "bytes": 6318
     },
     {
+      "path": "tests/test_configure.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "29de1edf0c1deaa45d86b9949e38bea2be845c2079e15d921178c85fe2e112e8",
+      "bytes": 17010
+    },
+    {
       "path": "tests/test_conformance_receipt.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -5290,8 +5304,8 @@
       "path": "tests/test_handed_commands.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ce54ebd5a21eea388e16e2b402535cf9491db27a144797a9f7648fdcbe617cfe",
-      "bytes": 26819
+      "export_sha256": "4445b46bce89cd7fcfe240af89288a20bc6fec816c728c37cc56a60adb994710",
+      "bytes": 26989
     },
     {
       "path": "tests/test_handoff.py",

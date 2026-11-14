@@ -814,11 +814,19 @@ def _parser() -> argparse.ArgumentParser:
     migration.add_argument("source", type=Path)
     migration.add_argument("--apply", action="store_true")
     migration.add_argument("--writers-stopped", action="store_true")
-    conf = sub.add_parser("configure", help="set one setting in config/settings.json; model and budget write config/models.json")
-    conf.add_argument("section", choices=["sources", "integrations", "features", "interface", "storage",
-                                                 "learning_review", "model", "budget", "apps", "loopback"])
-    conf.add_argument("name")
-    conf.add_argument("value")
+    conf = sub.add_parser("configure", help="set one setting in config/settings.json; model and budget write config/models.json; "
+                                            "--list, --plan, --apply and --undo go through the configuration door (OBS-563)")
+    conf.add_argument("section", nargs="?", choices=["sources", "integrations", "features", "interface", "storage",
+                                                     "learning_review", "model", "budget", "apps", "loopback"])
+    conf.add_argument("name", nargs="?")
+    conf.add_argument("value", nargs="?")
+    door = conf.add_mutually_exclusive_group()
+    door.add_argument("--list", action="store_true", help="every setting with its type, default, file, gate and value")
+    door.add_argument("--plan", nargs="+", metavar="KEY=VALUE",
+                      help="preview changes (an empty VALUE is the default); writes no configuration")
+    door.add_argument("--apply", metavar="DIGEST", help="write the plan this digest names, and journal it")
+    door.add_argument("--undo", metavar="ID", help="restore the values a journalled change found")
+    ap.configure_parser = conf
     phrase = sub.add_parser("backup-passphrase", help="the passphrase that encrypts backups (stdin)")
     phrase.add_argument("action", choices=["set", "status", "show"])
     backups = sub.add_parser("backups", help="where backups go; move legacy copies; decrypt one")
@@ -923,7 +931,21 @@ def parse(argv: list[str]) -> argparse.Namespace:
     if name == "ports":
         import local_ports
         return local_ports.parser().parse_args(rest)
-    return _parser().parse_args(argv)
+    return _parse_workspace(argv)
+
+
+def _parse_workspace(argv: list[str]) -> argparse.Namespace:
+    """The workspace commands' own parser, and what argparse cannot say alone: `configure` takes SECTION NAME VALUE
+    or one of the door's flags, never both and never neither."""
+    ap = _parser()
+    a = ap.parse_args(argv)
+    if a.command == "configure":
+        door = a.list or a.plan or a.apply or a.undo
+        if door and a.section is not None:
+            ap.configure_parser.error("--list, --plan, --apply and --undo take no SECTION NAME VALUE")
+        if not door and None in (a.section, a.name, a.value):
+            ap.configure_parser.error("the following arguments are required: section, name, value")
+    return a
 
 
 def _place(base: Path) -> dict:
@@ -978,7 +1000,7 @@ def main(argv: list[str]) -> int:
     if argv and argv[0] == "ports":
         import local_ports
         return local_ports.main(argv[1:])
-    a = _parser().parse_args(argv)
+    a = _parse_workspace(argv)
     try:
         base = config.home()
         if a.command == "backup-passphrase":
@@ -1012,6 +1034,13 @@ def main(argv: list[str]) -> int:
                 raise config.ConfigurationError(result["reason"])
         elif a.command == "untrack":
             result = __import__("tracked").remove(a.path)
+        elif a.list or a.plan or a.apply or a.undo:
+            import configuration_door
+            answer, code = configuration_door.command(a, base)
+            print(json.dumps(answer, indent=2))
+            if code:
+                print(f"Observatory: {answer.get('message')}", file=sys.stderr)
+            return code
         else:
             config.validate_workspace(base, required=True)
             doc = config.load(base)
@@ -1023,8 +1052,7 @@ def main(argv: list[str]) -> int:
                         f"Unknown {a.section} setting: {a.name}; known: {', '.join(config.LOCAL_SECTIONS[a.section])}")
                 if a.value not in choices:
                     raise config.ConfigurationError(f"{a.section} {a.name} must be one of: {', '.join(choices)}")
-                with lock(base):
-                    config.write_local(base, {a.section: {a.name: a.value}})
+                _through_door(base, f"{a.section}.{a.name}", a.value)
                 print(json.dumps({"status": "configured", "section": a.section, "name": a.name,
                                   "file": "config/local.json"}, indent=2))
                 return 0
@@ -1067,16 +1095,9 @@ def main(argv: list[str]) -> int:
                     raise config.ConfigurationError("Use true or false")
                 value = a.value == "true"
             local_key = config.LOCAL_MOVED.get((a.section, a.name))
-            with lock(base):
-                if local_key:
-                    # Decided per machine and OS account (OBS-353): local.json, mirrored into settings.json so an older
-                    # engine reads the same value.
-                    change = {local_key[0]: value} if len(local_key) == 1 else {local_key[0]: {local_key[1]: value}}
-                    config.write_local(base, change)
-                else:
-                    doc = config.load(base)
-                    doc.setdefault(a.section, {})[a.name] = value
-                    write_json(base / "config/settings.json", doc)
+            # Through the configuration door (OBS-563): the same write as before (a moved key to local.json, mirrored
+            # into settings.json for an older engine, OBS-353), now journalled with the values before and after.
+            _through_door(base, f"{a.section}.{a.name}", value)
             result = {"status": "configured", "section": a.section, "name": a.name}
             if local_key:
                 result["file"] = "config/local.json"
@@ -1138,6 +1159,17 @@ def _init(base: Path, *, fresh: bool = False) -> dict:
     return result
 
 
+def _through_door(base: Path, key: str, value) -> None:
+    """One `configure SECTION NAME VALUE`, already validated here, written by the configuration door as the person at
+    this terminal: planned, applied under the workspace lock and journalled (store/logs/configure.jsonl). The door's
+    refusal reads as this command's own."""
+    import configuration_door
+    try:
+        configuration_door.set_now({key: value}, actor="person:cli", base=base)
+    except configuration_door.Refusal as refusal:
+        raise config.ConfigurationError(str(refusal)) from None
+
+
 def _configure_models(base: Path, a) -> int:
     """`configure model chain ID[,ID…]` and `configure budget CEILING AMOUNT`:
     the agent's model chain and wallet ceilings in `config/models.json`, written
@@ -1161,14 +1193,7 @@ def _configure_models(base: Path, a) -> int:
             amount = math.nan
         if not math.isfinite(amount) or amount < 0:
             raise config.ConfigurationError("A budget ceiling is a non-negative number, in the wallet's denomination")
-    with lock(base):
-        file = base / "config" / "models.json"
-        doc = json.loads(file.read_text(encoding="utf-8"))
-        if a.section == "model":
-            doc["chain"] = [{"id": i, "why": "configured"} for i in ids]
-        else:
-            doc.setdefault("wallet", {})[a.name] = amount
-        write_json(file, doc)
+    _through_door(base, f"{a.section}.{a.name}", ids if a.section == "model" else amount)
     result = {"status": "configured", "section": a.section, "name": a.name,
               "model_status": config.model_readiness(base)["model_status"]}
     print(json.dumps(result, indent=2))

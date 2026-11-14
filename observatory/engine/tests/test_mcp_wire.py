@@ -39,7 +39,7 @@ REQUIRED = ["observatory_status", "observatory_project", "observatory_timeline",
 GOLDEN_TOOLS = [
     # observatory_* tools (31)
     "observatory_assistant_ask", "observatory_assistant_conversation", "observatory_assistant_status",
-    "observatory_checkpoint_latest", "observatory_checkpoint_write", "observatory_credentials",
+    "observatory_checkpoint_latest", "observatory_checkpoint_write", "observatory_configure", "observatory_credentials",
     "observatory_dependencies",
     "observatory_explain", "observatory_findings", "observatory_handoff_accept",
     "observatory_handoff_create", "observatory_handoff_get", "observatory_key_consumers",
@@ -514,6 +514,15 @@ async def run_credentials() -> None:
                 "org": "example-team", "action": "apply", "digest": "sha256:" + "0" * 64}))
             check("org selection apply without organizations is a typed refusal with its command",
                   data.get("error") == "no-organizations" and bool(data.get("command")), json.dumps(data)[:200])
+            # OBS-563: the configuration door lists every setting over the wire; an unknown key is refused by type.
+            data = payload(await session.call_tool("observatory_configure", {"action": "list"}))
+            check("observatory_configure lists the settings with a degraded list",
+                  any(r.get("key") == "features.auto_cleanup" for r in data.get("settings", []))
+                  and isinstance(data.get("degraded"), list), json.dumps(data)[:200])
+            data = payload(await session.call_tool("observatory_configure", {"action": "apply", "digest": "nope"}))
+            check("observatory_configure apply without a plan is a typed refusal",
+                  data.get("error") in ("plan_unknown", "workspace_refused") and data.get("degraded") == [],
+                  json.dumps(data)[:200])
 
 
 async def run_refusals() -> None:
@@ -556,6 +565,9 @@ async def run_refusals() -> None:
                         ("observatory_org_selection", {"org": "example-team", "action": "confirm-replacement",
                                                        "key": value}),
                         ("observatory_org_keys", {"org": value}),
+                        ("observatory_configure", {"action": "plan", "changes": {value: True}}),
+                        ("observatory_configure", {"action": "plan", "changes": {"sources.projects": value}}),
+                        ("observatory_configure", {"action": "undo", "journalId": value}),
                         ("estate.survey", {"limit": 1, "cursor": value}),
                         ("project.timeline", {"projectId": SYNTHETIC_PROJECT, "since": value})):
                     res = await session.call_tool(tool, args)

@@ -122,12 +122,12 @@ server = InteropServer(
         "(embedding-policy/1, lexical); `degraded` says so.\n"
         "WRITE: `observatory_record`, `_lesson` and `_propose` append PROPOSALS below "
         "confidence 1; only the operator or independent corroboration promotes one; "
-        "`_org_selection` changes need the operator's `decision`.\n"
+        "`_org_selection` and gated `_configure` changes need the operator's `decision`.\n"
         "SECRETS: `observatory_credentials` names keys and CANNOT return a value; run its command, "
         "open no file. Missing key: `observatory_secret_request`, no chat.\n"
         "DEGRADED: every read carries `degraded` (empty: full coverage; else it "
         "names gaps); treat a read without one as a bug (writes/job handles have none). "
-        "Refusals are typed `error` answers; isError: malformed input, unknown tool "
+        "Refusals are typed `error`s; isError: malformed input, unknown tool "
         "or invalid output.\n"
         "WORKFLOW: `observatory_checkpoint_write` after each step (keep `leaseId`); "
         "`observatory_handoff_create`/`_accept` moves it; `observatory_workflow_list` finds it.\n"
@@ -140,7 +140,7 @@ server = InteropServer(
         "Also `observatory_machine` (`section`, `move`, `explainPid`); `_sessions`; `observatory_ssh_keys` (no private key); "
         "`observatory_org_accounts`/`_keys`; "
         "`observatory_assistant_status`; `observatory_assistant_conversation`.\n"
-        "Fabric capabilities (fabric-interop/0.1), exact schemas: "
+        "Fabric capabilities (fabric-interop/0.1): "
         "`estate.survey`, `project.detail`, `project.resolve`, "
         "`project.timeline`, `project.record`, `machine.mcp.inventory`, `machine.mcp.refresh`."
     ),
@@ -713,6 +713,60 @@ def observatory_org_selection(
         return S.confirm_replacement(org, key, decision=words, caller="agent:mcp")
     except S.Refusal as refusal:
         return refusal.answer()
+
+
+@server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False))
+def observatory_configure(
+    action: Annotated[Literal["list", "plan", "apply", "undo"],
+                      Field(description="list and plan read and write no configuration; apply writes the plan "
+                                        "`digest` names; undo restores what `journalId` changed.")] = "list",
+    changes: Annotated[dict[str, Any] | None, Field(
+        description="plan: {key: value} for keys `list` names, typed as `list` says (true/false, a number, one of "
+                    "the choices, an absolute path, a list of vendor/model ids); null is back to the default.")] = None,
+    digest: Annotated[str | None, Field(description="apply: the `digest` the plan answered.")] = None,
+    journalId: Annotated[str | None, Field(validation_alias=AliasChoices("journalId", "journal_id"),
+                                           description="undo: the `journal` id an apply answered.")] = None,
+    decision: Annotated[dict[str, Any] | None, Field(
+        description="Only for a change `needsPerson` names: the operator's words in contract DEC-0121's shape: {by: "
+                    "operator, via: relayed-instruction, action: configure.apply|configure.undo, target: the digest "
+                    "or the journal id, instruction: their words verbatim, at: when, source?}. Also read from "
+                    "_meta.decision.")] = None,
+    ctx: "Context | None" = None,
+) -> dict[str, Any]:
+    """The configuration door (OBS-563, CP-20): every setting the engine reads, previewed, applied and undone in
+    one way, the same as `project-observatory full configure --list|--plan|--apply|--undo`.
+
+    `list` answers each key with its type, allowed values or range, default, file, gate and current value. `plan`
+    answers the values before and after, each change's effect, the keys that need the person (`needsPerson`: a switch
+    that sends data out, a cleanup that removes sooner, a budget raised, the model chain) and a `digest`; it writes no
+    configuration. `apply` with that digest writes exactly that plan, atomically, only while the files still hold what
+    it read (else `plan_stale`), and journals the values before and after with this caller as the actor
+    (store/logs/configure.jsonl); a change that needs the person also needs their words as `decision`. `undo`
+    restores the values an apply found, only while the files still hold what it wrote (else `undo_refused`).
+    Refusals are typed (`unknown_key`, `invalid_value`, `secret_refused`, `plan_stale`, `plan_unknown`,
+    `operator_decision_required`, `decision_invalid`, `journal_unknown`, `already_undone`) and never echo a refused
+    value; a credential is never configuration (`observatory_secret_request`)."""
+    import configuration_door as D
+    words = decision if decision is not None else _meta_decision(ctx)
+    stray = [name for name, value, takes in (("changes", changes, "plan"), ("digest", digest, "apply"),
+                                             ("journalId", journalId, "undo"))
+             if value not in (None, {}, "") and action != takes]
+    if action in ("list", "plan") and decision is not None:
+        stray.append("decision")
+    if stray:
+        return D.Refusal("invalid_argument", f"`{stray[0]}` belongs to another action, not to {action}").answer()
+    try:
+        if action == "list":
+            return D.listing()
+        if action == "plan":
+            return D.plan(changes)
+        if action == "apply":
+            return D.apply(digest, actor="agent:mcp", decision=words)
+        return D.undo(journalId, actor="agent:mcp", decision=words)
+    except D.Refusal as refusal:
+        return refusal.answer()
+    except configuration.ConfigurationError as exc:
+        return {"error": "workspace_refused", "message": str(exc)[:300], "degraded": []}
 
 
 #: A bare project name (a folder, or an id without its prefix).
