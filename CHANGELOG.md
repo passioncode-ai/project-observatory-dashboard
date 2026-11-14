@@ -3,6 +3,48 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.37.0 (2026-11-15)
+
+The first wave of the estate control plane (docs/design/CONTROL-PLANE.md). Every coding session on the machine is
+counted once, from the processes, the account manager and the ledger, and a session outside a lifecycle owner is a
+finding. Each project's dependencies are read from its lockfiles and checked once a day against public advisories,
+without a private package name ever leaving the machine. A key rotation no longer cuts a live consumer: the new key is
+delivered and read back everywhere the old one was before the old one is revoked. Settings change through one
+configuration door with a plan, a journal and an undo, over the CLI and MCP. Agent parity becomes a test: every
+dashboard action and state-changing command has an MCP tool, a person's gate with its reason, or a row. The
+observatory-log plugin moves to 0.37.0 with the release.
+
+### Added
+
+- **The estate control plane, planned** (OBS-549, #540): requirements CP-01 to CP-20, modules M0 to M14 with their
+  contracts, decisions D1 to D9 and four waves, with the measured state of the engine and the public sources.
+- **Agent parity is a test** (OBS-559 part 1, #541): `docs/design/control-plane/parity.json` lists 109 actions (the key
+  server's and the state-changing CLI verbs), each covered by an MCP tool, a person's gate with its reason, or a
+  missing row; `tests/test_agent_parity.py` fails on any action without one.
+- **One session count** (OBS-550, #542): `sessions_view.summary()` joins the account manager's machine listing, the
+  machine survey and the ledger into three facets (running, managed, active in the last hour); `observatory_sessions`;
+  finding `session.unmanaged`; the tick step `coding-sessions`; Home and Agents read the same numbers.
+- **Dependency inventory and vulnerability watch** (OBS-553, #543): lockfiles of npm, pnpm, yarn, PyPI, uv, poetry,
+  Pipfile, Cargo, Go, RubyGems and Composer read per project, local and private packages marked and never sent; a daily
+  OSV check with the known-exploited catalogue; findings `dep.vulnerable` and `dep.watch_stale`;
+  `observatory_dependencies`; switch `integrations.vulnerabilities`, on by default.
+- **The configuration door** (OBS-563, #544): every settable key declared; `configure --list/--plan/--apply/--undo`
+  and `observatory_configure`; every change journalled in `store/logs/configure.jsonl`; a change that sends data out,
+  removes sooner or spends more needs the person.
+- **Key consumers** (OBS-561, #544): `observatory_key_consumers` and `rotate --dry-run` list where a key's value is
+  deployed, never printing it.
+- **Platform products in the registry** (OBS-564, #544): an organization's `platform_products` marks projects
+  `platform_product: true` (registry) and `platformProduct: true` (full project view).
+
+### Fixed
+
+- **Rotation never cuts a live consumer** (OBS-561, #544): OpenRouter `rotate` and `issue` into an occupied slot deliver
+  the new key to each copy found (Heroku config vars, inventoried env files) and read it back before deleting the old
+  key; a copy that cannot be reached holds the rotation with the old key alive; Cloudflare and Heroku refuse to roll
+  while a copy outside the vault is found; `--force` cuts and journals.
+- **The digest folders' collector attributes services** (OBS-567, #544): it passed no registry, so no daily line was
+  ever recorded from a declared folder; one registry reader, `identifiers.load_registry()`.
+
 ## 0.36.0 (2026-11-14)
 
 Several people can now run Observatory on one computer, each in their own OS account: every listener takes a port of

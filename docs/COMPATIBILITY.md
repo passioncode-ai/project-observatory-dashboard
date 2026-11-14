@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The application release is **0.36.0**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
+The application release is **0.37.0**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
 
 ## SQLite runtime prerequisite
 
@@ -701,7 +701,7 @@ is sent: the node's check-in still sends no `credentialRequests` and reads no de
 put` and `rotate` there leave a stale `provenance` beside a new value, which the newer engine drops at the slot's
 next put or rotation.
 
-## Coding sessions in three facets (OBS-550, the release after 0.36.0)
+## Coding sessions in three facets (OBS-550, 0.37.0)
 
 The tick gains the step `coding-sessions` (under `features.machine_watch`, like the machine survey). It runs
 `sessions_view.py`, which asks the account manager once (`switchboard sessions --machine --json`, at most 10 s,
