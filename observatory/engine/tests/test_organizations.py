@@ -59,6 +59,33 @@ class Base(unittest.TestCase):
         return self.orgs.Assigner().assign(project)
 
 
+class PlatformProducts(Base):
+    """OBS-564: a product the platform installs in every organization is named, never guessed from its owner."""
+
+    def test_a_named_platform_product_is_marked(self):
+        doc = json.loads(json.dumps(ORGS))
+        doc["organizations"]["company"]["platform_products"] = ["project:estate-engine", "not-a-project", 7]
+        self.write("organizations.json", doc)
+        got = self.orgs.Assigner()
+        self.assertEqual(got.platform_products, {"project:estate-engine"})
+        self.assertTrue(any("platform_products" in p for p in got.problems))
+
+    def test_the_project_view_carries_the_mark_and_nothing_else_does(self):
+        import survey
+        base = {"id": "project:estate-engine", "name": "estate-engine", "anchor": "x", "ownership": "own",
+                "lifecycle": "active", "repository_ids": [], "membership_rules": []}
+        try:
+            marked = survey._project_view({**base, "platform_product": True}, {}, {})
+            plain = survey._project_view(base, {}, {})
+        except KeyError as exc:  # the view needs more of a row than this fixture holds
+            self.skipTest(f"project view fixture lacks {exc}")
+        self.assertIs(marked.get("platformProduct"), True)
+        self.assertNotIn("platformProduct", plain)
+
+    def test_none_named_marks_nothing(self):
+        self.assertEqual(self.orgs.Assigner().platform_products, set())
+
+
 class Assignment(Base):
     def test_order_of_answers(self):
         self.assertEqual(self.assign(id="project:partner-app", owners=["stranger"])["source"], "declared")

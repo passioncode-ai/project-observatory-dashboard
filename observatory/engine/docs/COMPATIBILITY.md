@@ -650,7 +650,7 @@ from `registry/agents.json` alone, with the inventory notes' frontmatter; no pat
 (its account row's `id`), DigitalOcean account rows gain `team_uuid` and Cloudflare account rows `account_id`. When
 `config/organizations.json` names organizations, those account rows also carry `organization`,
 `organization_source` (`rule`, `conflict`, `none`) and `organization_why`, and `registry/heroku-apps.json` carries
-`team_organizations` (`team` and the same three fields); without the file nothing new is written. `match` accepts
+`team_organizations` (`team` and the same three fields); without the file nothing new is written. An organization may name `platform_products` (project ids, OBS-564): each such project's row in `registry/projects.json` gains `platform_product: true` and its view in `observatory_project` and `estate.survey` (detail `full`) gains `platformProduct: true`; the published survey shape is unchanged, and an older engine ignores the key. `match` accepts
 `digitalocean_teams` (a team's uuid, or its name while no other team here bears it), `cloudflare_accounts` and
 `heroku_teams`; an older engine ignores the new keys, so a project they assigned falls back to the older answer there.
 A rule that is not a list of strings is ignored and named on the emit's error output. A project assigned through a

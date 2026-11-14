@@ -243,7 +243,18 @@ def collect(descriptors: list[tuple[Path, dict]] | None = None, *,
         import fabric_service
         descriptors = fabric_service.read_descriptors()
     record = record or ops_digest_store.record
-    projects = projects or (lambda service: ops_digest_store.service_projects(service, None))
+    if projects is None:
+        # CA-430: the registry is read once, here, and every service is attributed through it; before, None was
+        # passed and every service read as of no project, so nothing was ever recorded.
+        import identifiers
+        loaded: list = []
+
+        def registry():
+            if not loaded:
+                loaded.append(identifiers.load_registry())
+            return loaded[0]
+
+        projects = lambda service: ops_digest_store.service_projects(service, registry)  # noqa: E731
     receipt: dict = {"services": 0, "folders": 0, "recorded": 0, "repeated": 0, "skipped": {}, "refused": {},
                      "notDeclared": [], "unattributed": []}
     for _, descriptor in descriptors:

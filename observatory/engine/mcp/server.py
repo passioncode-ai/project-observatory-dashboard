@@ -475,48 +475,10 @@ def observatory_resolve(
 
 
 def _resolve_registry():
-    """The four registry documents and Fabric's aliases `identifiers.resolve` reads, each missing or unreadable one
-    named in `degraded`. One reader for `observatory_resolve` and `ops.digest.record`'s project and service
-    attribution (OBS-330), so the two never disagree about which project a name is."""
+    """The registry `identifiers.resolve` reads (`identifiers.load_registry`): one reader for `observatory_resolve`,
+    `ops.digest.record` and the digest folders' collector (OBS-330, CA-430), so they never disagree."""
     import identifiers
-    degraded: list[dict[str, str]] = []
-
-    def doc(name: str, key: str) -> list[dict]:
-        try:
-            return json.loads((paths.REGISTRY / name).read_text(encoding="utf-8"))[key]
-        except FileNotFoundError:
-            degraded.append({"source": f"registry/{name}", "reason": "absent: the emit has not written it"})
-        except (OSError, ValueError, KeyError) as exc:
-            degraded.append({"source": f"registry/{name}", "reason": f"unreadable: {type(exc).__name__}"})
-        return []
-
-    projects, products, relations = (doc("projects.json", "projects"), doc("products.json", "products"),
-                                     doc("relations.json", "relations"))
-    try:
-        idoc = json.loads((paths.REGISTRY / "identifiers.json").read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        idoc = {}
-        degraded.append({"source": "registry/identifiers.json",
-                         "reason": "absent: curated other names were not read; run `project-observatory full emit`"})
-    except (OSError, ValueError) as exc:
-        idoc = {}
-        degraded.append({"source": "registry/identifiers.json", "reason": f"unreadable: {type(exc).__name__}"})
-    # Fabric owns the canonical project id (OBS-160, DEC-0089): its `fabric:<uuid>` for each project, as
-    # Observatory last pulled it, and folders answered by the contract's rules over Observatory's facts.
-    import fabric_attribution
-    fdoc = fabric_attribution.load()
-    if not fdoc:
-        degraded.append({"source": "store/raw/fabric-attribution.json",
-                         "reason": "absent: no Fabric aliases read; run `project-observatory full fabric-attribution`"})
-    else:
-        degraded.extend({"source": "fabric-hub", "reason": str(d.get("reason"))}
-                        for d in fdoc.get("degraded") or [] if isinstance(d, dict))
-    # COPIES AND MOVES (OBS-321) are NOT added here: this tool is `project.resolve`'s required
-    # feature, and that capability's published v0.24.0 answer is closed, so an added field fails
-    # every host that validates it. `observatory_project` carries them (its `project` is open).
-    return identifiers.Registry(projects, products, relations, idoc, degraded,
-                                fabric_aliases=fabric_attribution.aliases(fdoc),
-                                attribute=fabric_attribution.attribute_local)
+    return identifiers.load_registry()
 
 
 @server.tool()
