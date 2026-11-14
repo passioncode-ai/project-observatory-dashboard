@@ -1,0 +1,32 @@
+{
+  "description": "A remote descriptor that carries the ops-digest key: no folder on this machine, FAC-SEM-168 (DEC-0153 OD-9).",
+  "kind": "service-descriptor",
+  "expect": [
+    "FAC-SEM-168"
+  ],
+  "input": {
+    "protocol": "fabric-service/0.1",
+    "id": "example-agent",
+    "instance": "default",
+    "name": "Example Agent",
+    "summary": "An online agent with a dashboard, hosted outside this computer.",
+    "placement": "remote",
+    "origin": "https://agent.example.com",
+    "auth": {
+      "tokenFile": "~/Library/Application Support/ai.passioncode.fabric/tokens/example-agent.default.token"
+    },
+    "lifecycle": {
+      "manager": "none"
+    },
+    "installedAt": "2026-10-02T18:00:00Z",
+    "installedBy": "fabric-service register-remote (example)",
+    "extensions": {
+      "https://fabric.passioncode.ai/agent-contract/extensions/ops-digest/0.1": [
+        {
+          "dir": "digests",
+          "source": "app"
+        }
+      ]
+    }
+  }
+}

@@ -287,6 +287,8 @@ BOUNDARY += ('session_reload',)
 BOUNDARY += ('node_org',)
 # OBS-192: the node's harness summary (node-summary/1, contract DEC-0101) and its drift, over the contract's vectors.
 BOUNDARY += ('node_summary',)
+# OBS-533: where a product's daily operations digests are read (DEC-0153 OD-9, FAC-SEM-168) and the collector.
+BOUNDARY += ('ops_digest_folders',)
 # OBS-76 OE-01a: the device's activity collector over synthetic transcripts and the contract's telemetry schema, and
 # routing by context (DEC-0082) over the contract's vectors.
 BOUNDARY += ('activity_collector', 'context_route')
@@ -369,7 +371,7 @@ RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'node', 'plugins', 's
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py', 'tracked.py',
-    'identity_map.py', 'identifiers.py', 'derivations.py', 'folder_attribution.py', 'fabric_attribution.py', 'activity_collector.py', 'fabric_hub.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'tick_progress.py', 'tick_budget.py', 'dashboard_stamp.py', 'workspace.py',
+    'identity_map.py', 'identifiers.py', 'derivations.py', 'folder_attribution.py', 'fabric_attribution.py', 'ops_digest_folders.py', 'activity_collector.py', 'fabric_hub.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'tick_progress.py', 'tick_budget.py', 'dashboard_stamp.py', 'workspace.py',
     'workspace_upgrade.py', 'backup_vault.py', 'secret_store_carry.py', 'organizations.py', 'org_view.py', 'org_selection.py', 'machine_view.py', 'memory_snapshot.py', 'checkout_inventory.py', 'checkout_state.py', 'checkout_graph.py', 'cache_coverage.py', 'open_unlinked.py', 'coverage_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
     'log_policy.py', 'code_freshness.py', 'session_reload.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',

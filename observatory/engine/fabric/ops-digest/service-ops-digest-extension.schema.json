@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/service-ops-digest-extension.schema.json",
+  "title": "extensions/ops-digest/0.1: where a collector on the same machine reads a product's daily operations digests, and the label it sends with them (fabric-ops-digest/0.1, DEC-0153)",
+  "description": "The value of the ops-digest extension key https://fabric.passioncode.ai/agent-contract/extensions/ops-digest/0.1 in a local service descriptor: 1 to 8 folders inside the product's own data folder (paths.data) that hold its daily-YYYY-MM.jsonl files (OD-6), each with the source label a collector sends with the daily lines it reads there. The digests stay as written (OD-6, OD-7). A checker reports an invalid value, a remote placement or a missing paths.data, a source or a dir named twice, a dir with a segment empty once its ignorable code points and trailing dots and spaces are dropped, a dir holding a lone surrogate, a dir holding a home folder, and a dir or source shaped like a credential as FAC-SEM-168. docs/specification/ops-digest.md#where-a-collector-reads-the-daily-digests.",
+  "type": "array",
+  "minItems": 1,
+  "maxItems": 8,
+  "items": {
+    "$ref": "#/$defs/folder"
+  },
+  "$defs": {
+    "folder": {
+      "type": "object",
+      "required": [
+        "dir",
+        "source"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "dir": {
+          "$ref": "fabric-package.schema.json#/$defs/path",
+          "description": "A folder inside the product's data folder (paths.data), relative to it: forward slashes, no leading / or ~, no drive or other ':', no backslash, no . or .. segment, no C0 control character, no // and no trailing /, at most 256 characters (the grammar of a package path, also used for a package's state relative to the data folder). It holds the product's daily-YYYY-MM.jsonl files (OD-6). Each dir once, compared under canonical caseless matching (the code points HFS+ ignores removed, NFD, lower, upper and lower case, NFC, Georgian Nuskhuri onto Mkhedruli), trailing dots and spaces dropped; no segment that is empty once every default-ignorable code point (those HFS+ ignores among them) and its trailing dots and spaces are dropped (a tool that trims or strips names may read it as empty, '.' or '..', another folder than the one declared, possibly outside paths.data) (FAC-SEM-168); no home folder and no credential's shape (FAC-SEM-168) in any of four readings: as written, with every default-ignorable code point removed, and each of those with each segment's trailing dots and spaces dropped; a run of 40 or more letters, digits, '+', '/', '=', '_' or '-' that mixes cases and a digit, across segments joined by '/' too (Application+Support/MyProduct/Digests2026x), is refused on purpose; a space or a dot inside a segment (not at its end) breaks the run. No lone surrogate (not well-formed Unicode, which no file system can name) (FAC-SEM-168). hasHomePath refuses a value in which 'home', 'users' or 'Users' stands at the start, right after any character that is not an ASCII letter or digit ('_', '-', '.', ':' and '/' included) or right after '%2F' or '%252F', and is followed by '/', '\\', '%2F' or '%252F' ('F' in either case, here and in the '%2F' or '%252F' before) and then an ASCII letter, digit or '_'; in which '-home-', '-users-' or '-Users-' stands at the start or after such a non-alphanumeric character and is followed by an ASCII letter or digit; or in which '~' stands at the start or after whitespace as JavaScript's \\s reads it, a double or single quote, '=', '/' or '\\', followed by an optional name (an ASCII letter or '_', then ASCII letters, digits, '_', '.' or '-') and then '/', '\\' or the end. So users/digests, my_users/digests, my-users/digests and a/~b are refused, and user-digests and a/~1/x pass."
+        },
+        "source": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]{0,31}$",
+          "description": "The label a collector sends with each daily digest read in dir, once in the list (FAC-SEM-168); app is the conventional label of a product's one folder."
+        }
+      }
+    }
+  }
+}

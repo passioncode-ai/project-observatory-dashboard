@@ -18,12 +18,14 @@ What each file is, and where it came from at that commit:
 - `positive/`, `negative/`: the `ops-digest-*` fixtures of `fixtures/positive/` and `fixtures/negative/` (a line each
   that the schema takes, and one each it refuses).
 - `semantic/`: the `ops-digest-hourly-*` and `ops-digest-daily-*` fixtures of `fixtures/semantic/`, each with the rule
-  codes (`FAC-SEM-166`, `FAC-SEM-167`) the contract's `opsDigestRules` reports on it. The `ops-digest-folders-*`
-  fixtures of `FAC-SEM-168` are not copied: they check a service descriptor's folder declaration, which a collector
-  reads and Observatory does not (`ops_digest.py` takes only that rule's `source` clause).
+  codes (`FAC-SEM-166`, `FAC-SEM-167`) the contract's `opsDigestRules` reports on it; and the `ops-digest-folders-*`
+  fixtures of `FAC-SEM-168`, a service descriptor's folder declaration (OD-9), which `ops_digest_folders.py` reads
+  since OBS-533.
+- `service-ops-digest-extension.schema.json`: `schemas/`, the declaration's closed shape, which
+  `ops_digest_folders.shape` ports.
 
 The rules are ported, not copied: `ops_digest.py` holds `FAC-SEM-166`, `FAC-SEM-167` and the `source` clause of
-`FAC-SEM-168`, with the shared detectors they use (`secretValue` of the contract's `src/secret-shape.ts` and
+`FAC-SEM-168`, `ops_digest_folders.py` the rest of `FAC-SEM-168` (`digestFoldersRules` and `digestFoldersView`), with the shared detectors they use (`secretValue` of the contract's `src/secret-shape.ts` and
 `hasHomePath` of its `src/activity-rules.ts`), as `docs/specification/ops-digest.md` states them at that commit.
 
 Do not edit these files here. When the contract changes, copy them again from a new release tag and update the tag,
@@ -50,6 +52,13 @@ the commit and the digests below; `tests/test_ops_digest.py` checks the digests.
 | `semantic/ops-digest-daily-ok.json` | `f3d029359ef5c34c555be24f7480107ea58d0901d0b26ef144fcae233b17ec03` |
 | `semantic/ops-digest-daily-rise-too-few.json` | `32ec59f358d3deccad60dfb37592c8a914a2da8d1a7ed4b5ca28ad42b76fdf1a` |
 | `semantic/ops-digest-daily-rose-more-hours.json` | `6d46d22be833601eaaba3c04306e2920a50407e9f453e24c7015abdac0f9027b` |
+| `semantic/ops-digest-folders-credential-source.json` | `316f79e1215a9381e3abc53d544597c94cbd9ae870d9cd310d595c6ba82d04aa` |
+| `semantic/ops-digest-folders-dir-twice.json` | `995adef255b7a834c618c9b121bc98e9c3c340517ad41f153e525800a4f289af` |
+| `semantic/ops-digest-folders-home-dir.json` | `42c98143615354c77636aba3266d4c7345cf61f4686f055cd250240fb8c9147c` |
+| `semantic/ops-digest-folders-invalid.json` | `270e27645232cb7d03f9434a22222f628cd59cafd3224fe5c9e8a674d64de090` |
+| `semantic/ops-digest-folders-ok.json` | `7076885d5a064b7b81c445a115fad4ccd283d6234d36e95d858be7c3927dad88` |
+| `semantic/ops-digest-folders-remote.json` | `f4d3875a422372f48711734d38cdf60258f487797517171e77bdc0486adc1ccc` |
+| `semantic/ops-digest-folders-source-twice.json` | `ebc7598b1f1e49dd6326d6ad3e280c1e17cd2c0c6efdc5a4c14dfacd3b9edea5` |
 | `semantic/ops-digest-hourly-no-such-day.json` | `61cd55ab5a8be352477074072099ca6e67fceef8b6ae0a69feae0a5409aaafb6` |
 | `semantic/ops-digest-hourly-not-a-rise.json` | `2176bf836d7db28edcc82942dc5821ba28dad9c5968fbb8a49b395ec7dd790c2` |
 | `semantic/ops-digest-hourly-ok.json` | `c905ebb1e18848874466062f153186bf1785ffccdd951732b45221a402a977b3` |
@@ -60,3 +69,4 @@ the commit and the digests below; `tests/test_ops_digest.py` checks the digests.
 | `semantic/ops-digest-hourly-rise-not-counted.json` | `a24f76a396b2d9a8eb7476f13e5b3815fb19d84ee8306f81dc6ec60d61f9beb0` |
 | `semantic/ops-digest-hourly-total-not-sum.json` | `eea580cdfb125df82940941d5845f1dbd777c73ee72ebee10518777badf985c2` |
 | `semantic/ops-digest-hourly-two-hours.json` | `c09503f58d42d14b1cc76cd4b117cf9b8cb7e2f736330bb065c3977d1699967c` |
+| `service-ops-digest-extension.schema.json` | `ddc7a873455ec2680a81bf0160174a7b73cfca2d5ef3658839149e6efe80d71b` |

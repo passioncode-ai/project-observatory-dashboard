@@ -15,8 +15,8 @@ copies in `fabric/ops-digest/` (schemas, vectors, fixtures) are what `tests/test
 - `fold_hour`, `fold_day`: the reference folds, run over the contract's vectors, so the engine's reading of a line
   agrees with the contract's (the contract's `foldHour` and `foldDay`).
 - `source_refused(source)`: the one clause of `FAC-SEM-168` a receiver applies, a `source` label shaped like a
-  credential. The rest of that rule (a descriptor's folder declaration) is a collector's, and Observatory reads no
-  digest folder.
+  credential. The rest of that rule (a descriptor's folder declaration) is `ops_digest_folders.py`'s, which reads
+  the declared folders since OBS-533.
 
 WHERE PYTHON AND JAVASCRIPT DIFFER, the JavaScript reading wins, because the contract's kit is JavaScript:
 
