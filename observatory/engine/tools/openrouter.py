@@ -850,6 +850,8 @@ def cmd_issue(name: str, limit: float, account: str | None, to: str,
           f"{r['expiry']}, delivered to {r['delivered_to']}")
     if r.get("name_check"):
         print(f"note: {r['name_check']}", file=sys.stderr)
+    rec = ledger()["issued"].get(r["name"]) or {}
+    _byok_after(rec.get("hash"), rec.get("account"), r["name"], rec)
     return 0
 
 
@@ -1736,6 +1738,8 @@ def cmd_rotate(name: str | None, leaked: bool) -> int:
                 continue
             print(f"  {n}: rotated, successor delivered to {r['delivered_to']}, predecessor deleted"
                   + ("; an earlier rotation left part done was finished first" if r.get("resumed") else ""))
+            rec = ledger()["issued"].get(n) or {}
+            _byok_after(rec.get("hash"), rec.get("account"), n, rec)
         except (LookupError, ValueError) as exc:
             print(f"  {n}: {exc}", file=sys.stderr)
             bad += 1
@@ -2098,6 +2102,191 @@ def read_activity(admin: str, key_hash: str, date: str | None = None) -> list[di
     return rows
 
 
+# ─────────────── BYOK: each workspace's openai credential (OBS-544) ───────────────
+#
+# OpenAI refuses OpenRouter's own route for `openai/*` on some accounts; a workspace then reaches OpenAI through a
+# BYOK credential (provider `openai`) carrying the operator's own key, limited by `allowed_api_key_hashes` to the keys
+# this door issued there. A key issued or rotated later is not on that list until it is synced. `byok list` compares,
+# `byok sync` sets each list to the ledger's keys in that workspace, and `issue` and `rotate` add the new key. The
+# credential's key VALUE is never read, sent or printed by list and sync; only `sync --create-from ENV` creates a
+# missing credential, from a value its caller put in the environment (`use_secret.py run`).
+
+BYOK_PROVIDER = "openai"
+BYOK_NAME = "openai-byok"
+
+
+def byok_exclusions() -> tuple[str, ...]:
+    """Substrings of a key's name, project or destination whose keys never get the credential: the workspace's
+    `config/openrouter.json` → `byok.exclude`. Absent: none."""
+    try:
+        doc = json.loads(paths.config_file("openrouter.json").read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return ()
+    except (OSError, ValueError) as exc:
+        raise RuntimeError(f"config/openrouter.json is unreadable ({type(exc).__name__}); nothing synced") from None
+    rows = ((doc or {}).get("byok") or {}).get("exclude") or []
+    return tuple(str(x).lower() for x in rows if isinstance(x, str) and x.strip())
+
+
+def _byok_excluded(name: str, rec: dict, patterns: tuple[str, ...]) -> bool:
+    text = " ".join((name, str(rec.get("project") or ""), str(rec.get("destination") or ""))).lower()
+    return any(p in text for p in patterns)
+
+
+def _byok_credentials(admin: str, workspace: str) -> list[dict]:
+    rows = _request(f"/byok?workspace_id={workspace}", admin).get("data") or []
+    return [c for c in rows if isinstance(c, dict) and c.get("provider") == BYOK_PROVIDER]
+
+
+def byok_plan(issued: dict | None = None) -> dict:
+    """Per workspace: the hashes it should allow, what it allows, and what a sync would change. A ledger key that
+    could not be read keeps whatever access it has (its hash is never removed on a guess)."""
+    issued = ledger()["issued"] if issued is None else issued
+    patterns = byok_exclusions()
+    spaces: dict[str, dict] = {}
+    degraded: list[dict] = []
+    unread: dict[str, set] = {}
+    for name, rec in sorted(issued.items()):
+        h, acc = rec.get("hash"), rec.get("account")
+        if not h or not acc:
+            continue
+        try:
+            _label, admin = read_admin(acc)
+            row = _request(f"/keys/{h}", admin).get("data") or {}
+        except RuntimeError as exc:
+            degraded.append({"key": name, "reason": str(exc)[:160]})
+            unread.setdefault(acc, set()).add(h)
+            continue
+        ws = row.get("workspace_id")
+        if not ws:
+            degraded.append({"key": name, "reason": "the provider names no workspace for it"})
+            unread.setdefault(acc, set()).add(h)
+            continue
+        space = spaces.setdefault(ws, {"workspace": ws, "account": acc, "accounts": set(), "want": {},
+                                       "excluded": {}})
+        space["accounts"].add(acc)
+        (space["excluded"] if _byok_excluded(name, rec, patterns) else space["want"])[h] = name
+    out = []
+    for ws, space in sorted(spaces.items()):
+        _label, admin = read_admin(space["account"])
+        try:
+            creds = _byok_credentials(admin, ws)
+        except RuntimeError as exc:
+            degraded.append({"workspace": ws, "reason": f"credentials unreadable: {str(exc)[:120]}"})
+            continue
+        keep_unread = set().union(*(unread.get(a, set()) for a in space["accounts"]))
+        for cred in creds or [None]:
+            have = set((cred or {}).get("allowed_api_key_hashes") or [])
+            target = set(space["want"]) | (have & keep_unread)
+            out.append({"workspace": ws, "account": space["account"],
+                        "credential": (cred or {}).get("id"),
+                        "keys": len(space["want"]), "allowed": len(have) if cred else None,
+                        "add": sorted(space["want"][h] for h in set(space["want"]) - have),
+                        "remove": len(have - target),
+                        "excluded": sorted(space["excluded"].values()),
+                        "target": sorted(target)})
+            if len(creds) > 1:
+                degraded.append({"workspace": ws, "reason": f"{len(creds)} openai credentials; each is synced"})
+    return {"workspaces": out, "degraded": degraded}
+
+
+def byok_sync(dry_run: bool = False, create_from: str | None = None) -> dict:
+    """Set each workspace's list to its plan. Only `allowed_api_key_hashes` is sent to an existing credential."""
+    plan = byok_plan()
+    for row in plan["workspaces"]:
+        if row["credential"] is None:
+            if not create_from:
+                row["result"] = "no-credential"
+                continue
+            value = os.environ.get(create_from, "").strip()
+            if not value:
+                raise ValueError(f"--create-from {create_from}: that variable is empty in this environment")
+            if dry_run:
+                row["result"] = "would-create"
+                continue
+            _l, admin = read_admin(row["account"])
+            made = _request("/byok", admin, {"provider": BYOK_PROVIDER, "workspace_id": row["workspace"],
+                                             "key": value, "name": BYOK_NAME,
+                                             "allowed_api_key_hashes": row["target"]}).get("data") or {}
+            row["credential"], row["result"] = made.get("id"), "created"
+            continue
+        if not row["add"] and not row["remove"]:
+            row["result"] = "in-step"
+            continue
+        if dry_run:
+            row["result"] = "would-patch"
+            continue
+        _l, admin = read_admin(row["account"])
+        _request(f"/byok/{row['credential']}", admin, {"allowed_api_key_hashes": row["target"]}, "PATCH")
+        row["result"] = "patched"
+    if not dry_run and any(r.get("result") in ("patched", "created") for r in plan["workspaces"]):
+        _journal("openrouter.byok.sync", BYOK_NAME, workspaces=sum(
+            1 for r in plan["workspaces"] if r.get("result") in ("patched", "created")))
+    return plan
+
+
+def byok_add(key_hash: str, account: str, name: str, rec: dict | None = None) -> str:
+    """After `issue` or `rotate`: put one new key on its workspace's credential list. Returns what happened."""
+    if _byok_excluded(name, rec or {}, byok_exclusions()):
+        return "excluded"
+    _label, admin = read_admin(account)
+    ws = (_request(f"/keys/{key_hash}", admin).get("data") or {}).get("workspace_id")
+    if not ws:
+        return "no-workspace"
+    creds = _byok_credentials(admin, ws)
+    if not creds:
+        return "no-credential"
+    done = "listed"
+    for cred in creds:
+        have = list(cred.get("allowed_api_key_hashes") or [])
+        if key_hash in have:
+            continue
+        _request(f"/byok/{cred['id']}", admin, {"allowed_api_key_hashes": have + [key_hash]}, "PATCH")
+        done = "added"
+    return done
+
+
+def _byok_after(key_hash: str | None, account: str | None, name: str, rec: dict | None = None) -> None:
+    """Best effort: the key is minted and delivered already; a failure here is said, never fatal."""
+    if not key_hash or not account:
+        return
+    try:
+        what = byok_add(key_hash, account, name, rec)
+    except (RuntimeError, OSError) as exc:
+        print(f"note: byok not updated for {name} ({str(exc)[:120]}); run `openrouter.py byok sync`", file=sys.stderr)
+        return
+    if what == "added":
+        print(f"  {name}: added to its workspace's openai credential (BYOK)")
+
+
+def cmd_byok(action: str, dry_run: bool, create_from: str | None, as_json: bool) -> int:
+    try:
+        plan = byok_plan() if action == "list" else byok_sync(dry_run, create_from)
+    except ValueError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    except RuntimeError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 1
+    if as_json:
+        print(json.dumps({**plan, "workspaces": [{k: v for k, v in r.items() if k != "target"}
+                                                 for r in plan["workspaces"]]}, ensure_ascii=False))
+    else:
+        for r in plan["workspaces"]:
+            state = r.get("result") or ("no-credential" if r["credential"] is None else
+                                        "in-step" if not r["add"] and not r["remove"] else "differs")
+            print(f"  workspace {str(r['workspace'])[:8]} ({r['account']}): {r['keys']} key(s), "
+                  f"allowed {r['allowed'] if r['allowed'] is not None else '-'}, {state}"
+                  + (f"; add {', '.join(r['add'])}" if r["add"] else "")
+                  + (f"; remove {r['remove']} hash(es)" if r["remove"] else "")
+                  + (f"; excluded {', '.join(r['excluded'])}" if r["excluded"] else ""))
+        for d in plan["degraded"]:
+            print(f"  degraded: {d.get('key') or d.get('workspace')}: {d['reason']}", file=sys.stderr)
+    missing = any(r.get("result") == "no-credential" or (action == "list" and r["credential"] is None)
+                  for r in plan["workspaces"])
+    return 1 if plan["degraded"] or missing else 0
+
+
 def cmd_spend(name: str, date: str | None, as_json: bool) -> int:
     """What an issued key cost, by day and model, from the provider's own record."""
     if date is not None and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", date):
@@ -2198,6 +2387,14 @@ def main() -> int:
                       help="clear a pending row with no hash without reading the provider — only once the key "
                       "called NAME is deleted there or was never minted (an account listing past PAGES_MAX)")
     p_re.add_argument("--reason", help="with --forget-pending: what makes the key gone; journaled")
+    p_bk = sub.add_parser("byok", help="each workspace's openai BYOK credential: which issued keys it allows "
+                          "(list), or set its list to the ledger's keys in that workspace (sync); OBS-544")
+    p_bk.add_argument("action", choices=("list", "sync"))
+    p_bk.add_argument("--dry-run", action="store_true", help="with sync: say what would change, change nothing")
+    p_bk.add_argument("--create-from", metavar="ENV",
+                      help="with sync: create a missing credential from the key in this environment variable "
+                      "(put there by use_secret.py run); never printed")
+    p_bk.add_argument("--json", action="store_true")
     p_cl = sub.add_parser("claim", help="bring a key minted elsewhere under this door; value on stdin")
     p_cl.add_argument("name", help="what the ledger will call it")
     p_cl.add_argument("--account", help="the stashed account to look in (default: every one)")
@@ -2241,6 +2438,8 @@ def main() -> int:
         return cmd_revoke(a.name, a.forget_pending, a.reason)
     if a.cmd == "claim":
         return cmd_claim(a.name, a.account, a.where)
+    if a.cmd == "byok":
+        return cmd_byok(a.action, a.dry_run, a.create_from, a.json)
     return 2
 
 
