@@ -628,6 +628,46 @@ class EnrollmentEndToEnd(unittest.TestCase):
         self.assertEqual(self.server.log.count('/v1/devices/share-registrations'), before + 1)
         self.assertEqual(self.make().register_shares()['sent'], 0)
 
+    def test_activity_of_this_organizations_sessions_reaches_the_outbox_once(self):
+        """OBS-76 OE-01a: a session in this organization's project gives usage lines with a derived id and its
+        intervals, carrying `session`, `project` and `runtime`; a second pass adds nothing; a personal one, nothing."""
+        import activity_collector
+        self.enroll()
+        root = self.node.parent / 'transcripts'
+        file = root / '-work-demo' / 'sess-1.jsonl'
+        file.parent.mkdir(parents=True)
+        at = lambda s: activity_collector._iso(T0 + s)
+        lines = [{'type': 'user', 'timestamp': at(0), 'sessionId': 'sess-1', 'cwd': '/work/demo'},
+                 {'type': 'assistant', 'timestamp': at(5), 'sessionId': 'sess-1', 'cwd': '/work/demo',
+                  'requestId': 'req_A', 'message': {'model': 'claude-opus-5-5', 'usage': {
+                      'input_tokens': 3, 'output_tokens': 9}}},
+                 {'type': 'user', 'timestamp': at(900), 'sessionId': 'sess-1', 'cwd': '/work/demo'}]
+        file.write_text(''.join(json.dumps(line) + '\n' for line in lines), encoding='utf-8')
+        files = lambda: [('claude', root, file, True)]
+        organization = lambda folder: ('org:' + ORG, 'project:demo')
+        first = self.make().collect_activity(files=files(), resolve=organization, now=T0 + 2000)
+        self.assertEqual((first['usage'], first['intervals']), (1, 2))
+        with self.make()._db() as conn:
+            bodies = [json.loads(r['body']) for r in conn.execute('SELECT body FROM events ORDER BY seq')]
+        usage = [b for b in bodies if b['kind'] == 'usage.line'][0]
+        self.assertEqual(usage['eventId'], activity_collector.event_id('claude_code.transcript', 'req_A'))
+        self.assertEqual((usage['sourceKey'], usage['session'], usage['project'], usage['runtime']),
+                         ('req_A', {'id': 'sess-1'}, {'id': 'project:demo'}, {'name': 'claude_code'}))
+        self.assertEqual(sorted(b['data']['state'] for b in bodies if b['kind'] == 'session.interval'),
+                         ['agent_working', 'idle'])
+        self.assertEqual(self.make().flush()['accepted'], 3)
+        self.assertEqual(sorted(e['kind'] for e in self.server.events.values()),
+                         ['session.interval', 'session.interval', 'usage.line'])
+        again = self.make().collect_activity(files=files(), resolve=organization, now=T0 + 3000)
+        self.assertEqual((again['usage'], again['intervals']), (0, 0))
+        (self.node / 'orgs' / ORG / 'activity.sqlite').unlink()                 # read from the start again
+        reread = self.make().collect_activity(files=files(), resolve=organization, now=T0 + 3000)
+        self.assertEqual((reread['usage'], reread['intervals']), (0, 0))        # the outbox keeps each once
+        self.assertEqual(self.make().telemetry_key(), self.make().telemetry_key())
+        personal = self.make().collect_activity(files=files(), resolve=lambda folder: ('personal', None),
+                                                now=T0 + 3000)
+        self.assertEqual(personal['usage'], 0)
+
     def test_a_typed_refusal_holds_until_the_record_changes(self):
         self.server.protocols.append('share-registration/1')
         self.enroll()

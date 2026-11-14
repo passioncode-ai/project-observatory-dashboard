@@ -1,0 +1,909 @@
+{
+  "about": "Vectors for routing by context (DEC-0082, docs/specification/contexts.md#routing). A context is personal or org:<orgId>, orgId a letter or digit then up to 127 of [A-Za-z0-9_-], compared as written. contexts: each value and whether it is a context (common.schema.json#/$defs/contextId agrees). cases: routeTarget(session, enrollments) answers where a collector may send an event of a session in that context (a check-in goes to its own enrollment's server and is not routed by a session): {route: enrollment, org, index} for the one enrollment whose org is exactly the context's id, else {route: none, reason} with reason personal (always, for a personal session), not-a-context, not-enrolled or ambiguous. Each enrollment is the org.id the device enrolled with (DEC-0031); an entry that is not an object with an own string org is skipped. Malformed input answers none and never throws. grantUsage: routeGrantUsage(grantContext, enrollments) answers where a grant.usage event goes: as routeTarget with the grant's own context, and {route: none, reason: no-context} when the grant states none (grantContext absent). The lax cases are what a careless port gets wrong.",
+  "contexts": [
+    {
+      "name": "personal",
+      "value": "personal",
+      "valid": true
+    },
+    {
+      "name": "an organization's id as the first organization server issues it",
+      "value": "org:org_7kq2m4xw",
+      "valid": true
+    },
+    {
+      "name": "a one-character id (the lower bound)",
+      "value": "org:a",
+      "valid": true
+    },
+    {
+      "name": "a 128-character id (the upper bound)",
+      "value": "org:oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo",
+      "valid": true
+    },
+    {
+      "name": "an id of digits, underscores and hyphens after a digit",
+      "value": "org:0_-9-_",
+      "valid": true
+    },
+    {
+      "name": "an id starting with an underscore",
+      "value": "org:_x",
+      "valid": false
+    },
+    {
+      "name": "an id starting with a hyphen",
+      "value": "org:-x",
+      "valid": false
+    },
+    {
+      "name": "an organization whose id is the word personal is an organization, not the personal context",
+      "value": "org:personal",
+      "valid": true
+    },
+    {
+      "name": "an empty id",
+      "value": "org:",
+      "valid": false
+    },
+    {
+      "name": "a 129-character id",
+      "value": "org:ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo",
+      "valid": false
+    },
+    {
+      "name": "Personal, capitalized",
+      "value": "Personal",
+      "valid": false
+    },
+    {
+      "name": "PERSONAL",
+      "value": "PERSONAL",
+      "valid": false
+    },
+    {
+      "name": "personal with a trailing newline",
+      "value": "personal\n",
+      "valid": false
+    },
+    {
+      "name": "personal with a leading space",
+      "value": " personal",
+      "valid": false
+    },
+    {
+      "name": "an organization's context with a trailing newline",
+      "value": "org:org_7kq2m4xw\n",
+      "valid": false
+    },
+    {
+      "name": "ORG: in capitals",
+      "value": "ORG:org_7kq2m4xw",
+      "valid": false
+    },
+    {
+      "name": "no colon",
+      "value": "orgorg_7kq2m4xw",
+      "valid": false
+    },
+    {
+      "name": "a dot in the id",
+      "value": "org:org.example",
+      "valid": false
+    },
+    {
+      "name": "a colon in the id",
+      "value": "org:a:b",
+      "valid": false
+    },
+    {
+      "name": "a space in the id",
+      "value": "org:org 1",
+      "valid": false
+    },
+    {
+      "name": "a non-ASCII letter in the id",
+      "value": "org:orgé",
+      "valid": false
+    },
+    {
+      "name": "a bare organization id without the prefix",
+      "value": "org_7kq2m4xw",
+      "valid": false
+    },
+    {
+      "name": "the empty string",
+      "value": "",
+      "valid": false
+    },
+    {
+      "name": "null",
+      "value": null,
+      "valid": false
+    },
+    {
+      "name": "a number",
+      "value": 7,
+      "valid": false
+    },
+    {
+      "name": "a boolean",
+      "value": true,
+      "valid": false
+    },
+    {
+      "name": "an array holding a context",
+      "value": [
+        "org:org_7kq2m4xw"
+      ],
+      "valid": false
+    },
+    {
+      "name": "an object",
+      "value": {
+        "context": "org:org_7kq2m4xw"
+      },
+      "valid": false
+    }
+  ],
+  "cases": [
+    {
+      "name": "an organization's session goes to that organization's enrollment",
+      "session": "org:org_7kq2m4xw",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "enrollment",
+        "org": "org_7kq2m4xw",
+        "index": 0
+      }
+    },
+    {
+      "name": "the second organization's session goes to the second enrollment",
+      "session": "org:org_3fh9p1zc",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "enrollment",
+        "org": "org_3fh9p1zc",
+        "index": 1
+      }
+    },
+    {
+      "name": "a one-character id routes when enrolled",
+      "session": "org:a",
+      "enrollments": [
+        {
+          "org": "a"
+        }
+      ],
+      "answer": {
+        "route": "enrollment",
+        "org": "a",
+        "index": 0
+      }
+    },
+    {
+      "name": "a 128-character id routes when enrolled",
+      "session": "org:oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo",
+      "enrollments": [
+        {
+          "org": "oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+        }
+      ],
+      "answer": {
+        "route": "enrollment",
+        "org": "oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo",
+        "index": 0
+      }
+    },
+    {
+      "name": "an enrollment may carry other members; only org is read",
+      "session": "org:org_7kq2m4xw",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw",
+          "serial": "aa01",
+          "origin": "https://org.example"
+        }
+      ],
+      "answer": {
+        "route": "enrollment",
+        "org": "org_7kq2m4xw",
+        "index": 0
+      }
+    },
+    {
+      "name": "personal never goes to an organization server",
+      "session": "personal",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "personal"
+      }
+    },
+    {
+      "name": "personal never goes to an organization server, with no enrollment",
+      "session": "personal",
+      "enrollments": [],
+      "answer": {
+        "route": "none",
+        "reason": "personal"
+      }
+    },
+    {
+      "name": "lax: personal never goes to an organization whose id is personal",
+      "session": "personal",
+      "enrollments": [
+        {
+          "org": "personal"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "personal"
+      }
+    },
+    {
+      "name": "an organization whose id is personal is routed like any other",
+      "session": "org:personal",
+      "enrollments": [
+        {
+          "org": "personal"
+        }
+      ],
+      "answer": {
+        "route": "enrollment",
+        "org": "personal",
+        "index": 0
+      }
+    },
+    {
+      "name": "a session of an organization the device is not enrolled in goes nowhere",
+      "session": "org:org_unenrolled",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-enrolled"
+      }
+    },
+    {
+      "name": "a session of an organization goes nowhere with no enrollment",
+      "session": "org:org_7kq2m4xw",
+      "enrollments": [],
+      "answer": {
+        "route": "none",
+        "reason": "not-enrolled"
+      }
+    },
+    {
+      "name": "lax: org ids compare as written; ORG_7KQ2M4XW is not org_7kq2m4xw",
+      "session": "org:ORG_7KQ2M4XW",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-enrolled"
+      }
+    },
+    {
+      "name": "lax: org ids compare as written; an enrollment spelled in capitals is another organization",
+      "session": "org:org_7kq2m4xw",
+      "enrollments": [
+        {
+          "org": "ORG_7KQ2M4XW"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-enrolled"
+      }
+    },
+    {
+      "name": "lax: never by prefix; a session's id that is a prefix of an enrolled id",
+      "session": "org:org_7kq2",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-enrolled"
+      }
+    },
+    {
+      "name": "lax: never by prefix; an enrolled id that is a prefix of the session's id",
+      "session": "org:org_7kq2m4xwx",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4x"
+        },
+        {
+          "org": "org_"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-enrolled"
+      }
+    },
+    {
+      "name": "lax: an enrollment with surrounding space is another id",
+      "session": "org:org_7kq2m4xw",
+      "enrollments": [
+        {
+          "org": " org_7kq2m4xw"
+        },
+        {
+          "org": "org_7kq2m4xw "
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-enrolled"
+      }
+    },
+    {
+      "name": "lax: an enrollment that names the whole context (org: prefix) is another id",
+      "session": "org:org_7kq2m4xw",
+      "enrollments": [
+        {
+          "org": "org:org_7kq2m4xw"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-enrolled"
+      }
+    },
+    {
+      "name": "lax: an empty id is no context, even with an empty enrollment",
+      "session": "org:",
+      "enrollments": [
+        {
+          "org": ""
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-a-context"
+      }
+    },
+    {
+      "name": "lax: a 129-character id is no context, even when enrolled",
+      "session": "org:ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo",
+      "enrollments": [
+        {
+          "org": "ooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-a-context"
+      }
+    },
+    {
+      "name": "lax: Personal is no context, and goes nowhere",
+      "session": "Personal",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-a-context"
+      }
+    },
+    {
+      "name": "lax: personal with a trailing newline is no context",
+      "session": "personal\n",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-a-context"
+      }
+    },
+    {
+      "name": "lax: an organization's context with a trailing newline is no context, even when enrolled",
+      "session": "org:org_7kq2m4xw\n",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_7kq2m4xw\n"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-a-context"
+      }
+    },
+    {
+      "name": "lax: ORG: in capitals is no context",
+      "session": "ORG:org_7kq2m4xw",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-a-context"
+      }
+    },
+    {
+      "name": "lax: a bare organization id is no context, even when it is enrolled",
+      "session": "org_7kq2m4xw",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-a-context"
+      }
+    },
+    {
+      "name": "lax: an id starting with an underscore is no context, even when an enrollment has that id",
+      "session": "org:_x",
+      "enrollments": [
+        {
+          "org": "_x"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-a-context"
+      }
+    },
+    {
+      "name": "lax: a dot in the id is no context, even when an enrollment has that id",
+      "session": "org:org.example",
+      "enrollments": [
+        {
+          "org": "org.example"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-a-context"
+      }
+    },
+    {
+      "name": "an enrollment whose org.id is outside orgId's set (org.example) cannot be routed: no context names it, so an organization server taking part in contexts issues ids within [A-Za-z0-9][A-Za-z0-9_-]{0,127}",
+      "session": "org:org_example",
+      "enrollments": [
+        {
+          "org": "org.example"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-enrolled"
+      }
+    },
+    {
+      "name": "non-string: null is no context",
+      "session": null,
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-a-context"
+      }
+    },
+    {
+      "name": "non-string: a number is no context",
+      "session": 7,
+      "enrollments": [
+        {
+          "org": "7"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-a-context"
+      }
+    },
+    {
+      "name": "non-string: a boolean is no context",
+      "session": true,
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-a-context"
+      }
+    },
+    {
+      "name": "non-string: an array holding a context is no context",
+      "session": [
+        "org:org_7kq2m4xw"
+      ],
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-a-context"
+      }
+    },
+    {
+      "name": "non-string: an object is no context",
+      "session": {
+        "context": "org:org_7kq2m4xw"
+      },
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-a-context"
+      }
+    },
+    {
+      "name": "two enrollments in one organization are ambiguous; the event goes to neither",
+      "session": "org:org_7kq2m4xw",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        },
+        {
+          "org": "org_7kq2m4xw"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "ambiguous"
+      }
+    },
+    {
+      "name": "malformed enrollments: null",
+      "session": "org:org_7kq2m4xw",
+      "enrollments": null,
+      "answer": {
+        "route": "none",
+        "reason": "not-enrolled"
+      }
+    },
+    {
+      "name": "malformed enrollments: one object, not a list",
+      "session": "org:org_7kq2m4xw",
+      "enrollments": {
+        "org": "org_7kq2m4xw"
+      },
+      "answer": {
+        "route": "none",
+        "reason": "not-enrolled"
+      }
+    },
+    {
+      "name": "malformed enrollments: a string",
+      "session": "org:org_7kq2m4xw",
+      "enrollments": "org_7kq2m4xw",
+      "answer": {
+        "route": "none",
+        "reason": "not-enrolled"
+      }
+    },
+    {
+      "name": "malformed enrollments: entries that are not objects with a string org are skipped",
+      "session": "org:org_7kq2m4xw",
+      "enrollments": [
+        null,
+        7,
+        "org_7kq2m4xw",
+        [
+          "org_7kq2m4xw"
+        ],
+        {
+          "org": 7
+        },
+        {
+          "org": [
+            "org_7kq2m4xw"
+          ]
+        },
+        {
+          "org": {
+            "id": "org_7kq2m4xw"
+          }
+        },
+        {
+          "id": "org_7kq2m4xw"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-enrolled"
+      }
+    },
+    {
+      "name": "malformed entries are skipped, and the index still counts them",
+      "session": "org:org_7kq2m4xw",
+      "enrollments": [
+        null,
+        "org_7kq2m4xw",
+        {
+          "org": [
+            "org_7kq2m4xw"
+          ]
+        },
+        {
+          "org": "org_7kq2m4xw"
+        }
+      ],
+      "answer": {
+        "route": "enrollment",
+        "org": "org_7kq2m4xw",
+        "index": 3
+      }
+    },
+    {
+      "name": "lax: an org only inherited through __proto__ is not the entry's own",
+      "session": "org:org_7kq2m4xw",
+      "enrollments": [
+        {
+          "__proto__": {
+            "org": "org_7kq2m4xw"
+          }
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-enrolled"
+      }
+    },
+    {
+      "name": "lax: an organization whose id is constructor reads no prototype member",
+      "session": "org:constructor",
+      "enrollments": [
+        {},
+        {
+          "org": "toString"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-enrolled"
+      }
+    },
+    {
+      "name": "an organization whose id is constructor is routed like any other",
+      "session": "org:constructor",
+      "enrollments": [
+        {
+          "org": "constructor"
+        }
+      ],
+      "answer": {
+        "route": "enrollment",
+        "org": "constructor",
+        "index": 0
+      }
+    }
+  ],
+  "grantUsage": [
+    {
+      "name": "a grant into an organization: its usage goes to that organization's enrollment",
+      "grantContext": "org:org_3fh9p1zc",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "enrollment",
+        "org": "org_3fh9p1zc",
+        "index": 1
+      }
+    },
+    {
+      "name": "a grant that states no context produces no grant.usage toward any organization",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "no-context"
+      }
+    },
+    {
+      "name": "a personal grant produces no grant.usage toward any organization",
+      "grantContext": "personal",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "personal"
+      }
+    },
+    {
+      "name": "a grant into an organization the device is not enrolled in: nowhere",
+      "grantContext": "org:org_unenrolled",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-enrolled"
+      }
+    },
+    {
+      "name": "lax: the grant's context compares as written; a case-folded one is not enrolled",
+      "grantContext": "org:ORG_7KQ2M4XW",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-enrolled"
+      }
+    },
+    {
+      "name": "lax: a grant's context of null is not absent; it is no context",
+      "grantContext": null,
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-a-context"
+      }
+    },
+    {
+      "name": "lax: a grant's context Personal is no context",
+      "grantContext": "Personal",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_3fh9p1zc"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-a-context"
+      }
+    },
+    {
+      "name": "lax: a grant's empty organization id is no context",
+      "grantContext": "org:",
+      "enrollments": [
+        {
+          "org": ""
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "not-a-context"
+      }
+    },
+    {
+      "name": "two enrollments in the grant's organization are ambiguous",
+      "grantContext": "org:org_7kq2m4xw",
+      "enrollments": [
+        {
+          "org": "org_7kq2m4xw"
+        },
+        {
+          "org": "org_7kq2m4xw"
+        }
+      ],
+      "answer": {
+        "route": "none",
+        "reason": "ambiguous"
+      }
+    }
+  ]
+}

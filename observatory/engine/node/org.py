@@ -90,6 +90,9 @@ SCAN_MAX_AGE_SECONDS = 48 * 3600
 #: whatever its code, or another refusal that names the summary or the records.
 SUMMARY_SUSPECT_STATUSES = frozenset({400, 413, 422})
 COLLECTOR_ID = 'observatory-node'
+#: The top-level fields a producer may set on its own events beside `data` (telemetry-event.schema.json); the stream's
+#: own fields (`eventId`, `seq`, `collector`, clocks) are always the enrollment's.
+ENVELOPE_FIELDS = ('session', 'project', 'runtime', 'account', 'git', 'sourceKey', 'skill', 'launch', 'run', 'task')
 ORG_ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_-]{0,127}\Z')
 TOKEN = re.compile(r'([A-Za-z0-9][A-Za-z0-9._:~-]{0,127})\.([A-Za-z0-9_-]{16,256})\Z')
 #: The receiver names its paths; the contract names none. These are the first organization server's, overridable.
@@ -1522,11 +1525,24 @@ class Enrollment:
             out['renewed'] = renewed
         return out
     # -- the outbox --------------------------------------------------------------------------------------------
+    def telemetry_key(self) -> bytes:
+        """The enrollment's telemetry key: 32 random bytes made once and kept beside the stream state in the outbox's
+        own database, never sent. It hashes path-derived source keys and branch names, so two organizations never see
+        one key's hashes (DEC-0128 UE-1); losing it loses the stream too, and the device re-enrolls."""
+        with self._db() as conn:
+            row = conn.execute("SELECT value FROM meta WHERE name = 'telemetryKey'").fetchone()
+            if row is None:
+                conn.execute("INSERT OR IGNORE INTO meta(name, value) VALUES('telemetryKey', ?)",
+                             (secrets.token_hex(32),))
+                row = conn.execute("SELECT value FROM meta WHERE name = 'telemetryKey'").fetchone()
+            return bytes.fromhex(row['value'])
     def enqueue(self, kind: str, data: dict, *, occurred: str, key: Optional[str] = None, source: str = 'meter',
-                monotonic: str = '0') -> Optional[dict]:
+                monotonic: str = '0', envelope: Optional[dict] = None, event_id: Optional[str] = None) -> Optional[dict]:
         """Persists one event of this enrollment's stream once (`key` dedupes), with its id and the next seq. An event
         of a kind the server rejected for its purpose is not collected while that hold stands (DEC-0100): None, as for
-        a duplicate."""
+        a duplicate. `envelope` carries the event's own top-level fields (`session`, `project`, `runtime`, `account`,
+        `git`, `sourceKey`); `event_id` is a derived id (`sha256:` of {source, sourceKey}) for an event read from a
+        source that can be read again, else the event gets a ULID (activity.md, event id)."""
         with self._locked():
             state = self._require()
             if kind in self.purpose_holds(state):
@@ -1537,8 +1553,11 @@ class Enrollment:
                     if key and conn.execute('SELECT 1 FROM events WHERE key = ?', (key,)).fetchone():
                         conn.execute('COMMIT')
                         return None
+                    if event_id and conn.execute('SELECT 1 FROM events WHERE event_id = ?', (event_id,)).fetchone():
+                        conn.execute('COMMIT')
+                        return None
                     event = self._insert(conn, state['epoch'], kind, data, occurred=occurred, key=key, source=source,
-                                         monotonic=monotonic)
+                                         monotonic=monotonic, envelope=envelope, event_id=event_id)
                     self._bound(conn, state)
                     conn.execute('COMMIT')
                 except BaseException:
@@ -1547,9 +1566,11 @@ class Enrollment:
             return event
 
     def _insert(self, conn, epoch: int, kind: str, data: dict, *, occurred: str, key: Optional[str] = None,
-                source: str = 'meter', monotonic: str = '0') -> dict:
+                source: str = 'meter', monotonic: str = '0', envelope: Optional[dict] = None,
+                event_id: Optional[str] = None) -> dict:
         seq = (conn.execute('SELECT MAX(seq) AS s FROM events WHERE epoch = ?', (epoch,)).fetchone()['s'] or 0) + 1
-        event = {'protocol': ACTIVITY_PROTOCOL, 'eventId': ulid(int(self.clock() * 1000)), 'kind': kind,
+        event = {**{k: v for k, v in (envelope or {}).items() if k in ENVELOPE_FIELDS},
+                 'protocol': ACTIVITY_PROTOCOL, 'eventId': event_id or ulid(int(self.clock() * 1000)), 'kind': kind,
                  'source': source, 'collector': {'id': COLLECTOR_ID, 'epoch': epoch}, 'seq': seq,
                  'occurred': occurred, 'bootId': _BOOT, 'monotonicNs': monotonic, 'data': data}
         conn.execute('INSERT INTO events(epoch, seq, event_id, kind, key, body) VALUES(?, ?, ?, ?, ?, ?)',
@@ -2224,6 +2245,20 @@ class Enrollment:
             conn.close()
         return [{'day': r[0], 'grantId': r[1], 'calls': int(r[2]), 'costUsd': round(float(r[3] or 0), 6),
                  'waiting': bool(r[4])} for r in rows if r[2] or r[4]]
+    def collect_activity(self, *, files=None, resolve=None, now: Optional[float] = None) -> dict:
+        """One pass of the device's activity collector for this organization (OBS-76 OE-01a,
+        `activity_collector.py`): usage lines and session intervals of the sessions whose folder is this
+        organization's project, from the collection start on; a personal session's are counted, never enqueued."""
+        import activity_collector
+        with self._locked():
+            state = self._require()
+            start = strict_time(state.get('collectionStart'))
+            if start is None:
+                return {'held': 'no-collection-start'}
+            run = activity_collector.Pass(self.org_id, self.folder, self.enqueue, self.telemetry_key(),
+                                          enrolled=enrolled_orgs(self.node), start=start / 1000, resolve=resolve,
+                                          now=self.clock() if now is None else now)
+            return run.run(files)
     def collect_grant_usage(self) -> dict:
         """Enqueues one `grant.usage` per (ended UTC day, grant) for the share grants the applied revision places in
         this organization's context, from the collection start on, each only when the grant's registration answer
@@ -2300,6 +2335,7 @@ class Enrollment:
                       if self.clock() >= (self.state().get('nextCheckInAt') or 0) else 'not-due'),
                      ('repairs', self.run_repairs),
                      ('shares', self.register_shares), ('grantUsage', self.collect_grant_usage),
+                     ('activity', self.collect_activity),
                      ('outbox', self.flush)]
             for name, step in steps:
                 try:
