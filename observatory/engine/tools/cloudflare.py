@@ -70,7 +70,11 @@ bucket's object lifecycle, not the token's.)
 ROTATION IS ROLLING, NOT REPLACING. Cloudflare can issue a fresh value for an
 existing token id, which keeps the token's identity, its permissions and its
 name — so a rotation after a leak changes exactly the thing that leaked, and
-nothing downstream has to learn a new name.
+nothing downstream has to learn a new name. A roll kills the old value at once,
+so a copy of it outside this door's files (a Heroku config var, a local env
+file: `tools/key_consumers.py`) would be cut: `rotate` refuses while one is
+found or a place it could be is unreadable, and `--force` rolls anyway and
+journals what it cut (OBS-561).
 
 THE TEAM SIDE READS LIKE THE HEROKU DOOR'S. `accounts` lists every stashed
 account with the tokens Cloudflare holds there (the managed ones with the vault
@@ -2112,7 +2116,24 @@ def label_of(p: pathlib.Path) -> str:
     return f"inventory/{p.name}" if p.parent == INVENTORY_STORE else p.name
 
 
-def cmd_rotate(label: str | None, leaked: bool) -> int:
+def consumer_sources(path: pathlib.Path) -> list:
+    """Where the copies of an issued token's value are looked for before a roll (OBS-561); tests replace it."""
+    import key_consumers
+    return key_consumers.default_sources(None, exclude=(str(path),))
+
+
+def _roll_guard(path: pathlib.Path) -> tuple[list[str], list[str]]:
+    """(lines that refuse rolling this token, services to restart after it). Delivering to the copies found is
+    later work (docs/design/control-plane/rotation.md)."""
+    import key_consumers
+    try:
+        old, why = (private_io.read(path).strip() or None), None
+    except (OSError, RuntimeError) as exc:
+        old, why = None, f"the token file could not be read ({type(exc).__name__})"
+    return key_consumers.roll_guard(old, consumer_sources(path) if not why else [], why)
+
+
+def cmd_rotate(label: str | None, leaked: bool, force: bool = False) -> int:
     targets = issued()
     if leaked:
         names = leaked_labels()
@@ -2141,6 +2162,20 @@ def cmd_rotate(label: str | None, leaked: bool) -> int:
                   f"managed one over it", file=sys.stderr)
             bad += 1
             continue
+        refuse, restart = _roll_guard(p)
+        if refuse and not force:
+            print(f"  {label_of(p)}: HELD, not rolled: a roll kills the old value at once, and a copy of it would "
+                  f"be cut (`--force` rolls anyway)", file=sys.stderr)
+            for line in refuse:
+                print(f"    holds it: {line}", file=sys.stderr)
+            _journal("rotation-held", f"cloudflare/{m.get('account_name', '')}/{label_of(p)}",
+                     consumers=refuse, stage="before-roll")
+            bad += 1
+            continue
+        if refuse:
+            _journal("rotation-forced", f"cloudflare/{m.get('account_name', '')}/{label_of(p)}", cut=refuse)
+        for line in restart + [f"--force cut {line}" for line in (refuse if force else [])]:
+            print(f"    {label_of(p)}: {line}")
         # The lifetime it was issued with; a record from before OBS-191 gets the default.
         days = m["expire_days"] if "expire_days" in m else key_expiry.DEFAULT_DAYS
         try:
@@ -2362,6 +2397,9 @@ def main() -> int:
     p_rot.add_argument("label", nargs="?")
     p_rot.add_argument("--leaked", action="store_true",
                        help="rotate every issued token named in an open leak")
+    p_rot.add_argument("--force", action="store_true",
+                       help="roll even when a copy of the value outside this door's files was found or a place it "
+                       "could be could not be read (OBS-561); the copies cut are journaled")
     p_rev = sub.add_parser("revoke", help="delete at Cloudflare, then locally")
     p_rev.add_argument("label")
     a = ap.parse_args()
@@ -2419,7 +2457,7 @@ def main() -> int:
             return 2
         return cmd_member(a.action, a.account, a.email, a.role, a.apply)
     if a.cmd == "rotate":
-        return cmd_rotate(a.label, a.leaked)
+        return cmd_rotate(a.label, a.leaked, a.force)
     if a.cmd == "revoke":
         return cmd_revoke(a.label)
     return 2

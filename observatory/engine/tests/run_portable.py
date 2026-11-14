@@ -331,6 +331,9 @@ BOUNDARY += ('peer_owner', 'peer_check')
 # OBS-361 part 1: the administrator's tool that runs a headless space's jobs as system daemons with UserName,
 # against a temporary system root, an injected euid and a fake launchctl.
 BOUNDARY += ('space_daemons',)
+# OBS-561 (CP-11): a rotation finds the other copies of a key's value (fake Heroku, env files, services), delivers and
+# reads them back before it revokes, and holds the old key when one is out of reach.
+BOUNDARY += ('rotation_consumers',)
 SUITES = LEGACY + BOUNDARY
 #: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
 #: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.
@@ -648,7 +651,7 @@ ASSERTION_LINE_SUITES = frozenset((
     'rollup_sessions', 'scrub', 'search_path', 'shared_ancestry', 'side_effect_attribution',
     'skill', 'skip_site_kinds', 'stale_collapse', 'store_faults', 'store_integrity', 'tick_repo',
     'unobservable', 'step_references', 'honest_absence', 'identifiers', 'memory_eval', 'textkeys',
-    'manifest_urls', 'digitalocean_door', 'heroku_door'
+    'manifest_urls', 'digitalocean_door', 'heroku_door', 'rotation_consumers'
 ))
 # Per-suite positive minimums may strengthen the default of one executed check.
 # Skips never satisfy a minimum; all-skipped selections remain explicitly SKIP.

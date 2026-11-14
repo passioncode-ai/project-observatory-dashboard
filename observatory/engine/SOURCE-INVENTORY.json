@@ -5318,8 +5318,8 @@
       "path": "tests/test_heroku_door.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "cf01b50669bd80ba542b38637e71072cad7a0834570aa92da1c59e36cee35405",
-      "bytes": 41978
+      "export_sha256": "03db461a0f30d71e36c28af499c3e60f51c1385d860b46bb061f4b1564d7b784",
+      "bytes": 42120
     },
     {
       "path": "tests/test_heroku_scoped.py",
@@ -5416,8 +5416,8 @@
       "path": "tests/test_infra_pages.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "56366cc9a05d88aec3d867a0e1f5da0b5a53258c1a011836dcf3ee3dcc14eda0",
-      "bytes": 40055
+      "export_sha256": "00d4bf08118356ad2568b73f636d8f8cf7eb224983e043a745a4659432f65a49",
+      "bytes": 40204
     },
     {
       "path": "tests/test_install_key.py",
@@ -6333,6 +6333,13 @@
       "bytes": 19448
     },
     {
+      "path": "tests/test_rotation_consumers.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "4f963033546a5a21d28bef4adc2e106ac6d011753bd8a17340c6f43da5a73659",
+      "bytes": 21556
+    },
+    {
       "path": "tests/test_runtime_identity.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -7116,8 +7123,8 @@
     {
       "path": "tools/cloudflare.py",
       "source_sha256": "554f7d6d0d677c887404479e33a84d40e76f022ecd49ce15e85cf409d5e6738f",
-      "export_sha256": "8cbd17836556ab96e96f746ed280784a145759deccf1e6e8c8ca83382dbd095a",
-      "bytes": 126889,
+      "export_sha256": "637b9950dce150903ce6a949028ef0d55edd3f59e368ab560f5c8b603a0f9aaa",
+      "bytes": 129114,
       "python_comments_removed": 37,
       "python_docstrings_removed": 16,
       "tool_descriptions_retained": 0,
@@ -7329,8 +7336,8 @@
       "path": "tools/heroku.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0d3f8dc8666fd2f59a0b5950a4eac990e96cd66e2766b89f758f017c61e8cf3d",
-      "bytes": 57829
+      "export_sha256": "7d1e6241d94f8bb71fda7b02775c634a9d1a54b6fcf395dfd1350c55458ececa",
+      "bytes": 60146
     },
     {
       "path": "tools/heroku_findings.py",
@@ -7370,6 +7377,13 @@
       "upstream_modified": true
     },
     {
+      "path": "tools/key_consumers.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "f243cf2ada2da70d6e70b0e4af7702008326df6ed17a02210e844267b1f441e7",
+      "bytes": 21506
+    },
+    {
       "path": "tools/key_expiry.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -7379,8 +7393,8 @@
     {
       "path": "tools/keyserver.py",
       "source_sha256": "5dfc52b15ea31b3d4d608cf4892bc16c274bacca224dacb28ef88c53fd92c571",
-      "export_sha256": "786dfb396a95c3446998b3c5e063c0f82c82869dba9a7a8b5f0221fd2a19c9c0",
-      "bytes": 47134,
+      "export_sha256": "04657fc6c35f4625c2bded072d7f85568693667d1db6c0498853ef726b8dbff1",
+      "bytes": 47394,
       "python_comments_removed": 46,
       "python_docstrings_removed": 15,
       "tool_descriptions_retained": 0,
@@ -7482,8 +7496,8 @@
     {
       "path": "tools/openrouter.py",
       "source_sha256": "756267c2e19482f5445b9cea2de0d13678ec7d7753131331c33ef9f708654749",
-      "export_sha256": "1ab21ebf52e91efe0a72a918c91ccf41dd9c7c15eb8b84b144431cec5d71e7b4",
-      "bytes": 131214,
+      "export_sha256": "f51c2ef47831bf9d1ae0383374f9878f6f93423ad10c161272ab58eaa7426765",
+      "bytes": 144826,
       "python_comments_removed": 31,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,

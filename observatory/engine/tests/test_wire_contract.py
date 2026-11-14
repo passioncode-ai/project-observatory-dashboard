@@ -262,8 +262,9 @@ def test_the_served_instructions_describe_the_served_surface() -> None:
     # `observatory_ssh_keys` (PB-163), which the "Also" line names.
     # Twenty-eight with `observatory_org_accounts` and `observatory_org_keys` (OBS-411, OBS-415), named in "Also".
     # Twenty-nine with `observatory_org_selection` (OBS-417), named on the WRITE line.
-    # Thirty-one with `observatory_sessions` (OBS-550) and `observatory_dependencies` (OBS-553).
-    check("the server serves thirty-one observatory tools (sessions OBS-550, dependencies OBS-553)", tools == 31,
+    # The wave-1 tools: `observatory_sessions` (OBS-550), `observatory_dependencies` (OBS-553), `observatory_key_consumers` (OBS-561),
+    # `observatory_configure` (OBS-563).
+    check("the server serves the observatory tools of wave 1", tools == EXPECTED_TOOLS,
           str(tools))
     check("the instructions name the coding sessions beside the machine",
           "`observatory_machine` (`section`, `move`, `explainPid`); `_sessions`" in src.split("instructions=(", 1)[1][:2600])

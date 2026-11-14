@@ -560,6 +560,31 @@ def observatory_credentials(
 
 
 @server.tool()
+def observatory_key_consumers(
+    project: Annotated[str, Field(description="The vault folder of the slot, as `observatory_credentials` names it.")],
+    env: Annotated[str, Field(description="The slot's environment: local, stage or prod.")],
+    name: Annotated[str, Field(description="The slot's NAME, UPPER_SNAKE_CASE.")],
+) -> dict[str, Any]:
+    """Where else a vault slot's current value is deployed, found by the value itself and never returning it
+    (OBS-561): Heroku apps' config vars (read fresh), the local env files the engine inventories, and the services
+    started from the slot. This is what a door's `rotate` reads before it revokes: a copy it cannot deliver to holds
+    the old key alive. `consumers` name each copy by application, variable, file or service label; `holds` lists what
+    would hold a rotation now; `degraded` names every place that could not be read (never read as "no consumer");
+    `skipped` names places not in use on this machine. Read-only."""
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
+    import key_consumers
+    import vault
+    if any(credential_shape.shaped(v) for v in (project, env, name)):
+        return {"error": {"code": "invalid-slot", "message": "a slot address shaped like a credential is refused, "
+                                                             "not echoed"}, "degraded": []}
+    try:
+        vault.validate_names(project, env, name)
+    except vault.VaultBoundaryError as exc:
+        return {"error": {"code": "invalid-slot", "message": str(exc)}, "degraded": []}
+    return key_consumers.vault_answer(project, env, name)
+
+
+@server.tool()
 def observatory_org_accounts() -> dict[str, Any]:
     """Whose every provider account is (OBS-411, organization onboarding ORG-W1): every account this space reaches
     (repository owners, DigitalOcean teams and the `doctl` contexts with no stashed token, Cloudflare accounts,
