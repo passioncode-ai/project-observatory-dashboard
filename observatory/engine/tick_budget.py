@@ -79,7 +79,10 @@ COLLECTOR_SHARE = 0.4
 #: (OBS-220) walked the whole estate root in one pass, 38 s on a quiet machine and 599 s under a
 #: load average above 70, so it took the 40 % every collector may; it now resumes its walk and its
 #: git reads where it stopped (collectors/scan_env.py) and takes 20 % (300 s of 1500 s).
-STEP_SHARES: dict[str, float] = {"leaks": 0.3, "env": 0.2}
+#: The dependency inventory (OBS-553) re-parses only lockfiles that changed and keeps the previous rows of the
+#: projects it did not reach, so 10 % (150 s) is ample; the daily OSV pass asks one batch per thousand packages and
+#: one record per new advisory, and a pass stopped short is asked again at the next tick, so it takes 20 %.
+STEP_SHARES: dict[str, float] = {"leaks": 0.3, "env": 0.2, "scan-dependencies": 0.1, "vulnerabilities": 0.2}
 #: A collector not started for this many ticks in a row goes first, and is reported as starved.
 STARVED_TICKS = 3
 #: A step is reported (`tick.step_over_share`) when it used this fraction of its own share of the

@@ -645,6 +645,11 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
         log("env: re-reading every .env under the estate (older than 24h or absent)")
         step("env", PY, "collectors/scan_env.py", SCRATCH / "env.json")
 
+    # THE DEPENDENCY WATCH (OBS-553): every lockfile each project resolves, each tick (a file unchanged since
+    # the last scan is not parsed again), then the daily OSV pass over the inventory the previous emit wrote;
+    # `tools/vuln_watch.py` decides whether its day's pass is done and answers at once when it is.
+    step("scan-dependencies", PY, "collectors/scan_dependencies.py", SCRATCH / "dependencies.json")
+    step("vulnerabilities", PY, "tools/vuln_watch.py")
     step("scan-cloudflare", PY, "collectors/scan_cloudflare.py", SCRATCH / "cloudflare_zones.json")
     # DigitalOcean's teams: what runs and what it costs (OBS-155); a day is fresh enough for money.
     if stale(SCRATCH / "digitalocean.json", 24):

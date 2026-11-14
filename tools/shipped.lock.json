@@ -66,6 +66,15 @@
         "projectId"
       ]
     },
+    "observatory_dependencies": {
+      "input": [
+        "cursor",
+        "limit",
+        "projectId",
+        "vulnerableOnly"
+      ],
+      "required": []
+    },
     "observatory_explain": {
       "input": [
         "receiptId"

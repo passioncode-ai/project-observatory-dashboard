@@ -693,7 +693,8 @@ def finding_matcher(project_id: str, view: dict | None = None):
     A subject names the thing that is wrong, so a project owns it through what it
     holds: the project itself, its repositories and their clones, the hosts its
     sites answer on, and secrets and env files kept in its local folders
-    (`secret:<folder>/…`, `credential:vault/<folder>/…`, `env:<folder>/…`)."""
+    (`secret:<folder>/…`, `credential:vault/<folder>/…`, `env:<folder>/…`), and the packages its
+    lockfiles resolve (`dep:<folder>/…`)."""
     if view is None:
         projects, repos, members = _index()
         p = next((x for x in projects if x["id"] == project_id), None)
@@ -710,7 +711,7 @@ def finding_matcher(project_id: str, view: dict | None = None):
                 exact.add(f"domain:{host}")
     folders = {Path(f).name for f in view.get("localFolders", []) if f}
     prefixes = tuple(f"{kind}{folder}/" for folder in folders
-                     for kind in ("secret:", "credential:vault/", "env:"))
+                     for kind in ("secret:", "credential:vault/", "env:", "dep:"))
     return lambda subject: subject in exact or (bool(prefixes) and subject.startswith(prefixes))
 
 

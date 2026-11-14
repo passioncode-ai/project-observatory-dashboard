@@ -85,6 +85,8 @@ LABELS: dict[str, str] = {
     "dashboard.blank": "Dashboard renders blank",
     "dashboard.unverified": "Dashboard build not verified",
     "deltas.not_diffed": "Changes not compared",
+    "dep.vulnerable": "Dependency with a known vulnerability",
+    "dep.watch_stale": "Vulnerability watch out of date",
     "domain.dark": "Domain does not resolve",
     "domain.expiring": "Domain expiring",
     "domain.hold": "Domain on registrar hold",

@@ -2531,5 +2531,14 @@
   "few": "{n} сессии агентов для кода работают без менеджера аккаунтов",
   "many": "{n} сессий агентов для кода работают без менеджера аккаунтов",
   "other": "{n} сессии агентов для кода работают без менеджера аккаунтов"
+ },
+ "Dependency with a known vulnerability": "Зависимость с известной уязвимостью",
+ "Vulnerability watch out of date": "Проверка уязвимостей устарела",
+ "Vulnerability watch last checked {day}": "Уязвимости последний раз проверены {day}",
+ "{package} {version} has {n} known vulnerabilities": {
+  "one": "У {package} {version} {n} известная уязвимость",
+  "few": "У {package} {version} {n} известные уязвимости",
+  "many": "У {package} {version} {n} известных уязвимостей",
+  "other": "У {package} {version} {n} известной уязвимости"
  }
 }

@@ -75,6 +75,14 @@ ACROSS_TICKS: dict[tuple[str, str], str] = {
         "exact-folder attribution reads the previously emitted project registry; "
         "the current tick has not emitted its replacement yet. A new project gains "
         "its registry identity on the next scan, while this scan keeps its folder label.",
+    ("scan-dependencies", "registry/projects.json"):
+        "the inventory reads which folders are projects from the previous emit, the same fixpoint "
+        "as the sessions below: a new project's lockfiles are read on the tick after it appears.",
+    ("vulnerabilities", "registry/dependencies.json"):
+        "the daily OSV pass reads the inventory the previous emit wrote; a lockfile changed this "
+        "tick is asked about at the next pass, which the watch runs as soon as the inventory moves.",
+    ("vulnerabilities", "registry/projects.json"):
+        "read only by the agent's view in the same file (`observatory_dependencies`), never by the step.",
     ("scan-sessions", "registry/projects.json"):
         "attribution needs the project list, and the project list needs sessions for its "
         "activity date — a fixpoint over ticks. A project's first sessions attach on the "
@@ -138,6 +146,12 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
     # runtime — the same shape as `scan-fs` above. What it reads is the estate,
     # not an artefact any step here writes.
     "env":       {"writes": ["store/raw/env.json"], "reads": []},
+    # Every lockfile under each project's folders (OBS-553): the estate's files, not an artefact a step writes,
+    # and the project list of the previous emit.
+    "scan-dependencies": {"writes": ["store/raw/dependencies.json"], "reads": ["registry/projects.json"]},
+    # The daily OSV pass over the inventory the emit wrote; its cache and state live in the store.
+    "vulnerabilities": {"writes": ["store/raw/vulnerabilities.json"],
+                        "reads": ["registry/dependencies.json", "registry/projects.json"]},
     # WHAT PRODUCTION HOLDS. It reads the application list the
     # `heroku` step wrote — the ordering is real, there is nothing to ask about
     # without it — and the vault's archives, which no step writes.
@@ -222,8 +236,10 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                              "registry/google-properties.json",
                              # DigitalOcean and Cloudflare beside Heroku, for the same reason:
                              # the project edge needs the repository list (OBS-235, OBS-271).
-                             "registry/digitalocean-account.json", "registry/cloudflare-account.json"],
-                  "reads": ["store/raw/digitalocean.json", "store/raw/cloudflare_account.json",
+                             "registry/digitalocean-account.json", "registry/cloudflare-account.json",
+                             # The dependency inventory (OBS-553), for the same reason as the env one.
+                             "registry/dependencies.json"],
+                  "reads": ["store/raw/dependencies.json", "store/raw/digitalocean.json", "store/raw/cloudflare_account.json",
                             "store/raw/google.json", "store/raw/remote-env.json", "store/raw/agents.json", "registry/agents.json",
                             "store/raw/cloudflare_zones.json", "store/raw/mcp.json", "collectors/products.json",
                             "collectors/host_boundary.json", "store/raw/model.json", "registry/domains.json", "store/raw/domains_live.json",
@@ -299,6 +315,8 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                             "store/raw/ssh-keys.json",
                             # copies and moves, written by `emit` (OBS-321, tools/derivation_findings.py)
                             "registry/derivations.json",
+                            # the dependency inventory `emit` wrote and the watch's answer (OBS-553)
+                            "registry/dependencies.json", "store/raw/vulnerabilities.json",
                             "store/raw/bitbucket.json", "store/raw/domains_live.json",
                             "store/raw/local.json", "store/raw/model.json",
                             "store/raw/projection.json", "store/raw/vault.json",

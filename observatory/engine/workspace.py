@@ -525,11 +525,12 @@ def _jobs() -> list[dict] | dict:
 
 
 def _switches(doc: dict, section: str) -> dict:
-    """{name: on} for every known name, sorted; a switch is on only when `true`,
-    the rule `configuration.enabled` applies."""
+    """{name: on} for every known name, sorted; a switch is on when `true`, or when it is absent and
+    on by default (`configuration.DEFAULT_ON`): the rule `configuration.enabled` applies."""
     found = doc.get(section, {}) if isinstance(doc.get(section), dict) else {}
     names = sorted(set(config.known_names(section)) | set(found))
-    return {name: found.get(name) is True for name in names}
+    defaults = config.DEFAULT_ON.get(section, frozenset())
+    return {name: found.get(name, name in defaults) is True for name in names}
 
 
 def _loopback(base: Path) -> dict:

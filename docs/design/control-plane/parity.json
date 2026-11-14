@@ -1051,7 +1051,7 @@
       ]
     },
     {
-      "reason": "pipeline steps: they rebuild derived, rebuildable workspace state from the sources; the tick and the maintenance job run them, and agents read their result through observatory_status, observatory_overview and observatory_findings",
+      "reason": "pipeline steps: they rebuild derived, rebuildable workspace state from the sources; the tick and the maintenance job run them, and agents read their result through observatory_status, observatory_overview, observatory_findings and observatory_dependencies",
       "commands": [
         "scan",
         "local",
@@ -1093,7 +1093,8 @@
         "project",
         "commit-projection",
         "commit-registry",
-        "scrub-companion"
+        "scrub-companion",
+        "vulnerabilities"
       ]
     },
     {
