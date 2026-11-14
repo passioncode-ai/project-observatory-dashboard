@@ -58,6 +58,16 @@
         "stepId"
       ]
     },
+    "observatory_configure": {
+      "input": [
+        "action",
+        "changes",
+        "decision",
+        "digest",
+        "journalId"
+      ],
+      "required": []
+    },
     "observatory_credentials": {
       "input": [
         "projectId"

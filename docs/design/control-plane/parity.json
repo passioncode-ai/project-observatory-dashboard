@@ -107,10 +107,9 @@
       "action": "configure",
       "kind": "cli",
       "where": "workspace.py: configure",
-      "tool": null,
+      "tool": "observatory_configure",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered"
     },
     {
       "action": "migrate-local --apply",

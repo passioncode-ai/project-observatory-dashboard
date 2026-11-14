@@ -143,12 +143,15 @@ LEARNING_REVIEW_SETTINGS = ("settle_hour_utc",)
 #: fails when one is missing here. A metric plugin's `integration:KEY` adds itself.
 KNOWN_INTEGRATIONS = frozenset({
     "bitbucket", "cloudflare", "cloudflare_analytics", "digitalocean", "domains", "ga4", "git_remotes",
-    "github", "google", "harness", "heroku", "mcp", "openrouter", "remote_env", "search_console",
-    "sessions", "wiki"})
+    "github", "github_issues", "google", "harness", "heroku", "mcp", "openrouter", "remote_env", "search_console",
+    "sessions", "vulnerabilities", "wiki"})
 KNOWN_FEATURES = frozenset({
     "agent", "auto_cleanup", "companion_remediation", "embeddings", "fixture_cleanup",
     "machine_watch", "notifications", "probe_fixture", "registry_history", "retention",
     "scheduler", "wiki_projection"})
+#: Switches that are ON until the person turns them off (OBS-563, CONTROL-PLANE D2 and D6): the dependency watch and
+#: the issues it files. Every other switch is off until set. `enabled` and the configuration door read this one set.
+DEFAULT_ON = frozenset({("integrations", "vulnerabilities"), ("integrations", "github_issues")})
 KNOWN_SOURCES = frozenset({
     "cloudflare_snapshot", "companion_db", "companion_home", "domain_export", "gateway_root",
     "harness_root", "mcp_config_root", "projects", "secret_store", "secrets", "sessions", "wiki"})
@@ -534,7 +537,7 @@ def enabled(name: str, section: str = "integrations", *, settings: dict | None =
     if section == "integrations" and offline(environ):
         return False
     doc = load() if settings is None else (settings or {})
-    return (doc.get(section) or {}).get(name, False) is True
+    return (doc.get(section) or {}).get(name, (section, name) in DEFAULT_ON) is True
 
 REGISTRY_VERSIONS = {"projects.json": 2, "repositories.json": 2, "relations.json": 2}
 
