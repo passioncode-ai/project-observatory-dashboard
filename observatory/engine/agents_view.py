@@ -111,6 +111,24 @@ def _lanes(conn: sqlite3.Connection, wid: str) -> list[dict]:
     return [{"segments": segments, "offers": pending}]
 
 
+def recent_sessions(conn: sqlite3.Connection, now: datetime) -> list[dict]:
+    """Agent sessions with a recorded turn in the last day, newest first, each marked
+    `active` when its last turn is under ACTIVE_SECONDS old. The one reader of the
+    ledger's session rows: this page and `sessions_view` (its `active_hour`) both count
+    from it, so the two can never disagree about what did work."""
+    since = _iso(now - timedelta(days=1))
+    rows = conn.execute(
+        "SELECT session_id, project_id, max(created_at) AS last, count(*) AS turns,"
+        "       max(workflow_id) AS workflow_id, max(agent_id) AS agent"
+        " FROM ledger WHERE kind = 'session' AND session_id IS NOT NULL AND created_at >= ?"
+        " GROUP BY session_id ORDER BY last DESC LIMIT ?", (since, MAX_SESSIONS)).fetchall()
+    active_since = _iso(now - timedelta(seconds=ACTIVE_SECONDS))
+    return [{"sessionId": r["session_id"], "projectId": r["project_id"],
+             "lastTurnAt": r["last"], "turns": r["turns"],
+             "workflowId": r["workflow_id"], "active": r["last"] >= active_since}
+            for r in rows]
+
+
 def summary(db: pathlib.Path | None = None,
             credential_reader: Callable[[str], dict] | None = None,
             now: datetime | None = None) -> dict:
@@ -160,17 +178,7 @@ def summary(db: pathlib.Path | None = None,
             " GROUP BY memory_id) m ON m.memory_id = l.memory_id AND m.r = l.revision"
             " LEFT JOIN tombstones t ON t.memory_id = l.memory_id WHERE t.memory_id IS NULL"
             " AND l.kind = 'step_result' AND l.state = 'proposed'").fetchone()[0]
-        since = _iso(now - timedelta(days=1))
-        rows = conn.execute(
-            "SELECT session_id, project_id, max(created_at) AS last, count(*) AS turns,"
-            "       max(workflow_id) AS workflow_id, max(agent_id) AS agent"
-            " FROM ledger WHERE kind = 'session' AND session_id IS NOT NULL AND created_at >= ?"
-            " GROUP BY session_id ORDER BY last DESC LIMIT ?", (since, MAX_SESSIONS)).fetchall()
-        active_since = _iso(now - timedelta(seconds=ACTIVE_SECONDS))
-        out["sessions"] = [{"sessionId": r["session_id"], "projectId": r["project_id"],
-                            "lastTurnAt": r["last"], "turns": r["turns"],
-                            "workflowId": r["workflow_id"], "active": r["last"] >= active_since}
-                           for r in rows]
+        out["sessions"] = recent_sessions(conn, now)
     except sqlite3.Error as exc:
         out["degraded"].append({"source": "store", "code": "unreadable",
                                 "reason": f"{type(exc).__name__}"})

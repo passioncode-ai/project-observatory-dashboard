@@ -285,6 +285,12 @@
         "why"
       ]
     },
+    "observatory_sessions": {
+      "input": [
+        "refresh"
+      ],
+      "required": []
+    },
     "observatory_ssh_keys": {
       "input": [
         "github",

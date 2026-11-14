@@ -70,6 +70,14 @@ def full_payload() -> dict:
         "creds": {"scanned_on": "2026-10-26", "totals": {"leaked_unrotated": 3, "unclaimed": 12}},
         "agents": {"measuredAt": "2026-10-26T17:25:00Z",
                    "counters": {"sessionsActive": 2, "stalled": 1, "workflowsOpen": 4}},
+        # The session count's three facets (sessions_view, OBS-550): what runs, what the account
+        # manager manages, what recorded a turn in the last hour.
+        "sessions": {"schema": "coding-sessions/1", "measuredAt": "2026-10-26T17:24:00Z",
+                     "processes": {"claude-code": 5, "codex": 1}, "managed": 3, "active_hour": 2,
+                     "sessions": [], "degraded": [],
+                     "sources": {"processes": {"from": "manager", "at": "2026-10-26T17:24:00Z"},
+                                 "manager": {"state": "read", "at": "2026-10-26T17:24:00Z"},
+                                 "ledger": {"at": "2026-10-26T17:24:00Z"}}},
         "findings": findings([
             finding("d1", "domain.hold", "critical", subject="project:alpha-web"),
             finding("h1", "heroku.app_down", "critical", href="heroku.html#a-c", href_label="c"),
@@ -102,9 +110,11 @@ class StateBand(unittest.TestCase):
         self.assertIn("12 without a project", keys)
         self.assertIn('href="creds.html?f=c-leaked"', tile(out, "keys"))
         agents = text(tile(out, "agents"))
-        self.assertIn("2 sessions active in the last hour", agents)
+        self.assertIn("6 sessions running", agents)
+        self.assertIn("3 managed", agents)
+        self.assertIn("2 active in the last hour", agents)
         self.assertIn("1 workflow stalled now", agents)
-        self.assertIn("as of this page's measurement", agents)
+        self.assertIn("read 2026-10-26 17:24 UTC", agents)
         for key, page in (("sites", "domains"), ("apps", "heroku"), ("disk", "machine"), ("agents", "agents")):
             self.assertRegex(tile(out, key), r'^<a[^>]*href="' + page + r'\.html')
 
@@ -201,7 +211,7 @@ class States(unittest.TestCase):
     def test_russian(self):
         out = text(home_page.home_html(full_payload(), RU))
         for part in ("Сайты", "1 работает", "Диск и память", "свободно 8 ГБ", "3 утекли и не сменены",
-                     "2 сессии активны за последний час", "1 задача стоит сейчас", "Личное облако", "не подключено",
+                     "6 сессий запущены", "3 под управлением", "2 активны за последний час", "1 задача стоит сейчас", "Личное облако", "не подключено",
                      "Требует вас в первую очередь", "Все проблемы (5)", "открыто: 2",
                      "Проекты одним взглядом", "Без организации"):
             self.assertIn(part, out)

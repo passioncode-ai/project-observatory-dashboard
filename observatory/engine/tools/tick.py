@@ -674,6 +674,10 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     # The lifecycle watch: orphaned product processes, per-session servers on replaced code,
     # jobs past their interval, logs past their cap. Reads the process table; starts nothing.
     step("lifecycle", PY, "collectors/scan_lifecycle.py", SCRATCH / "lifecycle.json")
+    # The coding sessions in three facets (OBS-550): what runs, what the account manager manages,
+    # what recorded a turn in the last hour. One call to the manager's CLI, bounded at 10 s; the
+    # pages and the `session.unmanaged` finding read the file it writes.
+    step("coding-sessions", PY, "sessions_view.py", SCRATCH / "coding-sessions.json")
     step("cleanup", PY, "tools/cleanup.py", "--auto")
     rotation.run_in_turn()
     step = t.step
