@@ -206,6 +206,8 @@ BOUNDARY += ('node_enroll', 'node_pairing')
 BOUNDARY += ('node_ceremony',)
 # PB-163: the machine's SSH keys; the private key is never shown or moved.
 BOUNDARY += ('ssh_keys',)
+# OBS-553: lockfile readers, the OSV and known-exploited watch, `dep.vulnerable`, `observatory_dependencies`.
+BOUNDARY += ('dependencies',)
 # Vault slots across the operator's machines by keyed digests (OBS-194, step 1).
 BOUNDARY += ('vault_digests',)
 # OBS-476: one slot copied into another store on this machine; the value stays in one process.

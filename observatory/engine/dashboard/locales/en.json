@@ -721,5 +721,9 @@
  "{n} coding sessions run without an account manager": {
   "one": "{n} coding session runs without an account manager",
   "other": "{n} coding sessions run without an account manager"
+ },
+ "{package} {version} has {n} known vulnerabilities": {
+  "one": "{package} {version} has {n} known vulnerability",
+  "other": "{package} {version} has {n} known vulnerabilities"
  }
 }

@@ -218,6 +218,8 @@ STATE_FAMILIES = {
     "node/device": "0.25.0", "node/records": "0.27.0", "node/orgs": "0.27.0",
     # The interim relay's spool (OBS-287).
     "node/relay": "0.31.0",
+    # The dependency inventory and the vulnerability watch's answer (OBS-553).
+    "store/raw/dependencies.json": "0.37.0", "store/raw/vulnerabilities.json": "0.37.0",
 }
 ROW_FROM = (0, 26, 0)
 

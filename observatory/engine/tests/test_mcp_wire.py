@@ -40,6 +40,7 @@ GOLDEN_TOOLS = [
     # observatory_* tools (30)
     "observatory_assistant_ask", "observatory_assistant_conversation", "observatory_assistant_status",
     "observatory_checkpoint_latest", "observatory_checkpoint_write", "observatory_credentials",
+    "observatory_dependencies",
     "observatory_explain", "observatory_findings", "observatory_handoff_accept",
     "observatory_handoff_create", "observatory_handoff_get", "observatory_learn", "observatory_lesson",
     "observatory_machine", "observatory_org_accounts", "observatory_org_keys", "observatory_org_selection",
@@ -164,6 +165,11 @@ async def run() -> None:
                   and coverage_result["coverage"]["checkouts"]["snapshot_count"] is None
                   and coverage_result["coverage"]["caches"]["reclaimable_bytes"] is None)
             await check_move_section(session, machine_tool)
+            # OBS-553: the dependency inventory before any scan is an empty page that says why, never "none".
+            deps = payload(await session.call_tool("observatory_dependencies", {"vulnerableOnly": True}))
+            check("dependencies before a scan: no rows, and degraded names the missing inventory and watch",
+                  deps.get("packages") == [] and {d.get("source") for d in deps.get("degraded") or []}
+                  >= {"dependencies", "osv"}, json.dumps(deps)[:200])
             names = sorted(t.name for t in listed.tools)
             missing = [t for t in REQUIRED if t not in names]
             check("every required tool and capability is served", not missing, f"missing {missing}")

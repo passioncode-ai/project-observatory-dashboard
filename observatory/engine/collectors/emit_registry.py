@@ -108,6 +108,7 @@ NEW_SOURCES = [
     ("SRC-0021", "DigitalOcean's public API through each team's `observatory-read` token (or its stashed team token, named in `token_kind`), read by collectors/scan_digitalocean.py: Droplets with their stated monthly price, App Platform apps with the repositories they deploy from, managed databases (named fields only, never a password), volumes, and each team's month-to-date usage. Answers WHAT RUNS ON DIGITALOCEAN and what its listing says it costs (OBS-235).", ["registry:digitalocean-account.json"]),
     ("SRC-0022", "Cloudflare's API through the read-only `inventory-read` token `tools/cloudflare.py` issues per account, read by collectors/scan_cloudflare_account.py: Workers, Pages projects with their source repository and latest deployment, R2 buckets, D1 databases, and each zone's plan and price, DNS record count and edge certificate expiry. Answers WHAT AN ACCOUNT HOLDS beyond its zones (OBS-271).", ["registry:cloudflare-account.json"]),
     ("SRC-0023", "The operator's curated derivations in " + paths.config_label("derivations.json") + " (which repository is a copy or a move of which), checked against this registry's repositories; each copy's tracked `.copy/upstream.json` read from its local clone at HEAD; and the commits on the source's branch after the copy's last sync, counted in the source's local clone (`git rev-list`, offline, never fetched). Answers WHICH REPOSITORIES ARE COPIES OR MOVES OF WHICH, and how far each copy has fallen behind (OBS-321).", ["registry:derivations.json"]),
+    ("SRC-0024", "Every lockfile and dependency manifest under each project's local folders (package-lock, pnpm-lock, yarn.lock, Pipfile.lock, poetry.lock, uv.lock, pylock.toml, requirements pins, go.mod, Cargo.lock, Gemfile.lock, composer.lock), read by collectors/scan_dependencies.py with the standard library: each resolved package's name, version, ecosystem, whether it is direct, and whether it is local (a path, a workspace member, a link, git or a private registry). Answers WHAT EACH PROJECT RUNS, the inventory the daily OSV watch matches advisories against (OBS-553).", ["registry:dependencies.json"]),
     ("SRC-0011", "Public DNS through `dig`, HTTP reachability through `curl`, and registrar records through RDAP at rdap.org. Answers whether a host resolves and answers, and what a registry says about a domain — measured, never transcribed.", ["registry:domain-liveness.json"]),
 ]
 SOURCE_INPUTS = {"SRC-0007": SP / "local.json", "SRC-0008": SP / "gh",
@@ -118,7 +119,7 @@ SOURCE_INPUTS = {"SRC-0007": SP / "local.json", "SRC-0008": SP / "gh",
     "SRC-0017": SP / "mcp.json", "SRC-0018": SP / "remote-env.json",
     "SRC-0019": SP / "google.json", "SRC-0020": SP / "agents.json",
     "SRC-0021": SP / "digitalocean.json", "SRC-0022": SP / "cloudflare_account.json",
-    "SRC-0023": paths.config_file("derivations.json")}
+    "SRC-0023": paths.config_file("derivations.json"), "SRC-0024": SP / "dependencies.json"}
 def source_available(sid):
     path = SOURCE_INPUTS.get(sid)
     return bool(path and (path.is_file() or (path.is_dir() and any(p.is_file() and not p.name.startswith("_") for p in path.glob("*.json")))))
@@ -734,6 +735,20 @@ if REMOTE_SRC.is_file() and ENV_SRC.is_file():
           f"checkout here, {_rt['same_as_local']} production value(s) equal to a local "
           f"one, {_rt['differs']} differing, {_rt['remote_only']} only in production, "
           f"{_rt['retired_still_deployed']} retired and still deployed")
+
+# ---- dependencies (OBS-553) ------------------------------------------------
+# WHAT EACH PROJECT'S LOCKFILES RESOLVE. ONE INPUT, named for the derivation
+# that reads this script's source: `store/raw/dependencies.json`, written by
+# the `scan-dependencies` step. The scan keeps sizes and times it caches by; the
+# document keeps the packages, the lockfiles read and the ones that could not be.
+DEPS_SRC = paths.SCRATCH / "dependencies.json"
+if DEPS_SRC.is_file():
+    import dependencies_registry
+    _depdoc = dependencies_registry.document(json.loads(DEPS_SRC.read_text(encoding="utf-8")), OBS)
+    _stamped("dependencies.json", _depdoc)
+    _dpt = _depdoc["totals"]
+    print(f"dependencies.json: {_dpt['projects']} project(s), {_dpt['packages']} package(s), "
+          f"{_dpt['local']} local, {_dpt['unreadable_files']} lockfile(s) unreadable")
 
 # ---- environments (docs/design/DEPLOYMENTS.md, PB-128) --------------------
 # ONE CURATED INPUT, named for the derivation that reads this script's source:
