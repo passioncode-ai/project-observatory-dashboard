@@ -325,6 +325,29 @@ the registry document yet is named there too. New command `project-observatory f
 COPY`, which reads only and prints the sync steps; it writes nothing. An older engine ignores both
 files; deleting `registry/derivations.json` loses nothing the next emit does not rebuild.
 
+## Registry: dependencies and the vulnerability watch (OBS-553)
+
+New registry document `registry/dependencies.json` (`schema_version` 1), written by `emit` from
+`store/raw/dependencies.json`, which the tick's new `scan-dependencies` step writes each tick (a lockfile
+whose size and time did not change is not parsed again). Per project: `ecosystems`, `packages` (`name`,
+`version`, `ecosystem`, `direct`, `local`, `file`; `source` on a local one, `dev` and `pinned: false` when
+they apply), `read_from` (each lockfile with its format and count, `error` when it could not be parsed)
+and `degraded`; `totals`. A lockfile that cannot be parsed is named, never read as no dependencies. New
+step `vulnerabilities` (`tools/vuln_watch.py`) asks OSV's batch API once a UTC day, or when the
+inventory changed, about every package with `local: false` and a pinned version, and writes
+`store/raw/vulnerabilities.json` (schema `vulnerabilities/1`: `checked_on`, `matches`, `advisories` with
+`severity`, `fixed`, `exploited`, `degraded`); advisory records and the known-exploited catalogue are
+cached in `store/state/osv-cache/`, its day in `vuln-watch.json` in the store folder. A local or private package (a
+path, a workspace member, a link, git, a private registry, a name in the optional
+`config/private_packages.json`) is never sent. New integration switch `integrations.vulnerabilities`,
+the first that is on when absent (`configuration.DEFAULT_ON`; `doctor` shows it on); `false` or
+`OBSERVATORY_OFFLINE=1` stops every request. New findings `dep.vulnerable` (one per project, package
+and version, with `advisory`, `advisories`, `aliases`, `fixed`, `exploited`, `lockfile`) and
+`dep.watch_stale`, with the subject `dep:<folder>/<ecosystem>/<name>@<version>` that
+`observatory_findings` with `projectId` matches. New MCP tool `observatory_dependencies` (30
+`observatory_*` tools), read-only and paged. An older engine ignores every one of these files; deleting
+any of them loses nothing the next tick does not rebuild, except the cache, which is fetched again.
+
 ## Machine-local settings (OBS-353)
 
 `config/local.json` (schema `observatory-local/1`, owner-only, no symbolic link) holds what this machine and this OS
@@ -1287,6 +1310,8 @@ code's path constants, so a path built another way is not seen (OBS-182).
 | `secrets/digitalocean-read.d/` | 0.27.0 | each team's installed `observatory-read` token, which the collector prefers over the stashed one | the collector falls back to the stashed token when a team has none |
 | `secrets/digitalocean-issued/` | 0.27.0 | one `<label>.meta.json` per installed narrow token (team, preset, declared scopes, slot, dates; never a value) and its lock | removing a record makes the door forget the token, not revoke it |
 | `store/raw/cloudflare_account.json` | 0.30.0 | per Cloudflare account: Workers, Pages projects with their source repository, R2 buckets, D1 databases, zones with plan and price, DNS record count and certificate expiry, and named `degraded`, written by `full scan-cloudflare-account` | `emit` turns it into `registry/cloudflare-account.json` for the Cloudflare page; an older engine never reads it, and absent, the page says the account inventory is not measured |
+| `store/raw/dependencies.json` | 0.37.0 | every lockfile each project's folders hold (OBS-553, schema `dependencies-scan/1`): per file its folder, path, format, size, time and parsed packages, or `error`; written by `full scan-dependencies` and the tick | `emit` turns it into `registry/dependencies.json`; an older engine never reads it, and deleting it only makes the next scan parse every lockfile again |
+| `store/raw/vulnerabilities.json` | 0.37.0 | the last OSV answer over the inventory (OBS-553, schema `vulnerabilities/1`): matches, summarized advisories, the catalogue's day and `degraded`; beside it `vuln-watch.json` in the store folder (the day of the last complete pass and the inventory digest) and `store/state/osv-cache/` (advisory records, `kev.json`) | the findings and `observatory_dependencies` read it; an older engine never does. Deleting it makes the next tick ask OSV again; deleting the cache only refetches records |
 | `secrets/cloudflare-inventory.d/` | 0.30.0 | one `inventory-read` token per account, owner-only, with its `<account>.meta.json` (account, groups, dates, expiry; never a value) | read by `collectors/scan_cloudflare_account.py` and managed by `tools/cloudflare.py`; an older engine never opens it, and deleting a file only stops the scan of that account, the token stays live at Cloudflare until `revoke` |
 | `secrets/sentry-issued.json` | 0.31.0 | the ledger of Sentry tokens the Sentry door issued or installed (kind, scopes, organization, project, hosts, token id, dates, last verification) and the broad tokens it retired, each with a keyed digest of the value a Sentry accepted; never a value or a plain hash. Beside it, `sentry-proof.key`: the random key of those digests, owner-only | written and read by `tools/sentry.py` only; deleting the key makes every recorded proof stale, so a broad token needs a new one before its revocation counts; an older engine never opens it, and removing it makes the door forget what it recorded, not revoke anything at Sentry |
 | `node/device/` | 0.25.0 | this machine's agent-network device keys from `full node --init`: `device.json`, `sig.pem`, `kem.pem`, owner-only; never replaced | an older engine ignores it; deleting it gives the machine a new device id at the next `--init` |

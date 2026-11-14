@@ -144,7 +144,10 @@ LEARNING_REVIEW_SETTINGS = ("settle_hour_utc",)
 KNOWN_INTEGRATIONS = frozenset({
     "bitbucket", "cloudflare", "cloudflare_analytics", "digitalocean", "domains", "ga4", "git_remotes",
     "github", "google", "harness", "heroku", "mcp", "openrouter", "remote_env", "search_console",
-    "sessions", "wiki"})
+    "sessions", "vulnerabilities", "wiki"})
+#: Switches that are on until a person switches them off; every other switch is off until switched on.
+#: The vulnerability watch (OBS-553, decision D2) sends only public package names and versions, so it is on.
+DEFAULT_ON = {"integrations": frozenset({"vulnerabilities"}), "features": frozenset()}
 KNOWN_FEATURES = frozenset({
     "agent", "auto_cleanup", "companion_remediation", "embeddings", "fixture_cleanup",
     "machine_watch", "notifications", "probe_fixture", "registry_history", "retention",
@@ -534,7 +537,7 @@ def enabled(name: str, section: str = "integrations", *, settings: dict | None =
     if section == "integrations" and offline(environ):
         return False
     doc = load() if settings is None else (settings or {})
-    return (doc.get(section) or {}).get(name, False) is True
+    return (doc.get(section) or {}).get(name, name in DEFAULT_ON.get(section, ())) is True
 
 REGISTRY_VERSIONS = {"projects.json": 2, "repositories.json": 2, "relations.json": 2}
 

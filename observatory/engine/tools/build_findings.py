@@ -1783,6 +1783,11 @@ def collect() -> list[dict]:
     # the operator records a relation in config/derivations.json.
     import derivation_findings
     out.extend(derivation_findings.from_file(paths.REGISTRY / "derivations.json", TODAY))
+    # KNOWN VULNERABILITIES IN DEPENDENCIES (OBS-553, tools/dependency_findings.py): the inventory `emit` wrote
+    # joined to the daily OSV answer `tools/vuln_watch.py` wrote. Silent until the watch has run once.
+    import dependency_findings
+    out.extend(dependency_findings.from_files(paths.REGISTRY / "dependencies.json",
+                                              paths.SCRATCH / "vulnerabilities.json", TODAY))
     # THE REVIEW QUEUE, both halves (OBS-227, tools/review_findings.py): what waits for a person after
     # the standing review policy took what it may. The registry proposals had no finding before.
     import review_findings

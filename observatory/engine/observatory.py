@@ -123,6 +123,10 @@ STEPS = {
     "node":      [PY, "tools/node.py"],
     "openrouter": [PY, "collectors/scan_openrouter.py", "store/raw/openrouter.json"],
     "env":       [PY, "collectors/scan_env.py", "store/raw/env.json"],
+    # Every lockfile each project resolves (OBS-553): files only, no network.
+    "scan-dependencies": [PY, "collectors/scan_dependencies.py", "store/raw/dependencies.json"],
+    # The daily OSV and known-exploited pass over that inventory (OBS-553): public names only.
+    "vulnerabilities": [PY, "tools/vuln_watch.py"],
     # Gated to once a day inside the scan itself: every run pulls every
     # production secret of every application into one process.
     "remote-env": [PY, "collectors/scan_remote_env.py", "store/raw/remote-env.json"],
@@ -646,6 +650,11 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   fabric-attribution           which Fabric project each project is: asks Fabric's hub (hub.json, a live pid,
                                loopback only) and records fabric:<uuid> aliases in store/raw/fabric-attribution.json;
                                a hub that is down or refuses is named in degraded, nothing recorded is lost
+  scan-dependencies            every lockfile each project resolves (npm, PyPI, Go, crates.io, RubyGems,
+                               Packagist): name, version, direct, local; files only, no network
+  vulnerabilities [--force]    the daily OSV pass over that inventory and the known-exploited catalogue;
+                               local and private packages are never sent (integration vulnerabilities, on
+                               by default: `configure integrations vulnerabilities false` turns it off)
   scan-harness                 the skills and instruction files every agent session loads, their
                                listing budget and security rules (integration harness)
   harness [--accept KEY|--accept-all]  the last harness scan; --accept records a changed skill's
@@ -732,6 +741,7 @@ FIXTURE_HOME = re.compile(r"(?:/|[A-Za-z]:[\\/])[^\x00-\x1f]{0,4095}")
 #: `refusal`, so a remedy that needs another option fails the gate, not the reader.
 STEP_OPTIONS: dict[str, dict[str, tuple[str | None, re.Pattern | None, str]]] = {
     "google": {"--force": (None, None, "re-fetch inside the twelve-hour cache window")},
+    "vulnerabilities": {"--force": (None, None, "ask OSV now, even when today's pass is done")},
     # A maintainer's synthetic workspace (fabric/FABRIC-CONFORMANCE.md). The steps
     # ran the runner without it, so `full probes` could only fail (OBS-224).
     "probes": {"--fixture-home": ("PATH", FIXTURE_HOME,

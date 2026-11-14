@@ -2494,5 +2494,14 @@
  "Theme": "Тема",
  "theme@@Light": "Светлая",
  "theme@@Dark": "Тёмная",
- "Your browser keeps no settings here, so the next page opens in the light theme.": "Браузер здесь не хранит настройки, поэтому следующая страница откроется в светлой теме."
+ "Your browser keeps no settings here, so the next page opens in the light theme.": "Браузер здесь не хранит настройки, поэтому следующая страница откроется в светлой теме.",
+ "Dependency with a known vulnerability": "Зависимость с известной уязвимостью",
+ "Vulnerability watch out of date": "Проверка уязвимостей устарела",
+ "Vulnerability watch last checked {day}": "Уязвимости последний раз проверены {day}",
+ "{package} {version} has {n} known vulnerabilities": {
+  "one": "У {package} {version} {n} известная уязвимость",
+  "few": "У {package} {version} {n} известные уязвимости",
+  "many": "У {package} {version} {n} известных уязвимостей",
+  "other": "У {package} {version} {n} известной уязвимости"
+ }
 }

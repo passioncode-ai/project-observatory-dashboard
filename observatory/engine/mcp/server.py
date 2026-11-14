@@ -895,6 +895,33 @@ def observatory_ssh_keys(
     return ssh_keys.agent_view(name=name, github=github)
 
 
+@server.tool()
+def observatory_dependencies(
+    projectId: Annotated[str | None,
+                         Field(validation_alias=AliasChoices("projectId", "project_id"),
+                               description="Only this 'project:<slug>'; its unreadable lockfiles join `degraded`.")] = None,
+    vulnerableOnly: Annotated[bool, Field(validation_alias=AliasChoices("vulnerableOnly", "vulnerable_only"),
+                                          description="Only packages with a known advisory.")] = False,
+    limit: Annotated[int, Field(ge=1, le=500, description="Package rows per page, the vulnerable first. "
+                                                          "`total` counts them all.")] = 50,
+    cursor: Annotated[str | None, Field(description="Continue after this row, from a previous answer's "
+                                                    "`nextCursor`.")] = None,
+) -> dict[str, Any]:
+    """Every dependency each project's lockfiles resolve (npm, PyPI, Go, crates.io, RubyGems, Packagist):
+    name, version, ecosystem, direct or transitive, local or public, the lockfile, and the OSV advisories
+    that match it with severity, the known-exploited mark and the fixed version.
+
+    Read-only, from `registry/dependencies.json` and the daily watch's `store/raw/vulnerabilities.json`
+    (`checkedOn`). A local package (a path, a workspace member, a link, git, a private registry) is never
+    sent to OSV and never carries an advisory. A lockfile that could not be parsed, a watch that has not
+    run, is switched off or could not reach OSV is named in `degraded`. Design:
+    docs/design/control-plane/dependencies.md.
+    """
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
+    import vuln_watch
+    return vuln_watch.agent_view(project_id=projectId, vulnerable_only=vulnerableOnly, limit=limit, cursor=cursor)
+
+
 MACHINE_TOP = 10
 #: Skills per page of `observatory_machine(section="skills")`: a machine measured holding 1,269 skills made an
 #: unpaged answer of 151,536 characters, past what a host keeps of one tool result, and 200 skills beside its 116

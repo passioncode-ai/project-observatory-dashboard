@@ -705,5 +705,9 @@
  },
  "step@@failed": "failed",
  "theme@@Light": "Light",
- "theme@@Dark": "Dark"
+ "theme@@Dark": "Dark",
+ "{package} {version} has {n} known vulnerabilities": {
+  "one": "{package} {version} has {n} known vulnerability",
+  "other": "{package} {version} has {n} known vulnerabilities"
+ }
 }
