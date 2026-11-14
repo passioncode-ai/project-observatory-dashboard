@@ -525,8 +525,8 @@
       "path": "collectors/scan_spend.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b3b6a377ecf90a115af41987007c761da540146f6dbeb08e4c38f6fcf098374c",
-      "bytes": 31308
+      "export_sha256": "996d6321034b3c3947a0f549e64dedaa9d3678d5deeb6e89ecebcb71c64d46f7",
+      "bytes": 33654
     },
     {
       "path": "collectors/scan_vault.py",
@@ -6500,8 +6500,8 @@
       "path": "tests/test_spend.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ed0cecfb707d3125ef8befc850811b53ec43cec6408baf304c4d2f57728ecaad",
-      "bytes": 146633
+      "export_sha256": "2496cffb2d795166990e1bb6906bfdaadc72f75c5920306f496746d49094a419",
+      "bytes": 148907
     },
     {
       "path": "tests/test_ssh_keys.py",
