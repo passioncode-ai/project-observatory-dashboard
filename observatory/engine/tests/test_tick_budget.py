@@ -47,7 +47,8 @@ ESTATE = {
     "bitbucket": None, "domains": 40, "backup": 10, "heroku": 10, "openrouter": 10, "env": 60,
     "scan-cloudflare": 15, "scan-digitalocean": None, "scan-mcp": 10, "scan-agents": 5,
     "scan-harness": None, "scan-spend": 20, "remote-env": 10, "google": 10, "leaks": 1125,
-    "scrub-companion": None, "machine": 60, "git-hygiene": 418, "lifecycle": 5, "cleanup": 30,
+    "scrub-companion": None, "machine": 60, "git-hygiene": 418, "lifecycle": 5, "coding-sessions": 5,
+    "cleanup": 30,
 }
 CEILING = 1500.0
 #: What the watchdog leaves the tail (`tick_lease.tail_reserve_seconds` at this ceiling).

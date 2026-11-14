@@ -664,6 +664,21 @@ is sent: the node's check-in still sends no `credentialRequests` and reads no de
 put` and `rotate` there leave a stale `provenance` beside a new value, which the newer engine drops at the slot's
 next put or rotation.
 
+## Coding sessions in three facets (OBS-550, the release after 0.36.0)
+
+The tick gains the step `coding-sessions` (under `features.machine_watch`, like the machine survey). It runs
+`sessions_view.py`, which asks the account manager once (`switchboard sessions --machine --json`, at most 10 s,
+found on PATH or in `~/.local/bin`), reads the machine survey and the ledger, and writes
+`store/raw/coding-sessions.json` (schema `coding-sessions/1`): `processes` per agent, `managed`, `quiet`,
+`active_hour`, one row per session (agent, project id, folder name, pid, managed, launch id, account group, last
+turn, state; never a full path), `sources` and `degraded`. The name `store/raw/sessions.json` stays the sessions
+collector's. A source that could not be read is `null` with its reason, never 0. The Agents page's single
+"Sessions working" counter becomes three (running, managed, active in the last hour) and Home's Agents tile shows
+the same numbers; both read `sessions_view.facets`. The findings board gains `session.unmanaged` (info, one row
+with the count), and the MCP server gains `observatory_sessions` (30 `observatory_*` tools; read-only, `refresh`
+asks the manager now). Downgrade: an older engine has no step, tool or finding, ignores the file, and its Agents
+page counts the ledger's sessions as before.
+
 ## Organizations: the local selection record (OBS-417, 0.35.9)
 
 Additive. Nothing migrates, and nothing is written until a person (or an agent with the operator's words) changes

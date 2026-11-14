@@ -202,6 +202,7 @@ LABELS: dict[str, str] = {
     "secret.sighting_suppressed": "Leak sightings suppressed",
     "secret.suppression_not_applied": "Leak suppression not applied",
     "server.silent": "Local server silent",
+    "session.unmanaged": "Coding sessions outside a lifecycle owner",
     "site.dead": "Project site does not answer",
     "skill.stale_session": "Session runs an old skill",
     "ssh.folder_permissions": "SSH folder open to other accounts",

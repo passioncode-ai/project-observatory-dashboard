@@ -227,17 +227,27 @@ def agents_tile(payload: dict, t: Translator) -> dict:
     name = t.mark("Agents")
     a = payload.get("agents") or {}
     counters = a.get("counters") or {}
-    if not counters:
+    import sessions_view
+    # The same three facets the Agents page shows (CP-03), read by the same function: what
+    # runs, what the account manager manages, what recorded a turn in the last hour. A facet
+    # that was not read says so; it is never shown as 0.
+    f = sessions_view.facets(payload.get("sessions"))
+    if not counters and f["running"] is None and f["managed"] is None and f["activeHour"] is None:
         return _unmeasured("agents", name, t.mark("never measured"), _reason(a.get("degraded")), "agents.html", t)
     stalled = int(counters.get("stalled") or 0)
-    # Each number names its own period: sessions with a turn in the last hour
-    # (agents_view.ACTIVE_SECONDS) and workflows stalled now. Both are read from the store
-    # when the page is built, so the time is the header's "Measured", not a clock here
-    # (two builds a minute apart would differ).
-    at = t.mark("as of this page's measurement")
-    return _tile("agents", name, "warn" if stalled else "ok",
-                 t.mark("home@@{n} sessions active in the last hour", n=int(counters.get("sessionsActive") or 0)),
-                 t.mark("home@@{n} workflows stalled now", n=stalled), at, "agents.html", t)
+    value = (t.mark("home@@{n} sessions running", n=f["running"]) if f["running"] is not None
+             else t.mark("sessions not counted"))
+    sub = " · ".join((
+        t.mark("home@@{n} managed", n=f["managed"]) if f["managed"] is not None else t.mark("managed: not read"),
+        t.mark("home@@{n} active in the last hour", n=f["activeHour"]) if f["activeHour"] is not None
+        else t.mark("activity not read"),
+        t.mark("home@@{n} workflows stalled now", n=stalled)))
+    # Workflows stalled are read from the store when the page is built, so without a sessions
+    # reading the time is the header's "Measured", not a clock here (two builds a minute apart
+    # would differ).
+    at = (t.mark("read {date}", date=_stamp(f["measuredAt"])) if f["measuredAt"]
+          else t.mark("as of this page's measurement"))
+    return _tile("agents", name, "warn" if stalled else "ok", value, sub, at, "agents.html", t)
 
 
 def cloud_tile(payload: dict, t: Translator) -> dict:

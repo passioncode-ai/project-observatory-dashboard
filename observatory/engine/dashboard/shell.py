@@ -387,7 +387,7 @@ def slice_for(page: str, payload: dict) -> dict:
     # small enough to ride everywhere, which is what the projects column and the
     # project panel read.
     heavy = {"env": "env", "heroku": "heroku", "creds": "creds", "mcp": "mcp",
-             "google": "traffic", "machine": "machine", "agents": "agents",
+             "google": "traffic", "machine": "machine", "agents": "agents", "sessions": "agents",
              "digitalocean": "digitalocean", "cloudflare": "cloudflare"}
     out = dict(payload)
     # WHAT PRODUCTION HOLDS is read by exactly the two pages that can say

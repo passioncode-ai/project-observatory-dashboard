@@ -131,13 +131,13 @@ server = InteropServer(
         "or invalid output.\n"
         "WORKFLOW: `observatory_checkpoint_write` after each step (keep `leaseId`); "
         "`observatory_handoff_create`/`_accept` moves it; `observatory_workflow_list` finds it.\n"
-        "START with `observatory_overview` (counts, findings, disk). Folders outside Git go to `config/tracked.json` for the next "
-        "pass; no grants or registry writes.\n"
+        "START with `observatory_overview` (counts, findings, disk). Folders outside Git go to `config/tracked.json`; "
+        "no grants or registry writes.\n"
         "READ, paged with `limit` and `cursor` → `nextCursor`, totals over the "
         "scope: `observatory_status` (pass `limit`, `detail: summary`; unpaged is "
         "huge); `observatory_findings` takes `projectId`; "
         "`observatory_recall`. `limit` only: `observatory_project`, `observatory_timeline`. "
-        "Also `observatory_machine` (`section`, `move`, `explainPid`); `observatory_ssh_keys` (no private key); "
+        "Also `observatory_machine` (`section`, `move`, `explainPid`); `_sessions`; `observatory_ssh_keys` (no private key); "
         "`observatory_org_accounts`/`_keys`; "
         "`observatory_assistant_status`; `observatory_assistant_conversation`.\n"
         "Fabric capabilities (fabric-interop/0.1), exact schemas: "
@@ -893,6 +893,29 @@ def observatory_ssh_keys(
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
     import ssh_keys
     return ssh_keys.agent_view(name=name, github=github)
+
+
+@server.tool()
+def observatory_sessions(
+    refresh: Annotated[bool, Field(description="Ask the account manager now (one call, at most 10 s) instead of "
+                                               "reading what the last tick wrote.")] = False,
+) -> dict[str, Any]:
+    """Every coding session on this machine as one count in three facets (OBS-550): `processes`
+    per agent (what runs), `managed` (of them, run by the account manager, Fabric Switchboard),
+    `active_hour` (of them, with a turn recorded in the last hour); then each session with its
+    agent, project id, folder name, pid, managed or not, launch id, account group, last turn
+    and state (working or quiet), and where each number came from (`sources`).
+
+    Read-only. A source that could not be read is null with its reason in `degraded`, never 0:
+    `managed: null` means the account manager is not installed or did not answer. No folder path
+    is returned, only its last component and the project it belongs to. Unmanaged sessions are
+    the `session.unmanaged` finding; start them through the account manager or an application's
+    embedded agent so their limits and hand-over are managed."""
+    import sessions_view
+    doc = sessions_view.load()
+    if refresh or any(d.get("code") == "not-collected" for d in doc.get("degraded") or []):
+        doc = sessions_view.summary()
+    return doc
 
 
 MACHINE_TOP = 10
