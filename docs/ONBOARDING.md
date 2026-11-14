@@ -2284,6 +2284,17 @@ keeps the 7-day certificate, the stream epoch and the protocols the server accep
 certificate at two thirds of its life, checks in, sends share registrations, collects `grant.usage` and empties the
 outbox. Every request carries the `fabric-device` HTTP signature (DEC-0056).
 
+**Activity of your sessions in the organization's projects (OBS-76 OE-01a).** The same tick reads Claude Code's and
+Codex's transcripts on this machine and sends, for each session whose folder is a project of that organization, one
+`usage.line` per model call (model and token counts, cost `null` until a price list is applied) and the session's
+`session.interval`s (`agent_working` while lines follow within 300 s, `idle` across a longer silence). Nothing of a
+line's content is kept: no prompt, answer, tool input, folder or branch name (the branch goes as an HMAC under a key
+made for this enrollment and never sent). A session counts as the organization's only when its project's organization
+in `config/organizations.json` names the server's organization id as `fabric_org`; every other session is personal and
+nothing of it leaves the machine (`full org tick` counts it as `keptPersonal`). Nothing from before the enrollment's
+collection start is sent. The collector's place in each file is kept in `node/orgs/<org id>/activity.sqlite`,
+owner-only. Design: [the activity collector](design/ACTIVITY-COLLECTOR.md).
+
 - `org status` shows each organization's server, the certificate's expiry date and state (`valid`, `expiring` in its
   last three days, `expired`) and whether rotation is due, the last check-in, the outbox depth and the last batch's
   result, and `degraded` lines: `org:certificate-expiring` (renew it now with `org rotate --org <id>` while the server

@@ -7,7 +7,7 @@ but one: `estate-secret-value-as-slot.json` names the AWS documentation's exampl
 public-release gate refuses, so `test_node_pairing.py` rebuilds it from `estate-record-ok.json`. They are the contract
 kit's own vectors for RFC 8785 (`canonical.json`), P-256 key validation (`p256.json`) and fabric-relay/0.1
 (`relay.json`, DEC-0047, DEC-0066), written by the contract's generators, never by hand, plus identifier equality
-(`identifiers.json`, DEC-0076), the estate record (`estate-record.json`, DEC-0055) the revocation delta with its
+(`identifiers.json`, DEC-0076), routing by context (`context-route.json`, DEC-0082) and the telemetry event's schema (`activity/telemetry-event.schema.json`, which refers to `summary/`'s two common schemas; both for OBS-76 OE-01a), the estate record (`estate-record.json`, DEC-0055) the revocation delta with its
 heartbeat (`revocation-delta.json`, DEC-0054) and the secret envelope (`secret-envelope.json`, DEC-0047 item 7).
 
 The estate ceremonies (DEC-0084, contract pull request #113): `enroll-token.json` (the headless join), `pairing.json`
@@ -53,6 +53,7 @@ the digests below.
 
 | File | sha256 |
 |---|---|
+| `context-route.json` | `b929579018ecc347ae03d73116c4edac10390519fa711f914ad23ae09d028aff` |
 | `canonical.json` | `e63411c0e1b615773d20c8c82b34a0c5ef7fc367fffc04d106b537c2628e5663` |
 | `enroll-token.json` | `475e8e54cb47ceeb8b7b478327b7f8b9e89cf8293521986c65a9f3ad437bbc71` |
 | `estate-record.json` | `3c37bf7bf205fe14674954200ef14b8e733e70a7e350ef08293da3edee2f61c0` |
@@ -72,6 +73,7 @@ the digests below.
 | `device/device-check-in-response-protocols.json` | `f7d9a64a109c118d86b15d7b309fc880d595d4e2ea4d897add884d94b7ce6d41` |
 | `device/device-enrollment-request-key-on-record.json` | `67932d96183358f4f977bdbef25b90159cea179fc9f3d9f0246ce15968b216c2` |
 | `device/device-enrollment-key-on-record-with-token.json` | `df17dd6bb544c7f53fb7bb4be94bcec531daf4e9a9bcc3775745259d65e9b982` |
+| `activity/telemetry-event.schema.json` | `3f0ec011b3bfc075e85364c0e94604ae6488cb9e2b0d4c125cc90d774d96b515` |
 | `summary/node-summary.schema.json` | `48979db88e36ba994755e717f990d99e20153d27d7253860a2b7a735034a46b2` |
 | `summary/common.schema.json` | `707a28c49e8a370d3ace2898406093ad9bac93952054f05bbffeb0b912dd8e99` |
 | `summary/activity-common.schema.json` | `82ffe926bb82c2d78525c947389c24aa718bf3a0d3f8367117c0e3fbefef7bec` |

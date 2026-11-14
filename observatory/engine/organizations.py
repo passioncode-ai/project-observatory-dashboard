@@ -18,6 +18,7 @@ so a workspace that never configures this sees no change):
                    "ga4_account": "accounts/<n>",
                    "ga4_legacy_accounts": ["accounts/<n>"],
                    "figma": {"team": "...", "project": "..."},
+                   "fabric_org": "<the organization's id on its server, as `full org enroll --org` names it>",
                    "match": {"repository_owners": ["..."], "products": ["product:..."],
                              "github_owners": ["..."],
                              "digitalocean_teams": ["<team uuid or name>"],
