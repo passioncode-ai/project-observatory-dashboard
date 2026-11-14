@@ -854,6 +854,10 @@ def act(a: dict, archive: pathlib.Path) -> dict:
     return {**rec, "result": "skipped", "reason": "unknown class"}
 
 
+#: The classes whose undo is only in the journal: a deleted branch's sha, a retired registration's ref (OBS-539).
+UNDO_IN_JOURNAL = ("branch-merged", "branch-pushed", "branch-unique", "worktree-missing")
+
+
 def journal(rows: list[dict]) -> None:
     log = paths.STATE / "logs" / "cleanup.jsonl"
     log.parent.mkdir(parents=True, exist_ok=True)
@@ -950,11 +954,19 @@ def main(argv: list[str]) -> int:
         chosen = [a for a in plan["actions"] if a["tier"] in tiers][: int(cfg.get("max_actions_per_run", 200))]
         archive = configuration.home() / "archive" / "cleanup" / datetime.now(timezone.utc).strftime("%Y-%m-%d")
         rows, stopped = [], 0
+        unjournalled: list[dict] = []
         mode = "auto" if "--auto" in argv else "manual"
         for n, a in enumerate(chosen):
             if deadline is not None and time.monotonic() > deadline:
                 stopped = len(chosen) - n
                 break
+            if unjournalled and a["class"] in UNDO_IN_JOURNAL:
+                # The journal is where this action's undo lives (OBS-539): once it cannot be written, such
+                # actions wait for a run that can record them; the ones that lose nothing still free space.
+                row = {"at": now(), "class": a["class"], "target": a["target"], "result": "skipped",
+                       "reason": "the journal cannot be written; an action whose undo lives in it waits"}
+                rows.append({**row, "mode": mode, **({"level": level} if level else {})})
+                continue
             try:
                 row = act({**a, "_deadline": deadline}, archive)
             except (OSError, subprocess.SubprocessError) as exc:
@@ -962,13 +974,21 @@ def main(argv: list[str]) -> int:
                        "reason": f"{type(exc).__name__}: {exc}"[:200]}
             row = {**row, "mode": mode, **({"level": level} if level else {})}
             rows.append(row)
-            journal([row])                   # as it happens: the sha of a deleted branch is its undo
+            try:
+                journal([row])               # as it happens: the sha of a deleted branch is its undo
+            except OSError as exc:
+                # A full disk (the case this tier runs for): the row with its undo goes to the summary and
+                # to stderr instead of being lost with a traceback (OBS-539).
+                unjournalled.append(row)
+                print("cleanup: the journal could not be written (" + type(exc).__name__ + "); its row: "
+                      + json.dumps(row, ensure_ascii=False), file=sys.stderr)
         done = sum(1 for r in rows if r["result"] in ("removed", "pruned"))
         skipped = sum(1 for r in rows if r["result"] == "skipped")
         failed = sum(1 for r in rows if r["result"] == "failed")
         freed = sum(r.get("kb") or 0 for r in rows) / 1048576
         summary = {"result": "ran", "removed": done, "skipped": skipped, "failed": failed,
-                   "stopped": stopped, "level": level or "normal", "plan_seconds": plan["plan_seconds"], **held}
+                   "stopped": stopped, "level": level or "normal", "plan_seconds": plan["plan_seconds"], **held,
+                   **({"unjournalled": unjournalled} if unjournalled else {})}
         text = (f"cleanup: {done} removed, {skipped} skipped on re-check, {failed} failed"
                 + (f"; {freed:.1f} GB of build output freed" if freed else "")
                 + (f"; {stopped} left for the next run (deadline)" if stopped else ""))

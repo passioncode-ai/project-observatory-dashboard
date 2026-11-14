@@ -329,6 +329,56 @@ def test_a_submodule_is_measured_composition_and_dissolves_the_phantom() -> None
           str(phantoms))
 
 
+def test_a_recorded_copy_stands_apart_from_its_source() -> None:
+    """OBS-535: a wiki note naming a recorded copy does not pour it into its source's project.
+
+    Measured on 2026-11-13: the note rule put an organization's copy of a personal agent into
+    the agent's project, so one project held two owners' repositories and lost its
+    organization. Driven twice over the same inputs: without `derivations.json` the note links
+    the copy (the control), with it the copy anchors a project of its own; a move is the same
+    work relocated and stays.
+    """
+    copy, moved = f"{OWNER}/fixture-copy", f"{OWNER}/fixture-moved"
+
+    def planted(derivations):
+        raw = raw_copy()
+        (raw / "gh" / "copies.json").write_text(json.dumps([
+            {"nameWithOwner": n, "url": "https://github.com/" + n, "visibility": "PRIVATE",
+             "isArchived": False, "isFork": False} for n in (copy, moved)]), encoding="utf-8")
+        vault = json.loads((raw / "vault.json").read_text(encoding="utf-8"))
+        next(v for v in vault if v["folder"] == "fixture-parent")["github"] = [copy, moved]
+        (raw / "vault.json").write_text(json.dumps(vault), encoding="utf-8")
+        if derivations is not None:
+            merge_fixture.write(merge_fixture.curation(raw.parent) / "derivations.json",
+                                {"schema": "derivations/1", "derivations": derivations})
+        return merge(raw)
+
+    rc, out, model = planted(None)
+    check("the control merge runs", rc == 0, out[-200:])
+    if rc:
+        return
+    check("without a record the note links the copy (the control)",
+          copy in model["projects"]["fixture-parent"]["repos"],
+          str(model["projects"]["fixture-parent"]["repos"]))
+    source = f"repository:{OWNER}/fixture-parent"
+    rc, out, model = planted([
+        {"copy": f"repository:{copy}", "source": source, "kind": "copy"},
+        {"copy": f"repository:{moved}", "source": source, "kind": "move"}])
+    check("the merge with a recorded copy runs", rc == 0, out[-200:])
+    if rc:
+        return
+    parent = model["projects"]["fixture-parent"]
+    check("the recorded copy left its source's project", copy not in parent["repos"],
+          str(parent["repos"]))
+    check("and no rule of the source's project still names it",
+          not any(r.startswith(copy + ":") for r in parent["rules"]), str(parent["rules"]))
+    own = [k for k, v in model["projects"].items() if v["repos"] == [copy]]
+    check("the copy anchors a project of its own", len(own) == 1, str(own))
+    check("a move stays where the note put it", moved in parent["repos"], str(parent["repos"]))
+    check("and the merge says why the copy stands apart",
+          f"a recorded copy stands apart: {copy}" in out, out[-300:])
+
+
 def test_retired_repositories_never_form_an_organisation_project() -> None:
     """The `or ks` hole, driven: two retired leftovers under one owned org."""
     raw = raw_copy()
@@ -421,6 +471,7 @@ if __name__ == "__main__":
                test_retired_repositories_never_form_an_organisation_project,
                test_every_folder_exclusion_carries_its_reason,
                test_a_submodule_is_measured_composition_and_dissolves_the_phantom,
+               test_a_recorded_copy_stands_apart_from_its_source,
                test_session_dates_pass_through_real_merge,
                test_404_is_driven_without_previous_answer):
         fn()
