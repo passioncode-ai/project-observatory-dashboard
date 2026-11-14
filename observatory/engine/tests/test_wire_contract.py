@@ -263,7 +263,9 @@ def test_the_served_instructions_describe_the_served_surface() -> None:
     # Twenty-eight with `observatory_org_accounts` and `observatory_org_keys` (OBS-411, OBS-415), named in "Also".
     # Twenty-nine with `observatory_org_selection` (OBS-417), named on the WRITE line.
     # Thirty with `observatory_sessions` (OBS-550), named in "Also".
-    check("the server serves thirty observatory tools (the coding sessions, OBS-550)", tools == 30,
+    # Thirty-one with `observatory_key_consumers` (OBS-561); the instructions are at the 1,800 characters a host
+    # keeps, so it is found by `tools/list` and its own description.
+    check("the server serves thirty-one observatory tools (the key consumers, OBS-561)", tools == 31,
           str(tools))
     check("the instructions name the coding sessions beside the machine",
           "`observatory_machine` (`section`, `move`, `explainPid`); `_sessions`" in src.split("instructions=(", 1)[1][:2600])

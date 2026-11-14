@@ -220,6 +220,8 @@ def setup(vault_ok=True):
         delivered.append((value, project, env, name))
     m.deliver_to_vault = deliver
     m.parse_vault_target = lambda t: tuple(t.split("/"))
+    # No copy of a slot's value elsewhere (OBS-561); test_rotation_consumers drives the real guard.
+    m._roll_guard = lambda slot: ([], [])
     with_admin(m)
     return m, fake, delivered
 

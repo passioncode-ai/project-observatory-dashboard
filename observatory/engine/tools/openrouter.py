@@ -9,7 +9,7 @@
     python "$T/openrouter.py" list | ping
     python "$T/openrouter.py" limit my-agent --set 25 [--reset daily]
     python "$T/openrouter.py" disable my-agent              # or enable
-    python "$T/openrouter.py" rotate my-agent               # or --leaked
+    python "$T/openrouter.py" rotate my-agent               # or --leaked; --dry-run, --force (OBS-561)
     python "$T/openrouter.py" revoke my-agent
     python "$T/openrouter.py" claim old-tool --where PATH < key-file   # a key minted elsewhere, by hash
 
@@ -36,6 +36,14 @@ Two provider differences the shape has to absorb:
   delete-first rotation that fails halfway leaves the consumer with a dead key
   and nothing else, and a consumer that falls back to another provider silently
   would hide that failure.
+
+* The slot is not the only consumer (OBS-561). Before anything is minted the
+  other copies of the slot's value are found by the value itself
+  (`tools/key_consumers.py`: Heroku config vars, the local env files the engine
+  inventories, the services started from the slot); after the slot each copy
+  gets the successor and is read back, and the predecessor is deleted only then.
+  A copy that cannot be reached holds the predecessor alive (`--force` cuts it,
+  journaled); `rotate --dry-run` names the copies first.
 
 Every minted key expires (OBS-191): `issue` sends `expires_at`, 90 days out by
 default; `--expire-days N` (1 to 365) moves it and `--no-expiry` mints one that
@@ -548,6 +556,90 @@ def deliver(value: str, to: str, *, rotate: bool = False) -> str:
                        f"{', '.join(NAMED_DESTINATIONS)} or vault:<project>/<env>/<NAME>")
 
 
+# ─────────────────────────── the other consumers of a value (OBS-561) ────────
+
+def _destination_slot(to: str) -> tuple[str, str, str] | None:
+    if not str(to or "").startswith("vault:"):
+        return None
+    parts = to[len("vault:"):].split("/")
+    return (parts[0], parts[1], parts[2]) if len(parts) == 3 and all(parts) else None
+
+
+def _destination_file(to: str) -> pathlib.Path | None:
+    if to not in NAMED_DESTINATIONS:
+        return None
+    sys.path.insert(0, str(ROOT / "tools"))
+    import install_key
+    return install_key.DESTINATIONS[to][0]
+
+
+def destination_value(to: str) -> tuple[str | None, str | None]:
+    """(the value the destination holds now, or None; why it could not be read, or None). In memory only: this is
+    the value whose other copies `key_consumers` looks for before the key behind it is revoked."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import key_consumers
+    try:
+        slot = _destination_slot(to)
+        if slot:
+            return key_consumers.vault_value(*slot), None
+        path = _destination_file(to)
+        if path is None or not path.is_file():
+            return None, None
+        text = path.read_text(encoding="utf-8")
+    except Exception as exc:                                                    # noqa: BLE001  named, never echoed
+        return None, f"the destination could not be read ({type(exc).__name__})"
+    import install_key
+    for line in text.splitlines():
+        _name, _eq, rest = line.partition("=")
+        candidate = rest.strip().strip("'\"") if _eq else line.strip()
+        if candidate.startswith(install_key.KEY_PREFIX):
+            return candidate, None
+    return (text.strip() or None), None
+
+
+def consumer_sources(to: str) -> list:
+    """Where the copies of a destination's value are looked for: Heroku config vars, the local env files the
+    engine inventories, the services started from the slot. The destination itself is never one of them."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import key_consumers
+    path = _destination_file(to)
+    return key_consumers.default_sources(_destination_slot(to), exclude=(str(path),) if path else ())
+
+
+def find_consumers(to: str) -> tuple[str | None, dict]:
+    """(the destination's value, in memory; the consumers of it found elsewhere, by name and place)."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import key_consumers
+    old, why = destination_value(to)
+    if why:
+        return None, {"consumers": [], "degraded": [{"source": "destination", "reason": why}], "skipped": [],
+                      "_sources": {}}
+    return old, key_consumers.find(old, consumer_sources(to))
+
+
+def _deliver_to_consumers(found: dict, old: str | None, new: str, secret: str) -> list[dict]:
+    """Deliver `new` to every consumer found and read it back; each delivery is a movement on the record."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import key_consumers
+    if not old:
+        return []
+    outcomes = key_consumers.deliver_all(found, old, new)
+    for o in outcomes:
+        if o["status"] == "delivered":
+            _journal("consumer-delivered", secret, consumer=o["consumer"])
+    return outcomes
+
+
+def _print_consumers(name: str, result: dict) -> None:
+    for o in result.get("consumers") or []:
+        if o["status"] == "delivered":
+            print(f"    {o['consumer']}: delivered and read back")
+        elif o["status"] == "restart":
+            print(f"    {o['consumer']}: reads the slot at start; restart it: {o['restart']}")
+    for line in result.get("cut") or []:
+        print(f"  {name}: --force cut {line}", file=sys.stderr)
+
+
 # ─────────────────────────── issue / limits / rotate ─────────────────────────
 
 def _lifetime(expire_days: int | None, asked: str | None, provider_row: dict | None) -> dict:
@@ -704,11 +796,16 @@ def _reset(value: str | None) -> str:
 @_locked
 def issue_key(name: str, limit: float, account: str | None, to: str,
               project: str | None, reset: str = "monthly",
-              expire_days: int | None = key_expiry.DEFAULT_DAYS) -> dict:
+              expire_days: int | None = key_expiry.DEFAULT_DAYS, force: bool = False) -> dict:
     """Mint, deliver, record. The ONE issuer: `tools/keyserver.py`'s HTTP
     `mint` calls this, so a key born from a button and a key born from the
     command line are the same key, in the same ledger, with the same ceiling.
     Raises ValueError for a caller's mistake and RuntimeError for the provider's.
+
+    A destination that already holds a value (OBS-561): the other copies of that value are found first, and an
+    unreadable source or a copy that cannot be written holds the issue before anything is minted (`force` goes
+    on). After the delivery each copy gets the new value and is read back; one that did not is named in `held`,
+    and the old key it still holds must not be revoked until it moves.
     """
     name = slug(name)
     if not name:
@@ -723,6 +820,14 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
     if (doc["issued"].get(name) or {}).get("pending"):
         raise ValueError(f"an issue of {name!r} is recorded as pending: {PENDING_REMEDY.format(name=name)}")
     label, admin = read_admin(account)
+    sys.path.insert(0, str(ROOT / "tools"))
+    import key_consumers
+    old_value, found = find_consumers(to)
+    early = key_consumers.blocks(found)
+    if early and not force:
+        _journal("issue-held", f"openrouter/{label}/{name}", to=to, consumers=early)
+        raise key_consumers.ConsumersHeld(f"{name}: {to} holds a value whose other copies cannot all be updated; "
+                                          f"nothing was minted (`--force` issues anyway)", early)
     try:
         name_check = _name_check(admin, name)
     except ValueError as exc:
@@ -797,10 +902,17 @@ def issue_key(name: str, limit: float, account: str | None, to: str,
     _record_slot_expiry(to, life["expires_at"], life.get("expiry_reason"))
     _journal("issue", f"openrouter/{label}/{name}", to=to, limit_usd=limit, name_check=name_check,
              expires_at=life["expires_at"])
+    outcomes = _deliver_to_consumers(found, old_value, value, f"openrouter/{label}/{name}")
+    held = key_consumers.held(outcomes)
+    if held:
+        _journal("issue-consumers-held", f"openrouter/{label}/{name}", to=to, consumers=held)
+    if force and early:
+        _journal("issue-forced", f"openrouter/{label}/{name}", to=to, cut=early)
     return {"name": name, "account": label, "label": row.get("label"),
             "limit": limit, "limit_reset": reset, "delivered_to": place,
             "name_check": name_check, "expires_at": life["expires_at"],
-            "expiry": key_expiry.describe(life)}
+            "expiry": key_expiry.describe(life), "consumers": outcomes, "held": held,
+            "cut": early if force else [], "degraded": found["degraded"]}
 
 
 #: What to do about a pending row (a key minted, or perhaps minted, whose delivery was never recorded).
@@ -837,9 +949,16 @@ def _undo_mint(admin: str, name: str, row: dict) -> None:
 
 def cmd_issue(name: str, limit: float, account: str | None, to: str,
               project: str | None, reset: str = "monthly",
-              expire_days: int | None = key_expiry.DEFAULT_DAYS) -> int:
+              expire_days: int | None = key_expiry.DEFAULT_DAYS, force: bool = False) -> int:
+    sys.path.insert(0, str(ROOT / "tools"))
+    import key_consumers
     try:
-        r = issue_key(name, limit, account, to, project, reset, expire_days)
+        r = issue_key(name, limit, account, to, project, reset, expire_days, force=force)
+    except key_consumers.ConsumersHeld as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        for line in exc.lines:
+            print(f"  holds it: {line}", file=sys.stderr)
+        return 1
     except ValueError as exc:
         print(f"refused: {exc}", file=sys.stderr)
         return 2
@@ -852,7 +971,11 @@ def cmd_issue(name: str, limit: float, account: str | None, to: str,
         print(f"note: {r['name_check']}", file=sys.stderr)
     rec = ledger()["issued"].get(r["name"]) or {}
     _byok_after(rec.get("hash"), rec.get("account"), r["name"], rec)
-    return 0
+    _print_consumers(r["name"], r)
+    for line in r.get("held") or []:
+        print(f"  {r['name']}: still holds the old value, so the old key must stay alive until it moves: {line}",
+              file=sys.stderr)
+    return 1 if r.get("held") else 0
 
 
 # ─────────────────────────── a project's own key, from its spend policy ───────
@@ -1485,7 +1608,10 @@ def _gone_snapshot(why: str) -> dict:
 
 #: A row a failure left part done: the rotation it belongs to is finished before a new one starts.
 PART_DONE = ("successor-minted-delivery-pending", "successor-delivered-predecessor-pending",
-             "predecessor-retired-rename-pending")
+             "predecessor-retired-rename-pending", "successor-delivered-predecessor-held")
+#: A rotation whose successor reached the slot while a consumer of the predecessor's value was not delivered and
+#: read back (OBS-561): the predecessor stays alive, named on the row, until `rotate` delivers to every consumer.
+HELD = "successor-delivered-predecessor-held"
 
 
 def _part_done(rec: dict) -> bool:
@@ -1512,7 +1638,46 @@ def _retire_predecessor(doc: dict, name: str, rec: dict, predecessor: str | None
     rec["rotation_status"] = "predecessor-retired-rename-pending"
 
 
-def _resume_rotation(doc: dict, name: str, rec: dict, label: str, admin: str) -> None:
+def _clear_hold(doc: dict, name: str, rec: dict, label: str, force: bool) -> None:
+    """A held rotation (`HELD`) is finished only once every copy of the predecessor's value carries the successor.
+    The predecessor's value is found again among the slot's retired values by the hash the ledger recorded (the
+    provider's hash is the value's SHA-256), never stored; when it is not there, its copies cannot be looked for
+    and the hold stays (`force` finishes anyway and journals what it cut). Raises ConsumersHeld while held."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import key_consumers
+    secret = f"openrouter/{label}/{name}"
+    dest = rec.get("destination") or ""
+    slot = _destination_slot(dest)
+    predecessor = rec.get("predecessor_hash")
+    new_value, why = destination_value(dest)
+    old_value = None
+    if slot and predecessor:
+        old_value = key_consumers.retired_value(
+            *slot, matches=lambda v: hashlib.sha256(v.encode("utf-8")).hexdigest() == predecessor)
+    if old_value and new_value:
+        found = key_consumers.find(old_value, consumer_sources(dest))
+    else:
+        reason = why or ("the predecessor's value is not on this machine (no retired value of the slot has its "
+                         "hash), so its copies cannot be looked for" if new_value else
+                         "the slot holds no successor to deliver")
+        found = {"consumers": [], "degraded": [{"source": "predecessor", "reason": reason}], "skipped": [],
+                 "_sources": {}}
+    early = key_consumers.blocks(found)
+    outcomes = _deliver_to_consumers(found, old_value, new_value, secret) if new_value else []
+    stuck = early + key_consumers.held(outcomes)
+    if stuck and not force:
+        rec["held_consumers"] = stuck
+        save_ledger(doc)
+        _journal("rotation-held", secret, consumers=stuck, stage="resume")
+        raise key_consumers.ConsumersHeld(f"{name}: the rotation stays held; the predecessor key stays alive", stuck)
+    if stuck:
+        _journal("rotation-forced", secret, cut=stuck)
+    rec.pop("held_consumers", None)
+    rec["rotation_status"] = "successor-delivered-predecessor-pending"
+    save_ledger(doc)
+
+
+def _resume_rotation(doc: dict, name: str, rec: dict, label: str, admin: str, force: bool = False) -> None:
     """Finish the rotation an earlier run left part done (round 5, R5-3/R5-9). `rotate_one` then rotates afresh:
     finishing an old rotation never replaces the current value, and a caller who asked to rotate gets a new one
     (round 6, R6-1).
@@ -1533,6 +1698,8 @@ def _resume_rotation(doc: dict, name: str, rec: dict, label: str, admin: str) ->
                          f"finishing that rotation would delete the key its consumer holds; nothing was done. "
                          f"Repair the row in the door's ledger: remove `predecessor_hash`, `predecessor_snapshot` and "
                          f"`rotation_status`, then `rotate {name}` again")
+    if rec.get("rotation_status") == HELD:
+        _clear_hold(doc, name, rec, label, force)
     try:
         pending = rec.pop("successor_pending", None)
         if pending:
@@ -1597,8 +1764,22 @@ def _retire_stale_successors(doc: dict, name: str, rec: dict, admin: str) -> Non
         save_ledger(doc)
 
 
-def _rotate_fresh(doc: dict, name: str, rec: dict, label: str, admin: str) -> dict:
-    """Mint a successor, record it, deliver it, then retire the predecessor: the current value is replaced."""
+def _rotate_fresh(doc: dict, name: str, rec: dict, label: str, admin: str, force: bool = False) -> dict:
+    """Mint a successor, record it, deliver it, then retire the predecessor: the current value is replaced.
+
+    THE OTHER COPIES FIRST (OBS-561, CP-11). Before anything is minted the copies of the slot's value elsewhere are
+    found (`find_consumers`); an unreadable source or a copy that cannot be written holds the rotation there, with
+    nothing minted. After the slot, each copy gets the successor and is read back; one that did not leaves the row
+    `HELD` with the predecessor alive. `force` deletes the predecessor anyway and journals what it cut."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import key_consumers
+    secret = f"openrouter/{label}/{name}"
+    old_value, found = find_consumers(rec["destination"])
+    early = key_consumers.blocks(found)
+    if early and not force:
+        _journal("rotation-held", secret, consumers=early, stage="before-mint")
+        raise key_consumers.ConsumersHeld(f"{name}: held before anything was minted; the current key stays alive",
+                                          early)
     rotations = rec.get("rotations", 0)
     limit = rec.get("limit_usd") or 10
     previous_hash = rec.get("hash")
@@ -1655,8 +1836,21 @@ def _rotate_fresh(doc: dict, name: str, rec: dict, label: str, admin: str) -> di
                 "predecessor_hash": old.get("hash") if old else None,
                 "predecessor_rotated_on": previous_rotated_on})
     predecessor = (old or {}).get("hash") or previous_hash
+    cut = list(early) if force else []
     try:
         save_ledger(doc)
+        outcomes = _deliver_to_consumers(found, old_value, value, secret)
+        stuck = key_consumers.held(outcomes)
+        if stuck and not force:
+            rec["rotation_status"] = HELD
+            rec["held_consumers"] = stuck
+            save_ledger(doc)
+            _journal("rotation-held", secret, consumers=stuck, stage="after-delivery", to=rec["destination"])
+            raise key_consumers.ConsumersHeld(f"{name}: the successor is in {place}, but the predecessor key stays "
+                                              f"alive until every copy of it is delivered", stuck)
+        cut += stuck
+        if cut:
+            _journal("rotation-forced", secret, cut=cut)
         _retire_stale_successors(doc, name, rec, admin)
         # What the predecessor spent, read while it still exists (the provider keeps no history of a deleted key),
         # and kept on the row BEFORE the DELETE: a failure after the DELETE must not lose it (round 4, P5).
@@ -1672,17 +1866,20 @@ def _rotate_fresh(doc: dict, name: str, rec: dict, label: str, admin: str) -> di
         _request(f"/keys/{new_row['hash']}", admin, {"name": name}, method="PATCH")
         rec["rotation_status"] = "complete"
         save_ledger(doc)
+    except key_consumers.ConsumersHeld:
+        raise
     except (OSError, ValueError, RuntimeError):
         _journal("rotation-partial", f"openrouter/{label}/{name}",
                  status="successor-delivered-provider-or-ledger-finalization-failed")
         raise RuntimeError("Partial failure: successor delivered, but provider or ledger finalization failed; inspect provider keys and ledger before retrying") from None
     _journal("rotate", f"openrouter/{label}/{name}", to=rec["destination"])
     return {"name": name, "delivered_to": place, "rotations": rec["rotations"],
-            "rotated_on": rec["rotated_on"], "replaced": True}
+            "rotated_on": rec["rotated_on"], "replaced": True, "consumers": outcomes, "cut": cut,
+            "degraded": found["degraded"], "skipped": found["skipped"]}
 
 
 @_locked
-def rotate_one(name: str, doc: dict | None = None) -> dict:
+def rotate_one(name: str, doc: dict | None = None, force: bool = False) -> dict:
     """Replace the key's value: deliver and verify a successor before revoking the predecessor, keeping recovery
     metadata. A row a failure left part done is finished first (`_resume_rotation`), then rotated afresh, so the
     result always names a new value (`replaced`) and says whether an earlier rotation was finished (`resumed`)."""
@@ -1705,13 +1902,36 @@ def rotate_one(name: str, doc: dict | None = None) -> dict:
     label, admin = read_admin(rec["account"])
     resumed = _part_done(rec)
     if resumed:
-        _resume_rotation(doc, name, rec, label, admin)
-    result = _rotate_fresh(doc, name, rec, label, admin)
+        _resume_rotation(doc, name, rec, label, admin, force)
+    result = _rotate_fresh(doc, name, rec, label, admin, force)
     result["resumed"] = resumed
     return result
 
 
-def cmd_rotate(name: str | None, leaked: bool) -> int:
+def cmd_rotate_dry_run(targets: list[str], doc: dict) -> int:
+    """What a rotation would find and hold, by name and place; nothing is minted, delivered or revoked."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import key_consumers
+    bad = 0
+    for n in targets:
+        rec = doc["issued"].get(n) or {}
+        _old, found = find_consumers(rec.get("destination") or "")
+        holds = key_consumers.blocks(found)
+        print(f"  {n}: {len(found['consumers'])} other consumer(s) of the value in {rec.get('destination')}"
+              + ("; the rotation would be HELD" if holds else ""))
+        for c in found["consumers"]:
+            print(f"    {key_consumers.describe(c)}")
+        for line in holds:
+            print(f"    holds it: {line}")
+        for s in found["skipped"]:
+            print(f"    not looked in: {s['source']} ({s['reason']})")
+        bad += bool(holds)
+    return 1 if bad else 0
+
+
+def cmd_rotate(name: str | None, leaked: bool, force: bool = False, dry_run: bool = False) -> int:
+    sys.path.insert(0, str(ROOT / "tools"))
+    import key_consumers
     doc = ledger()
     targets = list(doc["issued"]) if not name else [name]
     if leaked:
@@ -1727,9 +1947,15 @@ def cmd_rotate(name: str | None, leaked: bool) -> int:
             print(f"  {n}: claimed, not issued — `issue` its replacement, then `revoke {n}`", file=sys.stderr)
             bad += 1
         targets = [t for t in targets if not (doc["issued"].get(t) or {}).get("claimed")]
+    if dry_run:
+        missing = [t for t in targets if t not in doc["issued"]]
+        for n in missing:
+            print(f"  {n}: not in the ledger", file=sys.stderr)
+        return cmd_rotate_dry_run([t for t in targets if t in doc["issued"]], doc) or (1 if missing else 0)
     for n in targets:
         try:
-            r = rotate_one(n)               # re-read under the lock: `doc` above was read before it
+            # re-read under the lock: `doc` above was read before it
+            r = rotate_one(n, force=True) if force else rotate_one(n)
             if not r.get("replaced"):
                 # Never "rotated" for a run that replaced nothing (round 6, R6-1).
                 print(f"  {n}: an earlier rotation was finished; the current value was not replaced — "
@@ -1738,8 +1964,14 @@ def cmd_rotate(name: str | None, leaked: bool) -> int:
                 continue
             print(f"  {n}: rotated, successor delivered to {r['delivered_to']}, predecessor deleted"
                   + ("; an earlier rotation left part done was finished first" if r.get("resumed") else ""))
+            _print_consumers(n, r)
             rec = ledger()["issued"].get(n) or {}
             _byok_after(rec.get("hash"), rec.get("account"), n, rec)
+        except key_consumers.ConsumersHeld as exc:
+            print(f"  {n}: HELD: {exc}", file=sys.stderr)
+            for line in exc.lines:
+                print(f"    holds it: {line}", file=sys.stderr)
+            bad += 1
         except (LookupError, ValueError) as exc:
             print(f"  {n}: {exc}", file=sys.stderr)
             bad += 1
@@ -1946,6 +2178,12 @@ def revoke_key(name_or_label: str) -> dict:
     if rec.get("successor_pending") or rec.get("stale_successors"):
         raise ValueError(f"{name}: a rotation left a successor whose delivery is unknown; `rotate {name}` "
                          f"finishes it (and deletes that successor once a new one holds the slot), then revoke")
+    if rec.get("rotation_status") == HELD:
+        # The predecessor is live and a consumer still reads it (OBS-561): revoking the successor would leave that
+        # key live and untracked. The hold is finished by `rotate`, never by a revoke.
+        raise ValueError(f"{name}: a rotation is held because a copy of the old value was not delivered "
+                         f"({'; '.join(rec.get('held_consumers') or []) or 'see the journal'}); `rotate {name}` "
+                         f"finishes it once that copy is reachable, `rotate {name} --force` cuts it")
     _label, admin = read_admin(rec["account"])
     row = find_key(admin, name)
     key_hash = rec.get("hash") or (row or {}).get("hash")
@@ -2338,6 +2576,9 @@ def main() -> int:
     key_expiry.add_flags(p_is, "--expire-days", NO_EXPIRY_FLAG, "key")
     p_is.add_argument("--reset", choices=RESETS, default="monthly",
                       help="when the ceiling starts again (default monthly)")
+    p_is.add_argument("--force", action="store_true",
+                      help="issue into a destination that holds a value even when that value's other copies cannot "
+                      "all be found or written (OBS-561); journaled")
     p_ip = sub.add_parser("issue-for-policy",
                           help="issue a project's own keys from its spend policy (OBS-58): their ceilings together "
                           "stay within the project limit at every moment — every key of the project counts, one the "
@@ -2381,6 +2622,12 @@ def main() -> int:
     p_ro.add_argument("name", nargs="?")
     p_ro.add_argument("--leaked", action="store_true",
                       help="rotate every issued key named in an open leak")
+    p_ro.add_argument("--force", action="store_true",
+                      help="delete the predecessor even when a copy of its value elsewhere (a Heroku config var, an "
+                      "env file) could not be found, delivered or read back; the copies cut are journaled (OBS-561)")
+    p_ro.add_argument("--dry-run", action="store_true",
+                      help="name the other copies of each key's value and whether the rotation would be held; "
+                      "mint, deliver and delete nothing")
     p_re = sub.add_parser("revoke", help="delete at the provider, clear the ledger row")
     p_re.add_argument("name")
     p_re.add_argument("--forget-pending", action="store_true",
@@ -2408,7 +2655,7 @@ def main() -> int:
     if a.cmd == "adopt":
         return cmd_adopt(a.label)
     if a.cmd == "issue":
-        return cmd_issue(a.name, a.limit, a.account, a.to, a.project, a.reset, key_expiry.days_of(a))
+        return cmd_issue(a.name, a.limit, a.account, a.to, a.project, a.reset, key_expiry.days_of(a), a.force)
     if a.cmd == "issue-for-policy":
         return cmd_issue_for_policy(a.policy, a.account, a.limit, a.dry_run, a.split)
     if a.cmd == "list":
@@ -2433,7 +2680,7 @@ def main() -> int:
     if a.cmd == "enable":
         return cmd_toggle(a.name, False)
     if a.cmd == "rotate":
-        return cmd_rotate(a.name, a.leaked)
+        return cmd_rotate(a.name, a.leaked, a.force, a.dry_run)
     if a.cmd == "revoke":
         return cmd_revoke(a.name, a.forget_pending, a.reason)
     if a.cmd == "claim":

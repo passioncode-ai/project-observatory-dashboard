@@ -499,6 +499,10 @@ def act_rotate_key(body: dict) -> dict:
     except LookupError as exc:
         raise LookupError(str(exc)) from None
     except RuntimeError as exc:
+        lines = getattr(exc, "lines", None)
+        if lines is not None:
+            # Held for a consumer of the old value (OBS-561): the old key stays alive; each holder is named.
+            raise LookupError(f"held: {exc}; " + "; ".join(lines)) from None
         raise LookupError(f"the provider refused: {exc}") from None
     if not result.get("replaced"):
         # Never "ok" for a run that replaced nothing (J-11 round 6, R6-1).

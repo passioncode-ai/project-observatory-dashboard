@@ -8,7 +8,7 @@
     python "$T/heroku.py" issue --preset deploy --vault PROJECT/ENV/NAME --app APP [--expire-days 90 | --no-expiry]
     python "$T/heroku.py" list
     python "$T/heroku.py" ping
-    python "$T/heroku.py" rotate PROJECT/ENV/NAME        # or --leaked, for every open leak
+    python "$T/heroku.py" rotate PROJECT/ENV/NAME        # or --leaked, for every open leak; --force (OBS-561)
     python "$T/heroku.py" revoke PROJECT/ENV/NAME
     python "$T/heroku.py" teams
     python "$T/heroku.py" members --team TEAM
@@ -61,7 +61,10 @@ credentials projection read.
 ROTATION IS IN PLACE. `regenerate-tokens` keeps the authorization's id, scope
 and description and kills the old value at once, so the slot is written in the
 same run; a delivery that fails after it says that the slot now holds a dead
-value.
+value. Because the old value dies at once, a copy of it elsewhere (a Heroku
+config var, a local env file: `tools/key_consumers.py`) would be cut, so the
+roll is refused while one is found or a place it could be is unreadable;
+`--force` rolls anyway and journals what it cut (OBS-561).
 
 TEAM MEMBERSHIP WRITES ARE A PLAN UNTIL `--apply`. `member add|role|remove`
 reads the team, prints what would change and stops. With `--apply` it makes the
@@ -832,8 +835,27 @@ def leaked_slots(doc: dict) -> set[str]:
     return out
 
 
+def consumer_sources(project: str, env: str, name: str) -> list:
+    """Where the copies of a slot's value are looked for before a roll (OBS-561); tests replace it."""
+    import key_consumers
+    return key_consumers.default_sources((project, env, name))
+
+
+def _roll_guard(slot: str) -> tuple[list[str], list[str]]:
+    """(lines that refuse rolling this slot's authorization, services to restart after it). A regenerate kills the
+    old value at once, so a copy of it outside the vault would be cut; delivering to such copies is later work
+    (docs/design/control-plane/rotation.md)."""
+    import key_consumers
+    project, env, name = slot.split("/")
+    try:
+        old, why = key_consumers.vault_value(project, env, name), None
+    except Exception as exc:                                                    # noqa: BLE001  named, never echoed
+        old, why = None, f"the slot could not be read ({type(exc).__name__})"
+    return key_consumers.roll_guard(old, consumer_sources(project, env, name) if not why else [], why)
+
+
 @_locked
-def cmd_rotate(wanted: str | None, leaked: bool, wait: float = 2.0) -> int:
+def cmd_rotate(wanted: str | None, leaked: bool, wait: float = 2.0, force: bool = False) -> int:
     try:
         doc = ledger()
         if leaked:
@@ -852,6 +874,17 @@ def cmd_rotate(wanted: str | None, leaked: bool, wait: float = 2.0) -> int:
     bad = 0
     for slot in slots:
         row = doc["issued"][slot]
+        refuse, restart = _roll_guard(slot)
+        if refuse and not force:
+            print(f"  {slot}: HELD, not regenerated: a regenerate kills the old value at once, and a copy of it "
+                  f"would be cut (`--force` regenerates anyway)", file=sys.stderr)
+            for line in refuse:
+                print(f"    holds it: {line}", file=sys.stderr)
+            _journal("rotation-held", slot, consumers=refuse, stage="before-roll")
+            bad += 1
+            continue
+        if refuse:
+            _journal("rotation-forced", slot, cut=refuse)
         try:
             _label, admin = read_admin(row.get("admin"))
             auth = _request("POST", f"/oauth/authorizations/{q(row['authorization_id'])}"
@@ -888,6 +921,8 @@ def cmd_rotate(wanted: str | None, leaked: bool, wait: float = 2.0) -> int:
         put_row(slot, row)
         _journal("rotate", slot, authorization=row.get("authorization_id"))
         print(f"  {slot}: regenerated in place and delivered (authorization {row.get('authorization_id')})")
+        for line in restart + [f"--force cut {line}" for line in (refuse if force else [])]:
+            print(f"    {line}")
     if leaked and not bad:
         print(SETTLE_HINT)
     return 1 if bad else 0
@@ -1148,6 +1183,9 @@ def main() -> int:
     p = sub.add_parser("rotate", help="regenerate an authorization's value in place")
     p.add_argument("target", nargs="?", help="PROJECT/ENV/NAME or an authorization id")
     p.add_argument("--leaked", action="store_true", help="every slot named in an open leak")
+    p.add_argument("--force", action="store_true",
+                   help="regenerate even when a copy of the value outside the vault was found or a place it could "
+                   "be could not be read (OBS-561); the copies cut are journaled")
     p = sub.add_parser("revoke", help="delete at Heroku, then the ledger row")
     p.add_argument("target", help="PROJECT/ENV/NAME or an authorization id")
     p = sub.add_parser("teams", help="teams: name, id, role, apps, slots")
@@ -1183,7 +1221,7 @@ def main() -> int:
     if a.cmd == "ping":
         return cmd_ping()
     if a.cmd == "rotate":
-        return cmd_rotate(a.target, a.leaked)
+        return cmd_rotate(a.target, a.leaked, force=a.force)
     if a.cmd == "revoke":
         return cmd_revoke(a.target)
     if a.cmd == "teams":

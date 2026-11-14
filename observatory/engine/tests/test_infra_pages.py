@@ -249,6 +249,8 @@ class Door(unittest.TestCase):
     def test_rotate_ping_list_and_revoke_reach_it_by_its_label(self):
         quiet(self.m.cmd_issue, "inventory-read", None, None)
         self.assertEqual([self.m.label_of(p) for p in self.m.issued()], ["inventory/example-account"])
+        # No copy of the token anywhere else (OBS-561); test_rotation_consumers drives the finder.
+        self.m.consumer_sources = lambda path: []
         rc, out, err = quiet(self.m.cmd_rotate, "inventory/example-account", False)
         self.assertEqual(rc, 0, err)
         meta = json.loads((self.m.INVENTORY_STORE / "example-account.meta.json").read_text())
