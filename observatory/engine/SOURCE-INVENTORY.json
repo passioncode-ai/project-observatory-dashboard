@@ -29,8 +29,8 @@
       "path": "agent/assistant.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "64eaa6b77b85b41ebe89e9e434542a2d973374fb21575d1ac1ff4ea6ea07f1d4",
-      "bytes": 31656
+      "export_sha256": "94f3d9f32ebd03c165e52a5f60cd9e547bf19af7cec6e106636d94fd1160777e",
+      "bytes": 32333
     },
     {
       "path": "agent/observe.py",
@@ -4632,8 +4632,8 @@
       "path": "tests/test_assistant.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "16b7e0ead8bd5fce248c5d9085150848b7674e2a2fcc01ba0086d6eebf459043",
-      "bytes": 32736
+      "export_sha256": "971f4321169000525b466633c0d8e715c2317b659f5a8a1a05086b43510d7e81",
+      "bytes": 33683
     },
     {
       "path": "tests/test_at_stake.py",
