@@ -17,7 +17,7 @@ hypothetical:
    document that is in git, and a handle that acts does not belong there.
 """
 from __future__ import annotations
-import json, pathlib, sys
+import json, os, pathlib, sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -549,6 +549,93 @@ def test_a_claimed_key_is_never_lost_skipped_or_guessed():
             setattr(door, k, v)
 
 
+def test_byok_lists_follow_the_ledger_per_workspace() -> None:
+    """OBS-544: each workspace's openai credential allows exactly the ledger's keys there. Two accounts that share a
+    workspace make ONE list (a per-account list would overwrite the other's); an excluded key and a foreign hash are
+    removed; a key the provider could not read keeps its access; only the list is ever sent, never a key value."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import importlib
+    door = importlib.import_module("openrouter")
+    issued = {
+        "agent-a": {"account": "acct-a", "hash": "ha"},
+        "agent-b": {"account": "acct-b", "hash": "hb"},          # same workspace as agent-a, another account
+        "phone-bot": {"account": "acct-a", "hash": "hx", "project": "secret-phone"},
+        "flaky": {"account": "acct-a", "hash": "hf"},              # the provider will not answer for it
+        "solo": {"account": "acct-c", "hash": "hs"},               # a workspace with no credential
+        "pending": {"account": "acct-a", "hash": None},
+    }
+    creds = {"w1": [{"id": "c1", "provider": "openai", "allowed_api_key_hashes": ["ha", "hx", "hf", "hforeign"]},
+                    {"id": "c-anthropic", "provider": "anthropic", "allowed_api_key_hashes": []}],
+             "w2": []}
+    workspace_of = {"ha": "w1", "hb": "w1", "hx": "w1", "hs": "w2", "hnew": "w1"}
+    sent = []
+
+    def fake(path, key, payload=None, method=None):
+        if path.startswith("/keys/"):
+            h = path.split("/")[-1]
+            if h == "hf":
+                raise RuntimeError("openrouter answered HTTP 500; provider response withheld")
+            return {"data": {"hash": h, "workspace_id": workspace_of[h]}}
+        if path.startswith("/byok?workspace_id="):
+            return {"data": creds[path.split("=")[1]]}
+        if path.startswith("/byok/") and method == "PATCH":
+            sent.append((path, payload))
+            creds["w1"][0]["allowed_api_key_hashes"] = list(payload["allowed_api_key_hashes"])
+            return {"data": creds["w1"][0]}
+        if path == "/byok" and payload:
+            sent.append((path, payload))
+            return {"data": {"id": "c-new"}}
+        raise AssertionError(path)
+    real = {k: getattr(door, k) for k in ("_request", "ledger", "read_admin", "_journal", "byok_exclusions")}
+    door._request = fake
+    door.ledger = lambda: {"issued": json.loads(json.dumps(issued))}
+    door.read_admin = lambda label=None: (label, "admin-" + str(label))
+    door._journal = lambda *a, **k: None
+    door.byok_exclusions = lambda: ("phone",)
+    try:
+        plan = door.byok_plan()
+        w1 = next(r for r in plan["workspaces"] if r["workspace"] == "w1")
+        check("one list for two accounts in one workspace", w1["add"] == ["agent-b"], str(w1))
+        check("the target is the ledger's keys, the unread one kept, the excluded and foreign gone",
+              w1["target"] == ["ha", "hb", "hf"], str(w1["target"]))
+        check("an excluded key is named", w1["excluded"] == ["phone-bot"], str(w1))
+        check("the unread key is a degradation, not a removal",
+              any(d.get("key") == "flaky" for d in plan["degraded"]), str(plan["degraded"]))
+        w2 = next(r for r in plan["workspaces"] if r["workspace"] == "w2")
+        check("a workspace with no credential says so", w2["credential"] is None, str(w2))
+        door.byok_sync(dry_run=True)
+        check("a dry run sends nothing", sent == [], str(sent))
+        out = door.byok_sync()
+        check("sync patches the list and sends nothing else",
+              sent == [("/byok/c1", {"allowed_api_key_hashes": ["ha", "hb", "hf"]})], str(sent))
+        check("and does not create a credential it was not given a key for",
+              next(r for r in out["workspaces"] if r["workspace"] == "w2")["result"] == "no-credential")
+        sent.clear()
+        again = door.byok_sync()
+        check("a second sync finds it in step", sent == [] and next(
+            r for r in again["workspaces"] if r["workspace"] == "w1")["result"] == "in-step", str(sent))
+        value = "sk-test-" + "9" * 40
+        os.environ["OBS544_TEST_KEY"] = value
+        try:
+            made = door.byok_sync(create_from="OBS544_TEST_KEY")
+        finally:
+            del os.environ["OBS544_TEST_KEY"]
+        post = [p for p in sent if p[0] == "/byok"]
+        check("--create-from creates the missing credential with its list",
+              len(post) == 1 and post[0][1]["allowed_api_key_hashes"] == ["hs"]
+              and post[0][1]["workspace_id"] == "w2", str(post))
+        check("and its value appears nowhere in the answer", value not in json.dumps(made))
+        sent.clear()
+        check("a new key is added to its workspace's list", door.byok_add("hnew", "acct-a", "fresh") == "added"
+              and sent == [("/byok/c1", {"allowed_api_key_hashes": ["ha", "hb", "hf", "hnew"]})], str(sent))
+        sent.clear()
+        check("an excluded new key is not", door.byok_add("hnew", "acct-a", "phone-two") == "excluded"
+              and sent == [], str(sent))
+    finally:
+        for k, v in real.items():
+            setattr(door, k, v)
+
+
 if __name__ == "__main__":
     print("openrouter keys — three characters were not an identifier\n")
     for fn in (test_the_label_is_derivable_without_asking,
@@ -564,7 +651,8 @@ if __name__ == "__main__":
                test_the_step_is_reachable,
                test_the_door_reads_every_page_of_keys,
                test_a_key_minted_elsewhere_is_claimed_by_its_hash_and_never_guessed,
-               test_a_claimed_key_is_never_lost_skipped_or_guessed):
+               test_a_claimed_key_is_never_lost_skipped_or_guessed,
+               test_byok_lists_follow_the_ledger_per_workspace):
         fn()
     print()
     if FAILURES:
