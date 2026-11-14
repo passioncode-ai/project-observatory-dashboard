@@ -11,6 +11,12 @@
    the [North Star](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/north-star.md) metric and
    gaps, and the [one plan in waves](https://github.com/passioncode-ai/fabric-workspace/blob/main/docs/plans/2026-11-11-unified/README.md).
    Name the track, plan row or gap the change serves; work that serves none goes to the board first.
+1b. **Step 0, the workstation, before every change** ([rules §0](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/rules.md),
+   North Star principle 12; operator, 2026-11-13): the skills family with `task-pipeline` installed and the harness
+   updated (`npx --yes sshlg-skills@latest update`), and `npx @passioncode-ai/passioncode doctor` without a `fail`
+   (the board, Fabric Dashboards, Switchboard where sessions run, Observatory). Without them, no change. Every change
+   goes through `task-pipeline` inside a tracked workflow; a changed recipe, schema or organization copy is a new
+   version beside the old one, which keeps working; keys come from the operator's Observatory vault by name.
 2. The PassionCode.ai knowledge base — `fabric-workspace/knowledge/` in your clone (org-index
    `scripts/clone_all.sh` makes it) or https://wiki.passioncode.ai/knowledge — at least its
    [README](https://github.com/passioncode-ai/fabric-workspace/blob/main/knowledge/README.md),
