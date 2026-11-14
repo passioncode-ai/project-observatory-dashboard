@@ -84,6 +84,24 @@ class ScanSpend(unittest.TestCase):
         # The account not read leaves its residual unknown: the unattributed total is too.
         self.assertIsNone(doc["unattributed"]["month_usd"])
 
+    def test_two_management_keys_of_one_organization_are_counted_once(self):
+        """Three provisioning keys of one OpenRouter organization answer the same activity report: summed per
+        label, one organization's month read as three times its spend and tripped the estate limit
+        (an operator machine, 2026-11-14: $1367.66 for $535.20)."""
+        org = [{"date": f"{MONTH}-01", "usage": 4.0, "model": "m"}, {"date": f"{MONTH}-02", "usage": 1.0, "model": "m"}]
+        doc = self.run_scan({"org-1": org, "org-2": json.loads(json.dumps(org)), "org-3": json.loads(json.dumps(org)),
+                             "other": [{"date": f"{MONTH}-01", "usage": 0.5, "model": "m"}]})
+        self.assertEqual(doc["total_usd"], 5.5)
+        self.assertEqual([a["account"] for a in doc["accounts"]], ["org-1", "other"])
+        self.assertEqual(doc["same_organization"], [{"account": "org-2", "same_as": "org-1"},
+                                                    {"account": "org-3", "same_as": "org-1"}])
+        self.assertFalse(doc["partial"])
+
+    def test_two_accounts_without_spend_are_not_taken_for_one(self):
+        doc = self.run_scan({"acct-a": [], "acct-b": []})
+        self.assertEqual([a["account"] for a in doc["accounts"]], ["acct-a", "acct-b"])
+        self.assertEqual(doc["same_organization"], [])
+
     def test_a_malformed_account_row_is_not_counted_and_the_scan_still_writes(self):
         doc = self.run_scan({"acct-a": [{"date": f"{MONTH}-01", "usage": 1}, {"date": f"{MONTH}-01", "usage": "x"},
                                         "not-a-row"]})
@@ -221,7 +239,7 @@ class ProjectSpend(unittest.TestCase):
     # The account's own activity: the three keys plus 1.25 this month on a hash no ledger row holds.
     ACCOUNT = [{"date": OCT, "usage": 2.0 + 0.5 + 1.25}, {"date": SEP, "usage": 1.0 + 0.25}]
 
-    def scan(self, ledger=None, keys=None, account=None, projects=None, remaining=None) -> dict:
+    def scan(self, ledger=None, keys=None, account=None, projects=None, remaining=None, labels=None) -> dict:
         import openrouter
         import scan_spend
         import step_budget
@@ -247,7 +265,7 @@ class ProjectSpend(unittest.TestCase):
         clock = iter(remaining) if remaining is not None else None
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp) / "spend.json"
-            with patch.object(openrouter, "admins", lambda: [("acct-a", Path("acct-a"))]), \
+            with patch.object(openrouter, "admins", lambda: [(k, Path(k)) for k in (labels or ["acct-a"])]), \
                     patch.object(openrouter, "read_admin", lambda label: (label, "admin-" + str(label))), \
                     patch.object(openrouter, "ledger", read_ledger), \
                     patch.object(scan_spend, "activity",
@@ -295,6 +313,21 @@ class ProjectSpend(unittest.TestCase):
         # The estate's month is still the accounts' own figure, as before.
         self.assertEqual(doc["total_usd"], 3.75)
         self.assertEqual(doc["accounts"][0]["last30_usd"], 5.0)
+
+    def test_keys_under_a_second_label_of_one_organization_are_its_keys_and_the_rest_is_counted_once(self):
+        ledger = {"issued": {
+            "alpha-agent": ledger_row("acct-a", "h-alpha", "alpha-web"),
+            "beta-agent": ledger_row("acct-a2", "h-beta", "beta-api"),
+            "old-tool": ledger_row("acct-a", "h-claimed", None, claimed=True, destination="external:somewhere"),
+        }}
+        doc = self.scan(ledger=ledger, labels=["acct-a", "acct-a2"])
+        self.assertEqual(doc["total_usd"], 3.75)
+        self.assertEqual(doc["same_organization"], [{"account": "acct-a2", "same_as": "acct-a"}])
+        self.assertEqual(doc["projects"]["beta-api"]["month_usd"], 0.5)
+        un = doc["unattributed"]
+        self.assertEqual((un["unledgered_month_usd"], un["unledgered_last30_usd"]), (1.25, 1.25))
+        self.assertFalse(un["partial"])
+        self.assertFalse(doc["attribution_partial"])
 
     def test_a_revoked_key_keeps_its_spend_with_its_project(self):
         """The round-1 repro: k1 $2 and k2 $4 on one project, k2 revoked. Before the tombstone the project read

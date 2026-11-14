@@ -101,6 +101,9 @@ month's `GET /api/v1/activity` for every OpenRouter account the door holds a pro
 `store/raw/spend.json`. It records each account's month in USD and the last day covered, and never a key. With a
 scan of this month no older than 36 hours, the estate total is what the providers charged plus the reservations
 still open; without one, it is the meter's own ledger. `full grant --status` names which (`estateCountedFrom`).
+One organization reached through several provisioning keys answers one activity report: a label whose
+non-empty report is byte-for-byte another label's is listed under `same_organization` (`same_as` names the first)
+and counted once, and its ledger keys are that organization's (OBS-548). Two labels with no activity stay two.
 The finding `spend.estate_month` is a warning at the alert ratio (80 %) and critical at the limit (OBS-56).
 
 **Each project's spend** (J-11, OBS-93; `schema_version` 2 of the same file). The scan also reads every key of
