@@ -5464,8 +5464,8 @@
       "path": "tests/test_machine.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "06651da9835bce729a7c3d91490a7699005990b712673ba7caeba4211df62a22",
-      "bytes": 80632
+      "export_sha256": "7a4f1a7e18a514bd7ba979b015ea810387a2bc6abd3b6ea512581343fec65f65",
+      "bytes": 81844
     },
     {
       "path": "tests/test_machine_backup.py",
@@ -6956,8 +6956,8 @@
       "path": "tools/cleanup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "095257da2ee7314baabd24a1e991312100633cb985ccd7d23717931cf91541a1",
-      "bytes": 54237
+      "export_sha256": "390e5d24de1556b1706d28877807be96280161f58afc5b1a8863658563f9a1ad",
+      "bytes": 55622
     },
     {
       "path": "tools/cloud_cli.py",

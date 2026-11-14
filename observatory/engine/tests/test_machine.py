@@ -783,6 +783,25 @@ class Estate(Base):
         branches = git(self.data / "app", "branch", "--format=%(refname:short)").split()
         self.assertNotIn("merged-one", branches, "the auto tier still ran")
 
+    def test_a_journal_that_cannot_be_written_keeps_the_undo_and_holds_back_ref_deletions(self):
+        """OBS-539: the journal line, a deleted branch's only undo, was written after the deletion and outside the
+        try, so a full disk lost it with a traceback. Now the first row reaches the summary and stderr, and the
+        other branch deletions wait for a run that can record them."""
+        repo = self.build(); self.survey()
+        log = self.home / "store/logs/cleanup.jsonl"
+        log.unlink(missing_ok=True)
+        log.mkdir(parents=True)          # any write to the journal now fails with an OSError
+        out, err = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            self.run_cleanup("--auto", "--json")
+        doc = json.loads(out.getvalue().strip().splitlines()[-1])
+        first = doc["unjournalled"][0]
+        self.assertEqual(len(first.get("sha", "")), 40, first)
+        self.assertIn(first["sha"], err.getvalue())
+        gone = {"merged-one", "pushed-one"} - self.branches(repo)
+        self.assertEqual(len(gone), 1, "only the first branch deletion ran")
+        self.assertGreaterEqual(doc["skipped"], 1)
+
     def test_the_recheck_reuses_a_listing_younger_than_twenty_seconds(self):
         """2026-10-12: a full listing per worktree, tens of seconds each under load, spent the
         guard's whole git-tier share before the first removal."""

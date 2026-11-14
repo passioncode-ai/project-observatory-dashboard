@@ -1044,7 +1044,7 @@
     "maintenance": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: 438 != 384; it also timed out at its limit under the job's load (run 40668387839)",
+      "reason": "AssertionError: 438 != 384; it also timed out at its limit under the job's load (run 40668387839); when the suite finishes instead of timing out, two Schedule checks reach the launchd code's os.getuid() and one Pass check meets the snapshot's EBADF (run 43529278182, Fabric task 04d25f5e)",
       "statuses": [
         "FAIL",
         "TIMEOUT"
@@ -1072,6 +1072,7 @@
         "Pass.test_a_torn_database_copy_is_retried_not_fatal",
         "Pass.test_an_update_cannot_start_while_the_snapshot_has_the_jobs_down",
         "Pass.test_daily_backups_never_rotate_away_a_persons_snapshot",
+        "Pass.test_the_pass_after_an_update_takes_the_daily_that_carries_the_store",
         "Pass.test_the_state_file_is_owner_only_and_holds_no_secret",
         "Pass.test_the_switch_set_to_off_stops_checks_downloads_and_installs_the_apps_too",
         "Pass.test_turned_off_means_no_check_and_the_backup_still_runs",
@@ -1090,8 +1091,10 @@
         "Reinstall.test_the_newest_backup_of_this_path_comes_back_after_the_workspace_is_deleted",
         "Reinstall.test_without_the_passphrase_init_names_the_backup_and_the_command",
         "Schedule.test_a_childs_home_beside_its_own_temporary_directory_is_still_a_tests",
+        "Schedule.test_doctor_names_a_tick_or_server_job_that_cannot_start",
         "Schedule.test_the_installed_path_is_kept_whoever_runs_the_installer",
         "Schedule.test_the_launchd_job_is_written_owner_only_and_loaded",
+        "Schedule.test_the_launchd_job_reports_its_last_exit",
         "Schedule.test_the_systemd_timer_runs_every_quarter_hour_persistent_and_quoted",
         "Switch.test_an_update_a_reinstall_or_an_uninstall_never_writes_the_switch",
         "Switch.test_automatic_updates_are_on_until_a_person_turns_them_off",
