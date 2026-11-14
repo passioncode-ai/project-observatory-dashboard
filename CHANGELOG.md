@@ -3,6 +3,82 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.36.0 (2026-11-14)
+
+Several people can now run Observatory on one computer, each in their own OS account: every listener takes a port of
+its own account, and a place id tells two accounts of one computer, and a cloned machine, apart. The settings that
+belong to this machine and account move into one owner-only file, `config/local.json`. A disk that fills up is handled
+better: the scheduled disk guard removes again (its first holder listing timed out under launchd), it names live
+sessions' folders and a VM writing on a nearly full disk, a snapshot an export could not take leaves with the next
+one, a command an agent session left waiting on its input is found, macOS's protected folders are passed over, and the
+cleanup keeps the undo of a branch it removed even when its journal cannot be written. An organization enrollment now
+sends the activity of its sessions in that organization's projects, and the digests a product declares in its own
+folders are read. The observatory-log plugin moves to 0.36.0 with the release.
+
+### Changed
+
+- **Machine-local settings in `config/local.json`** (OBS-353, #516). What this machine and OS account decide
+  (`scheduler`, `storage.backups`, later `ports`, `apps.location`, `loopback.peerCheck`) lives in one owner-only file,
+  never a link, never in a profile. The two moved settings are mirrored into `settings.json` in three atomic writes, so
+  an older engine reads the same values and a crash between writes loses none. A second-machine restore rewrites the
+  file. `full doctor` shows each value with its source (`local_settings`).
+- **A port per OS account** (OBS-354, #518, #524, #525, #528). The server, memory over HTTP, the relay and the
+  keyserver listen on this account's port, recorded in `config/local.json` with a world-readable claim per account; on
+  a one-account computer nothing changes (the historical ports stay). Clients (the secret client, the repair runner's
+  lifecycle door, `full open`, the apps) read the record and refuse with `port-unallocated` on a shared computer with no
+  record, instead of reaching another account's server. `full ports show|allocate|set|release`; a nightly job proves
+  two real accounts allocate side by side.
+- **The place: this computer and this OS account** (OBS-357, #520, #521, #527). `local.json`, machine bundles,
+  workspace snapshots and restore receipts carry the place id (the host id and a hash of the account, naming no
+  account). A restore decides by it: this place restores whole, another account or another computer as a second
+  machine. A bundle or snapshot of this place taken on another device is refused until `--second-machine` or
+  `--same-machine` decides (`clone-suspected`); `full doctor` names a suspected clone and a vault digest name two
+  accounts share.
+- **`check.yml` runs on pull requests, `main` and tags only** (OBS-528, #522), and a newer push cancels a pull
+  request's stale run.
+
+### Added
+
+- **The device's activity collector** (OBS-76 OE-01a, #532). An organization enrollment's tick reads Claude Code's and
+  Codex's transcripts and sends, for each session whose folder is a project of that organization (its organization's
+  `fabric_org` in `config/organizations.json`), one `usage.line` per model call and the session's `session.interval`s
+  (`fabric-activity/0.1`). Nothing of a line's content is kept; a personal session's events never leave the machine.
+  Routing by context ports the contract's `routeTarget` over its vectors. Its cursor keeps a file's device and id as
+  text, since a Windows file id does not fit SQLite's INTEGER.
+- **A share between one person's own two machines is finished by their agent** (OBS-531, #529, contract CT-298):
+  `full share accept-own`, `read-code` and `confirm-own` with `--agent` and the operator's words as `--decision`; the
+  comparison is never skipped, and anything outside one person's personal machines answers `human-step-required`.
+- **The digests a product declares in its own folders are read** (OBS-533, #533). A local descriptor's
+  `extensions/ops-digest/0.1` folders are read by every maintenance pass, each day's first line recorded once under the
+  service's project; a declaration the contract refuses (`FAC-SEM-168`) is reported, never read.
+- **A command an agent session left hanging is found** (OBS-530, #526): `machine.hung_commands`; with
+  `features.auto_cleanup` on, only a leaf `wc`, `cat`, `grep` or `head` reading no file is stopped.
+
+### Fixed
+
+- **The scheduled disk guard removed nothing** (OBS-534, #531). Under launchd a pass's first `lsof` took 13 to 41 s
+  and each later one 0.25 s; every class's listing (about 15 s) timed out and read `holders: unavailable`. One warm-up
+  listing with up to 60 s now comes first, and an unknown listing names its cause in the report.
+- **A local snapshot an export could not take stayed for good** (OBS-532, #530): it now goes into the backup root
+  with the next export that works.
+- **Cleanup on a full disk** (OBS-527, #517): the git survey and the cleanup no longer stop on `ENOSPC` while writing
+  their own record, and the guard names the live sessions' temporary folders it passes over.
+- **A VM writing on a nearly full disk is named** (OBS-529, #523): the guard's report lists Colima and Lima disks,
+  and `machine.vm_disk_at_risk` warns at low and critical pressure.
+- **The disk guard tried to remove macOS's own service folders** (OBS-537, #534): an entry of the user temporary root
+  with `sunlnk` or an immutable flag is passed over and named as kept, never planned (it failed on every pass).
+- **The cleanup lost a removed branch's undo on a full disk** (OBS-539, #534): its journal line was written after the
+  removal and outside the `try`. A row the journal cannot take goes to the summary (`unjournalled`) and to stderr, and
+  removals whose undo lives only in the journal wait for a run that can record them.
+- **A recorded copy stands apart from its source's project** (OBS-535, #534). The wiki note rule and the repository
+  name rule joined an organization's copy of a personal agent (recorded in `config/derivations.json`) to the agent's
+  project, which then held two owners' repositories and had no organization. Only a submodule pin, the copy's own
+  vault folder or a verified link keeps a copy in another project now.
+- **A GitHub listing past 500 repositories was cut silently** (OBS-536, #534): the limit is 5000, and a listing that
+  reaches it is named in `gh/_degraded.json`.
+- **A board run's packet keeps its `board-message:` ref** (OBS-517, #512): the redactor scrubbed the message id, so
+  the packet no longer said which message started the run.
+
 ## 0.35.17 (2026-11-12)
 
 A checkpoint step may be left `failed`, as the memory/0.1 schema has always declared; a node stops checking in to a
