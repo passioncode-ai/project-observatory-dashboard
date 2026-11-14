@@ -78,7 +78,9 @@ MAX_HORIZON = timedelta(days=7)
 #: What keys need: without any of these a packet gets none (§3.4).
 REQUIRED_FOR_KEYS = ("board-request", "fabric-project", "deadline")
 #: The refs memory_redact keeps whole (a UUID inside them is no credential).
-KEEP_PATTERN = r"(?:board-request|board-thread|fabric-project):" + _UUID
+#: board-message:<uuid> (a run for unread board messages, OBS-517) is kept too, but is not one of REFS: runs in
+#: flight carry it scrubbed, as board-message:[redacted], and a shape check would refuse their checkpoints.
+KEEP_PATTERN = r"(?:board-request|board-message|board-thread|fabric-project):" + _UUID
 _ABSOLUTE = re.compile(r"^(?:/|~[\\/]|[A-Za-z]:[\\/]|\\\\|file:)", re.IGNORECASE)
 
 REFUSALS = {
