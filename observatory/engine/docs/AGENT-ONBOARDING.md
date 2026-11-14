@@ -107,6 +107,14 @@ computer; nothing is sent to the organization or to Fabric yet, and no key moves
 the door it waits for. My passkey signing in Fabric, the macOS administrator password and the
 administrator's computer token are mine or theirs; name them, never try them.
 
+## Coding sessions
+
+When I ask which coding sessions run, read `observatory_sessions` (OBS-550): the processes per agent, how
+many the account manager (Fabric Switchboard) manages and how many recorded a turn in the last hour, each
+with its source and time. `managed: null` means the manager is not installed or did not answer, never that it
+manages none. A `session.unmanaged` row is information: start new sessions through the account manager or an
+application's embedded agent; never stop a running session to make the count look right.
+
 ## SSH keys
 
 When I ask for an SSH key, read `observatory_ssh_keys` first (my keys, fingerprints, passphrase

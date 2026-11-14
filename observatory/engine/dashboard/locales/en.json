@@ -687,10 +687,6 @@
   "one": "{n} without a project",
   "other": "{n} without a project"
  },
- "home@@{n} sessions active in the last hour": {
-  "one": "{n} session active in the last hour",
-  "other": "{n} sessions active in the last hour"
- },
  "home@@{n} workflows stalled now": {
   "one": "{n} workflow stalled now",
   "other": "{n} workflows stalled now"
@@ -706,6 +702,26 @@
  "step@@failed": "failed",
  "theme@@Light": "Light",
  "theme@@Dark": "Dark",
+ "home@@{n} sessions running": {
+  "one": "{n} session running",
+  "other": "{n} sessions running"
+ },
+ "home@@{n} managed": {
+  "one": "{n} managed",
+  "other": "{n} managed"
+ },
+ "home@@{n} active in the last hour": {
+  "one": "{n} active in the last hour",
+  "other": "{n} active in the last hour"
+ },
+ "{n} coding sessions run outside a lifecycle owner": {
+  "one": "{n} coding session runs outside a lifecycle owner",
+  "other": "{n} coding sessions run outside a lifecycle owner"
+ },
+ "{n} coding sessions run without an account manager": {
+  "one": "{n} coding session runs without an account manager",
+  "other": "{n} coding sessions run without an account manager"
+ },
  "{package} {version} has {n} known vulnerabilities": {
   "one": "{package} {version} has {n} known vulnerability",
   "other": "{package} {version} has {n} known vulnerabilities"

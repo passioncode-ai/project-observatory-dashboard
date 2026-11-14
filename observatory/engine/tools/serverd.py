@@ -665,12 +665,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         import agents_page
         import agents_view
         import i18n
+        import sessions_view
         query = parse_qs(urlsplit(self.path).query)
         locale = (query.get("locale") or ["en"])[0]
         if locale not in i18n.LOCALES:
             locale = "en"
         try:
-            markup = agents_page.agents_html({"agents": agents_view.summary()},
+            markup = agents_page.agents_html({"agents": agents_view.summary(), "sessions": sessions_view.load()},
                                              i18n.Translator(locale), live=True)
         except Exception as exc:  # noqa: BLE001 — the page keeps what it shows
             self._json({"error": f"the agents view could not be read: {type(exc).__name__}"}, 503)

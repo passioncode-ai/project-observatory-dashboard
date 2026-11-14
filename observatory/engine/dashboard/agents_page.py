@@ -84,13 +84,44 @@ def _cmd(text: str) -> str:
     return f'<code class="mono agents-cmd">{_e(text)}</code>'
 
 
-def _counters(c: dict, t: Translator) -> str:
-    tiles = [("Sessions working", c.get("sessionsActive", 0), "turn in the last hour"),
-             ("Workflows open", c.get("workflowsOpen", 0), "held by an executor"),
-             ("Handoffs waiting", c.get("handoffsWaiting", 0), "to be accepted"),
-             ("Stalled", c.get("stalled", 0), "silent 30 min"),
-             ("Steps kept", c.get("keptSteps", 0), "for review")]
-    cells = "".join(f'<div class="tile">{t.mark(k)}<b>{t.number(v)}</b>{t.mark(sub, tag="span")}</div>'
+#: What a facet that was not read shows in place of its number: never 0 (CP-03).
+NOT_READ = "\u2013"
+
+
+def _session_tiles(f: dict, t: Translator) -> list[tuple[str, object, str]]:
+    """The three facets of one session count (CP-03, D1), each with its source and time:
+    what runs, what the account manager manages, what recorded a turn in the last hour.
+    `sessions_view.facets` is the one reader; Home's tile reads it too. A facet that was
+    not read is a dash with its reason, never 0."""
+    by = " · ".join(f"{a} {n}" for a, n in (f.get("byAgent") or {}).items())
+    if f.get("processesFrom") == "manager":
+        running = t.mark("processes the account manager lists, read {at}", tag="span", at=_stamp(f.get("processesAt")))
+    elif f.get("processesFrom") == "machine-survey":
+        running = t.mark("processes the machine survey counted, read {at}", tag="span",
+                         at=_stamp(f.get("processesAt")))
+    else:
+        running = t.mark("not read yet", tag="span")
+    if by:
+        running += f' <span class="mono">{_e(by)}</span>'
+    state = f.get("managerState")
+    managed = (t.mark("by the account manager, read {at}", tag="span", at=_stamp(f.get("managerAt"))) if state == "read"
+               else t.mark("the account manager is not installed", tag="span") if state == "not-installed"
+               else t.mark("not read yet", tag="span") if state is None
+               else t.mark("the account manager did not answer", tag="span"))
+    active = (t.mark("a turn recorded in the ledger", tag="span") if f.get("activeHour") is not None
+              else t.mark("the ledger could not be read", tag="span"))
+    return [("Sessions running", f.get("running"), running), ("Managed", f.get("managed"), managed),
+            ("Active in the last hour", f.get("activeHour"), active)]
+
+
+def _counters(c: dict, t: Translator, sessions: dict | None = None) -> str:
+    import sessions_view
+    tiles = [*_session_tiles(sessions_view.facets(sessions), t),
+             ("Workflows open", c.get("workflowsOpen", 0), t.mark("held by an executor", tag="span")),
+             ("Handoffs waiting", c.get("handoffsWaiting", 0), t.mark("to be accepted", tag="span")),
+             ("Stalled", c.get("stalled", 0), t.mark("silent 30 min", tag="span")),
+             ("Steps kept", c.get("keptSteps", 0), t.mark("for review", tag="span"))]
+    cells = "".join(f'<div class="tile">{t.mark(k)}<b>{t.number(v) if v is not None else NOT_READ}</b>{sub}</div>'
                     for k, v, sub in tiles)
     return f'<div class="tiles agents-tiles">{cells}</div>'
 
@@ -220,7 +251,7 @@ def _sessions(sessions: list[dict], t: Translator, names: dict | None = None) ->
             f'<table><thead><tr>{th}</tr></thead><tbody>{"".join(rows)}</tbody></table></section>')
 
 
-def signature(a: dict) -> str:
+def signature(a: dict, sessions: dict | None = None) -> str:
     """What the page SAYS, without its clocks: the live refresh announces a change to
     a screen reader only when this differs (audit A27), not every 15 seconds."""
     import hashlib
@@ -232,6 +263,10 @@ def signature(a: dict) -> str:
                            w.get("handoffs")) for w in a.get("workflows") or []],
             "sessions": [(s.get("sessionId"), s.get("turns"), s.get("active")) for s in a.get("sessions") or []],
             "degraded": [d.get("code") or d.get("reason") for d in a.get("degraded") or []]}
+    if sessions is not None:
+        import sessions_view
+        f = sessions_view.facets(sessions)
+        said["sessionCount"] = (f["running"], f["managed"], f["activeHour"], f["managerState"])
     return hashlib.sha256(json.dumps(said, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
@@ -241,11 +276,11 @@ def agents_html(payload: dict, t: Translator | None = None, live: bool = False) 
     a = payload.get("agents") or {}
     names = a.get("projectNames") or {}
     parts = [f'<section id="agents" class="agents" data-measured="{_e(a.get("measuredAt"))}"'
-             f' data-signature="{signature(a)}"{" data-live" if live else ""}>']
+             f' data-signature="{signature(a, payload.get("sessions"))}"{" data-live" if live else ""}>']
     parts.append(t.mark("Read {at}", tag="p", attrs=' class="machine-at" id="agents-at"',
                         at=_stamp(a.get("measuredAt"))))
     parts.append(f'<p class="machine-hint" id="agents-live" role="status" aria-live="polite"></p>')
-    parts.append(_counters(a.get("counters") or {}, t))
+    parts.append(_counters(a.get("counters") or {}, t, payload.get("sessions")))
     needs = a.get("needsYou") or []
     parts.append(f'<section class="card panel">{t.mark("Needs you", tag="h2", attrs=HEADING)}')
     if needs:
@@ -291,7 +326,8 @@ def agents_html(payload: dict, t: Translator | None = None, live: bool = False) 
 
 #: Values translated through `t(...)` with a variable argument (see DYNAMIC_IDS in
 #: tests/test_i18n.py).
-DYNAMIC = (DOT_TITLE, *DOT_TITLES.values(), "Sessions working", "turn in the last hour", "Workflows open",
+DYNAMIC = (DOT_TITLE, *DOT_TITLES.values(), "Sessions running", "Managed", "Active in the last hour",
+           "Workflows open",
            "held by an executor", "Handoffs waiting", "to be accepted", "Stalled",
            "silent 30 min", "Steps kept", "for review", "Session", "Project", "Last turn",
            "Turns", "Workflow", "{n} s", "{n} min", "{n} h", "{n} d",

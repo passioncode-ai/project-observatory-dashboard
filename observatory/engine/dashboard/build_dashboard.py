@@ -1222,6 +1222,13 @@ def build():
         PAYLOAD["agents"] = agents_view.summary()
     except Exception as exc:  # noqa: BLE001 — a page, not a crash
         PAYLOAD["agents"] = {"degraded": [{"source": "agents", "reason": f"{type(exc).__name__}: {exc}"[:200]}]}
+    # THE CODING SESSIONS in three facets (OBS-550): what the tick's `coding-sessions` step read.
+    # Home's Agents tile and the Agents page read the same numbers through `sessions_view.facets`.
+    try:
+        import sessions_view
+        PAYLOAD["sessions"] = sessions_view.load()
+    except Exception as exc:  # noqa: BLE001: a page, not a crash
+        PAYLOAD["sessions"] = {"degraded": [{"source": "sessions", "reason": f"{type(exc).__name__}: {exc}"[:200]}]}
     build.last_payload = PAYLOAD
     build.last_stamp = built_from
     payload = json.dumps(PAYLOAD, ensure_ascii=False)

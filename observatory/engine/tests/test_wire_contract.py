@@ -262,10 +262,11 @@ def test_the_served_instructions_describe_the_served_surface() -> None:
     # `observatory_ssh_keys` (PB-163), which the "Also" line names.
     # Twenty-eight with `observatory_org_accounts` and `observatory_org_keys` (OBS-411, OBS-415), named in "Also".
     # Twenty-nine with `observatory_org_selection` (OBS-417), named on the WRITE line.
-    # Thirty with `observatory_dependencies` (OBS-553); the instructions are at their length budget, so its own
-    # description says what it reads.
-    check("the server serves thirty observatory tools (the dependency inventory, OBS-553)", tools == 30,
+    # Thirty-one with `observatory_sessions` (OBS-550) and `observatory_dependencies` (OBS-553).
+    check("the server serves thirty-one observatory tools (sessions OBS-550, dependencies OBS-553)", tools == 31,
           str(tools))
+    check("the instructions name the coding sessions beside the machine",
+          "`observatory_machine` (`section`, `move`, `explainPid`); `_sessions`" in src.split("instructions=(", 1)[1][:2600])
     check("the instructions name the organization selection's write rule",
           "_org_selection" in src.split("instructions=(", 1)[1][:2600])
     check("the instructions name the organization views",

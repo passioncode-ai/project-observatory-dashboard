@@ -305,6 +305,9 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                             # the lifecycle watch (collectors/scan_lifecycle.py),
                             # written by the tick's `lifecycle` step before this one
                             "store/raw/lifecycle.json", "store/raw/harness.json", "store/raw/spend.json",
+                            # the coding sessions (sessions_view.py), written by the tick's
+                            # `coding-sessions` step before this one (OBS-550)
+                            "store/raw/coding-sessions.json",
                             # Fabric attribution conflicts (OBS-160)
                             "store/raw/fabric-attribution.json",
                             # the SSH-key inventory, written by `full ssh-keys list`

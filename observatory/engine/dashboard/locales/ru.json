@@ -1964,7 +1964,6 @@
  "No agent session recorded a turn in the last day.": "За последние сутки ни одна сессия агента не записала ход.",
  "No workflow yet. An agent starts one by writing its first checkpoint: observatory_checkpoint_write.": "Задач пока нет. Агент создаёт задачу, когда записывает первую контрольную точку: observatory_checkpoint_write.",
  "The page shows and hands over commands; it changes nothing. Opened through the local server it refreshes every 15 seconds.": "Страница показывает состояние и выдаёт команды, но ничего не меняет. Если открыть её через локальный сервер, она обновляется каждые 15 секунд.",
- "Sessions working": "Сессии в работе",
  "Workflows open": "Открытые задачи",
  "held by an executor": "у исполнителя",
  "Handoffs waiting": "Ожидающие передачи",
@@ -2025,7 +2024,6 @@
  "workflow@@stalled": "застряла",
  "workflow@@handoff waiting": "ждёт передачи",
  "workflow@@closed": "закрыта",
- "turn in the last hour": "ход за последний час",
  "to be accepted": "приёма сессией",
  "silent 30 min": "молчат 30 мин",
  "for review": "на разбор",
@@ -2406,12 +2404,6 @@
   "many": "{n} без проекта",
   "other": "{n} без проекта"
  },
- "home@@{n} sessions active in the last hour": {
-  "one": "{n} сессия активна за последний час",
-  "few": "{n} сессии активны за последний час",
-  "many": "{n} сессий активны за последний час",
-  "other": "{n} сессии активны за последний час"
- },
  "home@@{n} workflows stalled now": {
   "one": "{n} задача стоит сейчас",
   "few": "{n} задачи стоят сейчас",
@@ -2495,6 +2487,51 @@
  "theme@@Light": "Светлая",
  "theme@@Dark": "Тёмная",
  "Your browser keeps no settings here, so the next page opens in the light theme.": "Браузер здесь не хранит настройки, поэтому следующая страница откроется в светлой теме.",
+ "Sessions running": "Сессии запущены",
+ "Managed": "Под управлением",
+ "Active in the last hour": "Активны за последний час",
+ "processes the account manager lists, read {at}": "процессы по данным менеджера аккаунтов, прочитано {at}",
+ "processes the machine survey counted, read {at}": "процессы по обследованию машины, прочитано {at}",
+ "not read yet": "ещё не прочитано",
+ "by the account manager, read {at}": "по данным менеджера аккаунтов, прочитано {at}",
+ "the account manager is not installed": "менеджер аккаунтов не установлен",
+ "the account manager did not answer": "менеджер аккаунтов не ответил",
+ "a turn recorded in the ledger": "ход записан в памяти",
+ "the ledger could not be read": "записи памяти не прочитаны",
+ "sessions not counted": "сессии не подсчитаны",
+ "managed: not read": "под управлением: не прочитано",
+ "activity not read": "активность не прочитана",
+ "Coding sessions outside a lifecycle owner": "Сессии агентов для кода без владельца жизненного цикла",
+ "home@@{n} sessions running": {
+  "one": "{n} сессия запущена",
+  "few": "{n} сессии запущены",
+  "many": "{n} сессий запущены",
+  "other": "{n} сессии запущены"
+ },
+ "home@@{n} managed": {
+  "one": "{n} под управлением",
+  "few": "{n} под управлением",
+  "many": "{n} под управлением",
+  "other": "{n} под управлением"
+ },
+ "home@@{n} active in the last hour": {
+  "one": "{n} активна за последний час",
+  "few": "{n} активны за последний час",
+  "many": "{n} активны за последний час",
+  "other": "{n} активны за последний час"
+ },
+ "{n} coding sessions run outside a lifecycle owner": {
+  "one": "{n} сессия агента для кода работает без владельца жизненного цикла",
+  "few": "{n} сессии агентов для кода работают без владельца жизненного цикла",
+  "many": "{n} сессий агентов для кода работают без владельца жизненного цикла",
+  "other": "{n} сессии агентов для кода работают без владельца жизненного цикла"
+ },
+ "{n} coding sessions run without an account manager": {
+  "one": "{n} сессия агента для кода работает без менеджера аккаунтов",
+  "few": "{n} сессии агентов для кода работают без менеджера аккаунтов",
+  "many": "{n} сессий агентов для кода работают без менеджера аккаунтов",
+  "other": "{n} сессии агентов для кода работают без менеджера аккаунтов"
+ },
  "Dependency with a known vulnerability": "Зависимость с известной уязвимостью",
  "Vulnerability watch out of date": "Проверка уязвимостей устарела",
  "Vulnerability watch last checked {day}": "Уязвимости последний раз проверены {day}",

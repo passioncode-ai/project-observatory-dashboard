@@ -1,0 +1,1145 @@
+{
+  "schema": "observatory-parity/1",
+  "row": "OBS-559",
+  "requirement": "CP-18",
+  "about": "Every dashboard action and every state-changing CLI verb: its MCP tool (covered), a person's gate with its reason (gate), or the board row that owes its tool (missing). tests/test_agent_parity.py holds this list to keyserver.ACTIONS, observatory.py's command table and the served MCP tools.",
+  "actions": [
+    {
+      "action": "mint",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_mint",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+    },
+    {
+      "action": "limit",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_limit",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+    },
+    {
+      "action": "disable",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_disable",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+    },
+    {
+      "action": "enable",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_enable",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+    },
+    {
+      "action": "rotate-key",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_rotate_key",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+    },
+    {
+      "action": "revoke",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_revoke",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+    },
+    {
+      "action": "leak",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_leak",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+    },
+    {
+      "action": "annotate",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_annotate",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+    },
+    {
+      "action": "reveal",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_reveal",
+      "tool": null,
+      "gate": {
+        "reason": "shows a credential value to a person on the page; a value is never revealed to an agent (the keyserver refuses a token with reveal-is-the-operators): an agent runs the command with use_secret.py run, which puts the value in the child's environment"
+      },
+      "status": "gate"
+    },
+    {
+      "action": "init",
+      "kind": "cli",
+      "where": "workspace.py: init",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "configure",
+      "kind": "cli",
+      "where": "workspace.py: configure",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "migrate-local --apply",
+      "kind": "cli",
+      "where": "workspace.py: migrate-local",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "open",
+      "kind": "cli",
+      "where": "tools/dashboard_open.py: open",
+      "tool": null,
+      "gate": {
+        "reason": "opens the dashboard in a person's browser; an agent reads the same data through observatory_overview, observatory_status and observatory_findings"
+      },
+      "status": "gate"
+    },
+    {
+      "action": "agent install",
+      "kind": "cli",
+      "where": "workspace.py: agent",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "agent uninstall",
+      "kind": "cli",
+      "where": "workspace.py: agent",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "workspace-backup",
+      "kind": "cli",
+      "where": "workspace.py: workspace-backup",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "upgrade --apply",
+      "kind": "cli",
+      "where": "workspace.py: upgrade",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "restore",
+      "kind": "cli",
+      "where": "workspace.py: restore",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "backups migrate",
+      "kind": "cli",
+      "where": "workspace.py: backups",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "backups decrypt",
+      "kind": "cli",
+      "where": "workspace.py: backups",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "backup-passphrase set",
+      "kind": "cli",
+      "where": "workspace.py: backup-passphrase",
+      "tool": null,
+      "gate": {
+        "reason": "a typed secret: the person types the passphrase on stdin, and no agent holds it"
+      },
+      "status": "gate"
+    },
+    {
+      "action": "backup-passphrase show",
+      "kind": "cli",
+      "where": "workspace.py: backup-passphrase",
+      "tool": null,
+      "gate": {
+        "reason": "shows the backup passphrase to a person so it can be kept outside this machine"
+      },
+      "status": "gate"
+    },
+    {
+      "action": "cleanup --apply",
+      "kind": "cli",
+      "where": "workspace.py: cleanup",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "disk-guard --apply",
+      "kind": "cli",
+      "where": "workspace.py: disk-guard",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "machine-backup now",
+      "kind": "cli",
+      "where": "workspace.py: machine-backup",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "machine-restore --apply",
+      "kind": "cli",
+      "where": "workspace.py: machine-restore",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "machine-move cutover",
+      "kind": "cli",
+      "where": "workspace.py: machine-move",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "machine-move leave",
+      "kind": "cli",
+      "where": "workspace.py: machine-move",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "machine-move return",
+      "kind": "cli",
+      "where": "workspace.py: machine-move",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "ports allocate",
+      "kind": "cli",
+      "where": "workspace.py: ports",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "ports set",
+      "kind": "cli",
+      "where": "workspace.py: ports",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "ports release",
+      "kind": "cli",
+      "where": "workspace.py: ports",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "update --apply",
+      "kind": "cli",
+      "where": "workspace.py: update",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "profile import",
+      "kind": "cli",
+      "where": "workspace.py: profile",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "maintain run",
+      "kind": "cli",
+      "where": "workspace.py: maintain",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "maintain ensure",
+      "kind": "cli",
+      "where": "workspace.py: maintain",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "maintain uninstall",
+      "kind": "cli",
+      "where": "workspace.py: maintain",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "maintain app",
+      "kind": "cli",
+      "where": "workspace.py: maintain",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "auto-update on",
+      "kind": "cli",
+      "where": "workspace.py: auto-update",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "auto-update off",
+      "kind": "cli",
+      "where": "workspace.py: auto-update",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "analytics on",
+      "kind": "cli",
+      "where": "workspace.py: analytics",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "analytics off",
+      "kind": "cli",
+      "where": "workspace.py: analytics",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "analytics send",
+      "kind": "cli",
+      "where": "workspace.py: analytics",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "track",
+      "kind": "cli",
+      "where": "workspace.py: track",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "untrack",
+      "kind": "cli",
+      "where": "workspace.py: untrack",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "assistant ask",
+      "kind": "cli",
+      "where": "agent/assistant.py: ask",
+      "tool": "observatory_assistant_ask",
+      "gate": null,
+      "status": "covered"
+    },
+    {
+      "action": "assistant cancel",
+      "kind": "cli",
+      "where": "agent/assistant.py: jobs.cancel",
+      "tool": "fabric.job.cancel",
+      "gate": null,
+      "status": "covered"
+    },
+    {
+      "action": "assistant delete",
+      "kind": "cli",
+      "where": "agent/assistant.py: delete_conversation",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "assistant serve",
+      "kind": "cli",
+      "where": "agent/assistant.py: serve",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "assistant analytics",
+      "kind": "cli",
+      "where": "agent/assistant.py: analytics",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "assistant ceremony",
+      "kind": "cli",
+      "where": "agent/assistant.py: ceremony",
+      "tool": null,
+      "gate": {
+        "reason": "the pairing ceremony: a person compares one code on two screens, which only a person can witness"
+      },
+      "status": "gate"
+    },
+    {
+      "action": "assistant secret",
+      "kind": "cli",
+      "where": "agent/assistant.py: secret",
+      "tool": null,
+      "gate": {
+        "reason": "a typed secret: the person types the value into the signed app's prompt; an agent asks for it with observatory_secret_request and never sees it"
+      },
+      "status": "gate"
+    },
+    {
+      "action": "workflow handoff",
+      "kind": "cli",
+      "where": "tools/workflow_cli.py: handoff",
+      "tool": [
+        "observatory_handoff_create",
+        "observatory_handoff_accept"
+      ],
+      "gate": null,
+      "status": "covered",
+      "note": "handoff --force still needs a terminal"
+    },
+    {
+      "action": "workflow close",
+      "kind": "cli",
+      "where": "tools/workflow_cli.py: close",
+      "tool": "observatory_checkpoint_write",
+      "gate": null,
+      "status": "covered",
+      "note": "the lease holder closes with close: true; a close without the lease needs a terminal"
+    },
+    {
+      "action": "embedding-policy grant",
+      "kind": "cli",
+      "where": "tools/embedding_policy_cli.py: grant",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "embedding-policy revoke",
+      "kind": "cli",
+      "where": "tools/embedding_policy_cli.py: revoke",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "access-binding issue",
+      "kind": "cli",
+      "where": "tools/access_binding_cli.py: issue",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "access-binding revoke",
+      "kind": "cli",
+      "where": "tools/access_binding_cli.py: revoke",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "agent-binding issue",
+      "kind": "cli",
+      "where": "tools/agent_binding_cli.py: issue",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "agent-binding revoke",
+      "kind": "cli",
+      "where": "tools/agent_binding_cli.py: revoke",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "lifecycle enroll",
+      "kind": "cli",
+      "where": "tools/lifecycle_cli.py: enroll",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "lifecycle allow",
+      "kind": "cli",
+      "where": "tools/lifecycle_cli.py: allow",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "lifecycle policy",
+      "kind": "cli",
+      "where": "tools/lifecycle_cli.py: policy",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "lifecycle hold",
+      "kind": "cli",
+      "where": "tools/lifecycle_cli.py: hold",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "lifecycle revoke",
+      "kind": "cli",
+      "where": "tools/lifecycle_cli.py: revoke",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "lifecycle import",
+      "kind": "cli",
+      "where": "tools/lifecycle_cli.py: import",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "lifecycle build-helper",
+      "kind": "cli",
+      "where": "tools/lifecycle_cli.py: build-helper",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "forget",
+      "kind": "cli",
+      "where": "tools/forget_cli.py: forget",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "ssh-keys create",
+      "kind": "cli",
+      "where": "tools/ssh_keys.py: create",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "ssh-keys send",
+      "kind": "cli",
+      "where": "tools/ssh_keys.py: send",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "ssh-keys rekey",
+      "kind": "cli",
+      "where": "tools/ssh_keys.py: rekey",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "vault-digests write",
+      "kind": "cli",
+      "where": "tools/vault_digests.py: write",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "vault-digests mark",
+      "kind": "cli",
+      "where": "tools/vault_digests.py: mark",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "vault-digests unmark",
+      "kind": "cli",
+      "where": "tools/vault_digests.py: unmark",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "vault-digests keep-here",
+      "kind": "cli",
+      "where": "tools/vault_digests.py: keep-here",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "vault-digests unkeep-here",
+      "kind": "cli",
+      "where": "tools/vault_digests.py: unkeep-here",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "vault-digests key",
+      "kind": "cli",
+      "where": "tools/vault_digests.py: key",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "import and export move the estate key; the value travels in a file or on stdin, never in a tool's answer"
+    },
+    {
+      "action": "org enroll",
+      "kind": "cli",
+      "where": "tools/org.py: enroll",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "org check-in",
+      "kind": "cli",
+      "where": "tools/org.py: check-in",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "org rotate",
+      "kind": "cli",
+      "where": "tools/org.py: rotate",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "org tick",
+      "kind": "cli",
+      "where": "tools/org.py: tick",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "org flush",
+      "kind": "cli",
+      "where": "tools/org.py: flush",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "org leave",
+      "kind": "cli",
+      "where": "tools/org.py: leave",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "org select",
+      "kind": "cli",
+      "where": "tools/org.py: select",
+      "tool": "observatory_org_selection",
+      "gate": null,
+      "status": "covered"
+    },
+    {
+      "action": "review promote",
+      "kind": "cli",
+      "where": "tools/review.py: promote",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "review reject",
+      "kind": "cli",
+      "where": "tools/review.py: reject",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "review reject-group",
+      "kind": "cli",
+      "where": "tools/review.py: reject-group",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "review accept-proposal",
+      "kind": "cli",
+      "where": "tools/review.py: accept-proposal",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "review reject-proposal",
+      "kind": "cli",
+      "where": "tools/review.py: reject-proposal",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "review policy",
+      "kind": "cli",
+      "where": "tools/review.py: policy",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "review batch",
+      "kind": "cli",
+      "where": "tools/review.py: batch",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "review undo-policy",
+      "kind": "cli",
+      "where": "tools/review.py: undo-policy",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "share create",
+      "kind": "cli",
+      "where": "tools/share_cli.py: create",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "share confirm",
+      "kind": "cli",
+      "where": "tools/share_cli.py: confirm",
+      "tool": null,
+      "gate": {
+        "reason": "two people compare a six-digit code read between them; only they can witness that it matches"
+      },
+      "status": "gate"
+    },
+    {
+      "action": "share differ",
+      "kind": "cli",
+      "where": "tools/share_cli.py: differ",
+      "tool": null,
+      "gate": {
+        "reason": "the other answer of the same comparison: the person saw a code that does not match"
+      },
+      "status": "gate"
+    },
+    {
+      "action": "share revoke",
+      "kind": "cli",
+      "where": "tools/share_cli.py: revoke",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "share provider-ended",
+      "kind": "cli",
+      "where": "tools/share_cli.py: provider-ended",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "share accept",
+      "kind": "cli",
+      "where": "tools/share_cli.py: accept",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559",
+      "note": "the command requires a terminal today; part 2 decides its tool"
+    },
+    {
+      "action": "share sync",
+      "kind": "cli",
+      "where": "tools/share_cli.py: sync",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "cloud deploy",
+      "kind": "cli",
+      "where": "tools/cloud_cli.py: deploy",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "relay enable",
+      "kind": "cli",
+      "where": "tools/relay_cli.py: enable",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "relay disable",
+      "kind": "cli",
+      "where": "tools/relay_cli.py: disable",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "learning-review run",
+      "kind": "cli",
+      "where": "tools/learning_review_cli.py: run",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "scan-mcp",
+      "kind": "cli",
+      "where": "collectors/scan_mcp.py: main",
+      "tool": "machine.mcp.refresh",
+      "gate": null,
+      "status": "covered"
+    },
+    {
+      "action": "harness --accept",
+      "kind": "cli",
+      "where": "tools/harness.py: accept",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "grant --check",
+      "kind": "cli",
+      "where": "tools/grant.py: check",
+      "tool": "grant.check",
+      "gate": null,
+      "status": "covered"
+    },
+    {
+      "action": "grant --settle",
+      "kind": "cli",
+      "where": "tools/grant.py: settle",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "node --init",
+      "kind": "cli",
+      "where": "tools/node.py: init",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    },
+    {
+      "action": "retention-apply",
+      "kind": "cli",
+      "where": "store/retention.py: apply",
+      "tool": null,
+      "gate": null,
+      "status": "missing",
+      "row": "OBS-559"
+    }
+  ],
+  "cli_excluded": [
+    {
+      "reason": "read-only: reports and listings that change no state",
+      "commands": [
+        "doctor",
+        "version",
+        "onboard",
+        "machine",
+        "tracked",
+        "copies",
+        "digest",
+        "use",
+        "chain",
+        "wallet",
+        "key",
+        "revoke",
+        "lease",
+        "stats",
+        "index-status",
+        "server-status",
+        "retention",
+        "pending",
+        "deltas"
+      ]
+    },
+    {
+      "reason": "pipeline steps: they rebuild derived, rebuildable workspace state from the sources; the tick and the maintenance job run them, and agents read their result through observatory_status, observatory_overview, observatory_findings and observatory_dependencies",
+      "commands": [
+        "scan",
+        "local",
+        "tick",
+        "remotes",
+        "domains",
+        "heroku",
+        "openrouter",
+        "env",
+        "remote-env",
+        "google",
+        "leaks",
+        "fabric-attribution",
+        "merge",
+        "emit",
+        "validate",
+        "dashboard",
+        "findings",
+        "settle",
+        "notify",
+        "smoke",
+        "smoke-pages",
+        "design",
+        "corroborate",
+        "export-ledger",
+        "links",
+        "lost",
+        "sweep",
+        "shape",
+        "skip-sites",
+        "snapshot",
+        "index",
+        "reindex",
+        "rollup",
+        "activity",
+        "migrate",
+        "plugins",
+        "models",
+        "project",
+        "commit-projection",
+        "commit-registry",
+        "scrub-companion",
+        "vulnerabilities"
+      ]
+    },
+    {
+      "reason": "maintainer gates and development setup: checks of this source tree and its contract, not acts on an installation",
+      "commands": [
+        "setup",
+        "deps",
+        "check",
+        "check-portable",
+        "all",
+        "docs-current",
+        "paths-current",
+        "trap-map",
+        "validate-plugin",
+        "plugins-check",
+        "probes",
+        "probes-check",
+        "fabric",
+        "contract",
+        "secrets",
+        "integrity",
+        "ledger-current"
+      ]
+    },
+    {
+      "reason": "historical: the SQLite-only backup kept for compatibility; workspace-backup is the act",
+      "commands": [
+        "backup"
+      ]
+    },
+    {
+      "reason": "a server process, not an act: it serves the same memory tools over loopback HTTP",
+      "commands": [
+        "memory-http"
+      ]
+    }
+  ],
+  "cli_excluded_prefixes": [
+    {
+      "prefix": "test",
+      "reason": "regression suites of the historical gate: they read fixtures and change no installation"
+    },
+    {
+      "prefix": "scan-",
+      "reason": "collectors: each refreshes one derived scan file; an action entry for a collector an agent triggers (scan-mcp) takes precedence"
+    }
+  ]
+}

@@ -46,7 +46,7 @@ GOLDEN_TOOLS = [
     "observatory_machine", "observatory_org_accounts", "observatory_org_keys", "observatory_org_selection",
     "observatory_overview", "observatory_project", "observatory_propose", "observatory_recall",
     "observatory_record", "observatory_resolve", "observatory_search", "observatory_secret_request",
-    "observatory_ssh_keys",
+    "observatory_sessions", "observatory_ssh_keys",
     "observatory_status",
     "observatory_timeline", "observatory_workflow_list",
     # Fabric capabilities (fabric-interop/0.1) and their job tools (9)
