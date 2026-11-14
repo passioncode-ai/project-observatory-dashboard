@@ -91,6 +91,8 @@ SAMPLES = {
     "{newest['snapshot']}": "/srv/example-ws/backups/example-ws-0badc0de/snapshot.obsnap",
     # A recorded copy's repository id, for `full copies plan` (OBS-321).
     "COPY": "repository:example-org/alpha-agent", "{copy}": "repository:example-org/alpha-agent",
+    # The configuration door's apply and undo commands (OBS-563): a plan's digest, a journal id.
+    "{digest}": "sha256:" + "0" * 64, "{ident}": "cfg_0123456789abcdef",
     # machine_view._load's survey command: `machine` or `cleanup` (audit A42).
     "{command}": "cleanup",
     # A partial restore's filters, repeated in its next steps (OBS-282): one `--flag=value` word each.

@@ -361,6 +361,20 @@ older engine never reads `local.json`. A profile never carries it; a second-mach
 location dropped, scheduler off, backups root kept, place set to this machine). `settings.json` keeps `schema_version`
 1 and gains no `must_understand` entry. Tests: `tests/test_local_settings.py`.
 
+## The configuration door (OBS-563)
+
+Every setting is a declared entry of `configuration_door.catalogue()` (type, allowed values or range,
+default, file, gate) and is written through one door: `full configure --list`, `--plan KEY=VALUE...`, `--apply DIGEST`
+and `--undo ID`, and the MCP tool `observatory_configure` (actions `list`, `plan`, `apply`, `undo`; 30 `observatory_*`
+tools). `configure SECTION NAME VALUE` keeps its arguments and answers and now writes through the door. A plan is kept
+under its digest in `store/raw/configure-plans/` for a day; every apply and undo appends one line to
+`store/logs/configure.jsonl` (owner-only: the id, the actor, the values before and after, the operator's words for a
+change that needs the person). No file changes shape: `settings.json`, `local.json`, `models.json` and
+`cleanup.json` hold the same keys as before. Two switches are on until set: `integrations.vulnerabilities` and
+`integrations.github_issues` (`configuration.DEFAULT_ON`); an older engine does not know either name and reads
+neither. Downgrade: an older engine has no door and no tool and never reads the journal or the plans. Tests:
+`tests/test_configure.py`.
+
 ## Ports per OS account (OBS-354)
 
 `project-observatory full ports show|allocate|set|release` records the port of each listener (server,
@@ -636,7 +650,7 @@ from `registry/agents.json` alone, with the inventory notes' frontmatter; no pat
 (its account row's `id`), DigitalOcean account rows gain `team_uuid` and Cloudflare account rows `account_id`. When
 `config/organizations.json` names organizations, those account rows also carry `organization`,
 `organization_source` (`rule`, `conflict`, `none`) and `organization_why`, and `registry/heroku-apps.json` carries
-`team_organizations` (`team` and the same three fields); without the file nothing new is written. `match` accepts
+`team_organizations` (`team` and the same three fields); without the file nothing new is written. An organization may name `platform_products` (project ids, OBS-564): each such project's row in `registry/projects.json` gains `platform_product: true` and its view in `observatory_project` and `estate.survey` (detail `full`) gains `platformProduct: true`; the published survey shape is unchanged, and an older engine ignores the key. `match` accepts
 `digitalocean_teams` (a team's uuid, or its name while no other team here bears it), `cloudflare_accounts` and
 `heroku_teams`; an older engine ignores the new keys, so a project they assigned falls back to the older answer there.
 A rule that is not a list of strings is ignored and named on the emit's error output. A project assigned through a

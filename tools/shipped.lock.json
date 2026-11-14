@@ -58,6 +58,16 @@
         "stepId"
       ]
     },
+    "observatory_configure": {
+      "input": [
+        "action",
+        "changes",
+        "decision",
+        "digest",
+        "journalId"
+      ],
+      "required": []
+    },
     "observatory_credentials": {
       "input": [
         "projectId"
@@ -132,6 +142,18 @@
       ],
       "required": [
         "handoffId"
+      ]
+    },
+    "observatory_key_consumers": {
+      "input": [
+        "env",
+        "name",
+        "project"
+      ],
+      "required": [
+        "env",
+        "name",
+        "project"
       ]
     },
     "observatory_learn": {

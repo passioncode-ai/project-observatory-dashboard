@@ -122,12 +122,12 @@ server = InteropServer(
         "(embedding-policy/1, lexical); `degraded` says so.\n"
         "WRITE: `observatory_record`, `_lesson` and `_propose` append PROPOSALS below "
         "confidence 1; only the operator or independent corroboration promotes one; "
-        "`_org_selection` changes need the operator's `decision`.\n"
+        "`_org_selection` and gated `_configure` changes need the operator's `decision`.\n"
         "SECRETS: `observatory_credentials` names keys and CANNOT return a value; run its command, "
         "open no file. Missing key: `observatory_secret_request`, no chat.\n"
         "DEGRADED: every read carries `degraded` (empty: full coverage; else it "
         "names gaps); treat a read without one as a bug (writes/job handles have none). "
-        "Refusals are typed `error` answers; isError: malformed input, unknown tool "
+        "Refusals are typed `error`s; isError: malformed input, unknown tool "
         "or invalid output.\n"
         "WORKFLOW: `observatory_checkpoint_write` after each step (keep `leaseId`); "
         "`observatory_handoff_create`/`_accept` moves it; `observatory_workflow_list` finds it.\n"
@@ -140,7 +140,7 @@ server = InteropServer(
         "Also `observatory_machine` (`section`, `move`, `explainPid`); `_sessions`; `observatory_ssh_keys` (no private key); "
         "`observatory_org_accounts`/`_keys`; "
         "`observatory_assistant_status`; `observatory_assistant_conversation`.\n"
-        "Fabric capabilities (fabric-interop/0.1), exact schemas: "
+        "Fabric capabilities (fabric-interop/0.1): "
         "`estate.survey`, `project.detail`, `project.resolve`, "
         "`project.timeline`, `project.record`, `machine.mcp.inventory`, `machine.mcp.refresh`."
     ),
@@ -475,48 +475,10 @@ def observatory_resolve(
 
 
 def _resolve_registry():
-    """The four registry documents and Fabric's aliases `identifiers.resolve` reads, each missing or unreadable one
-    named in `degraded`. One reader for `observatory_resolve` and `ops.digest.record`'s project and service
-    attribution (OBS-330), so the two never disagree about which project a name is."""
+    """The registry `identifiers.resolve` reads (`identifiers.load_registry`): one reader for `observatory_resolve`,
+    `ops.digest.record` and the digest folders' collector (OBS-330, CA-430), so they never disagree."""
     import identifiers
-    degraded: list[dict[str, str]] = []
-
-    def doc(name: str, key: str) -> list[dict]:
-        try:
-            return json.loads((paths.REGISTRY / name).read_text(encoding="utf-8"))[key]
-        except FileNotFoundError:
-            degraded.append({"source": f"registry/{name}", "reason": "absent: the emit has not written it"})
-        except (OSError, ValueError, KeyError) as exc:
-            degraded.append({"source": f"registry/{name}", "reason": f"unreadable: {type(exc).__name__}"})
-        return []
-
-    projects, products, relations = (doc("projects.json", "projects"), doc("products.json", "products"),
-                                     doc("relations.json", "relations"))
-    try:
-        idoc = json.loads((paths.REGISTRY / "identifiers.json").read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        idoc = {}
-        degraded.append({"source": "registry/identifiers.json",
-                         "reason": "absent: curated other names were not read; run `project-observatory full emit`"})
-    except (OSError, ValueError) as exc:
-        idoc = {}
-        degraded.append({"source": "registry/identifiers.json", "reason": f"unreadable: {type(exc).__name__}"})
-    # Fabric owns the canonical project id (OBS-160, DEC-0089): its `fabric:<uuid>` for each project, as
-    # Observatory last pulled it, and folders answered by the contract's rules over Observatory's facts.
-    import fabric_attribution
-    fdoc = fabric_attribution.load()
-    if not fdoc:
-        degraded.append({"source": "store/raw/fabric-attribution.json",
-                         "reason": "absent: no Fabric aliases read; run `project-observatory full fabric-attribution`"})
-    else:
-        degraded.extend({"source": "fabric-hub", "reason": str(d.get("reason"))}
-                        for d in fdoc.get("degraded") or [] if isinstance(d, dict))
-    # COPIES AND MOVES (OBS-321) are NOT added here: this tool is `project.resolve`'s required
-    # feature, and that capability's published v0.24.0 answer is closed, so an added field fails
-    # every host that validates it. `observatory_project` carries them (its `project` is open).
-    return identifiers.Registry(projects, products, relations, idoc, degraded,
-                                fabric_aliases=fabric_attribution.aliases(fdoc),
-                                attribute=fabric_attribution.attribute_local)
+    return identifiers.load_registry()
 
 
 @server.tool()
@@ -557,6 +519,31 @@ def observatory_credentials(
     if bad:
         return bad
     return _note_unknown(projectId, survey_mod.credentials(projectId))
+
+
+@server.tool()
+def observatory_key_consumers(
+    project: Annotated[str, Field(description="The vault folder of the slot, as `observatory_credentials` names it.")],
+    env: Annotated[str, Field(description="The slot's environment: local, stage or prod.")],
+    name: Annotated[str, Field(description="The slot's NAME, UPPER_SNAKE_CASE.")],
+) -> dict[str, Any]:
+    """Where else a vault slot's current value is deployed, found by the value itself and never returning it
+    (OBS-561): Heroku apps' config vars (read fresh), the local env files the engine inventories, and the services
+    started from the slot. This is what a door's `rotate` reads before it revokes: a copy it cannot deliver to holds
+    the old key alive. `consumers` name each copy by application, variable, file or service label; `holds` lists what
+    would hold a rotation now; `degraded` names every place that could not be read (never read as "no consumer");
+    `skipped` names places not in use on this machine. Read-only."""
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
+    import key_consumers
+    import vault
+    if any(credential_shape.shaped(v) for v in (project, env, name)):
+        return {"error": {"code": "invalid-slot", "message": "a slot address shaped like a credential is refused, "
+                                                             "not echoed"}, "degraded": []}
+    try:
+        vault.validate_names(project, env, name)
+    except vault.VaultBoundaryError as exc:
+        return {"error": {"code": "invalid-slot", "message": str(exc)}, "degraded": []}
+    return key_consumers.vault_answer(project, env, name)
 
 
 @server.tool()
@@ -688,6 +675,60 @@ def observatory_org_selection(
         return S.confirm_replacement(org, key, decision=words, caller="agent:mcp")
     except S.Refusal as refusal:
         return refusal.answer()
+
+
+@server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False))
+def observatory_configure(
+    action: Annotated[Literal["list", "plan", "apply", "undo"],
+                      Field(description="list and plan read and write no configuration; apply writes the plan "
+                                        "`digest` names; undo restores what `journalId` changed.")] = "list",
+    changes: Annotated[dict[str, Any] | None, Field(
+        description="plan: {key: value} for keys `list` names, typed as `list` says (true/false, a number, one of "
+                    "the choices, an absolute path, a list of vendor/model ids); null is back to the default.")] = None,
+    digest: Annotated[str | None, Field(description="apply: the `digest` the plan answered.")] = None,
+    journalId: Annotated[str | None, Field(validation_alias=AliasChoices("journalId", "journal_id"),
+                                           description="undo: the `journal` id an apply answered.")] = None,
+    decision: Annotated[dict[str, Any] | None, Field(
+        description="Only for a change `needsPerson` names: the operator's words in contract DEC-0121's shape: {by: "
+                    "operator, via: relayed-instruction, action: configure.apply|configure.undo, target: the digest "
+                    "or the journal id, instruction: their words verbatim, at: when, source?}. Also read from "
+                    "_meta.decision.")] = None,
+    ctx: "Context | None" = None,
+) -> dict[str, Any]:
+    """The configuration door (OBS-563, CP-20): every setting the engine reads, previewed, applied and undone in
+    one way, the same as `project-observatory full configure --list|--plan|--apply|--undo`.
+
+    `list` answers each key with its type, allowed values or range, default, file, gate and current value. `plan`
+    answers the values before and after, each change's effect, the keys that need the person (`needsPerson`: a switch
+    that sends data out, a cleanup that removes sooner, a budget raised, the model chain) and a `digest`; it writes no
+    configuration. `apply` with that digest writes exactly that plan, atomically, only while the files still hold what
+    it read (else `plan_stale`), and journals the values before and after with this caller as the actor
+    (store/logs/configure.jsonl); a change that needs the person also needs their words as `decision`. `undo`
+    restores the values an apply found, only while the files still hold what it wrote (else `undo_refused`).
+    Refusals are typed (`unknown_key`, `invalid_value`, `secret_refused`, `plan_stale`, `plan_unknown`,
+    `operator_decision_required`, `decision_invalid`, `journal_unknown`, `already_undone`) and never echo a refused
+    value; a credential is never configuration (`observatory_secret_request`)."""
+    import configuration_door as D
+    words = decision if decision is not None else _meta_decision(ctx)
+    stray = [name for name, value, takes in (("changes", changes, "plan"), ("digest", digest, "apply"),
+                                             ("journalId", journalId, "undo"))
+             if value not in (None, {}, "") and action != takes]
+    if action in ("list", "plan") and decision is not None:
+        stray.append("decision")
+    if stray:
+        return D.Refusal("invalid_argument", f"`{stray[0]}` belongs to another action, not to {action}").answer()
+    try:
+        if action == "list":
+            return D.listing()
+        if action == "plan":
+            return D.plan(changes)
+        if action == "apply":
+            return D.apply(digest, actor="agent:mcp", decision=words)
+        return D.undo(journalId, actor="agent:mcp", decision=words)
+    except D.Refusal as refusal:
+        return refusal.answer()
+    except configuration.ConfigurationError as exc:
+        return {"error": "workspace_refused", "message": str(exc)[:300], "degraded": []}
 
 
 #: A bare project name (a folder, or an id without its prefix).

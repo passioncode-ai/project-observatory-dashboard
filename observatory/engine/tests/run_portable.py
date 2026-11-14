@@ -80,6 +80,8 @@ BOUNDARY = (
     'private_sources', 'public_contracts', 'vault_boundaries', 'provider_secret_boundaries', 'cli_compatibility', 'handed_commands', 'dashboard_portability',
     'agent_plugin', 'audit_regressions', 'identity_map', 'zone_accounts', 'deployed_commit', 'scrub_incremental', 'leak_scan_incremental', 'tick_health', 'accounts', 'environments', 'credential_bindings', 'local_keys', 'trap_anchors', 'leak_coverage', 'backup_vault', 'organizations', 'org_selection', 'machine', 'local_folders', 'config_locations', 'dashboard_stop',
     'engine_update', 'workspace_profile', 'local_settings', 'local_ports', 'place_id', 'release_signature',
+    # The configuration door (OBS-563, CP-20).
+    'configure',
     # Ported suites, first batch: each builds its own temporary workspace.
     'delta_fold', 'mcp_inventory', 'openrouter_keys', 'scan_ids', 'secrets', 'signature',
     'skill_check', 'use_secret', 'validator_rules',
@@ -331,6 +333,9 @@ BOUNDARY += ('peer_owner', 'peer_check')
 # OBS-361 part 1: the administrator's tool that runs a headless space's jobs as system daemons with UserName,
 # against a temporary system root, an injected euid and a fake launchctl.
 BOUNDARY += ('space_daemons',)
+# OBS-561 (CP-11): a rotation finds the other copies of a key's value (fake Heroku, env files, services), delivers and
+# reads them back before it revokes, and holds the old key when one is out of reach.
+BOUNDARY += ('rotation_consumers',)
 SUITES = LEGACY + BOUNDARY
 #: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
 #: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.
@@ -377,6 +382,7 @@ ROOT_FILES = (
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py', 'tracked.py',
     'identity_map.py', 'identifiers.py', 'derivations.py', 'folder_attribution.py', 'fabric_attribution.py', 'ops_digest_folders.py', 'activity_collector.py', 'fabric_hub.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'sessions_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'tick_progress.py', 'tick_budget.py', 'dashboard_stamp.py', 'workspace.py',
     'workspace_upgrade.py', 'backup_vault.py', 'secret_store_carry.py', 'organizations.py', 'org_view.py', 'org_selection.py', 'machine_view.py', 'memory_snapshot.py', 'checkout_inventory.py', 'checkout_state.py', 'checkout_graph.py', 'cache_coverage.py', 'open_unlinked.py', 'coverage_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
+    'configuration_door.py',
     'log_policy.py', 'code_freshness.py', 'session_reload.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',
     # The companion's request for a why: journal, measurement, reach (M-8).
@@ -648,7 +654,7 @@ ASSERTION_LINE_SUITES = frozenset((
     'rollup_sessions', 'scrub', 'search_path', 'shared_ancestry', 'side_effect_attribution',
     'skill', 'skip_site_kinds', 'stale_collapse', 'store_faults', 'store_integrity', 'tick_repo',
     'unobservable', 'step_references', 'honest_absence', 'identifiers', 'memory_eval', 'textkeys',
-    'manifest_urls', 'digitalocean_door', 'heroku_door'
+    'manifest_urls', 'digitalocean_door', 'heroku_door', 'rotation_consumers'
 ))
 # Per-suite positive minimums may strengthen the default of one executed check.
 # Skips never satisfy a minimum; all-skipped selections remain explicitly SKIP.

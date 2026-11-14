@@ -27,6 +27,9 @@ so a workspace that never configures this sees no change):
                              "openrouter_accounts": ["<the label the door stashed it as>"]}}},
      "projects": {"project:<slug>": {"organization": "<name>", "why": "..."}}}
 
+`platform_products` (OBS-564), a list of project ids under an organization, marks the projects the platform
+installs in every organization: the registry gives each `platform_product: true`.
+
 THE ORDER, first answer wins:
   1. declared  — `projects` here, or `organization` in project_overrides.json
                  (where an accepted proposal lands);
@@ -218,6 +221,20 @@ class Assigner:
         self.estate = _estate_owners() if estate_owners is None else {o.lower() for o in estate_owners}
         self.products = product_index() if products is None else products
         self.default = next((n for n, o in self.orgs.items() if isinstance(o, dict) and o.get("default") is True), None)
+        # PLATFORM PRODUCTS (OBS-564): the projects the platform installs in every organization, named by
+        # its organization's `platform_products`, so a host reading the registry never guesses one from the
+        # owner of its repository.
+        self.platform_products: set[str] = set()
+        for name, org in self.orgs.items():
+            listed = (org or {}).get("platform_products") or []
+            if not isinstance(listed, list):
+                self.problems.append(f"{name}: platform_products must be a list of project ids; ignored")
+                continue
+            for item in listed:
+                if isinstance(item, str) and item.startswith("project:"):
+                    self.platform_products.add(item)
+                else:
+                    self.problems.append(f"{name}: platform_products holds {item!r}, not a project id; ignored")
 
     @property
     def active(self) -> bool:
