@@ -470,7 +470,7 @@ the Cloudflare door's twin on the Heroku Platform API. `heroku auth:token | pyth
 "$(project-observatory full-path)/tools/heroku.py" stash` (or `stash --from-cli`) keeps the
 CLI session's token as the admin, read by the door alone. `issue --preset read|deploy|identity
 --vault PROJECT/ENV/NAME [--team TEAM] [--app APP]` mints a direct OAuth authorization with that
-scope only (`config-read` and `config-write` reach config vars and need `--app`), proves it with
+scope only (`config-read` and `config-write` reach config vars and need `--app`; `billing-read` issues `global`, the one scope Heroku answers a team's invoices to, needs `--team`, expires in 365 days at most, and is proved on the invoices), proves it with
 its own value, and delivers it on stdin; `rotate` regenerates it in place, `revoke` deletes it
 first at Heroku, `list` and `ping` name what exists. Heroku narrows an authorization by scope
 only, never to a team or an app: `--team` and `--app` are its stated purpose and what the proof

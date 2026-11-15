@@ -85,6 +85,22 @@ def vm_findings(guard: dict | None) -> list[dict]:
     """OBS-529: a VM writing into its disk file while the host disk is low is the next thing to break."""
     out = []
     for w in (guard or {}).get("warnings") or []:
+        if isinstance(w, dict) and w.get("code") == "vm-disk-errors" and isinstance(w.get("instances"), list):
+            seen = [i for i in w["instances"] if isinstance(i, dict) and isinstance(i.get("instance"), str)]
+            if not seen:
+                continue
+            named = "; ".join(f"{i['instance']} ({'; '.join(str(x) for x in (i.get('lines') or [])[:2])})"
+                              for i in seen[:5])
+            out.append({"type": "vm.disk_errors", "subject": "machine:vm", "severity": "critical",
+                        **titled("a virtual machine's disk reports file system errors"),
+                        "detail": (f"The kernel log of {len(seen)} VM(s) shows a journal abort or a file system "
+                                   f"mounted with errors: {named}. Docker and every container on that disk may fail "
+                                   "or lose data. The guard only reads the log and never repairs the disk."),
+                        "action": ("repair it by hand: stop Docker in the VM, run `e2fsck -fy` on the device the log "
+                                   "names (the Docker data disk), then `colima restart`; the guard never does this "
+                                   "because it would stop every container"),
+                        "evidence": ["store:raw/disk-guard.json"]})
+            continue
         if not isinstance(w, dict) or w.get("code") != "vm-disk-at-risk" or not isinstance(w.get("vms"), list):
             continue
         out.append({"type": "machine.vm_disk_at_risk", "subject": "machine:vm",

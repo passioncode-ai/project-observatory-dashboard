@@ -6,6 +6,7 @@
     python "$T/heroku.py" stash --from-cli              # the same, the pipe made inside this program
     python "$T/heroku.py" issue --preset read --vault PROJECT/ENV/NAME [--team TEAM] [--app APP]
     python "$T/heroku.py" issue --preset deploy --vault PROJECT/ENV/NAME --app APP [--expire-days 90 | --no-expiry]
+    python "$T/heroku.py" issue --preset billing-read --vault PROJECT/ENV/NAME --team TEAM [--expire-days 365]
     python "$T/heroku.py" list
     python "$T/heroku.py" ping
     python "$T/heroku.py" rotate PROJECT/ENV/NAME        # or --leaked, for every open leak; --force (OBS-561)
@@ -34,6 +35,12 @@ USER's authorization: Heroku offers no field that limits one to a team or an app
 to be a grant: they are written into the description Heroku shows beside the
 authorization, recorded in the ledger, and they are what the proof reads before
 the value is delivered. The preset table states this, and `list` repeats it.
+
+ONE PRESET IS WIDER THAN ITS READ (OBS-571). `billing-read` issues scope `global` because a team's invoices
+answer to nothing narrower (measured 2026-11-15: `read-protected` 403, `read` 403, `global` 200). It needs
+`--team`, expires in 365 days by default (at most 365, never without an expiry), and is proved on
+`GET /teams/TEAM/invoices` before the vault holds the value: a failed proof deletes the new authorization and
+writes nothing. The journal line, the ledger row and the output say why `global` was needed.
 
 `read` and `write` exclude config vars; the `-protected` scopes include them,
 which is why the presets that grant them are named after config, not deploys.
@@ -136,11 +143,12 @@ SETTLE_HINT = ("the leaked values are dead; close each row the register names wi
 
 #: The scopes Heroku accepts on an authorization (the CLI's ScopeCompletion,
 #: heroku-cli 10.16, and devcenter.heroku.com/articles/oauth). `global` is the
-#: admin's own and no preset issues it.
+#: admin's own; only `billing-read` issues it (OBS-571), and says why.
 SCOPES = ("identity", "read", "write", "read-protected", "write-protected", "global")
 
-#: A preset is a scope set and a purpose. None issues `global`: a credential that
-#: can do everything the admin can is the admin, and that one is never handed out.
+#: A preset is a scope set and a purpose. Only `billing-read` issues `global`, because Heroku answers a team's
+#: invoices to nothing narrower (measured 2026-11-15: read-protected 403, read 403, global 200); it carries `wider`,
+#: the reason, which the journal, the ledger row and the output repeat. Every other preset stays narrow.
 #: `probe` is what the NEW value must read before the vault holds it; {app} and
 #: {team} come from --app and --team, and the narrowest one given is used.
 PRESETS: dict[str, dict] = {
@@ -170,6 +178,18 @@ PRESETS: dict[str, dict] = {
         "why": "reads and changes apps and their resources INCLUDING config vars",
         "probe": "apps",
         "needs_app": True,
+    },
+    "billing-read": {
+        "scopes": ("global",),
+        "why": "reads a team's invoices (billing); Heroku offers no narrower scope for them",
+        "probe": "invoices",
+        "needs_team": True,
+        "default_days": 365,                  # a billing check is rare: a year, never more, never without an expiry
+        "never_expires": False,
+        "wider": ("global is wider than the read needs: a team's invoices answer only to global "
+                  "(measured 2026-11-15: read-protected 403, read 403, global 200), and global can do whatever "
+                  "this admin can; so it expires, is never handed to an agent that does not need billing, and "
+                  "is proved on the invoices alone"),
     },
 }
 #: The roles a membership write may set. `owner` is a transfer of the team,
@@ -523,6 +543,8 @@ def probe_paths(preset: dict, team: str | None, app: str | None) -> list[tuple[s
     account for `identity`, whose scope reads no app and no team."""
     if preset["probe"] == "account":
         return [("/account", "the account")]
+    if preset["probe"] == "invoices" and team:
+        return [(f"/teams/{q(team)}/invoices", f"team {team}'s invoices")]
     out = []
     if app:
         out.append((f"/apps/{q(app)}", f"app {app}"))
@@ -628,6 +650,18 @@ def same_lifetime(existing: dict, prior: dict | None, expire_days: int | None) -
     return _expires_in(existing) is not None and (prior or {}).get("expire_days") == expire_days
 
 
+#: What `--expire-days` holds when the flag was not given: the preset's default (365 for `billing-read`),
+#: else the shared one.
+NOT_GIVEN = -1
+
+
+def days_for(preset_key: str, asked: int | None) -> int | None:
+    """The lifetime to mint: what the flags asked, or the preset's own default when no `--expire-days` was given."""
+    if asked == NOT_GIVEN:
+        return (PRESETS.get(preset_key) or {}).get("default_days", key_expiry.DEFAULT_DAYS)
+    return asked
+
+
 @_locked
 def cmd_issue(preset_key: str, target: str | None, team: str | None, app: str | None,
               admin_label: str | None, expire_days: int | None = key_expiry.DEFAULT_DAYS,
@@ -639,6 +673,14 @@ def cmd_issue(preset_key: str, target: str | None, team: str | None, app: str | 
     if not target:
         print("refused: --vault PROJECT/ENV/NAME is required; a Heroku credential goes "
               "to a vault slot", file=sys.stderr)
+        return 2
+    if preset.get("needs_team") and not team:
+        print(f"refused: preset {preset_key!r} reads one team's billing and needs --team, the team it is for, "
+              f"so the description and the proof name it", file=sys.stderr)
+        return 2
+    if preset.get("never_expires") is False and expire_days is None:
+        print(f"refused: preset {preset_key!r} is wider than its read needs and always expires; "
+              f"--no-expiry is not offered for it", file=sys.stderr)
         return 2
     if preset.get("needs_app") and not app:
         print(f"refused: preset {preset_key!r} reaches config vars and needs --app, the one "
@@ -727,9 +769,10 @@ def cmd_issue(preset_key: str, target: str | None, team: str | None, app: str | 
         "rotated_on": today() if rolled else (prior or {}).get("rotated_on"),
         "rotations": ((prior or {}).get("rotations") or 0) + (1 if rolled else 0),
         "issued_by": "tools/heroku.py",
+        **({"wider": preset["wider"]} if preset.get("wider") else {}),
     })
     _journal("rotate" if rolled else "issue", slot, preset=preset_key,
-             authorization=auth_id, team=team, app=app)
+             authorization=auth_id, team=team, app=app, **({"note": preset["wider"]} if preset.get("wider") else {}))
     print(f"  {slot}: {'regenerated' if rolled else 'issued'} authorization {auth_id}, "
           f"scope {', '.join(scopes)}, {expiry}{retired}")
     # Exactly what was proved, and nothing more: an `identity` value reads the
@@ -737,6 +780,8 @@ def cmd_issue(preset_key: str, target: str | None, team: str | None, app: str | 
     print(f"  proved with its own value before delivery: it read {', '.join(proved)}")
     unproved = [w for w, given in ((f"team {team}", team), (f"app {app}", app))
                 if given and not any(w in p for p in proved)]
+    if preset.get("wider"):
+        print(f"  {preset['wider']}")
     print("  Heroku cannot narrow an authorization to a team or an app: the scope is the grant, "
           "and it reaches every app this user reaches"
           + (f"; {' and '.join(unproved)} exist for the admin but this scope cannot read them"
@@ -1178,6 +1223,7 @@ def main() -> int:
     p.add_argument("--app", help="the app it is for: named in its description, read by its proof")
     p.add_argument("--admin", help="which stashed admin token to issue from")
     key_expiry.add_flags(p, "--expire-days", NO_EXPIRY_FLAG, "authorization")
+    p.set_defaults(key_expire_days=NOT_GIVEN)     # a preset's own default applies unless --expire-days says another
     sub.add_parser("list", help="what exists, with dates; never values")
     sub.add_parser("ping", help="is every admin alive and every issued authorization still there")
     p = sub.add_parser("rotate", help="regenerate an authorization's value in place")
@@ -1215,7 +1261,8 @@ def main() -> int:
             return 2
         return cmd_stash(sys.stdin.read().strip(), a.label)
     if a.cmd == "issue":
-        return cmd_issue(a.preset, a.vault, a.team, a.app, a.admin, key_expiry.days_of(a))
+        return cmd_issue(a.preset, a.vault, a.team, a.app, a.admin,
+                         days_for(a.preset, key_expiry.days_of(a)))
     if a.cmd == "list":
         return cmd_list()
     if a.cmd == "ping":
