@@ -41,6 +41,7 @@ PAGES: tuple[tuple[str, str, str], ...] = (
     ("traffic",  "Traffic",   "table"),
     ("health",   "Health",    "health"),
     ("machine",  "Machine",   "machine"),
+    ("disk",     "Disk",      "disk"),
 )
 #: THE QUESTION EACH PAGE ANSWERS, in the reader's words (IS-01/IS-02; backlog
 #: D-03). Nine pages shared one `<title>` and one `<h1>` until 2026-09-14: a
@@ -62,6 +63,7 @@ QUESTIONS: dict[str, str] = {
     "traffic":  "Product audiences, data sources and linked projects.",
     "health":   "Observer state, data freshness and the agents' records.",
     "machine":  "What runs on this machine, where memory and disk go, and what was cleaned.",
+    "disk":     "How much space is free, what the guard and auto cleanup removed and keep, and how they are set.",
 }
 #: The product's name is never translated (docs/brand/locales/*.md).
 TITLE_SUFFIX = "Project Observatory"
@@ -78,7 +80,7 @@ NAV_GROUPS = (
     ("work", "Work", ("index", "projects", "agents", "findings")),
     ("infrastructure", "Infrastructure", ("heroku", "digitalocean", "cloudflare", "domains", "traffic")),
     ("access", "Access", ("creds", "env", "mcp")),
-    ("system", "System", ("health", "machine")),
+    ("system", "System", ("health", "machine", "disk")),
 )
 OVERVIEW_FINDINGS_LIMIT = 8
 
@@ -128,6 +130,12 @@ def _machine(payload: dict, t: Translator) -> str:
     """The Machine page's body, rendered at build time (dashboard/machine_page.py)."""
     import machine_page
     return machine_page.machine_html(payload, t)
+
+
+def _disk(payload: dict, t: Translator) -> str:
+    """The Disk page's body, rendered at build time (dashboard/disk_page.py, OBS-562)."""
+    import disk_page
+    return disk_page.disk_html(payload, t)
 
 
 def locale_switch_html(t: Translator) -> str:
@@ -328,6 +336,17 @@ def _machine_line(payload: dict, t: Translator) -> str:
             + t.mark("{n} processes", n=(m.get("processes") or {}).get("count") or 0))
 
 
+def _disk_line(payload: dict, t: Translator) -> str:
+    """The overview's Disk card: free space and whether auto cleanup is on (OBS-562)."""
+    m = payload.get("machine") or {}
+    free = ((m.get("disk") or {}).get("volume") or {}).get("free_gb")
+    auto = (m.get("cleanup") or {}).get("autoEnabled")
+    line = t.mark("{gb} GB free on disk", gb=free) if free is not None else t.mark("not surveyed")
+    if auto is not None:
+        line += " · " + (t.mark("auto cleanup on") if auto else t.mark("auto cleanup off"))
+    return line
+
+
 def cards_html(payload: dict, counts: dict, t: Translator | None = None) -> str:
     """The index page's module cards: one sentence each, the number, the link."""
     t = t or Translator()
@@ -352,6 +371,7 @@ def cards_html(payload: dict, counts: dict, t: Translator | None = None) -> str:
                + t.mark("{n} servers", n=((payload.get("mcp") or {}).get("totals") or {}).get("distinct_servers", 0)),
         "traffic": _traffic_line(payload, t),
         "machine": _machine_line(payload, t),
+        "disk": _disk_line(payload, t),
         "agents": _agents_line(payload, t),
         # The observer's state alone: the agents' unconfirmed records ask nothing of a
         # person (operator, 2026-10-06), so they are no reason to open the page.
@@ -404,6 +424,8 @@ def slice_for(page: str, payload: dict) -> dict:
     for key, owner in heavy.items():
         if page != owner:
             out[key] = None
+    if page == "disk":
+        out["machine"] = payload.get("machine")     # the Disk page reads the machine survey too (OBS-562)
     if page != "domains":
         out["zones"] = None
         out["domains"] = []
@@ -511,6 +533,7 @@ def page_html(template: str, page: str, payload: dict, locale: str = "en") -> st
         "HOME": lambda: _home(payload, t) if page == "index" else "",
         "CARDS": lambda: cards_html(payload, counts, t) if page == "index" else "",
         "MACHINE": lambda: _machine(payload, t) if page == "machine" else "",
+        "DISK": lambda: _disk(payload, t) if page == "disk" else "",
         "AGENTS": lambda: _agents(payload, t) if page == "agents" else "",
         "INFRA": lambda: _infra(page, payload, t) if page in INFRA_PAGES else "",
         "DATA": lambda: data.replace("</", "<\\/"),

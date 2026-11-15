@@ -82,6 +82,8 @@ BOUNDARY = (
     'engine_update', 'workspace_profile', 'local_settings', 'local_ports', 'place_id', 'release_signature',
     # The configuration door (OBS-563, CP-20).
     'configure',
+    # The Disk page and its settings route on the key server (OBS-562, CP-16).
+    'disk_page',
     # Ported suites, first batch: each builds its own temporary workspace.
     'delta_fold', 'mcp_inventory', 'openrouter_keys', 'scan_ids', 'secrets', 'signature',
     'skill_check', 'use_secret', 'validator_rules',

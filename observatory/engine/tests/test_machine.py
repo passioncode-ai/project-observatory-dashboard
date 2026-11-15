@@ -975,7 +975,7 @@ class Page(Base):
             self.assertIn(text, en)
         self.assertIn("Память по источникам", ru)
         self.assertIn("кэш", ru)
-        self.assertIn("Nothing was cleaned in the last 7 days.", en)   # empty state, not a blank card
+        self.assertIn('href="disk.html"', en)   # the guard and the cleanup are on the Disk page (OBS-562)
         self.assertIn("git-hygiene.json", json.dumps(summary["degraded"]))
         # L10N-05: the decimal comma and the unit follow the reader's language.
         self.assertIn(">1,5 ГБ<", ru)
@@ -1045,14 +1045,15 @@ class LightSample(Base):
         self.assertIn("app:Editor", en)
         self.assertNotIn("executable:node", en)
 
-    def test_the_guard_command_names_the_workspace(self):
-        # OSS-26: a command copied from the page runs against the workspace that built it.
-        import machine_page, paths
+    def test_the_guard_shows_no_command_line(self):
+        # OBS-562: the guard moved to the Disk page, which shows no command a person would copy; the settings
+        # change from the page or through `observatory_configure`. (OSS-26 named the workspace in the command.)
+        import disk_page
         from i18n import Translator
         guard = {"at": "2026-01-01T00:00:00Z", "level": "normal", "results": {}, "planned": {}}
         for locale in ("en", "ru"):
-            html = machine_page.guard_html(guard, Translator(locale))
-            self.assertIn(f"OBSERVATORY_HOME=&#x27;{paths.HOME}&#x27; project-observatory full disk-guard --apply", html)
+            html = disk_page.guard_html(guard, Translator(locale))
+            self.assertNotIn("project-observatory full", html)
 
     def test_the_light_sample_stands_alone_when_no_full_survey_ran(self):
         import machine_view
@@ -1132,7 +1133,7 @@ class Unmeasured(Base):
         from i18n import Translator
         summary = machine_view.summary()
         en = machine_page.machine_html({"machine": summary}, Translator("en"))
-        for claim in ("Every worktree is clean", "No branch holds commits found nowhere else", "Nothing to clean."):
+        for claim in ("Every worktree is clean", "No branch holds commits found nowhere else"):
             self.assertNotIn(claim, en)
         self.assertIn("Not measured yet", en)
         self.assertIn("project-observatory full machine", en)

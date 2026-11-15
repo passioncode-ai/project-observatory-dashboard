@@ -1214,6 +1214,15 @@ def build():
             for k, d in (("critical", 10), ("low", 25))}
     except Exception as exc:  # noqa: BLE001 (a page, not a crash)
         print(f"  disk guard lines unavailable: {type(exc).__name__}: {exc}", file=sys.stderr)
+    # THE DISK PAGE'S SETTINGS (OBS-562): every key the configuration door declares for the guard and the cleanup,
+    # with its value, default and whether a file sets it. A door that cannot read is named, never a blank table.
+    try:
+        import configuration_door
+        import disk_page
+        PAYLOAD["machine"]["diskSettings"] = disk_page.settings_of(configuration_door.listing())
+    except Exception as exc:  # noqa: BLE001 (a page, not a crash)
+        PAYLOAD["machine"]["diskSettings"] = {"settings": [], "degraded": [
+            {"source": "configuration", "code": "unreadable", "reason": f"{type(exc).__name__}"}]}
     # THE AGENTS: workflows, handoffs and sessions, read-only from the store;
     # only the Agents page carries it (shell.slice_for), and the overview card
     # reads its counters.
@@ -1235,7 +1244,7 @@ def build():
     locale = build_locale()
     t = i18n.Translator(locale)
     title = "Projects — the operator's registry"
-    return (template_for(locale).replace("__PAGE__", "").replace("__NAV__", "").replace("__CARDS__", "").replace("__MACHINE__", "").replace("__AGENTS__", "").replace("__INFRA__", "")
+    return (template_for(locale).replace("__PAGE__", "").replace("__NAV__", "").replace("__CARDS__", "").replace("__MACHINE__", "").replace("__DISK__", "").replace("__AGENTS__", "").replace("__INFRA__", "")
             .replace("__TITLE__", html.escape(t(title)))
             .replace("__PAGE_TITLE__", "")
             .replace("__H1__", t.mark(title, tag="h1"))
@@ -1770,6 +1779,7 @@ body[data-page="machine"] #out, body[data-page="machine"] #list-tools,
 body[data-page="agents"] #out, body[data-page="agents"] #list-tools,
 body[data-page="index"] #panel, body[data-page="findings"] #panel, body[data-page="health"] #panel,
 body[data-page="machine"] #panel, body[data-page="agents"] #panel,
+body[data-page="disk"] #out, body[data-page="disk"] #list-tools, body[data-page="disk"] #panel,
 body[data-page="digitalocean"] #out, body[data-page="digitalocean"] #list-tools, body[data-page="digitalocean"] #panel,
 body[data-page="cloudflare"] #out, body[data-page="cloudflare"] #list-tools, body[data-page="cloudflare"] #panel { display: none; }
 /* The Agents page: server-rendered cards (dashboard/agents_page.py). */
@@ -1810,7 +1820,7 @@ body[data-page="cloudflare"] #out, body[data-page="cloudflare"] #list-tools, bod
 @media (max-width: 640px) { .agents-lane { flex-direction: column; align-items: stretch; } }
 /* The Machine page: server-rendered cards (dashboard/machine_page.py). */
 .machine-h { font: 600 var(--t-section) var(--font-ui); margin: 0 0 var(--space-3); }
-#machine thead th.num { text-align: right; }
+#machine thead th.num, #disk thead th.num { text-align: right; }
 .machine-at, .machine-hint { color: var(--muted); font-size: var(--t-label); margin-top: var(--space-3); }
 body[data-page="findings"] .flist.folded .finfo, body[data-page="findings"] .flist.folded .fwarning { display: block; }
 /* The index page puts the inventory tiles first and the work tiles after
@@ -1960,6 +1970,7 @@ __NAV__
 <section id="panel" class="card panel" role="dialog" aria-labelledby="panel-title" hidden></section>
 __CARDS__
 __MACHINE__
+__DISK__
 __AGENTS__
 __INFRA__
 <div id="list-tools" class="list-tools"></div>
@@ -4788,6 +4799,91 @@ stick();
 render();
 // Finally, open whatever the URL hash names.
 fromHash();
+// THE DISK PAGE'S SETTINGS (OBS-562, CP-16). The page builds every control disabled. Served by
+// the local control server with its token (LIVE), they are enabled and post to its `configure`
+// action: a plan first, shown here; Apply writes exactly that plan; Undo restores it by the
+// journal id. Opened as a file nothing is sent and the controls say why.
+(function diskSettings() {
+  if (PAGE !== "disk" || typeof document === "undefined" || !document.querySelectorAll) return;
+  const box = document.getElementById("disk-plan");
+  if (!box || !LIVE) return;
+  const quiet = el => { for (const a of ["title", "data-t-title", "data-t-title-args"]) el.removeAttribute(a); };
+  const live = document.getElementById("disk-live");
+  if (live) {
+    quiet(live);
+    live.removeAttribute("data-t");
+    live.textContent = T("Each change is previewed here before it applies, and can be undone.");
+  }
+  for (const el of document.querySelectorAll("[data-cfg-key], [data-cfg-input]")) { el.disabled = false; quiet(el); }
+  const row = key => document.querySelector(`tr[data-cfg-row="${key}"]`);
+  const label = key => { const r = row(key), l = r && r.querySelector('[id^="cfg-label-"]'); return l ? l.textContent : key; };
+  const shown = v => v === true ? T("switch@@on") : v === false ? T("switch@@off")
+    : v === null || v === undefined ? "\u2013" : String(v);
+  const open = markup => {
+    box.innerHTML = markup;
+    box.hidden = false;
+    const first = box.querySelector("button");
+    if (first) first.focus();
+  };
+  const failed = err => `<p>${E(err instanceof Uncertain
+    ? T("the outcome is unknown: {why}; reload the page to see the settings", {why: err.message})
+    : T("not changed: {why}", {why: err.message}))}</p>`;
+  // The row shows what the server wrote, until the next build shows it everywhere.
+  function mark(key, value) {
+    const r = row(key);
+    if (!r) return;
+    const cells = r.querySelectorAll("td");
+    if (cells[1]) cells[1].textContent = shown(value);
+    if (cells[3]) cells[3].textContent = T("changed from this page");
+    const input = r.querySelector("[data-cfg-input]");
+    if (input && typeof value === "number") input.value = String(value);
+    const sw = r.querySelector("[data-cfg-value]");
+    if (sw && typeof value === "boolean") {
+      sw.dataset.cfgValue = String(!value);
+      sw.textContent = value ? T("Turn off") : T("Turn on");
+    }
+  }
+  async function preview(key, value) {
+    let d;
+    try { d = await call("configure", {op: "plan", changes: {[key]: value}}); }
+    catch (err) { open(failed(err)); return; }
+    const rows = (d.changes || []).map(c =>
+      `<li><b>${E(label(c.key))}</b>: ${E(shown(c.before))} → ${E(shown(c.after))}</li>`).join("");
+    const yours = (d.needsPerson || []).length
+      ? `<p class="machine-hint">${T("This change turns cleanup on or makes it remove things sooner: applying it is your decision.")}</p>` : "";
+    open(`<h2 class="machine-h">${T("Change preview")}</h2><ul>${rows}</ul>${yours}` +
+         `<button type="button" class="chip-btn" data-cfg-apply="${E(d.digest)}">${T("Apply")}</button> ` +
+         `<button type="button" class="chip-btn" data-cfg-cancel="1">${T("Cancel")}</button>`);
+  }
+  async function apply(digest) {
+    let d;
+    try { d = await call("configure", {op: "apply", digest}); }
+    catch (err) { open(failed(err)); return; }
+    for (const c of d.changes || []) mark(c.key, c.after);
+    open(`<p>${T("Applied. The next build shows it on every page.")}</p>` + (d.journal
+      ? `<button type="button" class="chip-btn" data-cfg-undo="${E(d.journal)}">${T("Undo")}</button>` : ""));
+  }
+  async function undo(journal) {
+    let d;
+    try { d = await call("configure", {op: "undo", journal}); }
+    catch (err) { open(failed(err)); return; }
+    for (const c of d.changes || []) mark(c.key, c.after);
+    open(`<p>${T("Undone.")}</p>`);
+  }
+  document.addEventListener("click", ev => {
+    const el = ev.target && ev.target.closest
+      && ev.target.closest("[data-cfg-key], [data-cfg-apply], [data-cfg-cancel], [data-cfg-undo]");
+    if (!el || el.disabled) return;
+    if (el.dataset.cfgApply) { apply(el.dataset.cfgApply); return; }
+    if (el.dataset.cfgUndo) { undo(el.dataset.cfgUndo); return; }
+    if (el.dataset.cfgCancel) { box.hidden = true; box.innerHTML = ""; return; }
+    if (el.dataset.cfgValue) { preview(el.dataset.cfgKey, el.dataset.cfgValue === "true"); return; }
+    const input = document.getElementById(el.dataset.cfgFrom || "");
+    const n = input && input.value !== "" ? Number(input.value) : NaN;
+    if (!Number.isFinite(n)) { toast(T("enter a number first")); return; }
+    preview(el.dataset.cfgKey, n);
+  });
+})();
 // THE AGENTS PAGE STAYS CURRENT between ticks when the local server serves it:
 // the server renders the same section again from the store (`/agents`, the same
 // Python renderer as the built page) and the page swaps it in. Which workflows

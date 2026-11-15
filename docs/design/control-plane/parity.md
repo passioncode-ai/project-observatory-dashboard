@@ -47,18 +47,19 @@ first proves the unmodified list passes.
 
 | status | count |
 |---|---|
-| covered | 8 |
+| covered | 9 |
 | gate | 8 |
 | missing | 93 |
 
-109 actions: 9 dashboard (8 missing, the reveal a gate) and 100 CLI verbs (8 covered, 7 gates, 85 missing).
+110 actions: 10 dashboard (8 missing, the reveal a gate, the Disk page's `configure` covered) and 100 CLI verbs (8 covered, 7 gates, 85 missing).
 79 top-level commands are excluded by name and the `test*` and `scan-*` families by prefix.
 
 Covered today: `workflow handoff` (`observatory_handoff_create`, `observatory_handoff_accept`), `workflow
 close` (`observatory_checkpoint_write` with `close`), `org select` (`observatory_org_selection`),
 `scan-mcp` (`machine.mcp.refresh`), `grant --check` (`grant.check`), `assistant ask`
 (`observatory_assistant_ask`), `assistant cancel` (`fabric.job.cancel`) and `configure`
-(`observatory_configure`, OBS-563).
+(`observatory_configure`, OBS-563), and the Disk page's `configure` action on the key server
+(`observatory_configure`, OBS-562).
 
 Gates: the reveal of a value to a person, `backup-passphrase set` and `assistant secret` (typed secrets),
 `backup-passphrase show` (a value shown to a person), `assistant ceremony` and `share confirm`/`differ`
