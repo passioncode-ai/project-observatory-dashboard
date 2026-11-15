@@ -138,6 +138,11 @@ class FakeHeroku:
             team = next((t for t in self.teams.values() if parts[2] in (t["id"], t["name"])), None)
             if not team:
                 raise self.m.HerokuError(404, "heroku answered HTTP 404")
+            if len(parts) > 3 and parts[3] == "invoices":
+                # Measured 2026-11-15: team invoices answer only to `global` (read-protected and read: 403).
+                if held and "global" not in held["scope"]:
+                    raise self.m.HerokuError(403, "heroku answered HTTP 403")
+                return [{"number": 1, "total": 0}], None
             if held and "read" not in held["scope"] and "read-protected" not in held["scope"]:
                 raise self.m.HerokuError(403, "heroku answered HTTP 403")
             if len(parts) == 3:
@@ -319,7 +324,9 @@ def test_issue_mints_a_narrow_authorization_proves_it_and_delivers_it() -> None:
     check("the ledger is owner-only", m.LEDGER.stat().st_mode & 0o777 == 0o600, "")
     check("nothing printed a value or the refresh token", no_value(o + e), o + e)
     check("the output says Heroku cannot narrow to a team", "cannot narrow" in o, o)
-    check("no preset issues global", all("global" not in p["scopes"] for p in m.PRESETS.values()), "")
+    check("one preset issues global, billing-read, and says why",
+          [k for k, p in m.PRESETS.items() if "global" in p["scopes"]] == ["billing-read"]
+          and "invoices" in m.PRESETS["billing-read"]["wider"], "")
 
 
 def test_issue_refuses_before_minting() -> None:
@@ -333,6 +340,51 @@ def test_issue_refuses_before_minting() -> None:
     rc, _o, e = run(m.cmd_issue, "read", "alpha/prod/K", None, None, None, 0, wait=0)
     check("an expiry of 0 days is refused", rc == 2, e)
     check("and none of them minted anything", not fake.auths and not delivered, str(fake.auths))
+
+
+def test_billing_read_issues_global_for_invoices_proves_them_and_says_why() -> None:
+    m, fake, delivered = setup()
+    journal: list[tuple] = []
+    m._journal = lambda event, secret, **detail: journal.append((event, secret, detail))
+    rc, o, e = run(m.cmd_issue, "billing-read", "alpha/prod/HEROKU_BILLING", None, None, None, None, wait=0)
+    check("billing-read without --team is refused before minting", rc == 2 and "--team" in e and not fake.auths, e)
+    rc, o, e = run(m.cmd_issue, "billing-read", "alpha/prod/HEROKU_BILLING", "example-team", None, None, None, wait=0)
+    check("a never-expiring billing-read is refused before minting", rc == 2 and not fake.auths, o + e)
+    rc, o, e = run(m.cmd_issue, "billing-read", "alpha/prod/HEROKU_BILLING", "example-team", None, None, 366, wait=0)
+    check("more than 365 days is refused", rc == 2 and not fake.auths, e)
+    rc, o, e = run(m.cmd_issue, "billing-read", "alpha/prod/HEROKU_BILLING", "example-team", None, None, 365, wait=0)
+    check("billing-read issues", rc == 0, o + e)
+    created = [p for meth, path, tok, p in fake.calls if meth == "POST" and path == "/oauth/authorizations"]
+    check("scope global, 365 days",
+          len(created) == 1 and created[0]["scope"] == ["global"] and created[0]["expires_in"] == 365 * 86400,
+          str(created))
+    new = next(iter(fake.auths.values()))["token"]
+    check("proved with the NEW value on the team's invoices before delivery",
+          any(tok == new and path == "/teams/example-team/invoices" for _m, path, tok, _p in fake.calls), "")
+    check("delivered to the slot", delivered == [(new, "alpha", "prod", "HEROKU_BILLING")], str(delivered))
+    row = json.loads(m.LEDGER.read_text())["issued"]["alpha/prod/HEROKU_BILLING"]
+    check("the ledger row names preset, scope and team, with no value",
+          row["preset"] == "billing-read" and row["scopes"] == ["global"] and row["team"] == "example-team"
+          and no_value(m.LEDGER.read_text()), str(row))
+    line = next(d for ev, _s, d in journal if ev == "issue")
+    check("the journal line names the preset and why global is wider than the read needs",
+          line["preset"] == "billing-read" and "global" in line["note"] and "invoices" in line["note"]
+          and "403" in line["note"], str(line))
+    check("the output says it too, and prints no value", "wider than" in o and no_value(o + e), o + e)
+
+
+def test_billing_read_default_is_365_days_and_a_failed_probe_revokes_and_writes_nothing() -> None:
+    m, fake, delivered = setup()
+    check("the preset's default lifetime is 365 days and the flag is not the shared 90",
+          m.PRESETS["billing-read"]["default_days"] == 365 and m.days_for("billing-read", -1) == 365
+          and m.days_for("billing-read", 30) == 30 and m.days_for("read", -1) == 90, "")
+    m, fake, delivered = setup()
+    fake.refuse["/teams/example-team/invoices"] = 403
+    rc, o, e = run(m.cmd_issue, "billing-read", "alpha/prod/HEROKU_BILLING", "example-team", None, None, 365, wait=0)
+    check("a failed invoices probe refuses", rc == 1 and "invoices" in e, o + e)
+    check("the new authorization is revoked again", not fake.auths and "deleted again" in e, e)
+    check("nothing reached the vault or the ledger", not delivered and not m.LEDGER.exists(), "")
+    check("and no value was printed", no_value(o + e), o + e)
 
 
 def test_issue_deletes_what_it_created_when_proof_or_delivery_fails() -> None:
@@ -704,6 +756,8 @@ if __name__ == "__main__":
                test_stash_from_cli_reads_the_session_token_without_argv,
                test_issue_mints_a_narrow_authorization_proves_it_and_delivers_it,
                test_issue_refuses_before_minting,
+               test_billing_read_issues_global_for_invoices_proves_them_and_says_why,
+               test_billing_read_default_is_365_days_and_a_failed_probe_revokes_and_writes_nothing,
                test_issue_deletes_what_it_created_when_proof_or_delivery_fails,
                test_issue_twice_regenerates_in_place_and_a_new_preset_retires_the_old,
                test_rotate_regenerates_proves_and_delivers,

@@ -145,5 +145,29 @@ class VirtualMachineAtRisk(unittest.TestCase):
         self.assertEqual(F.vm_findings({"warnings": [{"code": "vm-disk-at-risk", "vms": "not a list"}, "x"]}), [])
 
 
+class VirtualMachineDiskErrors(unittest.TestCase):
+    """The VM's kernel log shows a journal abort: a critical finding with the repair steps as text, never run."""
+
+    WARN = {"code": "vm-disk-errors", "level": "critical",
+            "instances": [{"home": "/x/.colima/_lima", "instance": "colima",
+                           "lines": ["[ 812.6] JBD2: Aborting journal on device vdb-8."]}]}
+
+    def test_a_vm_with_disk_errors_is_a_critical_finding_with_the_repair_steps(self):
+        found = F.vm_findings({"warnings": [self.WARN]})
+        self.assertEqual([(f["type"], f["severity"]) for f in found], [("vm.disk_errors", "critical")])
+        self.assertIn("colima", found[0]["detail"])
+        self.assertIn("Aborting journal", found[0]["detail"])
+        for step in ("stop Docker", "e2fsck -fy", "colima restart"):
+            self.assertIn(step, found[0]["action"])
+        self.assertTrue(found[0]["title"])
+
+    def test_the_type_is_named_and_a_malformed_warning_is_ignored(self):
+        sys.path.insert(0, str(ROOT / 'dashboard'))
+        import finding_types
+        self.assertIn("vm.disk_errors", finding_types.LABELS)
+        self.assertEqual(F.vm_findings({"warnings": [{"code": "vm-disk-errors", "instances": "no"}]}), [])
+        self.assertEqual(F.vm_findings({"warnings": [{"code": "vm-disk-errors", "instances": [1]}]}), [])
+
+
 if __name__ == '__main__':
     unittest.main()

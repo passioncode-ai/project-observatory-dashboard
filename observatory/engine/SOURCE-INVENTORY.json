@@ -666,8 +666,8 @@
       "path": "dashboard/finding_types.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "04c4802e2266d86e6d7c0fc51a378b28f62d823b551de290502cd34256332d2d",
-      "bytes": 17288
+      "export_sha256": "fcc264bed988de07f0b4e81626fa84d085842cb99721324a1a93e954037d730a",
+      "bytes": 17353
     },
     {
       "path": "dashboard/home_page.py",
@@ -701,8 +701,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a88d876470dcf3c19c1ab8af0b7cace880442d2496cc5fe9a0caec8fc11dd49e",
-      "bytes": 223249
+      "export_sha256": "38828ec9d102576e17bf316267c0bde1fa41c950ccf41aeded8b2306e4b047fd",
+      "bytes": 223566
     },
     {
       "path": "dashboard/machine_page.py",
@@ -783,15 +783,15 @@
       "path": "defaults/cleanup-history.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "14bf7e90813064636cd5eddf7e568ab1f6e2dcb287b7459c797fd912e45ca154",
-      "bytes": 21095
+      "export_sha256": "69001f0d54dc5b0f7713ad617d46813ee610681deab38f6dd6138d1caafb1bf0",
+      "bytes": 28441
     },
     {
       "path": "defaults/cleanup.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "75faef996f4cab91b2cc1fb5a8296540047799727408b22e8f32ab015c478ac4",
-      "bytes": 7079
+      "export_sha256": "3f72dd0d873abdebd8b9252b3b6d984ba94b1e9b92c85326c8b0e67ae1407022",
+      "bytes": 7072
     },
     {
       "path": "defaults/credential_annotations.json",
@@ -1010,8 +1010,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "c65ecb6c598b52c2e6fcdf13b433cb23f10417a9d63117b7042ffcd1ad06ded7",
-      "bytes": 333240,
+      "export_sha256": "eb95af0ab3bcd6807ee3082e2780f6fabe472aa7e1eeed8b3354909c0946f8e3",
+      "bytes": 333399,
       "upstream_modified": true
     },
     {
@@ -5067,8 +5067,8 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0e0f86f35561152cc32c892a9f242cfef072b3d43405703cb39741e50b0f0b1c",
-      "bytes": 181234
+      "export_sha256": "817f5e76d8e56fb1188f715c8e4a4ba00658198215a933d78e31870855365ac2",
+      "bytes": 199566
     },
     {
       "path": "tests/test_disk_page.py",
@@ -5353,8 +5353,8 @@
       "path": "tests/test_heroku_door.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "03db461a0f30d71e36c28af499c3e60f51c1385d860b46bb061f4b1564d7b784",
-      "bytes": 42120
+      "export_sha256": "c34af048773871efd7bafa6a517d98287f6d44f783c0e59d0419259d1b3410d3",
+      "bytes": 46141
     },
     {
       "path": "tests/test_heroku_scoped.py",
@@ -5646,8 +5646,8 @@
       "path": "tests/test_machine_findings.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "87b58d44184cdfe90fb04885744ad916aab42d8198aa1e8d33dd3ff75ce4ea6d",
-      "bytes": 9587
+      "export_sha256": "17c04651d73612243b52d58bee80f7f18a75a4d98f763df1e714f10b0df7f10f",
+      "bytes": 10939
     },
     {
       "path": "tests/test_machine_forward.py",
@@ -7286,8 +7286,8 @@
       "path": "tools/disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "74f50decb2b80e0d67d234865d60184a456ba26043667007a2e5bbee0d775a07",
-      "bytes": 103816
+      "export_sha256": "8864e70c61772b9cc192181fe37d8893f4186184c85d45c8707fc24b20e73bcc",
+      "bytes": 114107
     },
     {
       "path": "tools/embedding_policy_cli.py",
@@ -7385,8 +7385,8 @@
       "path": "tools/heroku.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "7d1e6241d94f8bb71fda7b02775c634a9d1a54b6fcf395dfd1350c55458ececa",
-      "bytes": 60146
+      "export_sha256": "401c405e51dd93b518068693095cdabd6a9929f89209bbc580c39ea5b0d5ac21",
+      "bytes": 63163
     },
     {
       "path": "tools/heroku_findings.py",
@@ -7484,8 +7484,8 @@
       "path": "tools/machine_findings.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "89b26abbf3833a800122d45e1112a0164af2dec2fa29cdebfaa78fa08dad1127",
-      "bytes": 25576
+      "export_sha256": "b4c4fa8e13f01b0723b029243a0e2f131c8f2128455e68f0d638d0e71aafb7f0",
+      "bytes": 26934
     },
     {
       "path": "tools/maintain.py",
