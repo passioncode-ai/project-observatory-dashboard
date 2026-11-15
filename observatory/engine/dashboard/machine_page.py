@@ -22,6 +22,7 @@ ROWS = 20
 NUM = ' class="num"'
 EMPTY = ' class="empty"'
 HEADING = ' class="machine-h"'
+TOOLS_LINK = ' href="tools.html"'
 #: What an empty table says when its survey has not run. "Every worktree is
 #: clean" over checkouts nobody looked at is a claim, not an empty state — and
 #: each survey names the command that runs it: the git tables are refreshed by
@@ -209,6 +210,9 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
     if m.get("measuredAt"):
         parts.append(t.mark("Machine surveyed {at}", tag="p", attrs=' class="machine-at"', at=stamp(m["measuredAt"])))
     parts.append(summary_html(m, t))
+    # The coding agents' skills, plugins and hooks have their own page (OBS-552).
+    parts.append(f'<p class="machine-hint">{t.mark("Coding agents, skills, plugins and hooks installed here:")} '
+                 f'{t.mark("Installed tools", tag="a", attrs=TOOLS_LINK)}</p>')
     for section, label in (("memory", "Memory"), ("processes", "Processes")):
         sample = m.get(section) or {}
         if sample.get("source"):
