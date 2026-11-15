@@ -316,6 +316,8 @@ class Shell(unittest.TestCase):
         template = next(ast.literal_eval(node.value) for node in source.body
                         if isinstance(node, ast.Assign)
                         and any(isinstance(t, ast.Name) and t.id == "TEMPLATE" for t in node.targets))
+        # The template's body slots are written once in the page table and expanded where it is built.
+        template = template.replace("__BODY_SLOTS__", "\n".join(f"__{slot}__" for slot in shell.SLOTS))
         payload = {"tooling": view()}
         page = shell.page_html(template, "tools", payload)
         self.assertIn('id="tools"', page)

@@ -105,62 +105,13 @@ def _table_page_ids(module: str) -> set[str]:
     return ids
 
 
-def infra_page_ids() -> set[str]:
-    """The DigitalOcean and Cloudflare pages' ids (OBS-235, OBS-271): literals, `_table`
-    arguments and the values translated through a variable (`infra_page.DYNAMIC`)."""
+def page_module_ids(module: str) -> set[str]:
+    """A build-time page module's ids: `t`/`mark` literals, every literal passed to `_table` (caption, column
+    heads, empty text) and the values it translates through a variable (its `DYNAMIC`). Which modules are
+    read comes from the page table (`shell.PAGE_MODULES`), so a new page's module is read without an edit here."""
     sys.path.insert(0, str(DASH))
-    import infra_page
-    return _table_page_ids("infra_page.py") | set(infra_page.DYNAMIC)
-
-
-def machine_page_ids() -> set[str]:
-    """The Machine page's ids: `t`/`mark` literals, every literal passed to
-    `_table` (caption, column heads, empty text) and the values it translates
-    through a variable (`machine_page.DYNAMIC`)."""
-    tree = ast.parse((DASH / "machine_page.py").read_text(encoding="utf-8"))
-    ids, _ = _python_ids(DASH / "machine_page.py")
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and getattr(node.func, "id", "") == "_table":
-            for arg in node.args[1:]:
-                if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                    ids.add(arg.value)
-                elif isinstance(arg, ast.List):
-                    ids |= {e.elts[0].value for e in arg.elts
-                            if isinstance(e, ast.Tuple) and isinstance(e.elts[0], ast.Constant)}
-    sys.path.insert(0, str(DASH))
-    import machine_page
-    return ids | set(machine_page.DYNAMIC)
-
-
-def disk_page_ids() -> set[str]:
-    """The Disk page's ids (OBS-562): literals, `_table` arguments and the values it translates
-    through a variable (`disk_page.DYNAMIC`)."""
-    sys.path.insert(0, str(DASH))
-    import disk_page
-    return _table_page_ids("disk_page.py") | set(disk_page.DYNAMIC)
-
-
-def agents_page_ids() -> set[str]:
-    """The Agents page's ids: `t`/`mark` literals and the values it translates
-    through a variable (`agents_page.DYNAMIC`)."""
-    ids, _ = _python_ids(DASH / "agents_page.py")
-    sys.path.insert(0, str(DASH))
-    import agents_page
-    return ids | {x for x in agents_page.DYNAMIC if x}
-
-
-def tools_page_ids() -> set[str]:
-    """The Installed tools page's ids (OBS-552): literals, `_table` arguments and the values it translates
-    through a variable (`tools_page.DYNAMIC`)."""
-    sys.path.insert(0, str(DASH))
-    import tools_page
-    return _table_page_ids("tools_page.py") | set(tools_page.DYNAMIC)
-
-
-def home_page_ids() -> set[str]:
-    """Home's ids: its `t`/`mark` literals (dashboard/home_page.py)."""
-    ids, _ = _python_ids(DASH / "home_page.py")
-    return ids
+    mod = __import__(module)
+    return _table_page_ids(f"{module}.py") | {x for x in getattr(mod, "DYNAMIC", ()) if x}
 
 
 def source_ids() -> set[str]:
@@ -168,12 +119,8 @@ def source_ids() -> set[str]:
     ids, template = _python_ids(DASH / "build_dashboard.py")
     shell_ids, _ = _python_ids(DASH / "shell.py")
     ids |= shell_ids
-    ids |= machine_page_ids()
-    ids |= agents_page_ids()
-    ids |= home_page_ids()
-    ids |= infra_page_ids()
-    ids |= tools_page_ids()
-    ids |= disk_page_ids()
+    for module in shell.PAGE_MODULES:
+        ids |= page_module_ids(module)
     literal = r'(["\'])((?:\\.|(?!\1).)+?)\1'
     for m in re.finditer(r"\bT\(\s*" + literal, template):
         ids.add(m.group(2).replace('\\"', '"').replace("\\'", "'"))
@@ -291,7 +238,7 @@ UNTRANSLATED = {"Heroku", "ENV", "MCP", "Cloudflare", "DigitalOcean", "GA4", "RD
 
 class SourcesCarryNoRussian(unittest.TestCase):
     def test_dashboard_sources(self):
-        for name in ("build_dashboard.py", "shell.py", "workspace.css", "i18n.py",
+        for name in ("build_dashboard.py", "shell.py", "page_table.py", "workspace.css", "i18n.py",
                      "finding_types.py", "subject_links.py", "machine_page.py", "infra_page.py", "tools_page.py", "disk_page.py"):
             text = (DASH / name).read_text(encoding="utf-8")
             if name == "i18n.py":

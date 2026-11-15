@@ -16,57 +16,16 @@ the pages a person opens. Both come from `build_dashboard.py` in one run.
 from __future__ import annotations
 import base64
 import html
+import importlib
 import json
 import re
 from pathlib import Path
 
 from i18n import LOCALE_NAMES, LOCALES, Translator
+# The page table lives in page_table.py (OBS-572); the names are re-exported because every reader says `shell.X`.
+from page_table import (BODIES, HOME_BODY, NAV_GROUP_LABELS, NAV_GROUPS, NAV_LINKS, NAV_VIEWS,  # noqa: F401
+                        PAGE_MODULES, PAGE_TABLE, PAGES, QUESTIONS, SLOTS, Page)
 
-#: (name, title, kind). `table` pages render one of the tab renderers into
-#: `#out`; the three others show the shell's own sections. Order is the nav
-#: order: Home first (OSS-88), then what needs a person most often.
-#: Titles are English message ids; `dashboard/locales/*.json` translates them.
-PAGES: tuple[tuple[str, str, str], ...] = (
-    ("index",    "Home",      "index"),
-    ("findings", "Findings",  "findings"),
-    ("projects", "Projects",  "table"),
-    ("agents",   "Agents",    "agents"),
-    ("domains",  "Domains",   "table"),
-    ("heroku",   "Heroku",    "table"),
-    ("digitalocean", "DigitalOcean", "infra"),
-    ("cloudflare", "Cloudflare", "infra"),
-    ("creds",    "Keys",      "table"),
-    ("env",      "ENV",       "table"),
-    ("mcp",      "MCP",       "table"),
-    ("traffic",  "Traffic",   "table"),
-    ("health",   "Health",    "health"),
-    ("machine",  "Machine",   "machine"),
-    ("tools",    "Installed tools", "tools"),
-    ("disk",     "Disk",      "disk"),
-)
-#: THE QUESTION EACH PAGE ANSWERS, in the reader's words (IS-01/IS-02; backlog
-#: D-03). Nine pages shared one `<title>` and one `<h1>` until 2026-09-14: a
-#: browser tab, a bookmark and the history could not tell them apart, and no
-#: page said what it showed or over what scope. The sentence is the page's own
-#: heading; the measurement stamp follows it on every page.
-QUESTIONS: dict[str, str] = {
-    "index":    "Is everything fine, and what needs you first.",
-    "findings": "Problems, next actions and the history of silenced findings.",
-    "projects": "Projects, their state, resources and latest changes.",
-    "agents":   "Which agents are working, on what, and where their work moved.",
-    "domains":  "Domains, reachability, expiry and linked projects.",
-    "heroku":   "Apps, state, deployments and cost.",
-    "digitalocean": "Droplets, apps, databases and volumes: state, project and cost.",
-    "cloudflare": "Workers, Pages, R2, D1 and zones: state, project and cost.",
-    "creds":    "Keys, their purpose, state and the actions available.",
-    "env":      "Variables by project, compared with the running environments.",
-    "mcp":      "Agent servers, connections and reachability.",
-    "traffic":  "Product audiences, data sources and linked projects.",
-    "health":   "Observer state, data freshness and the agents' records.",
-    "machine":  "What runs on this machine, where memory and disk go, and what was cleaned.",
-    "tools":    "Which coding agents, skills, plugins and hooks are installed here, and which are out of date.",
-    "disk":     "How much space is free, what the guard and auto cleanup removed and keep, and how they are set.",
-}
 #: The product's name is never translated (docs/brand/locales/*.md).
 TITLE_SUFFIX = "Project Observatory"
 #: The family the product belongs to, and where it lives.
@@ -78,21 +37,6 @@ ICON = "data:image/svg+xml;base64," + base64.b64encode(
 NAMES = tuple(p[0] for p in PAGES)
 TABLE_PAGES = tuple(p[0] for p in PAGES if p[2] == "table")
 INFRA_PAGES = tuple(p[0] for p in PAGES if p[2] == "infra")
-#: MONITORING FIRST (OBS-551, CP-17): what is wrong right now, then the work, then what it runs on. Security and
-#: Availability are not pages of their own: each opens the Findings page narrowed to its group
-#: (`finding_types.GROUPS`), so a finding has one home and two ways in.
-NAV_GROUPS = (
-    ("monitoring", "Monitoring", ("health", "security", "availability")),
-    ("work", "Work", ("index", "projects", "agents", "findings")),
-    ("infrastructure", "Infrastructure", ("heroku", "digitalocean", "cloudflare", "domains", "traffic")),
-    ("access", "Access", ("creds", "env", "mcp")),
-    ("system", "System", ("machine", "tools", "disk")),
-)
-#: Navigation entries that are a narrowed view of a page, not a page: (title, address).
-NAV_LINKS: dict[str, tuple[str, str]] = {
-    "security": ("Security", "findings.html?group=security"),
-    "availability": ("Availability", "findings.html?group=availability"),
-}
 #: The pages whose overview card Home leaves out, because a tile or a Home group already says it (CP-01):
 #: Needs you first speaks for Findings, the Estate group for Projects, the tiles for the rest.
 HOME_COVERED = ("findings", "projects", "agents", "domains", "heroku", "digitalocean", "cloudflare", "creds",
@@ -113,12 +57,6 @@ def brand_html(t: Translator) -> str:
             f'<span class="brand-name"><strong>{TITLE_SUFFIX}</strong>{family}</span></a>')
 
 
-def _agents(payload: dict, t: Translator) -> str:
-    """The Agents page's body, rendered at build time (dashboard/agents_page.py)."""
-    import agents_page
-    return agents_page.agents_html(payload, t)
-
-
 def _agents_line(payload: dict, t: Translator) -> str:
     """The overview's Agents card: what is open and what needs a person."""
     c = (payload.get("agents") or {}).get("counters") or {}
@@ -131,26 +69,16 @@ def _agents_line(payload: dict, t: Translator) -> str:
 
 def _home(payload: dict, t: Translator) -> str:
     """Home's body, rendered at build time (dashboard/home_page.py, OSS-88)."""
-    import home_page
-    return home_page.home_html(payload, t)
+    module, func = HOME_BODY
+    return getattr(importlib.import_module(module), func)(payload, t)
 
 
-def _infra(page: str, payload: dict, t: Translator) -> str:
-    """The DigitalOcean or Cloudflare page's body, rendered at build time (dashboard/infra_page.py)."""
-    import infra_page
-    return infra_page.infra_html(page, payload, t)
-
-
-def _machine(payload: dict, t: Translator) -> str:
-    """The Machine page's body, rendered at build time (dashboard/machine_page.py)."""
-    import machine_page
-    return machine_page.machine_html(payload, t)
-
-
-def _tools(payload: dict, t: Translator) -> str:
-    """The Installed tools page's body, rendered at build time (dashboard/tools_page.py, OBS-552)."""
-    import tools_page
-    return tools_page.tools_html(payload, t)
+def body_html(kind: str, page: str, payload: dict, t: Translator) -> str:
+    """The body a page kind draws at build time (`BODIES`): the module's function, given the page name
+    when it serves several pages (the infrastructure pages)."""
+    _slot, module, func, takes_page = BODIES[kind]
+    render = getattr(importlib.import_module(module), func)
+    return render(page, payload, t) if takes_page else render(payload, t)
 
 
 def _tools_line(payload: dict, t: Translator) -> str:
@@ -161,12 +89,6 @@ def _tools_line(payload: dict, t: Translator) -> str:
     c = v.get("counts") or {}
     return (t.mark("{n} coding agents", n=c.get("agents", 0)) + " · "
             + t.mark("{n} plugins behind", n=c.get("behind", 0)))
-
-
-def _disk(payload: dict, t: Translator) -> str:
-    """The Disk page's body, rendered at build time (dashboard/disk_page.py, OBS-562)."""
-    import disk_page
-    return disk_page.disk_html(payload, t)
 
 
 def locale_switch_html(t: Translator) -> str:
@@ -587,13 +509,11 @@ def page_html(template: str, page: str, payload: dict, locale: str = "en") -> st
         "NAV": lambda: nav_html(page, counts, t),
         "HOME": lambda: _home(payload, t) if page == "index" else "",
         "CARDS": lambda: cards_html(payload, counts, t, HOME_COVERED) if page == "index" else "",
-        "MACHINE": lambda: _machine(payload, t) if page == "machine" else "",
-        "TOOLS": lambda: _tools(payload, t) if page == "tools" else "",
-        "DISK": lambda: _disk(payload, t) if page == "disk" else "",
-        "AGENTS": lambda: _agents(payload, t) if page == "agents" else "",
-        "INFRA": lambda: _infra(page, payload, t) if page in INFRA_PAGES else "",
         "DATA": lambda: data.replace("</", "<\\/"),
     }
+    kind = next(p.kind for p in PAGE_TABLE if p.name == page)
+    for body_kind, (slot, *_rest) in BODIES.items():
+        fills[slot] = (lambda k=body_kind: body_html(k, page, payload, t)) if kind == body_kind else (lambda: "")
     return fill_placeholders(template, fills)
 
 

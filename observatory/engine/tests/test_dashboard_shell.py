@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import ast
 import copy
+import importlib
 from html.parser import HTMLParser
 import importlib.util
 from pathlib import Path
@@ -370,6 +371,48 @@ class MonitoringNavigation(unittest.TestCase):
         src = (ROOT / "dashboard/build_dashboard.py").read_text(encoding="utf-8")
         self.assertIn('new URLSearchParams(location.search).get("group")', src)
         self.assertIn('"type_groups": finding_types.groups_for(', src)
+
+
+class PageTable(unittest.TestCase):
+    """OBS-572: every page list is derived from `dashboard/page_table.py`, so a page is one entry."""
+
+    def test_the_lists_are_derived_from_the_one_table(self):
+        names = [p.name for p in shell.PAGE_TABLE]
+        self.assertEqual(list(shell.NAMES), names)
+        self.assertEqual(len(set(names)), len(names), "a page is declared once")
+        self.assertEqual(list(shell.QUESTIONS), names, "every page has its question")
+        self.assertEqual([n for n, _t, _k in shell.PAGES], names)
+        self.assertEqual(sorted(n for _k, _l, ns in shell.NAV_GROUPS for n in ns if n not in shell.NAV_LINKS),
+                         sorted(names), "every page is in one navigation group")
+
+    def test_every_body_kind_names_a_module_that_draws_it_and_a_slot_the_template_carries(self):
+        source = ast.parse((ROOT / "dashboard/build_dashboard.py").read_text(encoding="utf-8"))
+        template = next(ast.literal_eval(n.value) for n in source.body if isinstance(n, ast.Assign)
+                        and any(isinstance(t, ast.Name) and t.id == "TEMPLATE" for t in n.targets))
+        self.assertEqual(template.count("__BODY_SLOTS__"), 1, "the slots are written once, from the table")
+        kinds = {p.kind for p in shell.PAGE_TABLE}
+        for kind, (slot, module, func, _takes) in shell.BODIES.items():
+            self.assertIn(kind, kinds, f"{kind} draws a body no page has")
+            self.assertTrue(callable(getattr(importlib.import_module(module), func)), f"{module}.{func}")
+            self.assertEqual(slot, kind.upper())
+        for page in shell.PAGE_TABLE:
+            self.assertTrue(page.kind in shell.BODIES or page.kind in ("index", "table", "findings", "health"),
+                            f"{page.name}: no body for kind {page.kind}")
+
+    def test_a_page_fills_only_its_own_slot_and_the_others_stay_empty(self):
+        slots = "\n".join(f"__{s}__" for s in shell.SLOTS)
+        for name, kind in (("machine", "machine"), ("disk", "disk"), ("tools", "tools"), ("agents", "agents")):
+            page = shell.page_html("__NAV__\n" + slots, name, {})
+            self.assertNotIn("__", page, f"{name}: a slot was left unfilled")
+        self.assertEqual(shell.page_html(slots, "projects", {}).strip(), "")
+
+    def test_the_build_output_list_reads_the_same_table(self):
+        spec = importlib.util.spec_from_file_location("observatory_cli", ROOT / "observatory.py")
+        cli = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cli)
+        self.assertEqual(cli._PAGE_NAMES, shell.NAMES)
+        for name in shell.NAMES:
+            self.assertIn(f"docs/dashboard/{name}.html", cli.IGNORED_WRITES_ALLOWED)
 
 
 if __name__ == "__main__":

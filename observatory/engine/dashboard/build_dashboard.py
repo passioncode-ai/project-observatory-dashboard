@@ -1255,7 +1255,10 @@ def build():
     locale = build_locale()
     t = i18n.Translator(locale)
     title = "Projects — the operator's registry"
-    return (template_for(locale).replace("__PAGE__", "").replace("__NAV__", "").replace("__CARDS__", "").replace("__MACHINE__", "").replace("__TOOLS__", "").replace("__DISK__", "").replace("__AGENTS__", "").replace("__INFRA__", "")
+    page = template_for(locale)
+    for slot in ("PAGE", "NAV", "CARDS", *_shell.SLOTS):     # the single page carries no page's own body
+        page = page.replace(f"__{slot}__", "")
+    return (page
             .replace("__TITLE__", html.escape(t(title)))
             .replace("__PAGE_TITLE__", "")
             .replace("__H1__", t.mark(title, tag="h1"))
@@ -1990,11 +1993,7 @@ __NAV__
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <section id="panel" class="card panel" role="dialog" aria-labelledby="panel-title" hidden></section>
 __CARDS__
-__MACHINE__
-__TOOLS__
-__DISK__
-__AGENTS__
-__INFRA__
+__BODY_SLOTS__
 <div id="list-tools" class="list-tools"></div>
 <main id="out" aria-live="polite"></main>
 
@@ -5037,7 +5036,8 @@ TEMPLATE = (TEMPLATE
             .replace("__PC_TOKENS__", (BRAND / "passioncode-tokens.css").read_text(encoding="utf-8"))
             .replace("</style>", (Path(__file__).with_name("workspace.css").read_text(encoding="utf-8")) + "\n</style>"))
 import shell as _shell
-TEMPLATE = TEMPLATE.replace("__ICON__", _shell.ICON)
+TEMPLATE = (TEMPLATE.replace("__ICON__", _shell.ICON)
+            .replace("__BODY_SLOTS__", "\n".join(f"__{slot}__" for slot in _shell.SLOTS)))
 
 if __name__ == "__main__":
     OUT.parent.mkdir(parents=True, exist_ok=True)
