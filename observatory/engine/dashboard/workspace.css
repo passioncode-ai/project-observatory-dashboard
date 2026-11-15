@@ -506,3 +506,12 @@ body[data-page="index"] .home-list .fdetail { margin-left: auto; white-space: no
 .home-org { color: inherit; overflow-wrap: anywhere; }
 .home-orgs .home-n { color: var(--muted); font-family: var(--font-data); }
 .home-orgs .home-sub { color: var(--muted); font-size: var(--t-label); }
+
+/* HOME, AGENTS AND NAVIGATION (OBS-551, CP-01, CP-02, CP-17). Home's Work group holds the
+ * activity tiles the page script draws; an Agents problem row carries its controls on one line
+ * that wraps; a navigation entry that opens a narrowed page reads like any other. */
+.home-work .tiles.work { margin-top: var(--space-2); }
+.agents-act { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
+.agents-act select { font: inherit; }
+.agents-act select:disabled, .agents-act button:disabled { opacity: .6; cursor: not-allowed; }
+#agents-sessions table { margin-top: var(--space-2); }

@@ -78,7 +78,7 @@ class DashboardShellTests(unittest.TestCase):
                 routes = [a for a in parsed.links if a.get("class") == "pg"]
                 self.assertEqual({a["href"] for a in routes}, {f"{name}.html" for name in shell.NAMES})
                 self.assertEqual([a["href"] for a in routes if a.get("aria-current") == "page"], [f"{page}.html"])
-                for group in ("work", "infrastructure", "access", "system"):
+                for group in ("monitoring", "work", "infrastructure", "access", "system"):
                     self.assertIn("nav-" + group, parsed.elements)
                 if page == "index":
                     # Home (OSS-88) comes first in reading order, before activity.
@@ -319,6 +319,57 @@ class AuditFixes(unittest.TestCase):
         # UX-10: the session count is not drawn below AA, and says "sessions".
         self.assertNotIn(".spark-sess { opacity", src)
         self.assertIn('T("{n} sessions", {n: stotal})', src)
+
+
+class MonitoringNavigation(unittest.TestCase):
+    """CP-17 (OBS-551, OSS-120): Monitoring is the first group of the navigation."""
+
+    def test_the_groups_and_their_order(self):
+        self.assertEqual([k for k, _l, _n in shell.NAV_GROUPS],
+                         ["monitoring", "work", "infrastructure", "access", "system"])
+        groups = {k: names for k, _l, names in shell.NAV_GROUPS}
+        self.assertEqual(groups["monitoring"], ("health", "security", "availability"))
+        self.assertEqual(groups["work"], ("index", "projects", "agents", "findings"))
+        self.assertEqual(groups["system"], ("machine", "tools", "disk"))
+        listed = [n for names in groups.values() for n in names if n not in shell.NAV_LINKS]
+        self.assertEqual(sorted(listed), sorted(shell.NAMES), "every page is reachable, once")
+
+    def test_security_and_availability_open_the_findings_page_narrowed(self):
+        items = [{"id": "s1", "type": "secret.leaked_unrotated", "severity": "critical"},
+                 {"id": "s2", "type": "dep.vulnerable", "severity": "warning"},
+                 {"id": "a1", "type": "site.dead", "severity": "warning"},
+                 {"id": "o1", "type": "clone.ahead", "severity": "info"}]
+        counts = shell.counts_of({"findings": findings(items)})
+        self.assertEqual((counts["security"], counts["availability"]), (2, 1))
+        nav = shell.nav_html("findings", counts)
+        self.assertIn('href="findings.html?group=security"', nav)
+        self.assertIn('href="findings.html?group=availability"', nav)
+        self.assertLess(nav.index('id="nav-monitoring"'), nav.index('id="nav-work"'))
+        self.assertLess(nav.index('href="health.html"'), nav.index('href="findings.html?group=security"'))
+        self.assertIn('href="findings.html" aria-current="page"', nav)
+        self.assertIn("Безопасность", shell.nav_html("index", counts, RU))
+        self.assertEqual(shell.counts_of({})["security"], "", "no findings built is no count, never 0")
+
+    def test_finding_types_belong_to_one_monitoring_group_or_none(self):
+        import finding_types
+        self.assertEqual(finding_types.group_of("secret.leaked_unrotated"), "security")
+        self.assertEqual(finding_types.group_of("ssh.key_weak"), "security")
+        self.assertEqual(finding_types.group_of("dep.vulnerable"), "security")
+        self.assertEqual(finding_types.group_of("site.dead"), "availability")
+        self.assertEqual(finding_types.group_of("heroku.app_down"), "availability")
+        self.assertEqual(finding_types.group_of("mcp.unreachable"), "availability")
+        self.assertIsNone(finding_types.group_of("clone.ahead"))
+        self.assertIsNone(finding_types.group_of(None))
+        named = [t for t in finding_types.LABELS if finding_types.group_of(t)]
+        for prefix in finding_types.GROUPS:
+            self.assertTrue(any(t == prefix or t.startswith(prefix) for t in finding_types.LABELS),
+                            f"{prefix} names no finding type")
+        self.assertGreater(len(named), 20)
+
+    def test_the_findings_page_reads_the_group_from_its_address(self):
+        src = (ROOT / "dashboard/build_dashboard.py").read_text(encoding="utf-8")
+        self.assertIn('new URLSearchParams(location.search).get("group")', src)
+        self.assertIn('"type_groups": finding_types.groups_for(', src)
 
 
 if __name__ == "__main__":

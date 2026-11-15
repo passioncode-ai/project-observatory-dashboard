@@ -6,18 +6,23 @@ the counters) and answered "what is wrong" while hiding "is anything fine"
 (docs/design/PERSON-SURFACES.md, decision D1). Home answers both in the first
 screenful, top to bottom:
 
-* the STATE BAND: six tiles (sites, apps, disk and memory, keys, agents, personal
+* STATE: six tiles (sites, apps, disk and memory, keys, agents, personal
   cloud), each with the period or time it was measured. A source that did not run
   says "not measured" with its reason; it is never green and never 0;
-* NEEDS YOU FIRST: the three findings to do first, one row per kind with its count,
-  and "All problems (N)" to the findings page;
-* PROJECTS AT A GLANCE, grouped by organization (by label once OBS-270 lands).
+* NEEDS YOU FIRST: the three findings to do first, one line per kind with its count
+  and a link to review it, and "All problems (N)" to the findings page;
+* WORK: the workflows open and the handoffs waiting (the Agents tile already says the
+  sessions and what is stalled), and the store's commit and project windows, which the
+  page script draws into the `#work` holder this group carries;
+* ESTATE: the projects grouped by organization (by label once OBS-270 lands).
 
-Activity (the store's commit and project windows) and the section cards follow it,
-drawn by the page script and `shell.cards_html` as before.
+EACH FACT ONCE (OBS-551, CP-01). A section card follows Home only for a page no tile
+and no group speaks for (`shell.HOME_COVERED`), and no line shows a command: a problem
+links to its finding, and the first-run steps are buttons that copy their command
+without printing it.
 
 It reads ONLY what the pages already read: the build's payload. Nothing here opens
-a file, asks a provider or runs a command; a command it shows is copied, never run.
+a file, asks a provider or runs a command.
 """
 from __future__ import annotations
 
@@ -54,8 +59,9 @@ def full_command(payload: dict, *args: str) -> str:
 
 
 def _copy(command: str, t: Translator) -> str:
-    return (f'<p><button class="chip-btn mono" type="button" data-copy="{_e(command)}"'
-            f'{t.attr("title", "copy the command")}>{_e(command)}</button></p>')
+    """A button that copies COMMAND. Home shows a person no command (CP-01): the label says what it does."""
+    return (f'<p><button class="chip-btn" type="button" data-copy="{_e(command)}"'
+            f'{t.attr("title", "copy the command")}>{t.mark("Copy the command")}</button></p>')
 
 
 def _reason(degraded: object) -> str:
@@ -324,19 +330,6 @@ def first_problems(findings: dict | None, limit: int = NEEDS_LIMIT) -> list[dict
     return ranked[:limit]
 
 
-_TOOL = re.compile(r'\bpython "\$\(project-observatory full-path\)/([^"]+)"')
-
-
-def runnable(text: str, payload: dict) -> str:
-    """The page script's `runnable`: a rule names a tool as `python "$(project-observatory
-    full-path)/tools/..."`; with this engine's interpreter and path known it becomes them."""
-    rt = payload.get("runtime") or {}
-    if not rt.get("python"):
-        return text
-    engine = str(rt.get("engine") or ".").rstrip("/")
-    return _TOOL.sub(lambda m: _shell_arg(rt["python"]) + " " + _shell_arg(engine + "/" + m.group(1)), text)
-
-
 def _anchor(fid: object) -> str:
     """The findings page's row anchor, as `renderFindings` writes it."""
     return "f-" + re.sub(r"[^A-Za-z0-9_.:-]+", "-", str(fid))
@@ -379,17 +372,31 @@ def needs_html(payload: dict, t: Translator) -> str:
         target = (t.mark(lead["href_label"]) if lead.get("href_page") else _e(lead.get("href_label") or ""))
         subject = (f' <a class="plink fsubj" href="{_e(lead["href"])}">→ {target}</a>'
                    if lead.get("href") and lead.get("href_label") else "")
-        # The action the rule names, as the findings page writes it (English, L10N: a
-        # finding's detail and action stay as the rule wrote them; `runnable` as on the page).
-        action = str(lead.get("action") or "").strip()
-        act = f'<span class="act home-act">{t.known(runnable(action, payload))}</span>' if action else ""
+        # One line and a link (CP-01): the rule's action, often a command, is read on the Findings page.
         review = f'<a class="fdetail" href="findings.html#{_e(_anchor(lead.get("id")))}">{t.mark("Review →")}</a>'
         rows.append(f'<li class="f" data-type="{_e(g["type"])}" data-sev="{_e(sev)}">{chip}'
                     f'<span class="t"><span class="ftl">{label}{count}</span>{_title(lead, t)}{subject}</span>'
-                    f'{act}{review}</li>')
+                    f'{review}</li>')
     more = f'<p class="home-more"><a href="findings.html">{t.mark("All problems ({n})", n=total)}</a></p>'
     return (f'<section class="home-needs" aria-labelledby="home-needs-h">{head}'
             f'<ol class="flist home-list">{"".join(rows)}</ol>{more}</section>')
+
+
+# --- work -------------------------------------------------------------------
+
+def work_html(payload: dict, t: Translator) -> str:
+    """The workflows open and the handoffs waiting, linked to the Agents page, and the holder the page script
+    draws the store's activity windows into. What the Agents tile says (sessions, stalled) is not repeated."""
+    c = (payload.get("agents") or {}).get("counters") or {}
+    if c:
+        line = (t.mark("{n} workflows open", n=int(c.get("workflowsOpen") or 0)) + " · "
+                + t.mark("{n} handoffs waiting", n=int(c.get("handoffsWaiting") or 0)))
+    else:
+        line = t.mark("no workflow yet")
+    return (f'<section class="home-work" id="home-work" aria-labelledby="home-work-h">'
+            + t.mark("Work", tag="h2", attrs=' class="home-h" id="home-work-h"')
+            + f'<p class="home-calm"><a href="agents.html">{line}</a></p>'
+            + '<div class="tiles work" id="work"></div></section>')
 
 
 # --- projects at a glance ---------------------------------------------------
@@ -488,4 +495,4 @@ def home_html(payload: dict, t: Translator | None = None) -> str:
     if not payload.get("rows"):
         return f'<div id="home" class="home">{notice}{empty_html(payload, t)}</div>'
     return (f'<div id="home" class="home">{notice}{band_html(payload, t)}{needs_html(payload, t)}'
-            f'{projects_html(payload, t)}</div>')
+            f'{work_html(payload, t)}{projects_html(payload, t)}</div>')

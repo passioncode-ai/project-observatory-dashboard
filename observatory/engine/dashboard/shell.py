@@ -78,12 +78,25 @@ ICON = "data:image/svg+xml;base64," + base64.b64encode(
 NAMES = tuple(p[0] for p in PAGES)
 TABLE_PAGES = tuple(p[0] for p in PAGES if p[2] == "table")
 INFRA_PAGES = tuple(p[0] for p in PAGES if p[2] == "infra")
+#: MONITORING FIRST (OBS-551, CP-17): what is wrong right now, then the work, then what it runs on. Security and
+#: Availability are not pages of their own: each opens the Findings page narrowed to its group
+#: (`finding_types.GROUPS`), so a finding has one home and two ways in.
 NAV_GROUPS = (
+    ("monitoring", "Monitoring", ("health", "security", "availability")),
     ("work", "Work", ("index", "projects", "agents", "findings")),
     ("infrastructure", "Infrastructure", ("heroku", "digitalocean", "cloudflare", "domains", "traffic")),
     ("access", "Access", ("creds", "env", "mcp")),
-    ("system", "System", ("health", "machine", "tools", "disk")),
+    ("system", "System", ("machine", "tools", "disk")),
 )
+#: Navigation entries that are a narrowed view of a page, not a page: (title, address).
+NAV_LINKS: dict[str, tuple[str, str]] = {
+    "security": ("Security", "findings.html?group=security"),
+    "availability": ("Availability", "findings.html?group=availability"),
+}
+#: The pages whose overview card Home leaves out, because a tile or a Home group already says it (CP-01):
+#: Needs you first speaks for Findings, the Estate group for Projects, the tiles for the rest.
+HOME_COVERED = ("findings", "projects", "agents", "domains", "heroku", "digitalocean", "cloudflare", "creds",
+                "machine", "disk")
 OVERVIEW_FINDINGS_LIMIT = 8
 
 #: What a lite project row keeps on pages that only look projects UP — the
@@ -192,6 +205,10 @@ def nav_html(page: str, counts: dict[str, int | str], t: Translator | None = Non
         for name in names:
             n = counts.get(name)
             badge = f' <span class="n">{n}</span>' if n not in (None, "") else ""
+            if name in NAV_LINKS:
+                view, href = NAV_LINKS[name]
+                items.append(f'<a class="pg pg-view" href="{href}">{t.mark(view)}{badge}</a>')
+                continue
             cur = ' aria-current="page"' if name == page else ""
             items.append(f'<a class="pg" href="{name}.html"{cur}>{t.mark(titles[name])}{badge}</a>')
         groups.append(f'<section class="nav-group" aria-labelledby="nav-{key}">'
@@ -289,10 +306,19 @@ def counts_of(payload: dict) -> dict[str, int | str]:
     # page it names never count two different units. Home and Health
     # are summaries, not inventories; severity and review totals belong in
     # their labelled content rather than beside an unrelated route name.
+    import finding_types
+    grouped = {"security": 0, "availability": 0}
+    for item in (f.get("items") or []) if f else []:
+        g = finding_types.group_of(item.get("type"))
+        if g in grouped and item.get("severity") in ("critical", "warning", "info"):
+            grouped[g] += 1
     return {
         "index": "",
         "health": "",
         "findings": open_findings or "",
+        # What the narrowed Findings page shows when it opens; no findings built is no count.
+        "security": (grouped["security"] or "") if f else "",
+        "availability": (grouped["availability"] or "") if f else "",
         "projects": len(payload.get("rows") or []),
         "domains": domain_totals(payload.get("domains") or [], payload.get("zones") or [])[0],
         # A scan that read no application is not a count of zero (audit A09).
@@ -365,8 +391,9 @@ def _disk_line(payload: dict, t: Translator) -> str:
     return line
 
 
-def cards_html(payload: dict, counts: dict, t: Translator | None = None) -> str:
-    """The index page's module cards: one sentence each, the number, the link."""
+def cards_html(payload: dict, counts: dict, t: Translator | None = None, skip: tuple[str, ...] = ()) -> str:
+    """The index page's module cards: one sentence each, the number, the link. Home passes `skip`
+    (HOME_COVERED), the pages a tile or a Home group already speaks for (CP-01)."""
     t = t or Translator()
     stats = payload.get("stats") or {}
     health = payload.get("health") or {}
@@ -404,7 +431,7 @@ def cards_html(payload: dict, counts: dict, t: Translator | None = None) -> str:
         lines["heroku"] = t.mark("not read")
     cards = []
     for name, title, _kind in PAGES:
-        if name == "index":
+        if name == "index" or name in skip:
             continue
         cards.append(f'<a class="card mod" href="{name}.html">{t.mark(title, tag="b")}'
                      f'<span class="anchor">{lines.get(name, "")}</span></a>')
@@ -534,6 +561,12 @@ def page_html(template: str, page: str, payload: dict, locale: str = "en") -> st
         # page and are hidden here (workspace.css); activity follows Home.
         template = template.replace('<div class="tiles" id="tiles">',
                                     "__HOME__\n" + '<div class="tiles" id="tiles">', 1)
+        # The activity tiles move into Home's Work group (OBS-551, CP-01): home_page draws their holder there,
+        # so the template's own heading and holder go, and the page script fills the one `#work` left. A fresh
+        # install's Home has no Work group, and the template keeps them.
+        if payload.get("rows"):
+            template = re.sub(r'\s*<h3 id="work-h"[^>]*>[^<]*</h3>\s*<div class="tiles work" id="work"></div>', "",
+                              template, count=1)
     # The table renderer owns #out, not the document's main landmark. Home,
     # Findings and Health hide #out, so their primary content needs a shared
     # visible main as well. Scripts stay outside the content landmark.
@@ -553,7 +586,7 @@ def page_html(template: str, page: str, payload: dict, locale: str = "en") -> st
         "SUB": lambda: t.mark(QUESTIONS[page]) if page in QUESTIONS else "",
         "NAV": lambda: nav_html(page, counts, t),
         "HOME": lambda: _home(payload, t) if page == "index" else "",
-        "CARDS": lambda: cards_html(payload, counts, t) if page == "index" else "",
+        "CARDS": lambda: cards_html(payload, counts, t, HOME_COVERED) if page == "index" else "",
         "MACHINE": lambda: _machine(payload, t) if page == "machine" else "",
         "TOOLS": lambda: _tools(payload, t) if page == "tools" else "",
         "DISK": lambda: _disk(payload, t) if page == "disk" else "",

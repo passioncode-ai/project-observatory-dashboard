@@ -74,6 +74,7 @@ import json
 import os
 import pathlib
 import re
+import secrets
 import socketserver
 import sys
 import time
@@ -557,10 +558,52 @@ def act_configure(body: dict) -> dict:
         raise ValueError(f"the workspace refused: {exc}"[:300]) from None
 
 
+#: Who offers a workflow from the Agents page: a service, as the CLI is (`service:observatory-cli`). The store
+#: refuses the operator as a handoff's owner outside the terminal's forced handoff.
+PAGE_OWNER = "service:observatory-page"
+#: The reasons a handoff without the executor's lease may give (store/workflow.REASONS_WITHOUT_TOKEN).
+PAGE_HANDOFF_REASONS = ("limit", "crash", "restart")
+
+
+def act_workflow_handoff(body: dict) -> dict:
+    """The Agents page's button (OBS-551, CP-02): offer a stalled workflow, or one whose handoff lapsed, to another
+    agent. The same store function as `observatory_handoff_create`, without a lease token, so only for `limit`,
+    `crash` or `restart` and only once the executor has been silent (the store decides and says why). Audited
+    before it acts with the workflow id, provider and reason; the pack's content and any token never come back."""
+    from store import db as store_db
+    from store import ledger as ledger_module
+    from store import workflow as W
+    wid, provider, reason = body.get("workflowId"), body.get("provider"), body.get("reason")
+    if not isinstance(wid, str) or not W.WORKFLOW_ID.fullmatch(wid):
+        raise ValueError("workflowId is a 'wf_' id")
+    if reason not in PAGE_HANDOFF_REASONS:
+        raise ValueError(f"reason is one of {', '.join(PAGE_HANDOFF_REASONS)}; another reason is the "
+                         "executor's own, with its lease")
+    if not isinstance(provider, str) or not provider.strip():
+        raise ValueError("provider names where the work goes")
+    try:
+        to = W.executor_shape({"provider": provider.strip()}, "to")
+    except W.InvalidInput as exc:
+        raise ValueError(str(exc)) from None
+    audit("workflow-handoff", wid, {"provider": to["provider"], "reason": reason})
+    conn = store_db.connect(paths.DB)         # this workspace's store, as the page that asked was built from
+    try:
+        out = W.handoff_create(conn, owner=PAGE_OWNER, idempotency_key=f"page-{secrets.token_hex(8)}",
+                               workflow_id=wid, to=to, reason=reason)
+    except W.UnknownWorkflow as exc:
+        raise LookupError(str(exc)) from None
+    except ledger_module.LedgerError as exc:
+        raise ValueError(str(exc)[:300]) from None
+    finally:
+        conn.close()
+    return {"handoffId": out["handoffId"], "workflowId": out["workflowId"], "expiresAt": out["expiresAt"],
+            "credentialsMissing": bool(out.get("credentialsMissing")), "degraded": out.get("degraded") or []}
+
+
 ACTIONS = {"mint": act_mint, "limit": act_limit, "revoke": act_revoke,
            "leak": act_leak, "reveal": act_reveal, "annotate": act_annotate,
            "disable": act_disable, "enable": act_enable, "rotate-key": act_rotate_key,
-           "configure": act_configure}
+           "configure": act_configure, "workflow-handoff": act_workflow_handoff}
 
 #: Refused on purpose, with the reason the caller needs rather than a 404.
 REFUSED = {

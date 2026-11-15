@@ -190,6 +190,7 @@ def source_ids() -> set[str]:
     # shell.py: the page titles, their questions and the navigation groups.
     ids |= {title for _n, title, _k in shell.PAGES} | set(shell.QUESTIONS.values())
     ids |= {label for _k, label, _names in shell.NAV_GROUPS}
+    ids |= {label for label, _href in shell.NAV_LINKS.values()}
     # finding_types.py: the reader's name for every finding type.
     import finding_types
     ids |= set(finding_types.LABELS.values())

@@ -104,6 +104,16 @@
       "note": "the Disk page's settings (OBS-562): the same configuration door, planned, applied and undone; the page's route takes only the guard and cleanup keys"
     },
     {
+      "action": "workflow-handoff",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_workflow_handoff",
+      "tool": "observatory_handoff_create",
+      "gate": null,
+      "status": "covered",
+      "row": "OBS-551",
+      "note": "the Agents page offers a stalled workflow, or one whose handoff lapsed, to another agent through the same store function (store/workflow.handoff_create) without a lease token: limit, crash or restart only"
+    },
+    {
       "action": "init",
       "kind": "cli",
       "where": "workspace.py: init",

@@ -285,18 +285,21 @@ class ReviewFixes(unittest.TestCase):
                              "diskLevels": {"critical": 15, "low": 40}}}
         self.assertEqual(home_page.disk_tile(lines, EN)["state"], "bad", "the guard's own lines decide")
 
-    def test_each_problem_row_shows_its_action(self):
-        out = home_page.needs_html(full_payload(), EN)
-        rows = re.findall(r'<li class="f".*?</li>', out, re.S)
-        self.assertEqual(len(rows), 3)
-        for row in rows:
-            self.assertIn('class="act home-act"', row)
-            self.assertIn("do it", text(row))
+    def test_each_problem_row_is_one_line_with_a_link_and_no_command(self):
+        """CP-01 (OBS-551): a problem row names the kind, its lead finding and where to review it; the rule's
+        action, which may be a command, is the Findings page's, never Home's."""
         payload = full_payload()
         payload["runtime"] = {"python": "/example/python", "engine": "/example/engine"}
         payload["findings"]["items"][0]["action"] = 'run python "$(project-observatory full-path)/tools/vault.py" leaks'
-        self.assertIn("run '/example/python' '/example/engine/tools/vault.py' leaks",
-                      html.unescape(home_page.needs_html(payload, EN)))
+        out = home_page.needs_html(payload, EN)
+        rows = re.findall(r'<li class="f".*?</li>', out, re.S)
+        self.assertEqual(len(rows), 3)
+        for row in rows:
+            self.assertNotIn("home-act", row)
+            self.assertNotIn("do it", text(row))
+            self.assertRegex(row, r'<a class="fdetail" href="findings\.html#f-[^"]+">')
+        self.assertNotIn("vault.py", out)
+        self.assertNotIn("project-observatory", out)
 
     def test_a_page_subject_label_is_translated(self):
         payload = full_payload()
@@ -351,6 +354,82 @@ class ReviewFixes(unittest.TestCase):
         for maintenance in ({"auto": True, "available": "9.9.9"}, {"auto": False, "available": None}, {}):
             self.assertNotIn("home-update-h", home_page.home_html({"rows": [], "health": {"maintenance": maintenance}}, EN))
         self.assertIn("Доступна версия 9.9.9", home_page.home_html(off, RU))
+
+
+def _template() -> str:
+    import ast
+    source = ast.parse((ROOT / "dashboard/build_dashboard.py").read_text())
+    return next(ast.literal_eval(node.value) for node in source.body
+                if isinstance(node, ast.Assign)
+                and any(isinstance(t, ast.Name) and t.id == "TEMPLATE" for t in node.targets))
+
+
+def _section(page: str, sid: str) -> str:
+    """The element whose id is SID with everything inside it (div or section)."""
+    start = page.index(f'id="{sid}"')
+    start = page.rindex("<", 0, start)
+    tag = re.match(r"<([a-z]+)", page[start:]).group(1)
+    depth, i = 0, start
+    for m in re.finditer(rf"<(/?){tag}\b[^>]*>", page[start:]):
+        depth += -1 if m.group(1) else 1
+        if depth == 0:
+            return page[start:start + m.end()]
+    raise AssertionError(f"{sid} is not closed")
+
+
+class ControlPlaneHome(unittest.TestCase):
+    """CP-01 (OBS-551, OSS-118): Home answers "is everything fine, and what needs me first" once per fact,
+    grouped as state, needs you, work and estate, with no command text."""
+
+    def test_four_groups_in_order_and_the_work_group_holds_activity(self):
+        out = home_page.home_html(full_payload(), EN)
+        order = [out.index(f'id="{h}"') for h in ("home-state-h", "home-needs-h", "home-work-h", "home-projects-h")]
+        self.assertEqual(order, sorted(order))
+        work = _section(out, "home-work")
+        self.assertIn('id="work"', work, "the page script's activity tiles sit inside the Work group")
+        self.assertIn("4 workflows open", text(work))
+        self.assertIn('href="agents.html"', work)
+        self.assertNotIn("sessions running", text(work), "the Agents tile says it already")
+        self.assertNotIn("stalled", text(work), "the Agents tile says it already")
+
+    def test_the_index_page_says_each_fact_once(self):
+        import build_dashboard
+        for template in (_template(), shell.split_template(build_dashboard.template_for("ru"))[0]):
+            built = shell.page_html(template, "index", full_payload())
+            self.assertEqual(built.count('id="work"'), 1)
+            self.assertNotIn('id="work-h"', built, "the template's Activity heading gives way to Home's Work group")
+        page = shell.page_html(_template(), "index", full_payload())
+        home = _section(page, "home")
+        tiles = {re.sub(r"[?#].*", "", h) for h in re.findall(r'class="tile home-tile[^"]*"[^>]*href="([^"]+)"', home)}
+        tiles |= {"findings.html", "projects.html", "agents.html"}
+        cards = set(re.findall(r'<a class="card mod" href="([^"]+)"', page))
+        self.assertEqual(tiles & cards, set(), "a card repeats what a tile or a Home group says")
+        for covered in ("machine.html", "disk.html", "heroku.html", "digitalocean.html", "cloudflare.html",
+                        "creds.html", "domains.html"):
+            self.assertNotIn(covered, cards)
+        for kept in ("env.html", "mcp.html", "traffic.html", "health.html", "tools.html"):
+            self.assertIn(kept, cards, "a section no tile speaks for keeps its card")
+        self.assertNotIn("<code", home)
+
+    def test_no_command_text_on_home_in_any_state(self):
+        fresh = {"runtime": {"home": "/example/workspace", "projects_configured": False}, "rows": [],
+                 "health": {"analytics": {"notice": True}, "maintenance": {"auto": False, "available": "9.9.9"}}}
+        unbuilt = dict(full_payload(), findings=None)
+        for name, payload in (("full", full_payload()), ("fresh", fresh), ("unbuilt", unbuilt)):
+            with self.subTest(state=name):
+                out = home_page.home_html(payload, EN)
+                self.assertNotIn("<code", out)
+                shown = text(re.sub(r'\s(data-copy|title)="[^"]*"', "", out))
+                for word in ("project-observatory", "OBSERVATORY_HOME", "--apply"):
+                    self.assertNotIn(word, shown)
+        buttons = re.findall(r"<button[^>]*data-copy=[^>]*>(.*?)</button>", home_page.home_html(fresh, EN))
+        self.assertTrue(buttons)
+        self.assertEqual(set(map(text, buttons)), {"Copy the command"})
+
+    def test_russian_groups(self):
+        out = text(home_page.home_html(full_payload(), RU))
+        self.assertIn("Работа", out)
+        self.assertIn("4 задачи открыты", out)
 
 
 if __name__ == "__main__":
