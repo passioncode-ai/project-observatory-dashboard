@@ -511,7 +511,18 @@ body[data-page="index"] .home-list .fdetail { margin-left: auto; white-space: no
  * activity tiles the page script draws; an Agents problem row carries its controls on one line
  * that wraps; a navigation entry that opens a narrowed page reads like any other. */
 .home-work .tiles.work { margin-top: var(--space-2); }
+/* A tile's source line and its short list (the sessions tile, OBS-572): sentence case on a line of its own,
+ * then one row per agent, instead of one uppercase run-on. */
+body[data-page] .tile .tile-sub { display: block; text-transform: none; letter-spacing: 0; }
+body[data-page] .tile .tile-list { list-style: none; margin: var(--space-1) 0 0; padding: 0;
+  font: 400 var(--t-label) var(--font-data); color: var(--ink); }
+body[data-page] .tile .tile-list span { text-transform: none; letter-spacing: 0; color: inherit; }
 .agents-act { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-2); }
 .agents-act select { font: inherit; }
 .agents-act select:disabled, .agents-act button:disabled { opacity: .6; cursor: not-allowed; }
 #agents-sessions table { margin-top: var(--space-2); }
+/* The free-space trend on the Disk page (OBS-572): one line over the days, the table beneath it is the data. */
+.free-spark { display: block; width: 100%; max-width: 360px; height: 48px; margin: var(--space-2) 0;
+  border-bottom: 1px solid var(--border); }
+.free-spark polyline { fill: none; stroke: var(--focus); stroke-width: 2; vector-effect: non-scaling-stroke;
+  stroke-linejoin: round; stroke-linecap: round; }

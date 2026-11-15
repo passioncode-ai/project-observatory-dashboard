@@ -372,6 +372,17 @@ class MonitoringNavigation(unittest.TestCase):
         self.assertIn('new URLSearchParams(location.search).get("group")', src)
         self.assertIn('"type_groups": finding_types.groups_for(', src)
 
+    def test_the_narrowed_entry_is_marked_as_the_current_page_and_findings_gives_it_back(self):
+        """OBS-572: on `findings.html?group=security` the Security entry carries aria-current, not Findings;
+        the reset and a finding link give it back. The server cannot know the query, so the script marks it."""
+        src = (ROOT / "dashboard/build_dashboard.py").read_text(encoding="utf-8")
+        self.assertIn("""'#pages a.pg-view[href$="group=' + group + '"]'""", src)
+        self.assertEqual(src.count("navMark(true)"), 1)
+        self.assertEqual(src.count("navMark(false)"), 2, "the reset button and a #f- link both clear the narrowing")
+        nav = shell.nav_html("findings", {})
+        self.assertEqual(nav.count('aria-current="page"'), 1, "the built page marks one entry, Findings")
+        self.assertIn('class="pg pg-view" href="findings.html?group=security"', nav)
+
 
 class PageTable(unittest.TestCase):
     """OBS-572: every page list is derived from `dashboard/page_table.py`, so a page is one entry."""

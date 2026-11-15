@@ -152,6 +152,14 @@ class View(unittest.TestCase):
         self.assertIsNone(codex["tier"], "a tier the scan did not record is unknown, not guessed")
         self.assertEqual([f["id"] for f in codex["findings"]], ["f-codex"])
 
+    def test_a_codex_skill_takes_the_tier_the_scan_recorded_in_its_own_list(self):
+        """OBS-572: `codex_skills` rows carry the tier their rule hits were judged at; the page shows it."""
+        doc = {**HARNESS, "codex_skills": [{"name": "review", "source": "user", "tier": 3, "digest": "0" * 64}]}
+        codex = {a["id"]: a for a in view(doc)["agents"]}["codex"]["skills"]["user"][0]
+        self.assertEqual(codex["tier"], 3)
+        shown = tools_page.tools_html({"tooling": view(doc)}, EN)
+        self.assertNotIn("not recorded", shown, "no skill is left without its source")
+
     def test_hooks_and_agent_findings_sit_beside_what_they_are_about(self):
         v = view()
         by = {a["id"]: a for a in v["agents"]}

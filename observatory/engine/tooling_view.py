@@ -130,6 +130,9 @@ def build(harness: dict | None, skills: dict, findings: list[dict] | None) -> di
     # 3 anything else. A project's own skills are read at tier 1 (scan_harness.project_skills).
     tiers = {(s.get("source"), s.get("name")): s.get("tier") for s in doc.get("skills") or []
              if isinstance(s, dict) and isinstance(s.get("tier"), int)}
+    # Codex's skills carry their tier in their own list (scan_harness.codex_skills, OBS-572).
+    tiers.update({("codex", s.get("name")): s["tier"] for s in doc.get("codex_skills") or []
+                  if isinstance(s, dict) and isinstance(s.get("tier"), int)})
     for space in skills.get("spaces") or []:
         for p in space.get("plugins") or []:
             if isinstance(p, dict) and isinstance(p.get("agent"), str):
@@ -144,6 +147,8 @@ def build(harness: dict | None, skills: dict, findings: list[dict] | None) -> di
                 tier = tiers.get((f"plugin:{s.get('plugin')}", s.get("name")))
             elif s["agent"] == "claude-code" and scope == "project":
                 tier = 1
+            elif s["agent"] == "codex" and scope == "user":
+                tier = tiers.get(("codex", s.get("name")))
             else:
                 tier = None
             agent(s["agent"])["skills"].setdefault(scope, []).append({**s, "tier": tier, "findings": []})

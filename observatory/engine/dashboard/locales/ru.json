@@ -2721,5 +2721,13 @@
   "few": "{n} передачи ждут",
   "many": "{n} передач ждут",
   "other": "{n} передачи ждут"
- }
+ },
+ "Free space by day": "Свободное место по дням",
+ "No daily history yet. The guard records the free space each time it runs.": "Истории по дням пока нет. Контроль диска записывает свободное место при каждом запуске.",
+ "Lowest free space of each day, {n} days": "Минимум свободного места за каждый день, дней: {n}",
+ "Lowest {low} GB on {date}, newest day {last} GB.": "Минимум {low} ГБ ({date}), последний день {last} ГБ.",
+ "Day": "День",
+ "Lowest": "Минимум",
+ "Last reading": "Последнее значение",
+ "Readings": "Замеров"
 }

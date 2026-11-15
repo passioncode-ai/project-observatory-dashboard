@@ -958,6 +958,18 @@ class Findings(Base):
         self.assertEqual(mf.findings(self.home / "store/raw", self.home / "store/logs", {}), [])
 
 
+class FreeSeries(Base):
+    def test_the_survey_carries_the_daily_free_space_the_guard_recorded(self):
+        """OBS-572: `freeSeries` is the guard's one-row-per-day series, `[]` when none was recorded."""
+        import machine_view
+        self.assertEqual(machine_view.summary()["freeSeries"], [])
+        (self.home / "store").mkdir(exist_ok=True)
+        (self.home / "store/disk-free-series.json").write_text(json.dumps({"schema_version": 1, "days": [
+            {"day": "2026-11-13", "min_gb": 30.2, "last_gb": 31.0, "samples": 5}]}))
+        self.assertEqual(machine_view.summary()["freeSeries"],
+                         [{"day": "2026-11-13", "min_gb": 30.2, "last_gb": 31.0, "samples": 5}])
+
+
 class Page(Base):
     def test_renders_every_section_in_both_languages_and_empty_states(self):
         import machine_view, machine_page

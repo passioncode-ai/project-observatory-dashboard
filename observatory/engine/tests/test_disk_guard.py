@@ -3258,5 +3258,56 @@ class VirtualMachineDisks(unittest.TestCase):
             self.assertEqual(g.vm_warnings("critical", old), [], "a VM that has not written in an hour is not at risk")
 
 
+class FreeSpaceSeries(Base):
+    """OBS-572: one row per UTC day of the free space the guard saw, bounded, for the Disk page's trend."""
+
+    def series(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        import disk_free_series
+        return importlib.reload(disk_free_series)
+
+    def test_readings_fold_into_their_day_and_the_file_stays_bounded(self):
+        from datetime import datetime, timezone, timedelta
+        m = self.series()
+        start = datetime(2026, 11, 1, 8, tzinfo=timezone.utc)
+        m.record(40.04, start)
+        rows = m.record(31.26, start + timedelta(hours=3))
+        self.assertEqual(rows, [{"day": "2026-11-01", "min_gb": 31.3, "last_gb": 31.3, "samples": 2}])
+        rows = m.record(35.0, start + timedelta(hours=5))
+        self.assertEqual((rows[0]["min_gb"], rows[0]["last_gb"], rows[0]["samples"]), (31.3, 35.0, 3))
+        for i in range(1, 45):
+            rows = m.record(20 + i, start + timedelta(days=i))
+        self.assertEqual(len(rows), m.KEEP_DAYS)
+        self.assertEqual(rows[-1]["day"], "2026-12-15")
+        self.assertLess(m.series_file().stat().st_size, 8 * 1024)
+        self.assertEqual(m.read(), rows)
+
+    def test_a_missing_or_damaged_series_reads_empty_never_zero(self):
+        m = self.series()
+        self.assertEqual(m.read(), [])
+        m.series_file().write_text("{not json", encoding="utf-8")
+        self.assertEqual(m.read(), [])
+        m.series_file().write_text(json.dumps({"days": [{"day": "x", "min_gb": 1, "last_gb": 1}, 7,
+                                                        {"day": "2026-11-02", "min_gb": -1, "last_gb": 2},
+                                                        {"day": "2026-11-03", "min_gb": 5, "last_gb": 6}]}))
+        self.assertEqual([r["day"] for r in m.read()], ["2026-11-03"])
+        self.assertEqual(m.record(None), [{"day": "2026-11-03", "min_gb": 5.0, "last_gb": 6.0, "samples": 1}],
+                         "an unmeasured reading adds nothing")
+
+    def test_every_guard_run_records_even_when_not_due_and_a_failed_write_is_named_not_raised(self):
+        m = self.series()
+        with patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g.Holders, "take", return_value=self.free()), \
+                patch.object(self.g, "large_files", return_value=None):
+            self.g.run(["--auto"])
+        self.assertEqual(len(m.read()), 1)
+        with patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g.Holders, "take", return_value=self.free()), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(m, "record", side_effect=OSError("disk full")):
+            doc = self.g.run(["--auto"])
+        self.assertIn("free-series", [d["source"] for d in doc["degraded"]])
+
+
 if __name__ == "__main__":
     unittest.main()

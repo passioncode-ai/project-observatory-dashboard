@@ -113,23 +113,26 @@ def _session_tiles(f: dict, t: Translator) -> list[tuple[str, object, str]]:
     what runs, what the account manager manages, what recorded a turn in the last hour.
     `sessions_view.facets` is the one reader; Home's tile reads it too. A facet that was
     not read is a dash with its reason, never 0."""
-    by = " · ".join(f"{a} {n}" for a, n in (f.get("byAgent") or {}).items())
+    by = "".join(f'<li><span class="mono">{_e(a)}</span> {t.number(n) if isinstance(n, int) else _e(n)}</li>'
+                 for a, n in (f.get("byAgent") or {}).items())
+    sub = ' class="tile-sub"'            # the source on its own line, in sentence case (OBS-572)
     if f.get("processesFrom") == "manager":
-        running = t.mark("processes the account manager lists, read {at}", tag="span", at=_stamp(f.get("processesAt")))
+        running = t.mark("processes the account manager lists, read {at}", tag="span", attrs=sub,
+                         at=_stamp(f.get("processesAt")))
     elif f.get("processesFrom") == "machine-survey":
-        running = t.mark("processes the machine survey counted, read {at}", tag="span",
+        running = t.mark("processes the machine survey counted, read {at}", tag="span", attrs=sub,
                          at=_stamp(f.get("processesAt")))
     else:
-        running = t.mark("not read yet", tag="span")
+        running = t.mark("not read yet", tag="span", attrs=sub)
     if by:
-        running += f' <span class="mono">{_e(by)}</span>'
+        running += f'<ul class="tile-list">{by}</ul>'
     state = f.get("managerState")
-    managed = (t.mark("by the account manager, read {at}", tag="span", at=_stamp(f.get("managerAt"))) if state == "read"
-               else t.mark("the account manager is not installed", tag="span") if state == "not-installed"
-               else t.mark("not read yet", tag="span") if state is None
-               else t.mark("the account manager did not answer", tag="span"))
-    active = (t.mark("a turn recorded in the ledger", tag="span") if f.get("activeHour") is not None
-              else t.mark("the ledger could not be read", tag="span"))
+    managed = (t.mark("by the account manager, read {at}", tag="span", attrs=sub, at=_stamp(f.get("managerAt"))) if state == "read"
+               else t.mark("the account manager is not installed", tag="span", attrs=sub) if state == "not-installed"
+               else t.mark("not read yet", tag="span", attrs=sub) if state is None
+               else t.mark("the account manager did not answer", tag="span", attrs=sub))
+    active = (t.mark("a turn recorded in the ledger", tag="span", attrs=sub) if f.get("activeHour") is not None
+              else t.mark("the ledger could not be read", tag="span", attrs=sub))
     return [("Sessions running", f.get("running"), running), ("Managed", f.get("managed"), managed),
             ("Active in the last hour", f.get("activeHour"), active)]
 
@@ -142,10 +145,10 @@ def _tiles(tiles: list, t: Translator) -> str:
 
 def _counters(c: dict, t: Translator) -> str:
     """The workflow counts, above the workflows (the session counts head the sessions)."""
-    return _tiles([("Workflows open", c.get("workflowsOpen", 0), t.mark("held by an executor", tag="span")),
-                   ("Handoffs waiting", c.get("handoffsWaiting", 0), t.mark("to be accepted", tag="span")),
-                   ("Stalled", c.get("stalled", 0), t.mark("silent 30 min", tag="span")),
-                   ("Steps kept", c.get("keptSteps", 0), t.mark("for review", tag="span"))], t)
+    return _tiles([("Workflows open", c.get("workflowsOpen", 0), t.mark("held by an executor", tag="span", attrs=' class="tile-sub"')),
+                   ("Handoffs waiting", c.get("handoffsWaiting", 0), t.mark("to be accepted", tag="span", attrs=' class="tile-sub"')),
+                   ("Stalled", c.get("stalled", 0), t.mark("silent 30 min", tag="span", attrs=' class="tile-sub"')),
+                   ("Steps kept", c.get("keptSteps", 0), t.mark("for review", tag="span", attrs=' class="tile-sub"'))], t)
 
 
 def _yes(t: Translator, value) -> str:

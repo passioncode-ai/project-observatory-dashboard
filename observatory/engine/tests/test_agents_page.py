@@ -341,6 +341,26 @@ class ControlPlaneAgents(unittest.TestCase):
             self.assertIn(word, quiet)
         self.assertIn('href="projects.html#project:beta-api"', rows[2][1])
 
+    def test_the_sessions_tile_puts_its_source_and_its_agents_on_separate_lines(self) -> None:
+        """OBS-572: the source line is sentence case and the per-agent counts are a list, not an uppercase run-on."""
+        import re
+        section = self.page()[self.page().index('id="agents-sessions"'):]
+        tile = re.search(r'<div class="tile"><span data-t="Sessions running">.*?</div>', section, re.S).group(0)
+        self.assertRegex(tile, r'<span class="tile-sub" data-t="processes the account manager lists, read \{at\}"')
+        items = re.findall(r"<li>(.*?)</li>", tile)
+        self.assertEqual([" ".join(re.sub(r"<[^>]+>", " ", i).split()) for i in items], ["claude-code 2", "codex 1"])
+        self.assertNotIn(" · ", re.sub(r"<[^>]+>", "", tile), "no run-on line of agents")
+        self.assertIn(".tile-sub { display: block; text-transform: none", (ROOT / "dashboard/workspace.css").read_text())
+
+    def test_the_live_refresh_keeps_what_a_person_picked_and_never_rebuilds_a_control_in_use(self) -> None:
+        """OBS-572: the offer's provider and reason, and its status line, survive the swap; a focused control defers it."""
+        src = (ROOT / "dashboard/build_dashboard.py").read_text(encoding="utf-8")
+        live = src[src.index("(function agentsLive()"):]
+        self.assertIn("if (!box || inUse(box)) return;", live)
+        self.assertLess(live.index("const form = formState(box);"), live.index("box.replaceWith(fresh);"))
+        self.assertLess(live.index("box.replaceWith(fresh);"), live.index("formRestore(fresh, form);"))
+        self.assertIn('const FORM = "[data-wf-provider], [data-wf-reason], [data-wf-said]";', live)
+
     def test_a_session_list_that_was_not_read_says_why_never_none(self) -> None:
         unread = sessions_doc(sessions=[], managed=None, quiet=None,
                               sources={"processes": {"from": "machine-survey", "at": "2026-10-26T17:00:00Z"},

@@ -243,6 +243,16 @@ class Harness(unittest.TestCase):
         self.assertGreater(doc["codex"]["listing_chars"], 0)
         self.assertIn(("codex/shared-one", "download-exec"), {(h["skill"], h["rule"]) for h in doc["security"]})
 
+    def test_a_codex_skill_row_carries_the_tier_it_was_judged_at(self):
+        """OBS-572: tier 1 inside the configured projects folders, 3 anywhere else, never absent."""
+        inside = self.home / "work"
+        target = skill(inside / "mine", "own-skill", "Mine.")
+        skill(self.home / ".codex" / "skills", "plain-skill", "Elsewhere.")
+        (self.home / ".codex" / "skills" / "own-skill").symlink_to(target)
+        self.configure(["sources", "projects", str(inside)])
+        rows = {r["name"]: r["tier"] for r in self.scan()["codex_skills"]}
+        self.assertEqual(rows, {"own-skill": 1, "plain-skill": 3})
+
     def test_provider_keys_in_tool_configs_are_named_never_quoted(self):
         """OBS-74: a credential-shaped value under a credential-like name in a tool's own config is named."""
         key = "sk-" + "or-v1-" + "Pl4inT3xt" * 6
