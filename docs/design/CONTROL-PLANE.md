@@ -169,6 +169,19 @@ Ordered by harm first (what breaks something real), then by what the person aske
 Each module runs stages 3 to 10 of the pipeline on its own branch and pull request; a wave is released when its modules
 are merged and its checks are green.
 
+### Delivered
+
+- **Wave 1, 0.37.0** (pull requests #540 to #545): the modules of wave 1 above, merged and released together; the session
+  count's three facets are `observatory_sessions` (`sessions_view.facets`, test `test_sessions_view`), and the release
+  record is the 0.37.0 entry of `CHANGELOG.md`.
+- **Wave 2, 0.38.0** (#546 Installed tools page, #547 Disk page and the configuration door, #548 Home, Agents and the
+  grouped navigation, #549 the release): the pages are `tools.html`, `disk.html`, a rebuilt `index.html` and `agents.html`;
+  the navigation groups are `NAV_GROUP_LABELS` in `observatory/engine/dashboard/page_table.py`.
+- **After 0.38.0 (OBS-572)**: Security and Availability are marked as the current page, the Agents page keeps a picked
+  provider and reason through its live refresh, the sessions tile separates its source from its per-agent list, Codex
+  skills carry a source tier, the Disk page shows a daily free-space trend, and every page is declared once in
+  `page_table.py` (tests `PageTable` in `test_dashboard_shell.py`, `FreeSpaceSeries` in `test_disk_guard.py`).
+
 ## Contract matters
 
 `observatory_sessions`, `observatory_dependencies`, `observatory_issues`, `observatory_doctor` and

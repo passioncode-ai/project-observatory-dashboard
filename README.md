@@ -155,6 +155,8 @@ Interface strings and finding titles are translated; a finding's details and sug
 
 `--no-browser` prints the address instead of opening it; `--rebuild` rebuilds the pages first; `--port` picks another loopback port. The pages live in `$OBSERVATORY_HOME/docs/dashboard/`, and `project-observatory full local` refreshes what they show. The server binds `127.0.0.1` only.
 
+The navigation rail groups the pages. **Monitoring** holds Health, Security and Availability (the last two open Findings narrowed to their group); **Work** holds Home, Projects, Agents and Findings; **Infrastructure** holds Heroku, DigitalOcean, Cloudflare, Domains and Traffic; **Access** holds Keys, ENV and MCP; **System** holds Machine, **Installed tools** (coding agents, skills, plugins and hooks, with the ones behind) and **Disk** (free space and its daily trend, the disk guard, auto cleanup and its settings). The list of pages is `observatory/engine/dashboard/page_table.py`; the test `PageTable` in `observatory/engine/tests/test_dashboard_shell.py` checks that every page is in one group.
+
 ### Connect Claude Code (plugin updates automatically)
 
 ```sh

@@ -1,6 +1,6 @@
 # Local backlog
 
-**Next free ID:** `OBS-571`
+**Next free ID:** `OBS-573`
 
 **Vacant ids:** `OBS-91` (skipped when the OBS register began reserving: #277 wrote OBS-92 and OBS-93, and no row was ever written under 91); `OBS-422` (reserved on 2026-11-08 for the provider-account organization rules, which became OBS-412 part 1 when the organization onboarding rows OBS-411 to OBS-420 were written)
 
@@ -595,3 +595,4 @@ still open and needs nothing, and a reservation older than that with no row must
 | OBS-568 | Key transfers between one person's own machines (board finding, 2026-11-15): `share confirm` on a machine enrolled in an organization refuses `human-step-required` (OM-1.1) even when both vault projects are personal and both machines are the same person's; the sender stays in `exchanging` until a `share sync`, so `confirm` answers `not-comparing`; `decision-invalid` names no field and `target` needs the full id while the command takes 8 characters. Let the agent confirm when both machines are recorded for one person in the node and both projects are personal; run `sync` before comparing; name the field in `decision-invalid` and accept an unambiguous 8-character prefix | open | Fabric board thread `a541aeca` (finding `6a067347`) |
 | OBS-569 | Usage data per DEC-0157 (contract UD-1..UD-6): the ops digest collector sends only while its switch is on and the first-run notice was shown; check every place Observatory sends usage or error data, a per-product switch and an agent door to it as a relayed change-policy action | open | Fabric board announcement `1ca250e1`, 2026-11-15 |
 | OBS-570 | Read Switchboard's `org-seats/1` (`switchboard --json organizations`, field `seats`, SB-381) into `observatory_org_accounts`: seats per organization by provider and class, placed_by, enabled, here or elsewhere; no account ids or machine names | open | Fabric board thread `8df590e8`, 2026-11-15 |
+| OBS-572 | After 0.38.0: interface polish, one page table, docs for waves 1 and 2. Current-page mark for Security and Availability, the Agents refresh keeping a picked provider and reason, the sessions tile in two lines, a source tier for Codex skills, a daily free-space series on the Disk page, every page declared once in `dashboard/page_table.py`, and the control plane docs for both waves | open | the operator, 2026-11-15: finish everything, then interface polish, refactoring and documentation; the polish packet of the estate control plane run |
