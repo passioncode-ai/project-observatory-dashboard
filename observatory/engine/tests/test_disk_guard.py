@@ -1020,9 +1020,9 @@ class LiveStateUnderCacheRoots(Base):
         view = importlib.reload(machine_view).summary()
         self.assertEqual(view["guard"]["kept"], kept)
         sys.path.insert(0, str(ROOT / "dashboard"))
-        import machine_page
+        import disk_page
         from i18n import Translator
-        html = machine_page.guard_html(view["guard"], Translator("en"))
+        html = disk_page.guard_html(view["guard"], Translator("en"))
         self.assertIn("Kept by the guard", html)
         self.assertIn("svc-jobs", html)
         self.assertIn(".observatory-keep", html)
@@ -2313,22 +2313,28 @@ class Surfaces(Base):
         self.assertEqual(done["title_args"]["gb"], "2.0", "13 GB by du, 0 by the disk: the disk wins")
 
     def test_the_page_shows_the_guard_in_both_languages(self):
-        import machine_view, machine_page
+        # The guard moved to the Disk page (OBS-562); the simulators that hold memory stay on Machine.
+        import machine_view, machine_page, disk_page
         from i18n import Translator
         self.report()
         summary = machine_view.summary()
-        en = machine_page.machine_html({"machine": summary}, Translator("en"))
-        ru = machine_page.machine_html({"machine": summary}, Translator("ru"))
-        for text in ("Disk guard", "Largest files", "/data/alpha-web/big.img", "Running simulators", "Phone A"):
+        en = disk_page.disk_html({"machine": summary}, Translator("en"))
+        ru = disk_page.disk_html({"machine": summary}, Translator("ru"))
+        for text in ("Disk guard", "Largest files", "/data/alpha-web/big.img"):
             self.assertIn(text, en)
-        for text in ("Контроль диска", "Самые большие файлы", "временные файлы", "Запущенные симуляторы", "мало места"):
+        for text in ("Контроль диска", "Самые большие файлы", "временные файлы", "мало места"):
             self.assertIn(text, ru)
         self.assertNotIn("&lt;span", en + ru, "a marked word passed as an argument prints its markup")
+        machine_en = machine_page.machine_html({"machine": summary}, Translator("en"))
+        machine_ru = machine_page.machine_html({"machine": summary}, Translator("ru"))
+        for text in ("Running simulators", "Phone A", "disk.html"):
+            self.assertIn(text, machine_en)
+        self.assertIn("Запущенные симуляторы", machine_ru)
 
-    def test_an_unrun_guard_says_how_to_run_it(self):
-        import machine_view, machine_page
+    def test_an_unrun_guard_says_so(self):
+        import machine_view, disk_page
         from i18n import Translator
-        en = machine_page.machine_html({"machine": machine_view.summary()}, Translator("en"))
+        en = disk_page.disk_html({"machine": machine_view.summary()}, Translator("en"))
         self.assertIn("The disk guard has not run yet", en)
 
     def test_the_command_line_takes_the_guard_and_refuses_an_unknown_level(self):
@@ -2658,14 +2664,14 @@ class CoverageTruth(Base):
 
     def test_page_does_not_call_failed_empty_scan_no_large_files(self):
         sys.path.insert(0, str(ROOT / "dashboard"))
-        import machine_page
+        import disk_page
         from i18n import Translator
         guard = {"largeFiles": {"complete": False, "files": [], "errors": {"directory_read": 1}}}
-        html = machine_page.guard_html(guard, Translator("en"))
+        html = disk_page.guard_html(guard, Translator("en"))
         self.assertIn("incomplete measurement", html)
         self.assertNotIn("No file above the size line.", html)
         guard["largeFiles"]["complete"] = True
-        self.assertIn("No file above the size line.", machine_page.guard_html(guard, Translator("en")))
+        self.assertIn("No file above the size line.", disk_page.guard_html(guard, Translator("en")))
 
     def test_mcp_overview_retains_coverage_and_unknown_swap(self):
         sys.path.insert(0, str(ROOT / "mcp"))

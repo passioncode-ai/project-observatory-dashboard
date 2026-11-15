@@ -21,6 +21,9 @@ by hand. So the page is served here instead, same-origin with a small API.
   revoking       a label — the provider's truncated display form of the key,
                  which is not the key.
   marking a leak free text saying where it was seen.
+  a setting      the Disk page's guard and cleanup settings (OBS-562): a key and a
+                 number or a switch, planned, applied and undone through the
+                 configuration door, which refuses anything shaped like a key.
 
   revealing      THE ONE EXCEPTION, and it is an exception to "the value never
                  passes through the browser" rather than to any of the rules
@@ -510,9 +513,54 @@ def act_rotate_key(body: dict) -> dict:
     return {"ok": True, **result}
 
 
+def act_configure(body: dict) -> dict:
+    """The Disk page's settings (OBS-562, CP-16): plan, apply or undo through the configuration door, the same door
+    as `observatory_configure` and `full configure`, as the person at this page (`person:page`). Only the keys the
+    page shows (`configuration_door.DISK_SCOPE`); every other setting is an agent's tool or a terminal's. Audited
+    before the door acts, with the key names only. No command line goes back to the page."""
+    import configuration
+    import configuration_door as door
+    op = body.get("op")
+    if op not in ("plan", "apply", "undo"):
+        raise ValueError("op is plan, apply or undo")
+    try:
+        if op == "plan":
+            changes = body.get("changes")
+            if not isinstance(changes, dict) or not changes:
+                raise ValueError("a plan takes one or more {key: value} changes")
+            keys = list(changes)
+        elif op == "apply":
+            keys = door.planned_keys(body.get("digest"))
+        else:
+            keys = door.applied_keys(body.get("journal"))
+        catalogue = door.catalogue()
+        for key in keys:
+            if key not in catalogue:
+                raise ValueError(f"{credential_shape.echo(str(key))} is not a setting this engine has")
+            if not door.in_disk_scope(key):
+                raise ValueError(f"{key} is not changed from this page; an agent changes it with "
+                                 "observatory_configure")
+        audit("configure", op, {"keys": sorted(keys)})
+        if op == "plan":
+            answer = door.plan(changes)
+            return {"digest": answer["digest"], "changes": [{k: r[k] for k in ("key", "before", "after", "gate",
+                                                                               "effect")} for r in answer["changes"]],
+                    "needsPerson": answer["needsPerson"], "degraded": answer["degraded"]}
+        if op == "apply":
+            answer = door.apply(body.get("digest"), actor="person:page")
+        else:
+            answer = door.undo(body.get("journal"), actor="person:page")
+        return {k: v for k, v in answer.items() if k != "undo"}
+    except door.Refusal as refusal:
+        raise ValueError(str(refusal)) from None
+    except configuration.ConfigurationError as exc:
+        raise ValueError(f"the workspace refused: {exc}"[:300]) from None
+
+
 ACTIONS = {"mint": act_mint, "limit": act_limit, "revoke": act_revoke,
            "leak": act_leak, "reveal": act_reveal, "annotate": act_annotate,
-           "disable": act_disable, "enable": act_enable, "rotate-key": act_rotate_key}
+           "disable": act_disable, "enable": act_enable, "rotate-key": act_rotate_key,
+           "configure": act_configure}
 
 #: Refused on purpose, with the reason the caller needs rather than a 404.
 REFUSED = {

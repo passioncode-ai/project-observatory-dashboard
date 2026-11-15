@@ -95,6 +95,15 @@
       "status": "gate"
     },
     {
+      "action": "configure",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_configure",
+      "tool": "observatory_configure",
+      "gate": null,
+      "status": "covered",
+      "note": "the Disk page's settings (OBS-562): the same configuration door, planned, applied and undone; the page's route takes only the guard and cleanup keys"
+    },
+    {
       "action": "init",
       "kind": "cli",
       "where": "workspace.py: init",

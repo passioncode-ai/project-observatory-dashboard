@@ -146,61 +146,25 @@ def summary_html(m: dict, t: Translator) -> str:
 GUARD_CLASSES = ("cache-command", "cache-dir", "build-output", "temp", "trash", "browser-clone")
 
 
-def _in_workspace(command: str) -> str:
-    import paths
-    return paths.in_workspace(command)
+def disk_line(m: dict, t: Translator) -> str:
+    """The disk guard and the cleanup moved to the Disk page (OBS-562): one line here, and the link."""
+    guard, cleanup = m.get("guard") or {}, m.get("cleanup") or {}
+    auto = t.mark("auto cleanup on") if cleanup.get("autoEnabled") else t.mark("auto cleanup off")
+    last = (t.mark("the disk guard last ran {at}", at=stamp(guard.get("at"))) if guard.get("at")
+            else t.mark("the disk guard has not run yet"))
+    link = t.mark("Disk and cleanup", tag="a", attrs=' href="disk.html"')
+    return f'<p class="machine-at">{link} · {auto} · {last}</p>'
 
 
-def guard_html(g: dict | None, t: Translator) -> str:
-    """The disk guard's last run, the largest files it found, and the simulators that
-    hold memory swap writes to this disk — each with what brings the space back."""
-    if not g:
-        return _table(t, "Disk guard", [("What", False), ("Planned", True)], [],
-                      "The disk guard has not run yet — project-observatory full disk-guard")
-    results, planned = g.get("results") or {}, g.get("planned") or {}
-    # The level is a word of its own, marked on its own: passed as an argument it was
-    # escaped, and the page printed its markup (seen on the first look, 2026-10-11).
-    ran = t.mark("Disk guard ran {at}: free {before} → {after} GB, {n} removed", at=stamp(g.get("at")),
-                 before=g.get("freeGbBefore", "—"), after=g.get("freeGbAfter", "—"), n=results.get("removed", 0))
-    parts = [f'<p class="machine-at">{ran} · {t.mark("pressure")} {_word(t, g.get("level"))}</p>']
-    parts.append(_table(t, "Disk guard", [("What", False), ("Planned", True)],
-                        [[_word(t, c), t.number(planned[c])] for c in GUARD_CLASSES if planned.get(c)],
-                        "Nothing to free at this pressure."))
-    kept = [k for k in g.get("kept") or [] if isinstance(k, dict) and k.get("target")][:ROWS]
-    if kept:
-        # Live state an agent service keeps under a cleanup root (OBS-203): shown, so a person
-        # sees why a large folder there is never freed.
-        parts.append(_table(t, "Kept by the guard", [("Folder", False), ("Why kept", False)],
-                            [[f'<span class="mono">{_e(k["target"])}</span>', t.known(k.get("reason"))]
-                             for k in kept], ""))
-    parts.append(t.mark("From the maintenance job when features.auto_cleanup is on: hourly while space is normal, every "
-                        "15 minutes below the low line; never anything a process holds, maps, runs from or works inside: "
-                        "{command}", tag="p", attrs=' class="machine-hint"',
-                        # Copied from a page of a non-default workspace, it runs against that one (OSS-26).
-                        command=_in_workspace("project-observatory full disk-guard --apply")))
-    coverage = g.get("largeFiles") or {}
-    files = (coverage.get("files") or [])[:ROWS]
-    measured = coverage.get("complete") is True
-    empty = "No file above the size line." if measured else "incomplete measurement" if coverage else "Not measured"
-    if coverage and not measured:
-        errors = coverage.get("errors")
-        count = (sum(n for n in errors.values() if isinstance(n, int) and n > 0)
-                 if isinstance(errors, dict) else None)
-        shown = t.number(count) if count is not None else t.mark("Not measured")
-        parts.append(f'<p class="machine-hint">{t.mark("incomplete measurement")} · '
-                     f'{_e(stamp(coverage.get("measured_at")))} · {t.mark("unreadable")}: {shown}</p>')
-    parts.append(_table(t, "Largest files",
-                        [("File", False), ("Size", True), ("Modified", False)],
-                        [[f'<span class="mono">{_e(f["path"])}</span>', _gigabytes(f.get("gb"), t), t.date(f.get("modified"))]
-                         for f in files],
-                        empty))
-    sims = (g.get("memory") or {}).get("simulators") or []
-    if sims:
-        parts.append(_table(t, "Running simulators",
-                            [("Device", False), ("Memory", True), ("How it comes back", False)],
-                            [[_e(x["name"]), _size(x.get("rss_mb"), t), f'<span class="mono">{_e(x["command"])}</span>']
-                             for x in sims[:ROWS]], ""))
-    return "".join(parts)
+def simulators_html(g: dict | None, t: Translator) -> str:
+    """The simulators the guard found holding memory that swap writes to this disk, each with what brings it back."""
+    sims = ((g or {}).get("memory") or {}).get("simulators") or []
+    if not sims:
+        return ""
+    return _table(t, "Running simulators",
+                  [("Device", False), ("Memory", True), ("How it comes back", False)],
+                  [[_e(x["name"]), _size(x.get("rss_mb"), t), f'<span class="mono">{_e(x["command"])}</span>']
+                   for x in sims[:ROWS]], "")
 
 
 def machine_html(payload: dict, t: Translator | None = None) -> str:
@@ -257,7 +221,8 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
                           + (f'<br><span class="mono">{_e(l["command"])}</span>' if l.get("command") else "")]
                          for l in disk.get("locations") or []],
                         "No disk location measured yet."))
-    parts.append(guard_html(m.get("guard"), t))
+    parts.append(disk_line(m, t))
+    parts.append(simulators_html(m.get("guard"), t))
     git = m.get("git") or {}
     # A pass the deadline cut short carried some checkouts from an earlier one; their rows below
     # are that old, and they plan no automatic removal until a fresh pass (ENG-009).
@@ -282,23 +247,6 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
                         [[_e(b["repository"].split(":", 1)[-1]), _e(b["name"]), _e(b.get("ahead")), _e(b.get("idle_days"))]
                          for b in sorted(git.get("uniqueBranches") or [], key=lambda b: -(b.get("idle_days") or 0))[:ROWS]],
                         "No branch holds commits found nowhere else." if git else UNMEASURED_GIT))
-    cleanup = m.get("cleanup") or {}
-    counts = cleanup.get("counts") or {}
-    parts.append(_table(t, "Cleanup plan",
-                        [("What", False), ("Tier", False), ("Count", True)],
-                        [[_word(t, k), t.mark("auto") if k in ("branch-merged", "branch-pushed", "worktree-missing",
-                                                               "worktree-clean", "build-artifacts") else t.mark("manual"), _e(v)]
-                         for k, v in counts.items() if v],
-                        "Nothing to clean." if cleanup else UNMEASURED_GIT))
-    parts.append(t.mark("The auto tier loses nothing; it runs on the tick and from the disk guard, which lowers its idle days"
-                        " under disk pressure. The manual tier archives first: project-observatory full cleanup --apply --include manual",
-                        tag="p", attrs=' class="machine-hint"'))
-    parts.append(_table(t, "Cleaned in the last 7 days",
-                        [("When", False), ("What", False), ("Item", False), ("Result", False)],
-                        [[t.date(stamp(r.get("at"))), _word(t, r.get("class")), f'<span class="mono">{_e(r.get("target"))}</span>',
-                          _word(t, r.get("result")) + (" — " + t.known(r["reason"]) if r.get("reason") else "")]
-                         for r in (cleanup.get("journal") or [])[:ROWS]],
-                        "Nothing was cleaned in the last 7 days."))
     degraded = m.get("degraded") or []
     if degraded:
         # A reason with a `code` is a message id, so the Russian page reads Russian;

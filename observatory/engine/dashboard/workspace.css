@@ -451,7 +451,24 @@ tr.hl > td { background: var(--accent-weak); }
   body[data-page="machine"] #machine tbody td:first-child { margin-bottom: 0; padding-top: var(--space-2); }
   body[data-page="machine"] #machine tbody td::before { content: none; display: none; }
   body[data-page="machine"] #machine td.num { text-align: right; }
+  body[data-page="disk"] #disk table { display: table; table-layout: auto; width: 100%; }
+  body[data-page="disk"] #disk thead { display: table-header-group; }
+  body[data-page="disk"] #disk tbody { display: table-row-group; width: auto; }
+  body[data-page="disk"] #disk tr { display: table-row; width: auto; padding: 0; }
+  body[data-page="disk"] #disk thead th { display: table-cell; }
+  body[data-page="disk"] #disk tbody td {
+    display: table-cell; width: auto; padding: var(--space-2);
+    border-bottom: 1px solid var(--border);
+  }
+  body[data-page="disk"] #disk tbody td:first-child { margin-bottom: 0; padding-top: var(--space-2); }
+  body[data-page="disk"] #disk tbody td::before { content: none; display: none; }
+  body[data-page="disk"] #disk td.num { text-align: right; }
 }
+/* The Disk page's settings (OBS-562): a number field beside its Preview button. */
+#disk input[type="number"] { width: 7em; padding: var(--space-1) var(--space-2); border: 1px solid var(--border-strong);
+  border-radius: var(--r-card); background: var(--panel); color: inherit; font: inherit; }
+#disk input:disabled, #disk button:disabled { opacity: .6; cursor: not-allowed; }
+#disk-plan ul { margin: var(--space-2) 0 var(--space-3); }
 
 /* HOME (OSS-88, OBS-261): the state band, the three problems to do first and the
  * projects at a glance, server-rendered by dashboard/home_page.py. The script's

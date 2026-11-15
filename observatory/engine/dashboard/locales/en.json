@@ -726,6 +726,10 @@
   "one": "{package} {version} has {n} known vulnerability",
   "other": "{package} {version} has {n} known vulnerabilities"
  },
+ "{n} days": {
+  "one": "{n} day",
+  "other": "{n} days"
+ },
  "scope@@user": "user",
  "scope@@project": "project",
  "scope@@local": "local",

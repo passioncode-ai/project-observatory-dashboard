@@ -15,8 +15,9 @@ type, its allowed values or range, its default, its file and its gate, and every
 
 THE GATE. A change is `safe` when it is reversible and changes only the engine's own behaviour; it needs the PERSON
 when it sends data out, deletes sooner, spends more or points at secrets (`person`: on, set, raise, lower, always,
-values). The person at a terminal (`person:cli`) passes it; an agent (`agent:...`) passes it with the operator's words
-in contract DEC-0121's shape (`decision`), checked as `node/actions.py` checks them.
+values). The person at a terminal (`person:cli`) or at the Disk page the key server serves with its token
+(`person:page`, OBS-562) passes it; an agent (`agent:...`) passes it with the operator's words in contract DEC-0121's
+shape (`decision`), checked as `node/actions.py` checks them.
 
 NEVER A SECRET. A key or value shaped like a credential (`credential_shape`) is refused before anything is kept, and a
 refusal never echoes what it refused. Credentials go to the vault, never into configuration.
@@ -49,7 +50,7 @@ ACTIONS = {"apply": ("configure.apply", "Apply a configuration change"),
            "undo": ("configure.undo", "Undo a configuration change")}
 JOURNAL_ID = re.compile(r"cfg_[0-9a-f]{16}")
 DIGEST = re.compile(r"sha256:[0-9a-f]{64}")
-ACTOR = re.compile(r"(person:cli|(agent|service):[A-Za-z0-9][A-Za-z0-9._+-]{0,63})")
+ACTOR = re.compile(r"(person:(cli|page)|(agent|service):[A-Za-z0-9][A-Za-z0-9._+-]{0,63})")
 ABSENT = config._ABSENT
 
 #: The clock; tests replace it.
@@ -138,6 +139,15 @@ CLEANUP_AUTO = {
     "clean_worktree_idle_days": "days a clean worktree is idle before the auto tier removes it",
     "build_artifacts_project_idle_days": "days a project is idle before the auto tier removes its build output",
 }
+
+
+#: The keys the Disk page shows and changes (OBS-562, CP-16): the auto cleanup switch, the disk guard's thresholds
+#: and the cleanup's auto tier. The page's server route changes nothing else.
+DISK_SCOPE = ("features.auto_cleanup", "guard.", "cleanup.auto.")
+
+
+def in_disk_scope(key: Any) -> bool:
+    return isinstance(key, str) and any(key == p or (p.endswith(".") and key.startswith(p)) for p in DISK_SCOPE)
 
 
 def _shipped(name: str) -> dict:
@@ -527,11 +537,26 @@ def _load_plan(base: Path, digest: Any) -> dict:
     return doc
 
 
+def planned_keys(digest: Any, *, base: Path | None = None) -> list[str]:
+    """The keys a waiting plan changes, so a caller can check them before it applies (`plan_unknown` otherwise)."""
+    return [row.get("key") for row in _load_plan(_home(base), digest).get("changes") or []]
+
+
+def applied_keys(journal_id: Any, *, base: Path | None = None) -> list[str]:
+    """The keys an applied change wrote, so a caller can check them before it undoes (`journal_unknown` otherwise)."""
+    if isinstance(journal_id, str) and JOURNAL_ID.fullmatch(journal_id):
+        for row in _journal_lines(_home(base)):
+            if row.get("id") == journal_id and row.get("kind") == "apply":
+                return [c.get("key") for c in row.get("changes") or []]
+    raise Refusal("journal_unknown", "undo takes the `journal` id an apply answered (cfg_ and 16 hex digits)")
+
+
 def _decided(action: str, target: str, actor: str, decision: Any, keys: list[str]) -> dict | None:
     """Who decided a change that needs the person: the person at the terminal, or the operator's words an agent
     relays (DEC-0121, checked as `node/actions.py` checks them, `target` the digest or the journal id)."""
-    if actor == "person:cli":
-        return {"by": "person", "via": "cli"} if keys else None
+    if actor in ("person:cli", "person:page"):
+        # The person at a terminal, or at the page the local control server serves with its token (OBS-562).
+        return {"by": "person", "via": actor.split(":", 1)[1]} if keys else None
     if not keys and decision is None:
         return None
     act, title = ACTIONS[action]
@@ -565,7 +590,8 @@ def _decided(action: str, target: str, actor: str, decision: Any, keys: list[str
 
 def _actor(actor: Any) -> str:
     if not isinstance(actor, str) or not ACTOR.fullmatch(actor):
-        raise Refusal("actor_refused", "the actor is `person:cli` (a terminal) or `agent:<name>` / `service:<name>`")
+        raise Refusal("actor_refused", "the actor is `person:cli` (a terminal), `person:page` (the page the local "
+                                       "control server serves) or `agent:<name>` / `service:<name>`")
     return actor
 
 

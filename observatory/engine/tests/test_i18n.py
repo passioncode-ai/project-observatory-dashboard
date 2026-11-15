@@ -132,6 +132,14 @@ def machine_page_ids() -> set[str]:
     return ids | set(machine_page.DYNAMIC)
 
 
+def disk_page_ids() -> set[str]:
+    """The Disk page's ids (OBS-562): literals, `_table` arguments and the values it translates
+    through a variable (`disk_page.DYNAMIC`)."""
+    sys.path.insert(0, str(DASH))
+    import disk_page
+    return _table_page_ids("disk_page.py") | set(disk_page.DYNAMIC)
+
+
 def agents_page_ids() -> set[str]:
     """The Agents page's ids: `t`/`mark` literals and the values it translates
     through a variable (`agents_page.DYNAMIC`)."""
@@ -165,6 +173,7 @@ def source_ids() -> set[str]:
     ids |= home_page_ids()
     ids |= infra_page_ids()
     ids |= tools_page_ids()
+    ids |= disk_page_ids()
     literal = r'(["\'])((?:\\.|(?!\1).)+?)\1'
     for m in re.finditer(r"\bT\(\s*" + literal, template):
         ids.add(m.group(2).replace('\\"', '"').replace("\\'", "'"))
@@ -258,8 +267,8 @@ def untitled_finding_literals() -> list[str]:
 DYNAMIC_IDS = {
     "Memory", "Processes",  # machine_page per-source freshness labels
 
-    "No file above the size line.",        # machine_page.guard_html(): measured empty state via `empty`
-    # machine_page.guard_html(): a kept folder's reason via `t.known`, cleanup_safety.KEEP_REASON (OBS-203)
+    "No file above the size line.",        # disk_page.guard_html(): measured empty state via `empty`
+    # disk_page.guard_html(): a kept folder's reason via `t.known`, cleanup_safety.KEEP_REASON (OBS-203)
     "the folder carries .observatory-keep: an agent service keeps live state here",
     "Projects — the operator's registry",  # build(): the single page's title, via `title`
     "Search",                              # render(): the placeholder when no tab matches
@@ -282,7 +291,7 @@ UNTRANSLATED = {"Heroku", "ENV", "MCP", "Cloudflare", "DigitalOcean", "GA4", "RD
 class SourcesCarryNoRussian(unittest.TestCase):
     def test_dashboard_sources(self):
         for name in ("build_dashboard.py", "shell.py", "workspace.css", "i18n.py",
-                     "finding_types.py", "subject_links.py", "machine_page.py", "infra_page.py", "tools_page.py"):
+                     "finding_types.py", "subject_links.py", "machine_page.py", "infra_page.py", "tools_page.py", "disk_page.py"):
             text = (DASH / name).read_text(encoding="utf-8")
             if name == "i18n.py":
                 text = text.replace('"ru": "Русский"', "")
