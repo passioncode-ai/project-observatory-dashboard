@@ -336,5 +336,6 @@ def disk_html(payload: dict, t: Translator | None = None) -> str:
 #: Values the page translates through a variable, named here so the catalog test sees them.
 DYNAMIC = (tuple(SETTING_LABELS.values()) + tuple(c[1] for c in CLASSES)
            + ("Day", "Lowest", "Last reading", "Readings",      # the trend table's heads (`trend_html`)
+              "Setting", "Value", "Default", "Source", "Change",  # the settings table's heads (`settings_html`)
               "Turn on", "Turn off", "Nothing to free at this pressure.", "No file above the size line.",
               "incomplete measurement", "Not measured", DISABLED))
