@@ -729,5 +729,20 @@
  "{n} days": {
   "one": "{n} day",
   "other": "{n} days"
+ },
+ "scope@@user": "user",
+ "scope@@project": "project",
+ "scope@@local": "local",
+ "{n} behind": {
+  "one": "{n} behind",
+  "other": "{n} behind"
+ },
+ "{n} coding agents": {
+  "one": "{n} coding agent",
+  "other": "{n} coding agents"
+ },
+ "{n} plugins behind": {
+  "one": "{n} plugin behind",
+  "other": "{n} plugins behind"
  }
 }

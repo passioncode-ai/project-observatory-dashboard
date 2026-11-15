@@ -149,6 +149,14 @@ def agents_page_ids() -> set[str]:
     return ids | {x for x in agents_page.DYNAMIC if x}
 
 
+def tools_page_ids() -> set[str]:
+    """The Installed tools page's ids (OBS-552): literals, `_table` arguments and the values it translates
+    through a variable (`tools_page.DYNAMIC`)."""
+    sys.path.insert(0, str(DASH))
+    import tools_page
+    return _table_page_ids("tools_page.py") | set(tools_page.DYNAMIC)
+
+
 def home_page_ids() -> set[str]:
     """Home's ids: its `t`/`mark` literals (dashboard/home_page.py)."""
     ids, _ = _python_ids(DASH / "home_page.py")
@@ -164,6 +172,7 @@ def source_ids() -> set[str]:
     ids |= agents_page_ids()
     ids |= home_page_ids()
     ids |= infra_page_ids()
+    ids |= tools_page_ids()
     ids |= disk_page_ids()
     literal = r'(["\'])((?:\\.|(?!\1).)+?)\1'
     for m in re.finditer(r"\bT\(\s*" + literal, template):
@@ -282,7 +291,7 @@ UNTRANSLATED = {"Heroku", "ENV", "MCP", "Cloudflare", "DigitalOcean", "GA4", "RD
 class SourcesCarryNoRussian(unittest.TestCase):
     def test_dashboard_sources(self):
         for name in ("build_dashboard.py", "shell.py", "workspace.css", "i18n.py",
-                     "finding_types.py", "subject_links.py", "machine_page.py", "infra_page.py", "disk_page.py"):
+                     "finding_types.py", "subject_links.py", "machine_page.py", "infra_page.py", "tools_page.py", "disk_page.py"):
             text = (DASH / name).read_text(encoding="utf-8")
             if name == "i18n.py":
                 text = text.replace('"ru": "Русский"', "")

@@ -362,7 +362,13 @@ class WorkspaceTests(unittest.TestCase):
         for step in ['scan','merge','emit','validate','scan-events','plugins','findings','dashboard','smoke-pages']:
             self.run_cli(step)
         pages=list((self.home/'docs/dashboard').glob('*.html'))
-        self.assertEqual(len(pages),14)
+        # One page per `shell.PAGES` entry (fourteen until the Installed tools page, OBS-552).
+        import importlib.util
+        spec=importlib.util.spec_from_file_location('dashboard_shell_pages',ROOT/'dashboard/shell.py')
+        sys.path.insert(0,str(ROOT/'dashboard'));shell=importlib.util.module_from_spec(spec);spec.loader.exec_module(shell)
+        self.assertEqual(sorted(p.stem for p in pages),sorted(shell.NAMES))
+        # The Installed tools page builds before any harness scan: it names the scan, never "nothing installed" (OBS-552).
+        self.assertIn('The harness scan has not run here yet',(self.home/'docs/dashboard/tools.html').read_text())
         # DigitalOcean and Cloudflare before any account is connected: what connecting takes (OBS-235, OBS-271).
         self.assertIn('is not connected',(self.home/'docs/dashboard/digitalocean.html').read_text())
         self.assertIn('scan-cloudflare-account',(self.home/'docs/dashboard/cloudflare.html').read_text())

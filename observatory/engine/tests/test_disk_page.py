@@ -199,12 +199,12 @@ class Page(unittest.TestCase):
 
 
 class Shell(unittest.TestCase):
-    def test_the_disk_page_follows_machine_in_the_system_group(self):
+    def test_the_disk_page_follows_installed_tools_in_the_system_group(self):
         names = [p[0] for p in shell.PAGES]
-        self.assertEqual(names.index("disk"), names.index("machine") + 1)
+        self.assertEqual(names.index("disk"), names.index("tools") + 1)
         self.assertEqual(dict(shell.PAGES and [(p[0], p[1]) for p in shell.PAGES])["disk"], "Disk")
         system = dict((k, n) for k, _l, n in shell.NAV_GROUPS)["system"]
-        self.assertEqual(system[system.index("machine") + 1], "disk")
+        self.assertEqual(system[system.index("tools") + 1], "disk")
         self.assertIn("disk", shell.QUESTIONS)
 
     def test_the_page_is_built_with_its_section_and_its_data(self):

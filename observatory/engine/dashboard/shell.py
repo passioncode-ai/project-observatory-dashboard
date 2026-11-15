@@ -41,6 +41,7 @@ PAGES: tuple[tuple[str, str, str], ...] = (
     ("traffic",  "Traffic",   "table"),
     ("health",   "Health",    "health"),
     ("machine",  "Machine",   "machine"),
+    ("tools",    "Installed tools", "tools"),
     ("disk",     "Disk",      "disk"),
 )
 #: THE QUESTION EACH PAGE ANSWERS, in the reader's words (IS-01/IS-02; backlog
@@ -63,6 +64,7 @@ QUESTIONS: dict[str, str] = {
     "traffic":  "Product audiences, data sources and linked projects.",
     "health":   "Observer state, data freshness and the agents' records.",
     "machine":  "What runs on this machine, where memory and disk go, and what was cleaned.",
+    "tools":    "Which coding agents, skills, plugins and hooks are installed here, and which are out of date.",
     "disk":     "How much space is free, what the guard and auto cleanup removed and keep, and how they are set.",
 }
 #: The product's name is never translated (docs/brand/locales/*.md).
@@ -80,7 +82,7 @@ NAV_GROUPS = (
     ("work", "Work", ("index", "projects", "agents", "findings")),
     ("infrastructure", "Infrastructure", ("heroku", "digitalocean", "cloudflare", "domains", "traffic")),
     ("access", "Access", ("creds", "env", "mcp")),
-    ("system", "System", ("health", "machine", "disk")),
+    ("system", "System", ("health", "machine", "tools", "disk")),
 )
 OVERVIEW_FINDINGS_LIMIT = 8
 
@@ -130,6 +132,22 @@ def _machine(payload: dict, t: Translator) -> str:
     """The Machine page's body, rendered at build time (dashboard/machine_page.py)."""
     import machine_page
     return machine_page.machine_html(payload, t)
+
+
+def _tools(payload: dict, t: Translator) -> str:
+    """The Installed tools page's body, rendered at build time (dashboard/tools_page.py, OBS-552)."""
+    import tools_page
+    return tools_page.tools_html(payload, t)
+
+
+def _tools_line(payload: dict, t: Translator) -> str:
+    """The overview's Installed tools card: agents found and plugins behind, or that nothing was read."""
+    v = payload.get("tooling") or {}
+    if not v.get("agents"):
+        return t.mark("not scanned")
+    c = v.get("counts") or {}
+    return (t.mark("{n} coding agents", n=c.get("agents", 0)) + " · "
+            + t.mark("{n} plugins behind", n=c.get("behind", 0)))
 
 
 def _disk(payload: dict, t: Translator) -> str:
@@ -371,6 +389,7 @@ def cards_html(payload: dict, counts: dict, t: Translator | None = None) -> str:
                + t.mark("{n} servers", n=((payload.get("mcp") or {}).get("totals") or {}).get("distinct_servers", 0)),
         "traffic": _traffic_line(payload, t),
         "machine": _machine_line(payload, t),
+        "tools": _tools_line(payload, t),
         "disk": _disk_line(payload, t),
         "agents": _agents_line(payload, t),
         # The observer's state alone: the agents' unconfirmed records ask nothing of a
@@ -424,6 +443,9 @@ def slice_for(page: str, payload: dict) -> dict:
     for key, owner in heavy.items():
         if page != owner:
             out[key] = None
+    # The installed tools are rendered into their page (dashboard/tools_page.py) and no script reads them: a
+    # machine holds a thousand skills, so they ride on no page's data.
+    out["tooling"] = None
     if page == "disk":
         out["machine"] = payload.get("machine")     # the Disk page reads the machine survey too (OBS-562)
     if page != "domains":
@@ -533,6 +555,7 @@ def page_html(template: str, page: str, payload: dict, locale: str = "en") -> st
         "HOME": lambda: _home(payload, t) if page == "index" else "",
         "CARDS": lambda: cards_html(payload, counts, t) if page == "index" else "",
         "MACHINE": lambda: _machine(payload, t) if page == "machine" else "",
+        "TOOLS": lambda: _tools(payload, t) if page == "tools" else "",
         "DISK": lambda: _disk(payload, t) if page == "disk" else "",
         "AGENTS": lambda: _agents(payload, t) if page == "agents" else "",
         "INFRA": lambda: _infra(page, payload, t) if page in INFRA_PAGES else "",
