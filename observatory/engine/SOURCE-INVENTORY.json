@@ -7290,6 +7290,13 @@
       "bytes": 6384
     },
     {
+      "path": "tools/disk_free_series.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "54dce828f8304142eb4d58698822596f2ec4df4d25d4abc42fc3294c809e1d6a",
+      "bytes": 3307
+    },
+    {
       "path": "tools/disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -8051,7 +8058,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 1086,
+  "file_count": 1087,
   "excluded": [
     "git-history",
     "operator-registries",
