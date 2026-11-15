@@ -43,23 +43,24 @@ entry names a command or verb the CLI no longer has, a tool is not served, a `co
 or this note's counts disagree with the list. Each failure mode has a test that feeds a modified copy and
 first proves the unmodified list passes.
 
-## Counts (2026-11-14)
+## Counts (2026-11-15)
 
 | status | count |
 |---|---|
-| covered | 9 |
+| covered | 10 |
 | gate | 8 |
 | missing | 93 |
 
-110 actions: 10 dashboard (8 missing, the reveal a gate, the Disk page's `configure` covered) and 100 CLI verbs (8 covered, 7 gates, 85 missing).
+111 actions: 11 dashboard (8 missing, the reveal a gate, the Disk page's `configure` and the Agents page's `workflow-handoff` covered) and 100 CLI verbs (8 covered, 7 gates, 85 missing).
 79 top-level commands are excluded by name and the `test*` and `scan-*` families by prefix.
 
 Covered today: `workflow handoff` (`observatory_handoff_create`, `observatory_handoff_accept`), `workflow
 close` (`observatory_checkpoint_write` with `close`), `org select` (`observatory_org_selection`),
 `scan-mcp` (`machine.mcp.refresh`), `grant --check` (`grant.check`), `assistant ask`
 (`observatory_assistant_ask`), `assistant cancel` (`fabric.job.cancel`) and `configure`
-(`observatory_configure`, OBS-563), and the Disk page's `configure` action on the key server
-(`observatory_configure`, OBS-562).
+(`observatory_configure`, OBS-563), the Disk page's `configure` action on the key server
+(`observatory_configure`, OBS-562), and the Agents page's `workflow-handoff` action
+(`observatory_handoff_create`, OBS-551).
 
 Gates: the reveal of a value to a person, `backup-passphrase set` and `assistant secret` (typed secrets),
 `backup-passphrase show` (a value shown to a person), `assistant ceremony` and `share confirm`/`differ`

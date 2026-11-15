@@ -1,9 +1,19 @@
 """The Agents page: which agents are working, on what, and where their work moved.
 
-Rendered from `agents_view.summary()` — at build time into `agents.html`, and by the
-local server on request (`/agents`), so one renderer serves the static page and its
-live refresh. It reads and never acts: every action is a command to copy (OSS
-scenarios: no administrative mutation from the dashboard).
+Rendered from `agents_view.summary()` and `sessions_view`: at build time into `agents.html`,
+and by the local server on request (`/agents`), so one renderer serves the static page and
+its live refresh.
+
+SESSIONS FIRST, THEN PROBLEMS (OBS-551, CP-02). The page opens with every coding session
+running on this machine (the three counts of `sessions_view.facets`, then the list grouped
+by agent and project: managed by the account manager or not, its account group, last turn,
+state). Problems come next, one row per workflow with its worst state. A row offers a button,
+never a command: a stalled workflow or a lapsed handoff is offered to another agent through
+the key server's `workflow-handoff` action, the same store function as the agent's
+`observatory_handoff_create`. Built disabled: the page script enables it only when the key
+server serves the page with its token; opened as a file the tooltip names the agent's tool.
+A key's value is typed by a person, so a key row links to the Keys page; kept steps link to
+the Health page's review queue.
 
 The lane view: one segment per executor that held the workflow, a dot per checkpoint
 it wrote, and between segments the handoff with its reason. An offered handoff is a
@@ -80,8 +90,18 @@ def _chip(t: Translator, label: str, tone: str = "", **kw) -> str:
     return f'<span class="{cls}"><span class="dot"></span>{t.mark(label, **kw)}</span>'
 
 
-def _cmd(text: str) -> str:
-    return f'<code class="mono agents-cmd">{_e(text)}</code>'
+#: The agent's tool for the handoff a row's button makes; named in the button's tooltip when it cannot act.
+HANDOFF_TOOL = "observatory_handoff_create"
+DISABLED = "Opened as a file, this page cannot act. An agent offers the workflow with {tool}."
+#: The reasons a handoff without the executor's lease may give (store/workflow.REASONS_WITHOUT_TOKEN).
+HANDOFF_REASONS = ("crash", "limit", "restart")
+#: A workflow's problems, worst first: the row shows the first, and names the rest.
+WORST = ("stalled", "handoff-lapsed", "credential-missing", "credential-unknown", "credential-env-only",
+         "kept-steps")
+#: The chip of a problem row: its worst state in a reader's words.
+NEED_WORDS = {"stalled": "need@@stalled", "handoff-lapsed": "need@@handoff lapsed",
+              "credential-missing": "need@@key missing", "credential-unknown": "need@@key not checked",
+              "credential-env-only": "need@@key in a .env", "kept-steps": "need@@steps to review"}
 
 
 #: What a facet that was not read shows in place of its number: never 0 (CP-03).
@@ -114,20 +134,73 @@ def _session_tiles(f: dict, t: Translator) -> list[tuple[str, object, str]]:
             ("Active in the last hour", f.get("activeHour"), active)]
 
 
-def _counters(c: dict, t: Translator, sessions: dict | None = None) -> str:
-    import sessions_view
-    tiles = [*_session_tiles(sessions_view.facets(sessions), t),
-             ("Workflows open", c.get("workflowsOpen", 0), t.mark("held by an executor", tag="span")),
-             ("Handoffs waiting", c.get("handoffsWaiting", 0), t.mark("to be accepted", tag="span")),
-             ("Stalled", c.get("stalled", 0), t.mark("silent 30 min", tag="span")),
-             ("Steps kept", c.get("keptSteps", 0), t.mark("for review", tag="span"))]
+def _tiles(tiles: list, t: Translator) -> str:
     cells = "".join(f'<div class="tile">{t.mark(k)}<b>{t.number(v) if v is not None else NOT_READ}</b>{sub}</div>'
                     for k, v, sub in tiles)
     return f'<div class="tiles agents-tiles">{cells}</div>'
 
 
-def _need(n: dict, t: Translator, names: dict | None = None) -> str:
-    wf = f'<span class="mono">{_e(n["workflowId"])}</span>'
+def _counters(c: dict, t: Translator) -> str:
+    """The workflow counts, above the workflows (the session counts head the sessions)."""
+    return _tiles([("Workflows open", c.get("workflowsOpen", 0), t.mark("held by an executor", tag="span")),
+                   ("Handoffs waiting", c.get("handoffsWaiting", 0), t.mark("to be accepted", tag="span")),
+                   ("Stalled", c.get("stalled", 0), t.mark("silent 30 min", tag="span")),
+                   ("Steps kept", c.get("keptSteps", 0), t.mark("for review", tag="span"))], t)
+
+
+def _yes(t: Translator, value) -> str:
+    return t.mark("answer@@yes") if value else t.mark("answer@@no")
+
+
+def _machine_sessions(sessions: dict | None, t: Translator, names: dict | None = None) -> str:
+    """Every coding session running here (sessions_view, CP-02): the three counts with their sources, then the
+    list grouped by agent and project. A list the account manager did not give says why, never "none"."""
+    import sessions_view
+    doc = sessions if isinstance(sessions, dict) else {}
+    f = sessions_view.facets(doc)
+    parts = [f'<section class="card panel" id="agents-sessions">'
+             f'{t.mark("Sessions on this machine", tag="h2", attrs=HEADING)}', _tiles(_session_tiles(f, t), t)]
+    rows = [r for r in doc.get("sessions") or [] if isinstance(r, dict) and r.get("agent")]
+    if not rows:
+        if f["managerState"] == "read":
+            parts.append(t.mark("No session is running: the account manager lists none.", tag="p", attrs=EMPTY))
+        else:
+            why = [d for d in doc.get("degraded") or [] if isinstance(d, dict)
+                   and d.get("source") in ("manager", "sessions")]
+            parts.append(t.mark("The session list comes from the account manager, and it was not read.",
+                                tag="p", attrs=EMPTY))
+            if why:
+                parts.append(f'<p class="machine-hint">{t.known(why[0].get("reason"))}</p>')
+        return "".join(parts) + "</section>"
+    heads = ("Project", "Folder", "Managed", "Account group", "Last turn", "State")
+    th = "".join(f'<th scope="col">{t.mark(h)}</th>' for h in heads)
+    by_agent: dict[str, list[dict]] = {}
+    for r in rows:
+        by_agent.setdefault(str(r["agent"]), []).append(r)
+    for agent in sorted(by_agent):
+        group = sorted(by_agent[agent], key=lambda r: (r.get("project") is None,
+                                                       str((names or {}).get(r.get("project")) or r.get("project") or ""),
+                                                       str(r.get("folder_name") or ""), r.get("pid") or 0))
+        parts.append(f'<h3 class="agents-project" data-agent="{_e(agent)}">{_e(agent)} · '
+                     f'{t.mark("{n} sessions", n=len(group))}</h3>')
+        body = []
+        for r in group:
+            quiet = r.get("state") == "quiet" or r.get("quiet") is True
+            state = _chip(t, "session@@quiet") if quiet else _chip(t, "working", "ok")
+            cells = (_project(r.get("project"), names) if r.get("project") else NOT_READ,
+                     f'<span class="mono">{_e(r.get("folder_name") or NOT_READ)}</span>',
+                     _yes(t, r.get("managed") is True),
+                     f'<span class="mono">{_e(r.get("account_group"))}</span>' if r.get("account_group") else NOT_READ,
+                     t.date(_stamp(r.get("last_turn_at"))) if r.get("last_turn_at") else NOT_READ,
+                     state)
+            tds = "".join(f'<td{t.attr("data-label", h)}>{c}</td>' for h, c in zip(heads, cells))
+            body.append(f'<tr data-session="{_e(r.get("pid"))}">{tds}</tr>')
+        parts.append(f'<table><thead><tr>{th}</tr></thead><tbody>{"".join(body)}</tbody></table>')
+    return "".join(parts) + "</section>"
+
+
+def _what(n: dict, t: Translator) -> str:
+    """One problem of a workflow, as a sentence."""
     kind = n["kind"]
     if kind == "stalled":
         what = t.mark("stalled: no checkpoint and no session turn for") + " " + _age(t, n.get("seconds"))
@@ -143,8 +216,64 @@ def _need(n: dict, t: Translator, names: dict | None = None) -> str:
     else:
         what = t.mark("key {name} ({env}) is only in a .env — move it to the vault",
                       name=n.get("name"), env=n.get("env"))
-    return (f'<li class="agents-need"><div>{wf} · {_project(n.get("projectId"), names)} — {what}</div>'
-            f'{_cmd(n["command"]) if n.get("command") else ""}</li>')
+    return what
+
+
+def providers(a: dict) -> list[str]:
+    """Where a workflow may be offered: every provider an executor of a listed workflow ran on, else two defaults."""
+    seen = set()
+    for w in a.get("workflows") or []:
+        for ex in [*(s.get("executor") for s in w.get("segments") or []), (w.get("lease") or {}).get("executor"),
+                   *(o.get("to") for o in w.get("offers") or [])]:
+            if isinstance(ex, dict) and isinstance(ex.get("provider"), str) and ex["provider"].strip():
+                seen.add(ex["provider"].strip())
+    return sorted(seen) or ["claude", "codex"]
+
+
+def _handoff(wid: str, worst: str, options: list[str], t: Translator) -> str:
+    """The offer: where to, why, and the button. Every control is built disabled (see the module's note)."""
+    tip = t.attr("title", DISABLED, tool=HANDOFF_TOOL)
+    pick = "".join(f'<option value="{_e(p)}">{_e(p)}</option>' for p in options)
+    default = "limit" if worst == "handoff-lapsed" else "crash"
+    why = "".join(f'<option value="{r}"{" selected" if r == default else ""}>{_m(t, "handoff", r)}</option>'
+                  for r in HANDOFF_REASONS)
+    return (f'<label>{t.mark("To")} <select data-wf-provider="{_e(wid)}" disabled{tip}>{pick}</select></label> '
+            f'<label>{t.mark("Because of")} <select data-wf-reason="{_e(wid)}" disabled{tip}>{why}</select></label> '
+            f'<button type="button" class="chip-btn" data-wf-act="handoff" data-wf="{_e(wid)}" disabled{tip}>'
+            f'{t.mark("Offer to another agent")}</button>')
+
+
+def _need(wid: str, items: list[dict], t: Translator, names: dict | None, options: list[str]) -> str:
+    """One row per workflow (CP-02): its worst state, the rest named after it, and what to do."""
+    items = sorted(items, key=lambda n: WORST.index(n["kind"]) if n["kind"] in WORST else len(WORST))
+    worst = items[0]["kind"]
+    tone = "danger" if worst in ("stalled", "handoff-lapsed", "credential-missing") else "warn"
+    also = [_what(n, t) for n in items[1:]]
+    head = (f'{_chip(t, NEED_WORDS.get(worst, "need@@stalled"), tone)} <span class="mono">{_e(wid)}</span> · '
+            f'{_project(items[0].get("projectId"), names)}: {_what(items[0], t)}')
+    if also:
+        head += f'<br><span class="machine-hint">{t.mark("also:")} {"; ".join(also)}</span>'
+    kinds = {n["kind"] for n in items}
+    acts = []
+    if kinds & {"stalled", "handoff-lapsed"}:
+        acts.append(_handoff(wid, worst, options, t))
+    if any(k.startswith("credential-") for k in kinds):
+        acts.append(f'<a href="creds.html">{t.mark("Open the keys")}</a>')
+    if "kept-steps" in kinds:
+        acts.append(f'<a href="health.html#queue-s">{t.mark("Review the kept steps")}</a>')
+    acts.append(f'<a href="#wf-{_e(wid)}">{t.mark("Open the workflow")}</a>')
+    return (f'<li class="agents-need" data-wf="{_e(wid)}" data-worst="{_e(worst)}"><div>{head}</div>'
+            f'<div class="agents-act">{" ".join(acts)}</div>'
+            f'<p class="machine-hint" data-wf-said="{_e(wid)}" role="status" aria-live="polite"></p></li>')
+
+
+def _needs(needs: list[dict], t: Translator, names: dict | None, options: list[str]) -> str:
+    by_wf: dict[str, list[dict]] = {}
+    for n in needs:
+        by_wf.setdefault(str(n.get("workflowId")), []).append(n)
+    rows = sorted(by_wf.items(), key=lambda kv: (min(WORST.index(n["kind"]) if n["kind"] in WORST else len(WORST)
+                                                     for n in kv[1]), kv[0]))
+    return f'<ul class="agents-needs">{"".join(_need(w, items, t, names, options) for w, items in rows)}</ul>'
 
 
 def _lanes(w: dict, t: Translator) -> str:
@@ -224,15 +353,14 @@ def _workflow(w: dict, t: Translator, names: dict | None = None) -> str:
     if git:
         body.append(f'{t.mark("Checkouts", tag="h3")}<ul>{git}</ul>')
     wid = w["workflowId"]
-    import paths  # a copied command runs against the workspace that built the page (OSS-26)
-    body.append(f'<p class="machine-hint">{_cmd(paths.in_workspace(f"project-observatory full workflow show {wid}"))}</p>')
     is_open = " open" if w.get("stalled") or w.get("pendingHandoff") or w.get("credentialsMissing") else ""
-    return f'<details class="card panel agents-wf"{is_open}>{head}{"".join(body)}</details>'
+    return f'<details class="card panel agents-wf" id="wf-{_e(wid)}"{is_open}>{head}{"".join(body)}</details>'
 
 
 def _sessions(sessions: list[dict], t: Translator, names: dict | None = None) -> str:
+    """The ledger's sessions with a recorded turn in the last day, and the workflow each worked on."""
     if not sessions:
-        return (f'<section class="card panel">{t.mark("Sessions", tag="h2", attrs=HEADING)}'
+        return (f'<section class="card panel">{t.mark("Recorded turns", tag="h2", attrs=HEADING)}'
                 f'{t.mark("No agent session recorded a turn in the last day.", tag="p", attrs=EMPTY)}</section>')
     th = "".join(f'<th scope="col"{NUM if h == "Turns" else ""}>{t.mark(h)}</th>'
                  for h in ("Session", "Project", "Last turn", "Turns", "Workflow"))
@@ -247,7 +375,7 @@ def _sessions(sessions: list[dict], t: Translator, names: dict | None = None) ->
             f'<td{t.attr("data-label", "Turns")} class="num">{t.number(s.get("turns"))}</td>'
             f'<td{t.attr("data-label", "Workflow")}><span class="mono">{_e(s.get("workflowId") or "—")}</span></td>'
             "</tr>")
-    return (f'<section class="card panel">{t.mark("Sessions", tag="h2", attrs=HEADING)}'
+    return (f'<section class="card panel">{t.mark("Recorded turns", tag="h2", attrs=HEADING)}'
             f'<table><thead><tr>{th}</tr></thead><tbody>{"".join(rows)}</tbody></table></section>')
 
 
@@ -267,6 +395,8 @@ def signature(a: dict, sessions: dict | None = None) -> str:
         import sessions_view
         f = sessions_view.facets(sessions)
         said["sessionCount"] = (f["running"], f["managed"], f["activeHour"], f["managerState"])
+        said["machineSessions"] = sorted((str(r.get("agent")), str(r.get("pid")), r.get("managed"), r.get("state"))
+                                         for r in (sessions.get("sessions") or []) if isinstance(r, dict))
     return hashlib.sha256(json.dumps(said, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
@@ -274,22 +404,28 @@ def agents_html(payload: dict, t: Translator | None = None, live: bool = False) 
     """The page body. `live` marks a fragment served for the page's refresh."""
     t = t or Translator()
     a = payload.get("agents") or {}
-    names = a.get("projectNames") or {}
+    # The agents view names the projects it saw; a project only a session names, or one the view could only
+    # name by its id, takes its name from the registry rows every page carries.
+    names = dict(a.get("projectNames") or {})
+    for r in payload.get("rows") or []:
+        if isinstance(r, dict) and r.get("id") and r.get("name") and names.get(r["id"]) in (None, r["id"]):
+            names[r["id"]] = r["name"]
     parts = [f'<section id="agents" class="agents" data-measured="{_e(a.get("measuredAt"))}"'
              f' data-signature="{signature(a, payload.get("sessions"))}"{" data-live" if live else ""}>']
     parts.append(t.mark("Read {at}", tag="p", attrs=' class="machine-at" id="agents-at"',
                         at=_stamp(a.get("measuredAt"))))
     parts.append(f'<p class="machine-hint" id="agents-live" role="status" aria-live="polite"></p>')
-    parts.append(_counters(a.get("counters") or {}, t, payload.get("sessions")))
+    parts.append(_machine_sessions(payload.get("sessions"), t, names))
     needs = a.get("needsYou") or []
-    parts.append(f'<section class="card panel">{t.mark("Needs you", tag="h2", attrs=HEADING)}')
+    parts.append(f'<section class="card panel" id="agents-needs">{t.mark("Needs you", tag="h2", attrs=HEADING)}')
     if needs:
-        parts.append(f'<ul class="agents-needs">{"".join(_need(n, t, names) for n in needs)}</ul>')
+        parts.append(_needs(needs, t, names, providers(a)))
     else:
         parts.append(t.mark("Nothing is waiting for you.", tag="p", attrs=EMPTY))
     parts.append("</section>")
     workflows = a.get("workflows") or []
-    parts.append(t.mark("Workflows", tag="h2", attrs=HEADING))
+    parts.append(t.mark("Workflows", tag="h2", attrs=HEADING + ' id="agents-workflows"'))
+    parts.append(_counters(a.get("counters") or {}, t))
     if workflows:
         by_project: dict[str, list[dict]] = {}
         for w in workflows:
@@ -317,9 +453,9 @@ def agents_html(payload: dict, t: Translator | None = None, live: bool = False) 
         items = "".join(f'<li><span class="mono">{_e(d.get("source"))}</span> — {reason(d)}</li>'
                         for d in degraded)
         parts.append(f'<section class="card panel">{t.mark("Not read", tag="h2", attrs=HEADING)}<ul>{items}</ul></section>')
-    parts.append(t.mark("The page shows and hands over commands; it changes nothing. "
-                        "Opened through the local server it refreshes every 15 seconds.",
-                        tag="p", attrs=HINT))
+    parts.append(t.mark("Served by the local control server, a problem's button acts through it; opened as a file "
+                        "the buttons are off and name the agent's tool. Opened through the local server the page "
+                        "refreshes every 15 seconds.", tag="p", attrs=HINT))
     parts.append("</section>")
     return "".join(parts)
 
@@ -332,7 +468,9 @@ DYNAMIC = (DOT_TITLE, *DOT_TITLES.values(), "Sessions running", "Managed", "Acti
            "silent 30 min", "Steps kept", "for review", "Session", "Project", "Last turn",
            "Turns", "Workflow", "{n} s", "{n} min", "{n} h", "{n} d",
            # `_chip` takes its label as an argument, which the catalog scan does not see.
-           "working",
+           "working", "session@@quiet", DISABLED, "answer@@yes", "answer@@no",
+           *NEED_WORDS.values(),
+           "Project", "Folder", "Managed", "Account group", "Last turn", "State",
            *(f"handoff@@{r}" for r in ("limit", "plan_route", "operator", "crash", "restart")),
            *(f"step@@{x}" for x in ("in_progress", "done", "blocked", "failed")),
            *(f"key-state@@{x}" for x in ("vault", "env-only", "missing", "unknown")),

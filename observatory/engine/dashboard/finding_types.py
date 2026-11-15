@@ -238,6 +238,38 @@ LABELS: dict[str, str] = {
 }
 
 
+#: THE MONITORING GROUPS (OBS-551, CP-17): which finding types the navigation's Security and Availability open
+#: the Findings page narrowed to. A key ending in a dot is a prefix, any other key is one type; a type in no group
+#: is listed under Findings alone. Security is keys, secrets and their files, vulnerable dependencies and the
+#: agent configuration that can run or leak something; Availability is a site, an app, a server or an integration
+#: that does not answer.
+GROUPS: dict[str, str] = {
+    "secret.": "security", "credential.": "security", "env.": "security", "ssh.": "security",
+    "dep.": "security", "agent.secret_": "security", "fixtures.leaked": "security", "wallet.shared_key": "security",
+    "mcp.key_in_url": "security", "harness.plaintext_secret": "security", "harness.hook_risk": "security",
+    "harness.skill_risk": "security",
+    "site.": "availability", "domain.": "availability", "heroku.app_down": "availability",
+    "digitalocean.app_down": "availability", "mcp.unreachable": "availability", "mcp.needs_auth": "availability",
+    "server.silent": "availability", "notify.channel_failing": "availability", "provider.health_": "availability",
+    "analytics.api_disabled": "availability",
+}
+
+
+def group_of(kind) -> str | None:
+    """`security`, `availability` or None for a finding type: an exact key first, then the longest prefix."""
+    if not isinstance(kind, str):
+        return None
+    if kind in GROUPS:
+        return GROUPS[kind]
+    prefixes = [p for p in GROUPS if (p.endswith(".") or p.endswith("_")) and kind.startswith(p)]
+    return GROUPS[max(prefixes, key=len)] if prefixes else None
+
+
+def groups_for(types) -> dict[str, str]:
+    """{type: group} of the types given that belong to a monitoring group, for the page's payload."""
+    return {t: g for t in sorted(set(types)) if (g := group_of(t))}
+
+
 def labels_for(types) -> dict[str, str]:
     """The labels of the types given, for the page's payload. A type this table
     does not name is left out, and the page shows its raw id instead."""

@@ -744,5 +744,9 @@
  "{n} plugins behind": {
   "one": "{n} plugin behind",
   "other": "{n} plugins behind"
+ },
+ "{n} handoffs waiting": {
+  "one": "{n} handoff waiting",
+  "other": "{n} handoffs waiting"
  }
 }

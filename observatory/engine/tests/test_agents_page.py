@@ -242,7 +242,7 @@ class AgentsPage(unittest.TestCase):
     def test_a_card_that_needs_attention_opens_by_itself(self) -> None:
         import re
         page = agents_page.agents_html({"agents": self.view}, Translator("en"))
-        card = re.search(r'<details class="card panel agents-wf"( open)?><summary><span class="mono">'
+        card = re.search(r'<details class="card panel agents-wf" id="wf-[^"]+"( open)?><summary><span class="mono">'
                          + re.escape(self.b), page)
         self.assertIsNotNone(card)
         self.assertEqual(card.group(1), " open", "the stalled workflow's card opens by itself")
@@ -276,6 +276,201 @@ class States(unittest.TestCase):
         page = agents_page.agents_html({"agents": view}, Translator("en"))
         self.assertIn("No workflow yet", page)
         self.assertIn("Nothing is waiting for you.", page)
+
+
+def sessions_doc(**over) -> dict:
+    """A coding-sessions/1 summary (sessions_view): managed, unmanaged and quiet sessions of two agents."""
+    doc = {"schema": "coding-sessions/1", "measuredAt": "2026-10-26T17:24:00Z",
+           "processes": {"claude-code": 2, "codex": 1}, "managed": 1, "quiet": 1, "active_hour": 1,
+           "sessions": [
+               {"agent": "codex", "project": "project:beta-api", "folder_name": "beta-api", "pid": 201,
+                "managed": False, "launch_id": None, "account_group": None,
+                "last_turn_at": "2026-10-26T17:10:00Z", "quiet": False, "state": "working"},
+               {"agent": "claude-code", "project": None, "folder_name": "scratch", "pid": 102, "managed": False,
+                "launch_id": None, "account_group": None, "last_turn_at": None, "quiet": True, "state": "quiet"},
+               {"agent": "claude-code", "project": "project:alpha-web", "folder_name": "alpha-web", "pid": 101,
+                "managed": True, "launch_id": "launch-1", "account_group": "team-a",
+                "last_turn_at": "2026-10-26T17:20:00Z", "quiet": False, "state": "working"}],
+           "sources": {"processes": {"from": "manager", "at": "2026-10-26T17:24:00Z"},
+                       "manager": {"state": "read", "at": "2026-10-26T17:24:00Z"},
+                       "ledger": {"at": "2026-10-26T17:24:00Z"}},
+           "degraded": []}
+    doc.update(over)
+    return doc
+
+
+def plain(markup: str) -> str:
+    import html
+    import re
+    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", markup)).split())
+
+
+class ControlPlaneAgents(unittest.TestCase):
+    """CP-02 (OBS-551, OSS-119): Agents opens with the sessions running here; problems come next, one row per
+    workflow with its worst state and a button, never a command."""
+
+    def setUp(self) -> None:
+        AgentsPage.setUp(self)
+        self.rows = [{"id": "project:alpha-web", "name": "Alpha Web"}]
+
+    def tearDown(self) -> None:
+        AgentsPage.tearDown(self)
+
+    def page(self, view=None, sessions=None, t=Translator("en")) -> str:
+        return agents_page.agents_html({"agents": view or self.view, "rows": self.rows,
+                                        "sessions": sessions or sessions_doc()}, t)
+
+    def test_sessions_open_the_page_grouped_by_agent_and_project(self) -> None:
+        import re
+        page = self.page()
+        first = page.index('id="agents-sessions"')
+        self.assertLess(first, page.index('id="agents-needs"'))
+        self.assertLess(page.index('id="agents-needs"'), page.index('id="agents-workflows"'))
+        section = page[first:page.index('id="agents-needs"')]
+        self.assertIn("Sessions running", section, "the three facets head the sessions")
+        self.assertIn("by the account manager, read 2026-10-26 17:24:00", plain(section))
+        agents = re.findall(r'<h3 class="agents-project"[^>]*data-agent="([^"]+)"', section)
+        self.assertEqual(agents, ["claude-code", "codex"])
+        rows = re.findall(r'<tr data-session="(\d+)">(.*?)</tr>', section, re.S)
+        self.assertEqual([pid for pid, _ in rows], ["101", "102", "201"], "by agent, then by project")
+        managed = plain(rows[0][1])
+        for word in ("Alpha Web", "alpha-web", "yes", "team-a", "working"):
+            self.assertIn(word, managed)
+        quiet = plain(rows[1][1])
+        for word in ("scratch", "no", "quiet"):
+            self.assertIn(word, quiet)
+        self.assertIn('href="projects.html#project:beta-api"', rows[2][1])
+
+    def test_a_session_list_that_was_not_read_says_why_never_none(self) -> None:
+        unread = sessions_doc(sessions=[], managed=None, quiet=None,
+                              sources={"processes": {"from": "machine-survey", "at": "2026-10-26T17:00:00Z"},
+                                       "manager": {"state": "timeout", "at": None}, "ledger": {"at": None}},
+                              degraded=[{"source": "manager", "code": "timeout",
+                                         "reason": "the account manager did not answer in 10 s"}])
+        section = plain(self.page(sessions=unread))
+        self.assertIn("the account manager did not answer in 10 s", section)
+        self.assertNotIn("No session is running", section)
+        empty = plain(self.page(sessions=sessions_doc(sessions=[], processes={}, managed=0)))
+        self.assertIn("No session is running", empty)
+
+    def test_one_row_per_workflow_with_its_worst_state_and_its_action(self) -> None:
+        import re
+        view = dict(self.view, needsYou=[*self.view["needsYou"],
+                                         {"kind": "handoff-lapsed", "workflowId": self.b, "projectId": "project:beta-api",
+                                          "command": "x"}])
+        page = self.page(view)
+        needs = page[page.index('id="agents-needs"'):page.index('id="agents-workflows"')]
+        rows = re.findall(r'<li class="agents-need" data-wf="([^"]+)" data-worst="([^"]+)">(.*?)</li>', needs, re.S)
+        self.assertEqual(sorted((w, k) for w, k, _ in rows),
+                         sorted([(self.a, "credential-missing"), (self.b, "stalled")]))
+        stalled = next(r for w, _k, r in rows if w == self.b)
+        self.assertIn("a handoff lapsed", plain(stalled), "the lesser state is named on the same row")
+        button = re.search(r'<button[^>]*data-wf-act="handoff"[^>]*>', stalled).group(0)
+        self.assertIn(f'data-wf="{self.b}"', button)
+        self.assertIn(" disabled", button, "opened as a file nothing can act")
+        self.assertIn("observatory_handoff_create", button)
+        self.assertRegex(stalled, r'<select[^>]*data-wf-provider[^>]*>.*<option value="openai"', )
+        self.assertIn(f'href="#wf-{self.b}"', stalled)
+        keys = next(r for w, _k, r in rows if w == self.a)
+        self.assertNotIn("data-wf-act", keys, "a key's value is typed by a person, not pressed for")
+        self.assertIn('href="creds.html"', keys)
+        self.assertIn('href="health.html#queue-s"', keys, "kept steps are reviewed on the Health page")
+        self.assertIn(f'id="wf-{self.b}"', page, "the row's link lands on its workflow")
+        self.assertNotIn("<code", page)
+        self.assertNotIn("project-observatory", plain(page))
+
+    def test_russian(self) -> None:
+        ru = plain(self.page(t=Translator("ru")))
+        for word in ("Сессии на этой машине", "Передать другому агенту", "да", "нет"):
+            self.assertIn(word, ru)
+
+
+class HandoffRoute(unittest.TestCase):
+    """POST /api/workflow-handoff on the key server: the same store function as observatory_handoff_create."""
+
+    TOKEN = "t" * 32
+
+    def setUp(self) -> None:
+        import importlib
+        import os
+        import threading
+        import time
+        from unittest.mock import patch
+        self.tmp = tempfile.TemporaryDirectory()
+        base = pathlib.Path(self.tmp.name).resolve()
+        self.home = base / "home"
+        self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home), "HOME": str(base / "user"),
+                                           "USERPROFILE": str(base / "user")}, clear=False)
+        self.env.start()
+        import workspace
+        workspace.initialize(self.home)
+        import paths
+        importlib.reload(paths)
+        from store import db as store_db
+        conn = store_db.connect(paths.DB)
+        conn.row_factory = sqlite3.Row
+        w = W.checkpoint_write(conn, owner="agent:codex", idempotency_key="route-start", step_id="S1",
+                               status="in_progress", project_id="project:beta-api",
+                               executor={"provider": "openai"}, body=body("migrate the schema"), redactor=QUIET)
+        conn.execute("UPDATE ledger SET created_at = ? WHERE memory_id = ?", (past(900), f"ckpt:{w['workflowId']}"))
+        conn.commit()
+        conn.close()
+        self.wid = w["workflowId"]
+        sys.path.insert(0, str(ROOT / "tools"))
+        import keyserver
+        self.ks = keyserver
+        self.audit = keyserver.AUDIT
+        keyserver.AUDIT = base / "keyserver.jsonl"
+        import socket
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            self.port = s.getsockname()[1]
+        self.srv = keyserver.Server(("127.0.0.1", self.port), keyserver.Handler, self.TOKEN)
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        time.sleep(0.1)
+
+    def tearDown(self) -> None:
+        self.srv.shutdown()
+        self.srv.server_close()
+        self.ks.AUDIT = self.audit
+        self.env.stop()
+        self.tmp.cleanup()
+
+    def post(self, body: dict) -> tuple[int, dict]:
+        import urllib.error
+        import urllib.request
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}/api/workflow-handoff",
+                                     data=json.dumps(body).encode(), method="POST",
+                                     headers={"Content-Type": "application/json", "X-Observatory-Token": self.TOKEN,
+                                              "X-Observatory-Caller": "page:agents",
+                                              "Origin": f"http://127.0.0.1:{self.port}"})
+        try:
+            with urllib.request.urlopen(req, timeout=20) as r:
+                return r.status, json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            with e:
+                return e.code, json.loads(e.read().decode())
+
+    def test_offer_a_silent_workflow_to_another_agent(self) -> None:
+        code, said = self.post({"workflowId": self.wid, "provider": "anthropic", "reason": "crash"})
+        self.assertEqual(code, 200, said)
+        self.assertTrue(said["handoffId"].startswith("handoff:"), said)
+        self.assertIn("expiresAt", said)
+        self.assertNotIn("leaseId", json.dumps(said))
+        rows = [json.loads(x) for x in self.ks.AUDIT.read_text(encoding="utf-8").splitlines()]
+        self.assertEqual([(r["action"], r["subject"]) for r in rows], [("workflow-handoff", self.wid)])
+        self.assertEqual((rows[0]["provider"], rows[0]["reason"]), ("anthropic", "crash"))
+
+    def test_refusals_are_typed_and_write_nothing(self) -> None:
+        for body_, want in (({"workflowId": self.wid, "provider": "anthropic", "reason": "operator"}, 400),
+                            ({"workflowId": self.wid, "provider": "", "reason": "crash"}, 400),
+                            ({"workflowId": self.wid, "provider": "a b/c", "reason": "crash"}, 400),
+                            ({"workflowId": "../etc", "provider": "anthropic", "reason": "crash"}, 400),
+                            ({"workflowId": "wf_0000000000000000", "provider": "anthropic", "reason": "crash"}, 404)):
+            with self.subTest(body=body_):
+                code, said = self.post(body_)
+                self.assertEqual(code, want, said)
+                self.assertIn("error", said)
 
 
 if __name__ == "__main__":

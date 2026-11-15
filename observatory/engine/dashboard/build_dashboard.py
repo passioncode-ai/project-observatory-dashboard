@@ -681,6 +681,9 @@ def _findings_panel(FINDINGS: dict, links: dict | None = None) -> dict:
             # The reader's name for each type present; an unnamed type keeps
             # its id on the page (`finding_types`).
             "type_labels": finding_types.labels_for([f["type"] for f in FINDINGS["findings"]]),
+            # Which monitoring group each type belongs to: the navigation's Security and Availability
+            # open this page narrowed to one (`?group=`, OBS-551).
+            "type_groups": finding_types.groups_for([f["type"] for f in FINDINGS["findings"]]),
             "folded_by_type": folded_by_type,
             "silenced": silenced,
             "omitted": 0}
@@ -4731,20 +4734,29 @@ if (!PAGE && bar) new ResizeObserver(stick).observe(bar);
     const bar = host.querySelector(".fbar");
     const sevOn = new Set();
     const rows = [...host.querySelectorAll(".flist > .f")];
+    // THE MONITORING GROUP (OBS-551, CP-17): the navigation's Security and Availability open this page
+    // with `?group=security` or `?group=availability`; the builder says which types belong to which.
+    const TYPE_GROUPS = F.type_groups || {};
+    const GROUP_WORDS = {security: "Security", availability: "Availability"};
+    let group = typeof location !== "undefined" && location.search
+      ? new URLSearchParams(location.search).get("group") : null;
+    if (!GROUP_WORDS[group]) group = null;
     const apply = () => {
       const type = bar.querySelector(".ftype").value;
       const q = bar.querySelector(".fq").value.trim().toLowerCase();
       let shown = 0;
       rows.forEach(r => {
         const ok = (!sevOn.size || sevOn.has(r.dataset.sev)) && (!type || r.dataset.type === type)
+          && (!group || TYPE_GROUPS[r.dataset.type] === group)
           && (!q || r.textContent.toLowerCase().includes(q));
         r.classList.toggle("fhide", !ok);
         if (ok) shown++;
       });
       // While anything narrows the list, per-type folding is set aside.
-      host.querySelectorAll("button.ftype").forEach(b => { b.hidden = !!(sevOn.size || type || q); });
-      if (sevOn.size || type || q) host.querySelectorAll(".f.ftype-folded").forEach(r => r.classList.add("ftype-open"));
+      host.querySelectorAll("button.ftype").forEach(b => { b.hidden = !!(sevOn.size || type || q || group); });
+      if (sevOn.size || type || q || group) host.querySelectorAll(".f.ftype-folded").forEach(r => r.classList.add("ftype-open"));
       const what = [];
+      if (group) what.push(T(GROUP_WORDS[group]));
       if (sevOn.size) what.push([...sevOn].map(s => SEV[s][0]).join(", "));
       if (type) what.push(T("type {type}", {type: typeLabel(type)}));
       if (q) what.push(T("search: “{text}”", {text: q}));
@@ -4767,6 +4779,7 @@ if (!PAGE && bar) new ResizeObserver(stick).observe(bar);
     host.addEventListener("click", ev => {
       if (!(ev.target.closest && ev.target.closest("[data-fclear]"))) return;
       sevOn.clear();
+      group = null;
       bar.querySelectorAll("[data-sev]").forEach(b => b.setAttribute("aria-pressed", "false"));
       bar.querySelector(".ftype").value = ""; bar.querySelector(".fq").value = "";
       apply();
@@ -4779,7 +4792,7 @@ if (!PAGE && bar) new ResizeObserver(stick).observe(bar);
       const target = location.hash && location.hash.startsWith("#f-") && document.getElementById(location.hash.slice(1));
       if (target) {
         const body = target.querySelector(".finding-body"); if (body) body.open = true;
-        sevOn.clear(); bar.querySelector(".ftype").value = ""; bar.querySelector(".fq").value = "";
+        sevOn.clear(); group = null; bar.querySelector(".ftype").value = ""; bar.querySelector(".fq").value = "";
         bar.querySelectorAll("[data-sev]").forEach(b => b.setAttribute("aria-pressed", "false"));
         apply(); target.scrollIntoView({block: "center"});
       }
@@ -4903,6 +4916,42 @@ fromHash();
     preview(el.dataset.cfgKey, n);
   });
 })();
+// THE AGENTS PAGE'S BUTTONS (OBS-551, CP-02). A stalled workflow, or one whose handoff lapsed,
+// is offered to another agent through the key server's `workflow-handoff` action, the same store
+// function as the agent's observatory_handoff_create. Built disabled; enabled only when the key
+// server serves the page with its token (LIVE). The live refresh swaps the section, so the
+// controls are enabled again after each swap and the click is listened for on the document.
+function agentsActions() {
+  if (PAGE !== "agents" || !LIVE || typeof document === "undefined" || !document.querySelectorAll) return;
+  for (const el of document.querySelectorAll("[data-wf-act], [data-wf-provider], [data-wf-reason]")) {
+    el.disabled = false;
+    for (const a of ["title", "data-t-title", "data-t-title-args"]) el.removeAttribute(a);
+  }
+}
+if (PAGE === "agents" && typeof document !== "undefined" && document.addEventListener) {
+  agentsActions();
+  document.addEventListener("click", async ev => {
+    const btn = ev.target && ev.target.closest && ev.target.closest("[data-wf-act]");
+    if (!btn || btn.disabled || !LIVE) return;
+    const wid = btn.dataset.wf;
+    const pick = sel => { const el = document.querySelector(`[${sel}="${wid}"]`); return el ? el.value : ""; };
+    const said = document.querySelector(`[data-wf-said="${wid}"]`);
+    const say = text => { if (said) said.textContent = text; };
+    btn.disabled = true;
+    say(T("Offering…"));
+    try {
+      const d = await call("workflow-handoff", {workflowId: wid, provider: pick("data-wf-provider"),
+                                                reason: pick("data-wf-reason")});
+      say(T("Offered until {at}. The next session of that agent accepts it.",
+            {at: String(d.expiresAt || "").replace("T", " ").replace("Z", " UTC")}));
+    } catch (err) {
+      say(err instanceof Uncertain
+        ? T("the outcome is unknown: {why}; the next refresh shows whether the workflow was offered", {why: err.message})
+        : T("not offered: {why}", {why: err.message}));
+      btn.disabled = false;
+    }
+  });
+}
 // THE AGENTS PAGE STAYS CURRENT between ticks when the local server serves it:
 // the server renders the same section again from the store (`/agents`, the same
 // Python renderer as the built page) and the page swaps it in. Which workflows
@@ -4956,6 +5005,7 @@ fromHash();
       const changed = sig !== last;
       last = sig;
       box.replaceWith(fresh);
+      agentsActions();
       if (focused) {
         const again = [...fresh.querySelectorAll("details summary")].find(
           s => (s.querySelector(".mono") || {}).textContent === focused);
