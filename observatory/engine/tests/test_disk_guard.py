@@ -2997,7 +2997,11 @@ class VmCacheAtCritical(Base):
             words = set(c["argv"])
             self.assertFalse(words & {"system", "volume", "volumes", "--volumes", "container", "rm", "rmi"}, c["argv"])
         trims = [c for c in cmds if "fstrim" in c["argv"]]
-        self.assertEqual([c["argv"][0] for c in trims], ["colima", "limactl"])
+        # One trim through limactl, run in every Lima home, Colima's included (OBS-565): `colima ssh` answers
+        # "colima not running" for a VM whose host agent stopped while the VM runs, and trims nothing.
+        self.assertEqual([c["argv"][0] for c in trims], ["limactl"])
+        self.assertTrue(trims[0].get("lima_homes"))
+        self.assertTrue(trims[0].get("engine_prune"))
         order = [c["argv"] for c in cmds]
         for t in trims:
             self.assertEqual(t["level"], "critical")
@@ -3010,15 +3014,14 @@ class VmCacheAtCritical(Base):
 
     def test_only_critical_plans_them_and_at_most_every_few_hours(self):
         cfg = self.cfg(commands=self.shipped())
-        new = {"docker builder prune -af", "colima ssh --profile {instance} -- sudo -n fstrim -av",
-               "limactl shell -- {instance} sudo -n fstrim -av"}
+        new = {"docker builder prune -af", "limactl shell -- {instance} sudo -n fstrim -av"}
         with patch.object(self.g, "find_tool", side_effect=lambda name: "/fake/bin/" + name):
             for level in ("normal", "low"):
                 self.assertFalse(new & {a["target"] for a in self.g.plan_commands(cfg, level)}, level)
             planned = {a["target"]: a for a in self.g.plan_commands(cfg, "critical")}
             self.assertLessEqual(new, set(planned))
-            trim = planned["colima ssh --profile {instance} -- sudo -n fstrim -av"]
-            self.assertEqual(trim["instances"], ["/fake/bin/colima", "list", "--json"])
+            trim = planned["limactl shell -- {instance} sudo -n fstrim -av"]
+            self.assertEqual(trim["instances"], ["/fake/bin/limactl", "list", "--json"])
             self.assertEqual(trim["password_output"], "a password is required")
             now_t = time.time()
             recent = {t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now_t - 600)) for t in new}
@@ -3115,6 +3118,7 @@ class VmCacheAtCritical(Base):
     def test_a_workspace_copy_of_an_earlier_release_takes_the_new_commands(self):
         history = json.loads((ROOT / "defaults" / "cleanup-history.json").read_text())["guard"]
         self.assertIn("0.24.1", history)
+        self.assertIn("0.38.0", history, "the section before OBS-565 is a known copy too")
         old = history["0.24.1"]
         self.assertNotIn(["docker", "builder", "prune", "-af"], [c["argv"] for c in old["commands"]])
         import paths
@@ -3145,6 +3149,276 @@ class VmCacheAtCritical(Base):
         self.assertEqual((rec["instances"], rec["instances_done"], rec["instances_failed"]), (3, 2, 1))
         self.assertEqual((rec["result"], rec["reason_code"], rec["exit_code"]), ("failed", "command-failed", 127))
         self.assertEqual(rec["freed_mb"], 2048, "what the others gave back is still counted")
+
+
+class LimaHomesAndBrokenVms(Base):
+    """OBS-565: the trim reads every Lima home (the default, LIMA_HOME, Colima's), runs each instance with its own
+    LIMA_HOME, also one Lima reports Broken while its VM driver runs, and at critical prunes that VM's own Docker
+    engine first. Fakes only: no docker, colima or limactl runs, and no VM is started or stopped."""
+
+    def homes(self, *names):
+        out = []
+        for n in names:
+            d = self.base / n
+            d.mkdir(parents=True, exist_ok=True)
+            out.append(str(d))
+        return out
+
+    def script(self, name, body):
+        path = self.t1 / name
+        path.write_text(body)
+        return [sys.executable, str(path)]
+
+    def action(self, listings, trim_body="pass", unreadable=(), engine_prune=False, timeout=20):
+        """A trim action whose fake lister prints `listings[LIMA_HOME]` and whose fake trimmer logs its home."""
+        self.log = self.t1 / "log.txt"
+        spec = self.t1 / "listings.json"
+        spec.write_text(json.dumps({"listings": listings, "unreadable": list(unreadable)}))
+        lister = self.script("list_vms.py", "import json, os, sys\n"
+                             "d = json.load(open(" + repr(str(spec)) + "))\n"
+                             "home = os.environ.get('LIMA_HOME', '')\n"
+                             "sys.exit(1) if home in d['unreadable'] else sys.stdout.write(d['listings'].get(home, ''))\n")
+        trimmer = self.script("trim.py", "import os, sys\nopen(" + repr(str(self.log)) + ", 'a').write("
+                              "'trim ' + os.environ.get('LIMA_HOME', '-') + ' ' + sys.argv[1] + '\\n')\n" + trim_body + "\n")
+        return {"class": "cache-command", "target": "limactl fstrim", "argv": [*trimmer, "{instance}"],
+                "instances": lister, "lima_homes": True, "busy_if": [], "needs": [], "timeout": timeout,
+                "password_output": "a password is required"} | ({"engine_prune": True} if engine_prune else {})
+
+    def lines(self):
+        return self.log.read_text().splitlines() if self.log.exists() else []
+
+    def test_each_lima_home_is_read_the_default_lima_home_and_colima_s(self):
+        default, own, colima = self.homes(".lima", "own-lima", ".colima/_lima")
+        with patch.dict(os.environ, {"LIMA_HOME": own}):
+            self.assertEqual(self.g.lima_homes(), [default, own, colima])
+        custom = self.homes("elsewhere/_lima")[0]
+        with patch.dict(os.environ, {"COLIMA_HOME": str(self.base / "elsewhere"), "LIMA_HOME": default}):
+            self.assertEqual(self.g.lima_homes(), [default, custom], "one home read once; COLIMA_HOME moves Colima's")
+        (self.base / "own-lima").rmdir()
+        with patch.dict(os.environ, {"LIMA_HOME": own, "COLIMA_HOME": ""}):
+            self.assertEqual(self.g.lima_homes(), [default, colima], "a home that does not exist is not read (nor made)")
+
+    def test_running_or_broken_with_a_live_driver_is_trimmable_and_nothing_else(self):
+        trim = self.g.vm_trimmable
+        self.assertTrue(trim({"name": "a", "status": "Running"}))
+        self.assertFalse(trim({"name": "a", "status": "Stopped", "driverPID": os.getpid()}))
+        self.assertFalse(trim({"name": "a", "status": "Broken"}), "no driver: the VM is not running")
+        self.assertFalse(trim({"name": "a", "status": "Broken", "driverPID": 0}))
+        self.assertFalse(trim({"name": "a", "status": "Broken", "driverPID": "123"}))
+        self.assertFalse(trim({"name": "a", "status": "Broken", "driverPID": True}))
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
+        dead.wait()
+        self.assertFalse(trim({"name": "a", "status": "Broken", "driverPID": dead.pid}), "a driver that exited")
+        live = {"name": "a", "status": "Broken", "driverPID": os.getpid(), "hostAgentPID": 0}
+        if os.name == "nt":
+            self.assertFalse(trim(live), "no liveness probe on Windows: a broken VM is never touched")
+        else:
+            self.assertTrue(trim(live), "the host agent stopped while the VM driver runs (measured 2026-11-14)")
+        with patch.object(self.g.os, "kill", side_effect=PermissionError(__import__("errno").EPERM, "not permitted")):
+            self.assertEqual(trim(live), os.name != "nt", "another account's live process is alive")
+
+    def test_every_home_s_running_and_broken_vms_are_trimmed_with_their_own_home(self):
+        a, b = self.homes(".lima", ".colima/_lima")
+        listings = {a: json.dumps({"name": "default", "status": "Running"}) + "\n",
+                    b: "\n".join(json.dumps(r) for r in (
+                        {"name": "colima", "status": "Broken", "driverPID": os.getpid(), "hostAgentPID": 0},
+                        {"name": "colima-off", "status": "Stopped"},
+                        {"name": "colima-gone", "status": "Broken", "driverPID": 0, "hostAgentPID": 0})) + "\n"}
+        frees = iter([self.g.GB, 4 * self.g.GB])
+        with patch.object(self.g, "lima_homes", return_value=[a, b]), \
+                patch.object(self.g, "free_bytes", side_effect=lambda *_: next(frees)):
+            rec = self.g.act(self.action(listings), self.free())
+        if os.name == "nt":
+            self.assertEqual(self.lines(), [f"trim {a} default"])
+            return
+        self.assertEqual(self.lines(), [f"trim {a} default", f"trim {b} colima"])
+        self.assertEqual(rec["result"], "removed")
+        self.assertEqual((rec["instances"], rec["instances_done"], rec["instances_broken"]), (2, 2, 1))
+        self.assertEqual(rec["freed_mb"], 3072)
+        self.assertNotIn("prunes", rec, "no engine prune unless the plan asked for it")
+
+    def test_one_unreadable_home_does_not_stop_the_others(self):
+        a, b = self.homes(".lima", ".colima/_lima")
+        listings = {b: json.dumps({"name": "colima", "status": "Running"})}
+        with patch.object(self.g, "lima_homes", return_value=[a, b]), \
+                patch.object(self.g, "free_bytes", return_value=self.g.GB):
+            rec = self.g.act(self.action(listings, unreadable=[a]), self.free())
+        self.assertEqual(self.lines(), [f"trim {b} colima"])
+        self.assertEqual((rec["result"], rec["homes_unreadable"]), ("removed", 1))
+
+    def test_no_trimmable_vm_or_no_readable_home_starts_nothing(self):
+        a, b = self.homes(".lima", ".colima/_lima")
+        stopped = {a: json.dumps({"name": "default", "status": "Stopped"}), b: ""}
+        for listings, unreadable, homes, code in ((stopped, (), [a, b], "no-running-vm"),
+                                                  ({}, (), [], "no-running-vm"),
+                                                  ({}, (a, b), [a, b], "vm-list-unknown")):
+            with self.subTest(code=code, homes=homes), patch.object(self.g, "lima_homes", return_value=homes):
+                rec = self.g.act(self.action(listings, unreadable=unreadable), self.free())
+            self.assertEqual((rec["result"], rec["reason_code"]), ("skipped", code))
+            self.assertEqual(self.lines(), [], "nothing ran inside a VM")
+
+    def fake_docker(self, version_exit=0):
+        path = self.t1 / "docker.py"
+        path.write_text("import os, sys\nargs = sys.argv[1:]\n"
+                        "assert 'DOCKER_HOST' not in os.environ and 'DOCKER_CONTEXT' not in os.environ\n"
+                        "open(" + repr(str(self.t1 / "log.txt")) + ", 'a').write('docker ' + ' '.join(args) + '\\n')\n"
+                        "sys.exit(" + str(version_exit) + " if 'version' in args else 0)\n")
+        launcher = self.t1 / "docker"
+        launcher.write_text("#!" + sys.executable + "\nimport runpy, sys\nsys.argv = [" + repr(str(path))
+                            + "] + sys.argv[1:]\nrunpy.run_path(" + repr(str(path)) + ", run_name='__main__')\n")
+        launcher.chmod(0o755)
+        return str(launcher)
+
+    @unittest.skipIf(os.name == "nt", "a unix socket file and an executable script")
+    def test_at_critical_the_vm_s_own_engine_is_pruned_before_its_trim_never_volumes(self):
+        a = self.homes(".colima/_lima")[0]
+        listings = {a: json.dumps({"name": "colima", "status": "Running"})}
+        sock = self.base / ".colima" / "default" / "docker.sock"
+        frees = iter(int(n * self.g.GB) for n in (1, 1, 2, 2, 3, 3, 3.5))
+        docker = self.fake_docker()
+        with patch.object(self.g, "lima_homes", return_value=[a]), \
+                patch.object(self.g, "engine_socket", return_value=str(sock)) as found, \
+                patch.object(self.g, "find_tool", side_effect=lambda n: docker if n == "docker" else None), \
+                patch.dict(os.environ, {"DOCKER_HOST": "ssh://deploy@prod.example.test", "DOCKER_CONTEXT": "x"}), \
+                patch.object(self.g, "free_bytes", side_effect=lambda *_: next(frees)):
+            rec = self.g.act(self.action(listings, engine_prune=True), self.free())
+        self.assertEqual(found.call_args.args, (a, "colima"))
+        host = "--host unix://" + str(sock)
+        self.assertEqual(self.lines(), [f"docker {host} version --format {{{{.Server.Version}}}}",
+                                        f"docker {host} image prune -a -f",
+                                        f"docker {host} builder prune -f",
+                                        f"trim {a} colima"], "the engine is pruned first, then the disk trimmed")
+        prunes = rec["prunes"]
+        self.assertEqual([(p["target"], p["result"], p["instance"], p["freed_mb"]) for p in prunes],
+                         [("docker image prune -a -f", "removed", "colima", 1024),
+                          ("docker builder prune -f", "removed", "colima", 1024)], "the disk's own count")
+        for p in prunes:
+            self.assertEqual((p["class"], p["mode"]), ("cache-command", "guard"))
+            self.assertFalse(set(p["target"].split()) & {"system", "volume", "volumes", "--volumes"})
+        self.assertEqual(rec["result"], "removed")
+
+    @unittest.skipIf(os.name == "nt", "an executable script")
+    def test_an_engine_that_does_not_answer_or_no_docker_cli_is_skipped_and_the_trim_still_runs(self):
+        a = self.homes(".colima/_lima")[0]
+        listings = {a: json.dumps({"name": "colima", "status": "Running"})}
+        for docker, code in ((self.fake_docker(version_exit=1), "docker-unanswered"), (None, "no-docker-cli")):
+            self.log.unlink(missing_ok=True) if hasattr(self, "log") else None
+            with self.subTest(code=code), patch.object(self.g, "lima_homes", return_value=[a]), \
+                    patch.object(self.g, "engine_socket", return_value="/x/docker.sock"), \
+                    patch.object(self.g, "find_tool", side_effect=lambda n: docker if n == "docker" else None), \
+                    patch.object(self.g, "free_bytes", return_value=self.g.GB):
+                rec = self.g.act(self.action(listings, engine_prune=True), self.free())
+            self.assertEqual([(p["result"], p["reason_code"]) for p in rec["prunes"]], [("skipped", code)])
+            self.assertNotIn("prune", " ".join(self.lines()))
+            self.assertEqual(self.lines()[-1], f"trim {a} colima")
+
+    def test_a_vm_without_an_engine_socket_gets_no_prune_row(self):
+        a = self.homes(".lima")[0]
+        listings = {a: json.dumps({"name": "default", "status": "Running"})}
+        with patch.object(self.g, "lima_homes", return_value=[a]), \
+                patch.object(self.g, "free_bytes", return_value=self.g.GB):
+            rec = self.g.act(self.action(listings, engine_prune=True), self.free())
+        self.assertEqual(rec.get("prunes", []), [])
+        self.assertEqual(self.lines(), [f"trim {a} default"])
+
+    @unittest.skipIf(os.name == "nt", "unix sockets")
+    def test_the_engine_socket_of_a_colima_profile_or_a_lima_instance(self):
+        import socket
+        short = Path(tempfile.mkdtemp(prefix="eng", dir="/tmp")).resolve()  # paths-check: allow: a unix socket path must stay under 104 bytes; removed by the cleanup below
+        self.addCleanup(lambda: __import__("shutil").rmtree(short, ignore_errors=True))
+        colima_home = short / "c" / "_lima"
+        colima_home.mkdir(parents=True)
+        made = []
+        for where in (short / "c" / "default", short / "c" / "work", short / "l" / "box" / "sock"):
+            where.mkdir(parents=True)
+            s = socket.socket(socket.AF_UNIX)
+            s.bind(str(where / "docker.sock"))
+            made.append(s)
+        self.addCleanup(lambda: [s.close() for s in made])
+        (short / "l" / "plain" / "sock").mkdir(parents=True)
+        (short / "l" / "plain" / "sock" / "docker.sock").write_text("not a socket")
+        es = self.g.engine_socket
+        self.assertEqual(es(str(colima_home), "colima"), str(short / "c" / "default" / "docker.sock"))
+        self.assertEqual(es(str(colima_home), "colima-work"), str(short / "c" / "work" / "docker.sock"))
+        self.assertIsNone(es(str(colima_home), "colima-none"))
+        self.assertEqual(es(str(short / "l"), "box"), str(short / "l" / "box" / "sock" / "docker.sock"))
+        self.assertIsNone(es(str(short / "l"), "plain"), "a regular file is no engine")
+        self.assertIsNone(es(str(short / "l"), "missing"))
+
+    def test_the_plan_asks_for_the_engine_prune_only_at_critical(self):
+        cfg = self.cfg(commands=[{"argv": [sys.executable, "-c", "pass", "{instance}"], "level": "low",
+                                  "instances": [sys.executable, "list"], "lima_homes": True, "engine_prune": True}])
+        low = self.g.plan_commands(cfg, "low", {}, time.time())
+        crit = self.g.plan_commands(cfg, "critical", {}, time.time())
+        self.assertTrue(low[0]["lima_homes"] and crit[0]["lima_homes"])
+        self.assertNotIn("engine_prune", low[0])
+        self.assertTrue(crit[0]["engine_prune"])
+
+    def test_the_journal_gets_each_prune_as_its_own_row_before_the_trim(self):
+        row = {"class": "cache-command", "target": "t", "result": "removed",
+               "prunes": [{"target": "docker image prune -a -f"}, {"target": "docker builder prune -f"}]}
+        self.assertEqual([r["target"] for r in self.g.action_rows(row)],
+                         ["docker image prune -a -f", "docker builder prune -f", "t"])
+        self.assertNotIn("prunes", self.g.action_rows(row)[-1])
+        self.assertEqual(self.g.action_rows({"target": "t"}), [{"target": "t"}])
+
+
+class VmKernelLogErrors(LimaHomesAndBrokenVms):
+    """The guard never repairs a VM's disk (e2fsck would stop Docker and every container on it); it reads the
+    kernel log through the same `limactl shell` route and names a journal abort or a file system mounted with
+    errors, so a person can repair it (finding `vm.disk_errors`)."""
+
+    BAD = ("[ 100.1] EXT4-fs (vdb): mounted filesystem with ordered data mode\n"
+           "[ 812.5] EXT4-fs error (device vdb): ext4_journal_check_start:84: comm dockerd: Detected aborted journal\n"
+           "[ 812.6] JBD2: Aborting journal on device vdb-8.\n"
+           "[ 900.0] EXT4-fs (vdb): Remounting filesystem read-only\n"
+           "[ 901.0] EXT4-fs (vdb): mounting fs with errors, running e2fsck is recommended\n")
+
+    def test_the_log_is_read_for_the_two_signs_and_nothing_else(self):
+        lines = self.g.vm_log_errors(self.BAD)
+        self.assertEqual(len(lines), 2)
+        self.assertTrue(any("Aborting journal on device" in l for l in lines))
+        self.assertTrue(any("mounting fs with errors" in l for l in lines))
+        self.assertEqual(self.g.vm_log_errors("[ 1.0] EXT4-fs (vdb): mounted filesystem\n"), [])
+        self.assertEqual(self.g.vm_log_errors(""), [])
+        self.assertLessEqual(len(self.g.vm_log_errors("Aborting journal on device x\n" * 50)), 5)
+
+    def test_each_running_instance_is_read_with_limactl_shell_under_its_home_and_only_read(self):
+        a, b = self.homes(".lima", ".colima/_lima")
+        spec = self.t1 / "l.json"
+        spec.write_text(json.dumps({a: json.dumps({"name": "default", "status": "Running"}),
+                                    b: json.dumps({"name": "colima", "status": "Running"})}))
+        argvlog = self.t1 / "argv.txt"
+        limactl = self.t1 / "limactl"
+        limactl.write_text("#!" + sys.executable + "\nimport json, os, sys\n"
+                           "a = sys.argv[1:]\n"
+                           "open(" + repr(str(argvlog)) + ", 'a').write(os.environ['LIMA_HOME'] + ' ' + ' '.join(a) + '\\n')\n"
+                           "if a[0] == 'list':\n    sys.stdout.write(json.load(open(" + repr(str(spec)) + "))[os.environ['LIMA_HOME']])\n"
+                           "elif os.environ['LIMA_HOME'].endswith('_lima'):\n    sys.stdout.write(" + repr(self.BAD) + ")\n"
+                           "else:\n    sys.stdout.write('[ 1.0] all quiet\\n')\n")
+        limactl.chmod(0o755)
+        if os.name == "nt":
+            return
+        with patch.object(self.g, "lima_homes", return_value=[a, b]), \
+                patch.object(self.g, "find_tool", side_effect=lambda n: str(limactl) if n == "limactl" else None):
+            found = self.g.vm_kernel_errors(30)
+        self.assertEqual([(f["home"], f["instance"]) for f in found], [(b, "colima")])
+        self.assertEqual(len(found[0]["lines"]), 2)
+        shells = [l for l in argvlog.read_text().splitlines() if " shell " in l]
+        self.assertEqual(len(shells), 2)
+        for l in shells:
+            self.assertIn("sudo -n", l)
+            self.assertTrue(any(w in l for w in ("journalctl -k", "dmesg")))
+            self.assertFalse(any(w in l for w in ("e2fsck", "fsck", "restart", "stop", "start")), l)
+        self.assertEqual(self.g.vm_kernel_errors(0), [], "no time: nothing read")
+        with patch.object(self.g, "find_tool", return_value=None):
+            self.assertEqual(self.g.vm_kernel_errors(30), [], "no limactl: nothing to read")
+
+    def test_the_report_carries_a_critical_warning_naming_the_instance(self):
+        w = self.g.vm_error_warnings([{"home": "/h/.colima/_lima", "instance": "colima", "lines": ["x"]}])
+        self.assertEqual([(x["code"], x["level"]) for x in w], [("vm-disk-errors", "critical")])
+        self.assertEqual(w[0]["instances"][0]["instance"], "colima")
+        self.assertEqual(self.g.vm_error_warnings([]), [])
 
 
 class DockerDaemonIsLocal(Base):

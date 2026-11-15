@@ -63,6 +63,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 import configuration  # noqa: E402
 import disk_free_series  # noqa: E402
 import osprivacy  # noqa: E402
+import osproc  # noqa: E402
 import paths  # noqa: E402
 import safe_git  # noqa: E402
 from cleanup_safety import (scheduled_job_reason, protected_entry_reason, bare_repository_reason, bare_ancestry_reason,  # noqa: E402
@@ -927,6 +928,8 @@ def plan_commands(cfg: dict, level: str, last: dict | None = None, at: float | N
                     "timeout": _number(c.get("timeout_seconds") or cfg.get("command_timeout_seconds", 90), 90),
                     "bytes": 0, "why": c.get("why") or "the tool's own cleanup"}
                    | ({"instances": [lister, *listing[1:]]} if listing else {})
+                   | ({"lima_homes": True} if listing and c.get("lima_homes") else {})
+                   | ({"engine_prune": True} if listing and c.get("engine_prune") and level == "critical" else {})
                    | ({"password_output": c["password_output"]} if c.get("password_output") else {}))
     return out
 
@@ -1018,14 +1021,13 @@ def vm_warnings(level: str, vms: list[dict]) -> list[dict]:
              "allocated_gb": round(sum(v["allocated_gb"] for v in writing), 1)}]
 
 
-def running_vms(argv: list[str], timeout: float) -> list[str] | None:
-    """The virtual machines a VM tool lists as running (`colima list --json`, `limactl list
-    --json`: one JSON object per line, or one array), by name. None when the list cannot be
-    read. Listing starts nothing; a name that is not a plain identifier is never passed on."""
+def vm_rows(argv: list[str], timeout: float, env: dict | None = None) -> list[dict] | None:
+    """The rows a VM tool lists (`colima list --json`, `limactl list --json`: one JSON object per line, or
+    one array). None when the list cannot be read. Listing starts nothing."""
     if timeout <= 0:
         return None
     try:
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL)
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL, env=env)
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
     if p.returncode:
@@ -1041,15 +1043,176 @@ def running_vms(argv: list[str], timeout: float) -> list[str] | None:
             rows = [json.loads(line) for line in text.splitlines() if line.strip()]
         except ValueError:
             return None
+    return rows if all(isinstance(r, dict) for r in rows) else None
+
+
+def _pid_alive(pid: object) -> bool:
+    """Whether a process of that id exists, through osproc (signal 0 sends nothing). Never on Windows: no probe, no claim."""
+    if os.name == "nt" or type(pid) is not int or pid <= 0:
+        return False
+    return osproc.alive(pid)
+
+
+def vm_trimmable(row: dict) -> bool:
+    """A VM the guard may trim: Lima says it runs, or says Broken while its VM driver process is alive (the host
+    agent stopped, the VM and its Docker engine still run: measured 2026-11-14, `colima ssh` then answers
+    "colima not running"). Stopped and every other state never; the guard starts and stops nothing (OBS-565)."""
+    name = row.get("name")
+    if not isinstance(name, str) or not VM_NAME.fullmatch(name):
+        return False
+    status = row.get("status")
+    if status == "Running":
+        return True
+    return status == "Broken" and _pid_alive(row.get("driverPID"))
+
+
+def running_vms(argv: list[str], timeout: float, env: dict | None = None) -> list[str] | None:
+    """The virtual machines a VM tool lists as running, by name (`vm_trimmable`; a name that is not a plain
+    identifier is never passed on). None when the list cannot be read."""
+    rows = vm_rows(argv, timeout, env)
+    if rows is None:
+        return None
     names: list[str] = []
     for row in rows:
-        if not isinstance(row, dict):
-            return None
-        name = row.get("name")
-        if (row.get("status") == "Running" and isinstance(name, str) and VM_NAME.fullmatch(name)
-                and name not in names):
-            names.append(name)
+        if vm_trimmable(row) and row["name"] not in names:
+            names.append(row["name"])
     return names
+
+
+def lima_homes() -> list[str]:
+    """Every Lima home that exists here: the default (`~/.lima`), `LIMA_HOME`, and Colima's own (`$COLIMA_HOME/_lima`,
+    else `~/.colima/_lima`, else under `$XDG_CONFIG_HOME/colima`), once each, in that order (OBS-565). A home that
+    does not exist is not read and never made."""
+    home = os.path.expanduser("~")
+    colima = os.environ.get("COLIMA_HOME", "").strip()
+    if not colima:
+        legacy = os.path.join(home, ".colima")
+        colima = legacy if os.path.isdir(legacy) else os.path.join(
+            os.environ.get("XDG_CONFIG_HOME", "").strip() or os.path.join(home, ".config"), "colima")
+    out: list[str] = []
+    for cand in (os.path.join(home, ".lima"), os.environ.get("LIMA_HOME", "").strip(), os.path.join(colima, "_lima")):
+        if cand and os.path.isdir(cand) and cand not in out:
+            out.append(cand)
+    return out
+
+
+def engine_socket(lima_home: str, name: str) -> str | None:
+    """The Docker socket of one Lima instance, when it is a socket: Colima's profile (`colima` is `default`,
+    `colima-x` is `x`) at `<colima home>/<profile>/docker.sock`, a plain Lima instance at
+    `<lima home>/<name>/sock/docker.sock`. None otherwise: no engine to prune."""
+    if os.path.basename(os.path.normpath(lima_home)) == "_lima":
+        if name != "colima" and not name.startswith("colima-"):
+            return None
+        profile = "default" if name == "colima" else name[len("colima-"):]
+        cand = os.path.join(os.path.dirname(os.path.normpath(lima_home)), profile, "docker.sock")
+    else:
+        cand = os.path.join(lima_home, name, "sock", "docker.sock")
+    try:
+        return cand if stat.S_ISSOCK(os.stat(cand).st_mode) else None
+    except OSError:
+        return None
+
+
+ENGINE_PRUNES = (["image", "prune", "-a", "-f"], ["builder", "prune", "-f"])   # never volumes, never `system prune`
+
+
+def engine_prune(sock: str, name: str, deadline: float) -> list[dict]:
+    """At critical, before a VM's trim: all unused images and build cache of that VM's own engine, through its
+    socket (never the context or `DOCKER_HOST`), each a journal row with the disk's own count of what it gave back."""
+    out = []
+    docker = find_tool("docker")
+    env = {k: v for k, v in os.environ.items() if k not in ("DOCKER_HOST", "DOCKER_CONTEXT")}
+    host = ["--host", "unix://" + sock]
+
+    def row(args, **over):
+        return {"at": now(), "class": "cache-command", "target": "docker " + " ".join(args), "mode": "guard",
+                "tier": "auto", "instance": name, **over}
+
+    if not docker:
+        return [row(ENGINE_PRUNES[0], result="skipped", reason="no docker command is installed here",
+                    reason_code="no-docker-cli")]
+    try:
+        p = subprocess.run([docker, *host, "version", "--format", "{{.Server.Version}}"], capture_output=True,
+                           text=True, timeout=max(1.0, min(10.0, deadline - time.monotonic())),
+                           stdin=subprocess.DEVNULL, env=env)
+        answered = not p.returncode
+    except (OSError, ValueError, subprocess.SubprocessError):
+        answered = False
+    if not answered:
+        return [row(ENGINE_PRUNES[0], result="skipped", reason="the virtual machine's Docker engine does not answer",
+                    reason_code="docker-unanswered")]
+    for args in ENGINE_PRUNES:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            out.append(row(args, result="skipped", reason="the run's time was spent", reason_code="timeout"))
+            break
+        before = free_bytes()
+        try:
+            p = subprocess.run([docker, *host, *args], capture_output=True, text=True, timeout=left,
+                               stdin=subprocess.DEVNULL, env=env)
+        except subprocess.TimeoutExpired:
+            out.append(row(args, result="skipped", reason="held up past its time", reason_code="timeout"))
+            break
+        except (OSError, subprocess.SubprocessError) as exc:
+            out.append(row(args, result="failed", reason=type(exc).__name__))
+            continue
+        if p.returncode:
+            out.append(row(args, result="failed", reason=f"exit {p.returncode}", reason_code="command-failed",
+                           exit_code=p.returncode))
+            continue
+        out.append(row(args, result="removed", freed_mb=round((free_bytes() - before) / 1048576)))
+    return out
+
+
+#: What a VM's kernel log says when its disk's file system failed (2026-11-15: the Colima VM's Docker disk aborted
+#: its journal twice). The guard only READS the log: repairing is a person's (e2fsck stops every container).
+VM_ERROR_SIGNS = ("Aborting journal on device", "mounting fs with errors")
+VM_LOG_COMMAND = ["sudo", "-n", "sh", "-c", "journalctl -k -n 200 --no-pager 2>/dev/null || dmesg | tail -n 200"]
+
+
+def vm_log_errors(log: str) -> list[str]:
+    """The lines of a kernel log that show a journal abort or a file system mounted with errors (at most 5)."""
+    out = [line.strip()[:200] for line in (log or "").splitlines() if any(sign in line for sign in VM_ERROR_SIGNS)]
+    return out[:5]
+
+
+def vm_kernel_errors(seconds: float) -> list[dict]:
+    """Each trimmable VM of every Lima home whose kernel log shows disk errors: {home, instance, lines}. Read-only
+    (`limactl shell`, `journalctl -k` or `dmesg`), within `seconds` in all; starts and stops nothing."""
+    limactl = find_tool("limactl")
+    deadline = time.monotonic() + seconds
+    out: list[dict] = []
+    if not limactl or seconds <= 0:
+        return out
+    for home in lima_homes():
+        env = {**os.environ, "LIMA_HOME": home}
+        for row in vm_rows([limactl, "list", "--json"], min(10.0, deadline - time.monotonic()), env) or []:
+            left = deadline - time.monotonic()
+            if left <= 0:
+                return out
+            if not vm_trimmable(row):
+                continue
+            try:
+                p = subprocess.run([limactl, "shell", "--", row["name"], *VM_LOG_COMMAND], capture_output=True,
+                                   text=True, timeout=min(15.0, left), stdin=subprocess.DEVNULL, env=env)
+            except (OSError, ValueError, subprocess.SubprocessError):
+                continue
+            lines = vm_log_errors(p.stdout or "") if not p.returncode else []
+            if lines:
+                out.append({"home": home, "instance": row["name"], "lines": lines})
+    return out
+
+
+def vm_error_warnings(found: list[dict]) -> list[dict]:
+    return [{"code": "vm-disk-errors", "level": "critical", "instances": found}] if found else []
+
+
+def action_rows(row: dict) -> list[dict]:
+    """The journal rows of one action: each engine prune it ran as its own row, then the action's."""
+    prunes = row.get("prunes")
+    if not prunes:
+        return [row]
+    return [*prunes, {k: v for k, v in row.items() if k != "prunes"}]
 
 
 def checkout_idle_days(root: str, at: float, timeout: float = 60) -> float | None:
@@ -1471,27 +1634,52 @@ def act(a: dict, holders: Holders, state: dict | None = None) -> dict:
                                   "this one" if where == "remote"
                         else "which daemon the docker context names could not be read; nothing was run",
                         "reason_code": "remote-docker-context" if where == "remote" else "docker-context-unknown"}
-        runs = [a["argv"]]
+        runs = [(a["argv"], None, None)]
         vm = bool(a.get("instances"))
         if vm:
-            names = running_vms(a["instances"], min(15.0, deadline - time.monotonic()))
+            homes = lima_homes() if a.get("lima_homes") else [None]
+            names: list[tuple[str | None, str]] = []
+            broken = unreadable = 0
+            for h in homes:
+                env = None if h is None else {**os.environ, "LIMA_HOME": h}
+                rows = vm_rows(a["instances"], min(15.0, deadline - time.monotonic()), env)
+                if rows is None:
+                    unreadable += 1
+                    continue
+                for r in rows:
+                    if vm_trimmable(r) and (h, r["name"]) not in names:
+                        names.append((h, r["name"]))
+                        broken += r.get("status") == "Broken"
             if not names:
+                unknown = unreadable and unreadable == len(homes)
                 return {**rec, "result": "skipped",
-                        "reason": "no virtual machine is running; the guard starts none" if names == []
-                        else "which virtual machines run could not be read; the guard starts none",
-                        "reason_code": "no-running-vm" if names == [] else "vm-list-unknown"}
+                        "reason": "which virtual machines run could not be read; the guard starts none" if unknown
+                        else "no virtual machine is running; the guard starts none",
+                        "reason_code": "vm-list-unknown" if unknown else "no-running-vm"}
             rec["instances"], rec["instances_done"], rec["instances_failed"] = len(names), 0, 0
-            runs = [[w.replace("{instance}", n) for w in a["argv"]] for n in names]
+            if a.get("lima_homes"):
+                rec["instances_broken"] = broken
+                if unreadable:
+                    rec["homes_unreadable"] = unreadable
+            runs = [([w.replace("{instance}", n) for w in a["argv"]], h, n) for h, n in names]
         problems: list[dict] = []
-        for argv in runs:
+        pruned_mb = 0                    # what the prunes gave back is theirs, not the trim's
+        for argv, lima_home, instance in runs:
             outcome = None
+            if a.get("engine_prune") and lima_home is not None:
+                sock = engine_socket(lima_home, instance)
+                if sock:
+                    pruned = engine_prune(sock, instance, deadline)
+                    rec.setdefault("prunes", []).extend(pruned)
+                    pruned_mb += sum(p.get("freed_mb", 0) for p in pruned)
             try:
                 # SHORT, and a wait is not a fault (2026-10-11): `uv cache prune` waits on the lock
                 # a long-running `uv tool run` server holds, and one such wait spent half a run.
                 left = deadline - time.monotonic()
                 if left <= 0:
                     raise subprocess.TimeoutExpired(argv, 0)
-                p = subprocess.run(argv, capture_output=True, text=True, timeout=left, stdin=subprocess.DEVNULL)
+                p = subprocess.run(argv, capture_output=True, text=True, timeout=left, stdin=subprocess.DEVNULL,
+                                   env=None if lima_home is None else {**os.environ, "LIMA_HOME": lima_home})
             except subprocess.TimeoutExpired:
                 problems.append({"result": "skipped",
                                  "reason": "held up past its time: something else holds the tool's cache"})
@@ -1598,7 +1786,7 @@ def act(a: dict, holders: Holders, state: dict | None = None) -> dict:
             rec.update(result="failed", reason=f"{type(exc).__name__}: {exc}"[:200])
         except OSError as exc:
             rec.update(result="failed", reason=f"{type(exc).__name__}: {exc}"[:200])
-    rec["freed_mb"] = round((free_bytes() - before) / 1048576)
+    rec["freed_mb"] = round((free_bytes() - before) / 1048576) - (pruned_mb if a["class"] == "cache-command" else 0)
     return rec
 
 
@@ -1879,7 +2067,7 @@ def run(argv: list[str]) -> dict:
                             row = {"at": now(), "class": a["class"], "target": a["target"], "mode": "guard",
                                    "result": "failed", "reason": f"{type(exc).__name__}: {exc}"[:200]}
                         rows.append(row)
-                        journal([row], degraded)  # as it happens: a run stopped from outside keeps its record
+                        journal(action_rows(row), degraded)  # as it happens: a run stopped from outside keeps its record
                         if a["class"] == "cache-command" and row["result"] == "removed":
                             last_commands[a["target"]] = row["at"]
                 phases[name] = round(time.monotonic() - mark)
@@ -1924,6 +2112,12 @@ def run(argv: list[str]) -> dict:
                 doc["warnings"] = vm_warnings(level, doc["vms"])
             except Exception as exc:  # noqa: BLE001 - a VM that cannot be measured is named, never stops the report
                 doc["degraded"].append({"source": "vms", "reason": f"VM disks could not be read ({type(exc).__name__})"})
+            if acting:
+                try:
+                    doc.setdefault("warnings", []).extend(vm_error_warnings(vm_kernel_errors(30)))
+                except Exception as exc:  # noqa: BLE001 - the kernel logs could not be read: named, never fatal
+                    doc["degraded"].append({"source": "vm-logs",
+                                            "reason": f"VM kernel logs could not be read ({type(exc).__name__})"})
             if acting:
                 journal([{"at": doc["at"], "kind": "summary", "mode": "guard", "level": level, **results,
                           "freed_mb": round((free1 - free0) / 1048576), "seconds": doc["seconds"],

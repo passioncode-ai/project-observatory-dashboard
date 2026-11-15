@@ -207,6 +207,7 @@
  "Agent commands hanging on their input": "Команды агентов, зависшие на вводе",
  "Machine disk low": "Мало места на диске машины",
  "Virtual machine at risk on a full disk": "Виртуальная машина под угрозой из-за полного диска",
+ "Virtual machine disk file system errors": "Ошибки файловой системы на диске виртуальной машины",
  "Managed database": "Управляемая база данных",
  "Month to date": "С начала месяца",
  "No account is connected.": "Ни один аккаунт не подключён.",
@@ -2257,6 +2258,7 @@
  },
  "the disk guard has never run": "контроль диска ни разу не запускался",
  "a virtual machine is writing to a nearly full disk": "виртуальная машина пишет на почти полный диск",
+ "a virtual machine's disk reports file system errors": "диск виртуальной машины сообщает об ошибках файловой системы",
  "the disk guard has not run for {hours} hours": "контроль диска не запускался {hours} ч",
  "trash": "корзина",
  "Disk guard ran {at}: free {before} → {after} GB, {n} removed": {

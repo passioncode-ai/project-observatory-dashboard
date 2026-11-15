@@ -181,16 +181,24 @@ So at `critical`, after its other commands, the guard runs (`defaults/cleanup.js
 
 1. `docker builder prune -af`: every build cache entry no build uses, whatever its age, at most
    every 6 hours. The normal-pressure entry keeps its one-week filter.
-2. `colima ssh --profile <name> -- sudo -n fstrim -av` in each Colima profile that
-   `colima list --json` reports `Running`, at most every 6 hours.
-3. `limactl shell -- <name> sudo -n fstrim -av` in each Lima instance that `limactl list --json`
-   reports `Running` (Lima's own home; a Colima VM is listed by Colima), at most every 6 hours.
+2. `limactl shell -- <name> sudo -n fstrim -av` in each Lima instance of every Lima home (OBS-565):
+   the default (`~/.lima`), `LIMA_HOME`, and Colima's own (`$COLIMA_HOME/_lima`, else `~/.colima/_lima`),
+   each listed with `limactl list --json` under that home's `LIMA_HOME`, at most every 6 hours. An
+   instance is trimmed when Lima says `Running`, or `Broken` while its VM driver process (`driverPID`)
+   is alive: a stopped host agent leaves the VM and its Docker running, but `colima ssh` then answers
+   "colima not running" and trims nothing (measured 2026-11-14). `Stopped` and any other state never.
+3. At `critical` only, before an instance's trim, `docker image prune -a -f` and `docker builder prune -f`
+   against that VM's own engine socket (Colima: `<colima home>/<profile>/docker.sock`; Lima:
+   `<home>/<name>/sock/docker.sock`), never the docker context or `DOCKER_HOST`. Never volumes, never
+   `system prune`. Skipped (`no-docker-cli`, `docker-unanswered`) when no docker command or no answering
+   engine exists. Each prune is its own journal row with its `instance` and the disk's own `freed_mb`;
+   the trim row's `freed_mb` excludes them.
 
 **What it never touches.** No `docker system prune`, no `--volumes`, no container or image a
 container uses: `builder prune` removes build cache only, and `image prune -f` (at `low`) dangling
 images only. The guard starts no VM and no daemon: a docker entry runs only while a daemon process
 is seen (`needs_running`, now also `colima` and `limactl`, the processes a running Colima or Lima VM
-keeps on the host), and a trim runs only in a VM its tool lists as running. With none running the
+keeps on the host), and a trim runs only in a VM Lima lists as running (or Broken with a live driver). With none running the
 row is `skipped` with `reason_code` `no-running-vm`; a list that cannot be read is `vm-list-unknown`
 and nothing runs. A VM name that is not a plain identifier is never passed on.
 
