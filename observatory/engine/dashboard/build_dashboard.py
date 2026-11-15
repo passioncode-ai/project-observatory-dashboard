@@ -1214,6 +1214,14 @@ def build():
             for k, d in (("critical", 10), ("low", 25))}
     except Exception as exc:  # noqa: BLE001 (a page, not a crash)
         print(f"  disk guard lines unavailable: {type(exc).__name__}: {exc}", file=sys.stderr)
+    # THE INSTALLED TOOLS (OBS-552, CP-05): coding agents, skills, plugins and hooks from the harness scan, each
+    # harness finding beside its item. Rendered into tools.html only (shell.slice_for keeps it off every page's data).
+    try:
+        import tooling_view
+        _found = PAYLOAD.get("findings")
+        PAYLOAD["tooling"] = tooling_view.summary(_found.get("items") or [] if isinstance(_found, dict) else None)
+    except Exception as exc:  # noqa: BLE001: a page, not a crash
+        PAYLOAD["tooling"] = {"degraded": [{"source": "tooling", "reason": f"{type(exc).__name__}: {exc}"[:200]}]}
     # THE AGENTS: workflows, handoffs and sessions, read-only from the store;
     # only the Agents page carries it (shell.slice_for), and the overview card
     # reads its counters.
@@ -1235,7 +1243,7 @@ def build():
     locale = build_locale()
     t = i18n.Translator(locale)
     title = "Projects — the operator's registry"
-    return (template_for(locale).replace("__PAGE__", "").replace("__NAV__", "").replace("__CARDS__", "").replace("__MACHINE__", "").replace("__AGENTS__", "").replace("__INFRA__", "")
+    return (template_for(locale).replace("__PAGE__", "").replace("__NAV__", "").replace("__CARDS__", "").replace("__MACHINE__", "").replace("__TOOLS__", "").replace("__AGENTS__", "").replace("__INFRA__", "")
             .replace("__TITLE__", html.escape(t(title)))
             .replace("__PAGE_TITLE__", "")
             .replace("__H1__", t.mark(title, tag="h1"))
@@ -1767,6 +1775,7 @@ body[data-page]:not([data-page="projects"]) #reading,
 body[data-page]:not([data-page="projects"]) #dups-s { display: none; }
 body[data-page="index"] #out, body[data-page="findings"] #out, body[data-page="health"] #out,
 body[data-page="machine"] #out, body[data-page="machine"] #list-tools,
+body[data-page="tools"] #out, body[data-page="tools"] #list-tools, body[data-page="tools"] #panel,
 body[data-page="agents"] #out, body[data-page="agents"] #list-tools,
 body[data-page="index"] #panel, body[data-page="findings"] #panel, body[data-page="health"] #panel,
 body[data-page="machine"] #panel, body[data-page="agents"] #panel,
@@ -1811,6 +1820,15 @@ body[data-page="cloudflare"] #out, body[data-page="cloudflare"] #list-tools, bod
 /* The Machine page: server-rendered cards (dashboard/machine_page.py). */
 .machine-h { font: 600 var(--t-section) var(--font-ui); margin: 0 0 var(--space-3); }
 #machine thead th.num { text-align: right; }
+/* The Installed tools page: server-rendered cards (dashboard/tools_page.py, OBS-552). */
+.tools-agent { margin-top: var(--space-4); }
+.tools-h { font: 600 var(--t-label) var(--font-ui); text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); margin: var(--space-4) 0 var(--space-2); }
+.tools-scope { margin-top: var(--space-2); }
+.tools-scope > summary { cursor: pointer; font-size: var(--t-label); }
+.tools-scope > summary:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.tools-findings { list-style: none; padding: 0; margin: var(--space-1) 0 0; }
+.tools-findings li { margin: 2px 0; overflow-wrap: anywhere; }
 .machine-at, .machine-hint { color: var(--muted); font-size: var(--t-label); margin-top: var(--space-3); }
 body[data-page="findings"] .flist.folded .finfo, body[data-page="findings"] .flist.folded .fwarning { display: block; }
 /* The index page puts the inventory tiles first and the work tiles after
@@ -1960,6 +1978,7 @@ __NAV__
 <section id="panel" class="card panel" role="dialog" aria-labelledby="panel-title" hidden></section>
 __CARDS__
 __MACHINE__
+__TOOLS__
 __AGENTS__
 __INFRA__
 <div id="list-tools" class="list-tools"></div>

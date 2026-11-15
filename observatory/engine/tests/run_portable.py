@@ -336,6 +336,8 @@ BOUNDARY += ('space_daemons',)
 # OBS-561 (CP-11): a rotation finds the other copies of a key's value (fake Heroku, env files, services), delivers and
 # reads them back before it revokes, and holds the old key when one is out of reach.
 BOUNDARY += ('rotation_consumers',)
+# OBS-552 (CP-05): the Installed tools page, coding agents, skills, plugins and hooks with their findings.
+BOUNDARY += ('tools_page',)
 SUITES = LEGACY + BOUNDARY
 #: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
 #: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.
@@ -383,6 +385,8 @@ ROOT_FILES = (
     'identity_map.py', 'identifiers.py', 'derivations.py', 'folder_attribution.py', 'fabric_attribution.py', 'ops_digest_folders.py', 'activity_collector.py', 'fabric_hub.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'sessions_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'tick_progress.py', 'tick_budget.py', 'dashboard_stamp.py', 'workspace.py',
     'workspace_upgrade.py', 'backup_vault.py', 'secret_store_carry.py', 'organizations.py', 'org_view.py', 'org_selection.py', 'machine_view.py', 'memory_snapshot.py', 'checkout_inventory.py', 'checkout_state.py', 'checkout_graph.py', 'cache_coverage.py', 'open_unlinked.py', 'coverage_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
     'configuration_door.py',
+    # The Installed tools page's view (OBS-552).
+    'tooling_view.py',
     'log_policy.py', 'code_freshness.py', 'session_reload.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',
     # The companion's request for a why: journal, measurement, reach (M-8).
