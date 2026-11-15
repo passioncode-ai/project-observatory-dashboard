@@ -3,6 +3,34 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.38.0 (2026-11-15)
+
+The second wave of the estate control plane (docs/design/CONTROL-PLANE.md): the pages a person reads. Home answers "is
+everything fine, and what needs me first" with each fact once and no command text. Agents opens with the sessions
+running on this machine and then one row per workflow with a button. Monitoring (Health, Security, Availability) is the
+first group of the navigation. Two new pages show what is installed for the coding agents and how the disk and its
+cleanup are set, and the cleanup settings change from the page through the configuration door. The observatory-log
+plugin moves to 0.38.0 with the release.
+
+### Added
+
+- **Installed tools page** (OBS-552, #546): `tools.html` in System shows each coding agent with its version, its
+  plugins (scope, version, newest known, enabled, behind), skills by scope with version and source tier, and hooks,
+  each harness finding beside its item; an unread or stale source is named, never shown as nothing installed.
+- **Disk page** (OBS-562, #547): `disk.html` shows free space, the guard's passes and what they freed by the disk's own
+  count, kept folders, largest files, what auto cleanup removes and keeps, and every guard and cleanup setting with its
+  value, default and source; a setting changes from the page with a preview, apply and undo through a `configure`
+  action on the key server (same token, Host and Origin checks as the key actions), covered by `observatory_configure`.
+
+### Changed
+
+- **Home, Agents and navigation** (OBS-551, #548): Home groups State, Needs you first, Work and Estate, drops the
+  section cards a tile already says, and shows no command text. Agents lists sessions first, then one row per
+  workflow with its worst state and an "Offer to another agent" button (`workflow-handoff`, the store call of
+  `observatory_handoff_create`). The navigation starts with Monitoring (Health, Security, Availability as filtered
+  Findings) and ends with System (Machine, Installed tools, Disk). The Machine page keeps one line about the disk and
+  links to the Disk page.
+
 ## 0.37.0 (2026-11-15)
 
 The first wave of the estate control plane (docs/design/CONTROL-PLANE.md). Every coding session on the machine is
