@@ -62,6 +62,7 @@ sys.path.insert(0, str(ROOT / "collectors"))
 sys.path.insert(0, str(ROOT / "tools"))
 import configuration  # noqa: E402
 import osprivacy  # noqa: E402
+import osproc  # noqa: E402
 import paths  # noqa: E402
 import safe_git  # noqa: E402
 from cleanup_safety import (scheduled_job_reason, protected_entry_reason, bare_repository_reason, bare_ancestry_reason,  # noqa: E402
@@ -1045,18 +1046,10 @@ def vm_rows(argv: list[str], timeout: float, env: dict | None = None) -> list[di
 
 
 def _pid_alive(pid: object) -> bool:
-    """Whether a process of that id exists (signal 0 sends nothing). Never on Windows: no probe, no claim."""
+    """Whether a process of that id exists, through osproc (signal 0 sends nothing). Never on Windows: no probe, no claim."""
     if os.name == "nt" or type(pid) is not int or pid <= 0:
         return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True                      # another account's process is alive
-    except OSError:
-        return False
-    return True
+    return osproc.alive(pid)
 
 
 def vm_trimmable(row: dict) -> bool:

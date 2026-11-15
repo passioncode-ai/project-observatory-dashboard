@@ -3214,7 +3214,7 @@ class LimaHomesAndBrokenVms(Base):
             self.assertFalse(trim(live), "no liveness probe on Windows: a broken VM is never touched")
         else:
             self.assertTrue(trim(live), "the host agent stopped while the VM driver runs (measured 2026-11-14)")
-        with patch.object(self.g.os, "kill", side_effect=PermissionError):
+        with patch.object(self.g.os, "kill", side_effect=PermissionError(__import__("errno").EPERM, "not permitted")):
             self.assertEqual(trim(live), os.name != "nt", "another account's live process is alive")
 
     def test_every_home_s_running_and_broken_vms_are_trimmed_with_their_own_home(self):
@@ -3324,7 +3324,7 @@ class LimaHomesAndBrokenVms(Base):
     @unittest.skipIf(os.name == "nt", "unix sockets")
     def test_the_engine_socket_of_a_colima_profile_or_a_lima_instance(self):
         import socket
-        short = Path(tempfile.mkdtemp(prefix="eng", dir="/tmp")).resolve()
+        short = Path(tempfile.mkdtemp(prefix="eng", dir="/tmp")).resolve()  # paths-check: allow: a unix socket path must stay under 104 bytes; removed by the cleanup below
         self.addCleanup(lambda: __import__("shutil").rmtree(short, ignore_errors=True))
         colima_home = short / "c" / "_lima"
         colima_home.mkdir(parents=True)
