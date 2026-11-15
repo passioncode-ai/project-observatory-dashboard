@@ -739,6 +739,13 @@
       "bytes": 7228
     },
     {
+      "path": "dashboard/tools_page.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "c253af91917f22901a44cb0ca22cde8168567fc2c62782767d22c8b1f948f1be",
+      "bytes": 12510
+    },
+    {
       "path": "dashboard/workspace.css",
       "source_sha256": null,
       "upstream_modified": true,
@@ -1003,7 +1010,7 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "cebc0fcb5383f64c3e57173f126654ca865178942d945162d709aaa34e764525",
+      "export_sha256": "a977e34e10f227eeb5400c190d6a292c9fc8f324cbb3297d455ab8be5c87549c",
       "bytes": 251016,
       "upstream_modified": true
     },
@@ -6696,6 +6703,13 @@
       "upstream_modified": true
     },
     {
+      "path": "tests/test_tools_page.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "393cf98a740be53613d1f5738a7f147c4b340a08abfb4455102946e597a8f60b",
+      "bytes": 18793
+    },
+    {
       "path": "tests/test_trace_opens.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -6994,6 +7008,13 @@
       "upstream_modified": true,
       "export_sha256": "2f5c9c488e4c19a7fea9fd8fa1e3ef3631183fbf991f0156d3d137eaeb4852ed",
       "bytes": 8166
+    },
+    {
+      "path": "tooling_view.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "99b283c0d661e1ceada4dbd3596a8cdef75584d74e48208980d1929233ad8cd8",
+      "bytes": 10759
     },
     {
       "path": "tools/access_binding_cli.py",
@@ -8009,7 +8030,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 1080,
+  "file_count": 1083,
   "excluded": [
     "git-history",
     "operator-registries",
