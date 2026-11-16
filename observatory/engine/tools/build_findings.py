@@ -3052,6 +3052,49 @@ def collect() -> list[dict]:
                 "action": mcp_registration_command(),
                 "evidence": ["registry/mcp-servers.json#own_declared"]})
 
+    # THE SUPPLY CHAIN OF THE MCP SERVERS (OBS-555, CP-09). A command line that fetches whatever is newest or runs
+    # fetched code, and a tool whose definition changed since the person last accepted it. A finding names the
+    # server and the rule or the tool, never the command line, an argument or a definition.
+    try:
+        import mcp_supply
+        _sc = mcp_supply.summary(_ms if _mf.is_file() else [])
+    except Exception:  # noqa: BLE001 (a finding source never stops the build)
+        _sc = {"risky": [], "changes": []}
+    for _r in _sc["risky"]:
+        for _rule in _r["rules"]:
+            out.append({
+                "type": "mcp.risky_command", "subject": f"mcp:{_r['agent']}/{_r['server']}/{_rule}",
+                "severity": "critical" if _rule == "fetch-execute" else "warning",
+                **(titled("MCP server {server} starts a package runner without an exact version", server=_r["server"])
+                   if _rule == "unpinned-runner" else
+                   titled("MCP server {server} fetches code and runs it", server=_r["server"])
+                   if _rule == "fetch-execute" else
+                   titled("MCP server {server} runs a program from outside the install places",
+                          server=_r["server"])),
+                "detail": (f"The {_r['agent']} config declares `{_r['server']}` and its command line trips the "
+                           f"`{_rule}` rule: {mcp_supply.RULES[_rule]}. The command line is not shown here; it can "
+                           "carry a key."),
+                "action": ("pin the version in the declaration (`name@1.2.3` or `name==1.2.3`), or install the "
+                           "program from a place an installer owns and declare that"),
+                "evidence": ["registry/mcp-servers.json#risky"]})
+    for _c in _sc["changes"]:
+        out.append({
+            "type": "mcp.tool_changed", "subject": f"mcp:tool:{_c['agent']}/{_c['server']}/{_c['tool']}",
+            "severity": "warning",
+            **(titled("tool {tool} of MCP server {server} changed since it was pinned", server=_c["server"],
+                      tool=_c["tool"]) if _c["change"] == "changed" else
+               titled("MCP server {server} added the tool {tool} since it was pinned", server=_c["server"],
+                      tool=_c["tool"]) if _c["change"] == "added" else
+               titled("MCP server {server} dropped the tool {tool} since it was pinned", server=_c["server"],
+                      tool=_c["tool"])),
+            "detail": (f"Seen {str(_c.get('seen_at') or '')[:10]}: the tool's definition (name, description, input "
+                       f"schema) is {_c['change']} against the digest the person accepted. Digests: "
+                       f"{str(_c.get('old') or 'none')[:19]} then {str(_c.get('new') or 'none')[:19]}. A server that "
+                       "rewrites a tool's description after approval is how a trusted tool turns hostile."),
+            "action": "read the server's change, then accept the new definitions on the MCP page or with "
+                      "`observatory_mcp_accept`",
+            "evidence": ["store/state/mcp-pins.json"]})
+
     # A LEAKED SECRET THAT NOBODY ROTATED. `tools/vault.py leak` is the rule
     # the observatory's skill makes mandatory: an agent that sees a secret value
     # where it does not belong records the sighting. The register is append-only

@@ -101,6 +101,9 @@ ALLOWED_SLICES = {
              "Heroku release so a reader can find it in `heroku releases` — a "
              "display cut of a stamp whose seconds carry nothing, never a "
              "measurement",
+    "[:19]": "a tool definition's digest shown as `sha256:` and its first twelve hex "
+             "digits (OBS-555), the same displayed length as `[:12]` with the "
+             "algorithm kept: an identifier the reader compares, never a measurement",
     "[:13]": "the `YYYY-MM-DDTHH` head of a compact archive stamp being "
              "rehydrated into ISO with colons re-inserted — a parse, not a cut: "
              "the tail is consumed by the [13:15] and [15:17] slices beside it "

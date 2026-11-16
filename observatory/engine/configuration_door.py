@@ -113,6 +113,11 @@ SAFE_FEATURES = frozenset({"machine_watch", "notifications", "probe_fixture", "r
 #: Sources that point the engine at secrets: the person decides where.
 SECRET_SOURCES = frozenset({"secret_store", "secrets"})
 
+FEATURE_TEXT = {
+    "auto_cleanup": "the disk guard and the cleanup's auto tier remove what loses nothing, from the maintenance job",
+    "mcp_remote_scanners": "third-party remote scanners of MCP tools: they are sent each tool's name, description "
+                           "and schema, so this stays off until you turn it on",
+}
 INTEGRATION_TEXT = {
     "vulnerabilities": "the dependency watch: public package names and versions go to OSV; local ones never leave",
     "github_issues": "file findings as issues in the project's own repository",
@@ -177,8 +182,7 @@ def catalogue() -> dict[str, Setting]:
                             INTEGRATION_TEXT.get(name, f"the {name} integration: its collector runs at the next pass"),
                             "never" if name in LOCAL_INTEGRATIONS else "on"))
     for name in sorted(config.known_names("features")):
-        text = ("the disk guard and the cleanup's auto tier remove what loses nothing, from the maintenance job"
-                if name == "auto_cleanup" else f"the {name} feature")
+        text = FEATURE_TEXT.get(name, f"the {name} feature")
         rows.append(Setting(f"features.{name}", "bool", "settings", ("features", name), False, text,
                             "never" if name in SAFE_FEATURES else "on"))
     for name in sorted(config.known_names("sources")):

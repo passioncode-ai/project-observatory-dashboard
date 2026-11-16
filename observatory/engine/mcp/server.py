@@ -1061,6 +1061,38 @@ def observatory_key_sweep_settle(
     return {"settled": fingerprint, "closes": "at the next sweep"}
 
 
+@server.tool()
+def observatory_mcp_supply() -> dict[str, Any]:
+    """The supply-chain watch over MCP servers (OBS-555, CP-09): `risky` (servers whose command line trips a rule:
+    `unpinned-runner`, `fetch-execute`, `outside-install-places`; the rule and the server, never the command line),
+    `changes` (tools whose full definition changed since it was pinned: added, removed or changed, with the old and
+    new SHA-256 digest), `pins` (how many tool definitions are pinned), and `scanners` (whether third-party remote
+    scanners may be sent tool definitions: off unless `features.mcp_remote_scanners` is on). Read-only, from the
+    last MCP scan and `store/state/mcp-pins.json`; tools are listed and pinned only when a probe runs on request
+    (`machine.mcp.refresh`). No env or header value is ever read. Design: docs/design/control-plane/supply-chain.md."""
+    import mcp_supply
+    return mcp_supply.summary()
+
+
+@server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True))
+def observatory_mcp_accept(
+    server_name: Annotated[str | None, Field(validation_alias=AliasChoices("server", "server_name", "serverName"),
+                                             description="Only this server, as `observatory_mcp_supply` names it "
+                                                         "(`agent:name` from `changes`: its `agent` and `server`).")] = None,
+    tool: Annotated[str | None, Field(description="Only this tool of that server.")] = None,
+) -> dict[str, Any]:
+    """Accept the tool definitions a probe found as the pinned ones (the page's Accept button, same function): for one
+    server and tool, or every changed tool when both are omitted. Answers {accepted, servers}; nothing pending accepts
+    nothing. A later change is raised again as `mcp.tool_changed`. Nothing is sent anywhere and no definition is
+    returned."""
+    import mcp_supply
+    for label, value in (("server", server_name), ("tool", tool)):
+        if value is not None and (not isinstance(value, str) or len(value) > 200):
+            return {"error": "invalid_argument", "message": f"{label} is a name of at most 200 characters",
+                    "degraded": []}
+    return mcp_supply.accept_pending(server_name, tool)
+
+
 MACHINE_TOP = 10
 #: Skills per page of `observatory_machine(section="skills")`: a machine measured holding 1,269 skills made an
 #: unpaged answer of 151,536 characters, past what a host keeps of one tool result, and 200 skills beside its 116

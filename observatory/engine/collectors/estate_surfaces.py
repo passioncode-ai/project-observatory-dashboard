@@ -423,6 +423,7 @@ def mcp_rows(scan: dict) -> list[dict]:
             "key_in_url": bool(r.get("key_in_url")),
             "key_in_header": bool(r.get("key_in_header")),
             "key_in_env": bool(r.get("key_in_env")),
+            "risky": [x for x in (r.get("risky") or []) if isinstance(x, str)],
             "liveness": r.get("liveness") if r.get("liveness") in LIVENESS else "not-probed",
             "liveness_detail": r.get("liveness_detail"),
             "source_refs": ["SRC-0017"],

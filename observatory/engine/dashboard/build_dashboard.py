@@ -1234,6 +1234,13 @@ def build():
                                                       if _ks.is_file() else None)
     except Exception as exc:  # noqa: BLE001: a page, not a crash
         PAYLOAD["key_sweep"] = {"state": "not-run", "degraded": [f"{type(exc).__name__}"]}
+    # THE SUPPLY CHAIN OF THE MCP SERVERS (OBS-555, CP-09): risky commands, changed tools and the scanners switch,
+    # drawn above the MCP page's table (dashboard/mcp_page.py; shell.slice_for keeps it on that page alone).
+    try:
+        import mcp_supply
+        PAYLOAD["supply"] = mcp_supply.summary((PAYLOAD["mcp"].get("servers") or []) if PAYLOAD.get("mcp") else None)
+    except Exception as exc:  # noqa: BLE001: a page, not a crash
+        PAYLOAD["supply"] = {"degraded": [{"source": "mcp supply chain", "reason": f"{type(exc).__name__}"}]}
     # THE DISK PAGE'S SETTINGS (OBS-562): every key the configuration door declares for the guard and the cleanup,
     # with its value, default and whether a file sets it. A door that cannot read is named, never a blank table.
     try:
@@ -5006,6 +5013,39 @@ if (PAGE === "agents" && typeof document !== "undefined" && document.addEventLis
     }
   });
 }
+// THE MCP PAGE'S ACCEPT BUTTONS (OBS-555, CP-09). A tool whose definition changed since it was pinned is accepted
+// through the key server's `mcp-accept` action, the same function as the agent's observatory_mcp_accept. Built
+// disabled; enabled only when the key server serves the page with its token (LIVE).
+(function mcpSupply() {
+  if (PAGE !== "mcp" || typeof document === "undefined" || !document.querySelectorAll) return;
+  const said = document.getElementById("supply-said");
+  const say = text => { if (said) said.textContent = text; };
+  if (LIVE) {
+    for (const el of document.querySelectorAll("[data-mcp-accept]")) {
+      el.disabled = false;
+      for (const a of ["title", "data-t-title", "data-t-title-args"]) el.removeAttribute(a);
+    }
+  }
+  document.addEventListener("click", async ev => {
+    const btn = ev.target && ev.target.closest && ev.target.closest("[data-mcp-accept]");
+    if (!btn || btn.disabled || !LIVE) return;
+    btn.disabled = true;
+    const body = {};
+    if (btn.dataset.mcpAccept) body.server = btn.dataset.mcpAccept;
+    if (btn.dataset.mcpTool) body.tool = btn.dataset.mcpTool;
+    try {
+      const d = await call("mcp-accept", body);
+      say(T("Accepted {n} definitions. The next build shows it everywhere.", {n: d.accepted}));
+      const row = btn.closest("tr");
+      if (row) row.remove();
+    } catch (err) {
+      say(err instanceof Uncertain
+        ? T("the outcome is unknown: {why}; reload the page to see the tools", {why: err.message})
+        : T("not accepted: {why}", {why: err.message}));
+      btn.disabled = false;
+    }
+  });
+})();
 // THE AGENTS PAGE STAYS CURRENT between ticks when the local server serves it:
 // the server renders the same section again from the store (`/agents`, the same
 // Python renderer as the built page) and the page swaps it in. Which workflows
