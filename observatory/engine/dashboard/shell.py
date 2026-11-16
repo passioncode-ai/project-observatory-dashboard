@@ -23,7 +23,7 @@ from pathlib import Path
 
 from i18n import LOCALE_NAMES, LOCALES, Translator
 # The page table lives in page_table.py (OBS-572); the names are re-exported because every reader says `shell.X`.
-from page_table import (BODIES, HOME_BODY, NAV_GROUP_LABELS, NAV_GROUPS, NAV_LINKS, NAV_VIEWS,  # noqa: F401
+from page_table import (BODIES, HOME_BODY, SECTIONS, NAV_GROUP_LABELS, NAV_GROUPS, NAV_LINKS, NAV_VIEWS,  # noqa: F401
                         PAGE_MODULES, PAGE_TABLE, PAGES, QUESTIONS, SLOTS, Page)
 
 #: The product's name is never translated (docs/brand/locales/*.md).
@@ -374,7 +374,7 @@ def slice_for(page: str, payload: dict) -> dict:
     # `traffic` is the per-project summary — a number and a link or two — and is
     # small enough to ride everywhere, which is what the projects column and the
     # project panel read.
-    heavy = {"env": "env", "heroku": "heroku", "creds": "creds", "mcp": "mcp",
+    heavy = {"env": "env", "heroku": "heroku", "creds": "creds", "mcp": "mcp", "supply": "mcp",
              "google": "traffic", "machine": "machine", "agents": "agents", "sessions": "agents",
              "digitalocean": "digitalocean", "cloudflare": "cloudflare"}
     out = dict(payload)
@@ -514,6 +514,9 @@ def page_html(template: str, page: str, payload: dict, locale: str = "en") -> st
     kind = next(p.kind for p in PAGE_TABLE if p.name == page)
     for body_kind, (slot, *_rest) in BODIES.items():
         fills[slot] = (lambda k=body_kind: body_html(k, page, payload, t)) if kind == body_kind else (lambda: "")
+    for section_page, (slot, module, func) in SECTIONS.items():
+        fills[slot] = ((lambda m=module, f=func: getattr(importlib.import_module(m), f)(payload, t))
+                       if page == section_page else (lambda: ""))
     return fill_placeholders(template, fills)
 
 

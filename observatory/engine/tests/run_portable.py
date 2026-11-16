@@ -60,7 +60,7 @@ LEGACY = (
     # Ported suites, first batch: they run over the synthetic estate above.
     'absent_fields', 'agent_faults', 'api_listings', 'caller_identity', 'clone_sync',
     'companion', 'companion_hook', 'dark_domain_cost', 'docs_current', 'export_scope',
-    'filesystem_scan', 'finding_rules', 'heroku', 'interpretation_contract', 'keyserver',
+    'filesystem_scan', 'finding_rules', 'mcp_supply_board', 'heroku', 'interpretation_contract', 'keyserver',
     'page_omission', 'plugin_reporting', 'projection_mirror', 'queue_order', 'rdap_keys',
     'recall', 'recount', 'release_cadence', 'remedy_fits', 'render_surface', 'review_queue',
     'serverd', 'stale_is_expected', 'store_modes', 'tick_standdown', 'trace_opens',
@@ -340,6 +340,8 @@ BOUNDARY += ('space_daemons',)
 BOUNDARY += ('rotation_consumers',)
 # OBS-552 (CP-05): the Installed tools page, coding agents, skills, plugins and hooks with their findings.
 BOUNDARY += ('tools_page',)
+# OBS-555 (CP-09): the supply-chain watch over MCP servers: command-line rules, tool definition pins, the scanners switch.
+BOUNDARY += ('mcp_supply',)
 SUITES = LEGACY + BOUNDARY
 #: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
 #: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.
@@ -387,6 +389,8 @@ ROOT_FILES = (
     'identity_map.py', 'identifiers.py', 'derivations.py', 'folder_attribution.py', 'fabric_attribution.py', 'ops_digest_folders.py', 'activity_collector.py', 'fabric_hub.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'sessions_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'tick_progress.py', 'tick_budget.py', 'dashboard_stamp.py', 'workspace.py',
     'workspace_upgrade.py', 'backup_vault.py', 'secret_store_carry.py', 'organizations.py', 'org_view.py', 'org_selection.py', 'machine_view.py', 'memory_snapshot.py', 'checkout_inventory.py', 'checkout_state.py', 'checkout_graph.py', 'cache_coverage.py', 'open_unlinked.py', 'coverage_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
     'configuration_door.py',
+    # The supply-chain watch over MCP servers (OBS-555).
+    'mcp_supply.py',
     # The Installed tools page's view (OBS-552).
     'tooling_view.py',
     'log_policy.py', 'code_freshness.py', 'session_reload.py', 'access_binding.py', 'embedding_policy.py',

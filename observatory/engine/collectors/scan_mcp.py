@@ -70,6 +70,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import paths  # per-user configuration and private state
 import atomic                                                       # noqa: E402
+import mcp_supply                                                   # noqa: E402
 import osproc  # noqa: E402
 import osproc                                                       # noqa: E402
 
@@ -184,7 +185,7 @@ def wire_of(agent: str, cfg: dict) -> str | None:
     return None
 
 
-def classify(name: str, cfg: dict, agent: str = "claude") -> dict:
+def classify(name: str, cfg: dict, agent: str = "claude", home: pathlib.Path | None = None) -> dict:
     """One declaration -> the facts a registry can hold. No values.
 
     Only names and booleans leave this function: the URL loses its query and its
@@ -228,6 +229,9 @@ def classify(name: str, cfg: dict, agent: str = "claude") -> dict:
         "key_in_header": keyed_header, "key_in_env": keyed_env,
         "command_present": (bool(shutil.which(cmd) or pathlib.Path(cmd).is_file())
                             if cmd else None),
+        # OBS-555: the supply-chain rules the command line trips, as ids. Judged here, beside the redaction, so
+        # the command line itself goes no further than this function.
+        "risky": mcp_supply.judge(cmd, args, str(HOME if home is None else home)) if cmd and not url else [],
         # Switched off in its own config: opencode `enabled: false`, Codex
         # `enabled = false`, Kiro and Gemini `disabled: true`.
         "disabled": cfg.get("enabled") is False or cfg.get("disabled") is True,
@@ -288,7 +292,7 @@ def read_sources(home: pathlib.Path | None = None) -> tuple[list[dict], list[dic
         sources.append({"agent": agent, "file": shown, "state": "read"})
         for name, cfg in _table(agent, doc).items():
             if isinstance(cfg, dict):
-                rows.append({**classify(str(name), cfg, agent), "agent": agent, "scope": "user",
+                rows.append({**classify(str(name), cfg, agent, home), "agent": agent, "scope": "user",
                              "declared_in": shown})
         if agent == "claude":
             for proj, pcfg in (doc.get("projects") or {}).items():
@@ -296,10 +300,40 @@ def read_sources(home: pathlib.Path | None = None) -> tuple[list[dict], list[dic
                     continue
                 for name, cfg in (pcfg.get("mcpServers") or {}).items():
                     if isinstance(cfg, dict):
-                        rows.append({**classify(str(name), cfg, agent), "agent": agent,
+                        rows.append({**classify(str(name), cfg, agent, home), "agent": agent,
                                      "scope": f"project:{_tilde(proj, home)}",
                                      "declared_in": f"{shown}#projects"})
     return rows, sources
+
+
+def launch_specs(home: pathlib.Path | None = None) -> dict[str, tuple[str, list[str]]]:
+    """{agent:name: (command, args)} for each enabled stdio server a config declares, for the tool listing of an
+    explicit probe (OBS-555). The pair stays in memory: it is never written, and no environment or header value
+    is read."""
+    home = HOME if home is None else home
+    out: dict[str, tuple[str, list[str]]] = {}
+    for agent, path in sources_for(home).items():
+        try:
+            doc = _load(agent, path) if path.is_file() else {}
+        except (OSError, ValueError):
+            continue
+        tables = [_table(agent, doc)]
+        if agent == "claude" and isinstance(doc, dict):
+            tables += [(p.get("mcpServers") or {}) for p in (doc.get("projects") or {}).values() if isinstance(p, dict)]
+        for table in tables:
+            for name, cfg in table.items():
+                if not isinstance(cfg, dict) or cfg.get("url") or cfg.get("httpUrl"):
+                    continue
+                if cfg.get("enabled") is False or cfg.get("disabled") is True:
+                    continue
+                cmd = cfg.get("command")
+                extra = []
+                if isinstance(cmd, list):
+                    cmd, extra = (str(cmd[0]) if cmd else ""), [str(a) for a in cmd[1:]]
+                if cmd:
+                    out.setdefault(mcp_supply.key_of(agent, str(name)),
+                                   (str(cmd), extra + [str(a) for a in (cfg.get("args") or [])]))
+    return out
 
 
 def read_declarations() -> list[dict]:
@@ -458,7 +492,7 @@ def carried(previous: dict | None) -> tuple[dict[str, dict], bool, str | None]:
 
 
 def scan(home: pathlib.Path | None = None, probe=None, *, declarations_only: bool = False,
-         previous: dict | None = None) -> dict:
+         previous: dict | None = None, tool_lister=None, pins_file: pathlib.Path | None = None) -> dict:
     """The whole scan as one document: declarations, liveness, sources, degraded.
 
     `probe` is the liveness source, `claude_probe` unless a caller hands in its
@@ -514,8 +548,17 @@ def scan(home: pathlib.Path | None = None, probe=None, *, declarations_only: boo
                          "key_in_env": False, "command_present": None, "disabled": False,
                          "liveness": pr["status"], "liveness_detail": pr["detail"],
                          **({"liveness_at": probed_at} if probed_at else {})})
+    # OBS-555: on an explicit probe only, list each stdio server's tools and pin their definitions. Never from the
+    # tick, never without a lister (the tests hand one in; `main` hands the real one).
+    tools_doc = None
+    if tool_lister is not None and not declarations_only:
+        risky = {mcp_supply.key_of(r["agent"], r["name"]): r.get("risky") or [] for r in rows if r.get("name")}
+        changes, why = mcp_supply.probe_tools(launch_specs(home), tool_lister, risky, path=pins_file)
+        degraded += why
+        tools_doc = {"probed_at": probed_at, "changed": sum(len(v) for v in changes.values())}
     rows.sort(key=lambda r: (r.get("agent") or "", r.get("name") or ""))
     return {"scanned_at": now(), "servers": rows, "sources": sources,
+            **({"tools": tools_doc} if tools_doc else {}),
             "own_server": OWN_SERVER,
             "own_declared": any(r.get("name") == OWN_SERVER for r in rows),
             "probe": probe_doc,
@@ -540,7 +583,8 @@ def main(argv: list[str]) -> int:
             previous = json.loads(out.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             previous = None
-    doc = scan(declarations_only=declarations_only, previous=previous)
+    doc = scan(declarations_only=declarations_only, previous=previous,
+               tool_lister=None if declarations_only else mcp_supply.stdio_tools)
     rows, degraded = doc["servers"], doc["degraded"]
     atomic.write_json(out, doc)
     by = {}

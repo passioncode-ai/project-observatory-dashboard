@@ -151,7 +151,7 @@ KNOWN_INTEGRATIONS = frozenset({
 DEFAULT_ON = {"integrations": frozenset({"vulnerabilities", "github_issues"}), "features": frozenset()}
 KNOWN_FEATURES = frozenset({
     "agent", "auto_cleanup", "companion_remediation", "embeddings", "fixture_cleanup",
-    "machine_watch", "notifications", "probe_fixture", "registry_history", "retention",
+    "machine_watch", "mcp_remote_scanners", "notifications", "probe_fixture", "registry_history", "retention",
     "scheduler", "wiki_projection"})
 KNOWN_SOURCES = frozenset({
     "cloudflare_snapshot", "companion_db", "companion_home", "domain_export", "gateway_root",

@@ -600,10 +600,23 @@ def act_workflow_handoff(body: dict) -> dict:
             "credentialsMissing": bool(out.get("credentialsMissing")), "degraded": out.get("degraded") or []}
 
 
+def act_mcp_accept(body: dict) -> dict:
+    """The MCP page's Accept buttons (OBS-555, CP-09): make the definitions a probe found the pinned ones, for one
+    server and tool or for every changed tool. The same function as `observatory_mcp_accept`. Audited with the server
+    and tool names only; no definition, digest or command line goes in or comes back."""
+    import mcp_supply
+    server, tool = body.get("server") or None, body.get("tool") or None
+    for label, value in (("server", server), ("tool", tool)):
+        if value is not None and (not isinstance(value, str) or len(value) > 200):
+            raise ValueError(f"{label} is a name of at most 200 characters")
+    audit("mcp-accept", server or "all", {"tool": tool or "all"})
+    return mcp_supply.accept_pending(server, tool)
+
+
 ACTIONS = {"mint": act_mint, "limit": act_limit, "revoke": act_revoke,
            "leak": act_leak, "reveal": act_reveal, "annotate": act_annotate,
            "disable": act_disable, "enable": act_enable, "rotate-key": act_rotate_key,
-           "configure": act_configure, "workflow-handoff": act_workflow_handoff}
+           "configure": act_configure, "workflow-handoff": act_workflow_handoff, "mcp-accept": act_mcp_accept}
 
 #: Refused on purpose, with the reason the caller needs rather than a 404.
 REFUSED = {

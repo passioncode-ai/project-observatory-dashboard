@@ -98,8 +98,9 @@ def sandbox(registry: dict | None = None, state: dict | None = None,
         for f in paths.STORE.glob("*.json"):
             shutil.copy2(f, work / "state" / f.name)
         for name, doc in state.items():
-            (work / "state" / f"{name}.json").write_text(
-                json.dumps(doc, ensure_ascii=False), encoding="utf-8")
+            target = work / "state" / f"{name}.json"      # a name may be nested: `state/mcp-pins`
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(json.dumps(doc, ensure_ascii=False), encoding="utf-8")
         env["OBSERVATORY_STATE"] = str(work / "state")
     if sql is not None:
         db = work / "t.db"

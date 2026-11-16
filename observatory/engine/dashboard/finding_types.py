@@ -155,6 +155,8 @@ LABELS: dict[str, str] = {
     "mcp.key_in_url": "MCP key in a URL",
     "mcp.needs_auth": "MCP server needs sign-in",
     "mcp.own_unregistered": "Observatory MCP server not declared",
+    "mcp.risky_command": "MCP server command line matching a supply-chain rule",
+    "mcp.tool_changed": "MCP server tool definition changed since it was pinned",
     "mcp.unreachable": "MCP server not answering",
     "memory.followed_rename": "Ledger follows a renamed project",
     "memory.orphan_subject": "Ledger names an unknown project",
@@ -247,7 +249,8 @@ LABELS: dict[str, str] = {
 GROUPS: dict[str, str] = {
     "secret.": "security", "credential.": "security", "env.": "security", "ssh.": "security",
     "dep.": "security", "agent.secret_": "security", "fixtures.leaked": "security", "wallet.shared_key": "security",
-    "mcp.key_in_url": "security", "harness.plaintext_secret": "security", "harness.hook_risk": "security",
+    "mcp.key_in_url": "security", "mcp.risky_command": "security", "mcp.tool_changed": "security",
+    "harness.plaintext_secret": "security", "harness.hook_risk": "security",
     "harness.skill_risk": "security",
     "site.": "availability", "domain.": "availability", "heroku.app_down": "availability",
     "digitalocean.app_down": "availability", "mcp.unreachable": "availability", "mcp.needs_auth": "availability",

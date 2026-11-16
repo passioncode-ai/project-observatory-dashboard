@@ -89,10 +89,16 @@ BODIES: dict[str, tuple[str, str, str, bool]] = {
     "infra": ("INFRA", "infra_page", "infra_html", True),
 }
 HOME_BODY = ("home_page", "home_html")
+#: A section a `table` page carries above its table, drawn at build time: page name -> (template slot, module,
+#: function). The table still renders into `#out`; the section is built for that page alone (OBS-555).
+SECTIONS: dict[str, tuple[str, str, str]] = {
+    "mcp": ("SUPPLY", "mcp_page", "mcp_html"),
+}
 #: The slots a template carries and the single page empties (`build_dashboard.py`), in template order.
-SLOTS = tuple(slot for slot, _m, _f, _p in BODIES.values())
+SLOTS = tuple(slot for slot, _m, _f, _p in BODIES.values()) + tuple(slot for slot, _m, _f in SECTIONS.values())
 #: The dashboard modules that draw a page body at build time (`test_i18n.py` reads their message ids).
-PAGE_MODULES = tuple(m for _s, m, _f, _p in BODIES.values()) + (HOME_BODY[0],)
+PAGE_MODULES = (tuple(m for _s, m, _f, _p in BODIES.values()) + (HOME_BODY[0],)
+                + tuple(m for _s, m, _f in SECTIONS.values()))
 
 PAGES: tuple[tuple[str, str, str], ...] = tuple((p.name, p.title, p.kind) for p in PAGE_TABLE)
 QUESTIONS: dict[str, str] = {p.name: p.question for p in PAGE_TABLE}

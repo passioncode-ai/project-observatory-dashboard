@@ -114,6 +114,16 @@
       "note": "the Agents page offers a stalled workflow, or one whose handoff lapsed, to another agent through the same store function (store/workflow.handoff_create) without a lease token: limit, crash or restart only"
     },
     {
+      "action": "mcp-accept",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_mcp_accept",
+      "tool": "observatory_mcp_accept",
+      "gate": null,
+      "status": "covered",
+      "row": "OBS-555",
+      "note": "the MCP page's Accept buttons make the definitions a probe found the pinned ones: the same function (mcp_supply.accept_pending), by server and tool or for every changed tool"
+    },
+    {
       "action": "init",
       "kind": "cli",
       "where": "workspace.py: init",
