@@ -7083,8 +7083,8 @@
       "path": "tick_budget.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "187b80e313fd137b449634934f15e4618ce6acb2a91604e7984f5e573b4adedf",
-      "bytes": 15894
+      "export_sha256": "c0f810a0a85e7a8541510d8643034d7cc1c48723d3ba2a81babfd1448949c6e9",
+      "bytes": 15997
     },
     {
       "path": "tick_health.py",
@@ -7998,8 +7998,8 @@
     {
       "path": "tools/tick_lease.py",
       "source_sha256": "e77182b3838aba63707e5e182c066b17fed6e195b2f18c67ee938c80236bad84",
-      "export_sha256": "189c8949f2521065bda067565fb53ff2c1b268f2b1a774d61bf020ba0d70c6fe",
-      "bytes": 36500,
+      "export_sha256": "02ef200b1364895306804d2a1051d198d78f09772b83f1a1d41d25115c3b0dbc",
+      "bytes": 36600,
       "python_comments_removed": 45,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,
