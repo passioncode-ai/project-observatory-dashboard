@@ -267,8 +267,8 @@ def run_external(scanner: str, mode: str, repo: pathlib.Path, *, log_opts: str |
     folder = tempfile.mkdtemp(prefix="observatory-key-sweep-")  # paths-check: allow - owner-only report folder, removed in the finally below on every path
     report = os.path.join(folder, "report.json")
     try:
-        fd = os.open(report, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        os.close(fd)
+        # mkdtemp made the folder owner-only (0700), so the report the scanner writes there is
+        # readable by this account alone whatever mode the scanner gives it.
         argv = [scanner, mode, str(repo), "-f", "json", "-r", report, "--redact", "--no-banner", "--exit-code", "0"]
         if mode == "git" and log_opts:
             argv += ["--log-opts", log_opts]

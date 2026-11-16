@@ -7471,8 +7471,8 @@
       "path": "tools/key_sweep.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "adb6a4653d75fe5abb2fa24161679f87213b61cd642835eaaf746d01f5a8d3d5",
-      "bytes": 41619
+      "export_sha256": "c1d8f4fa34c455162f2f382f9ef2233c22c3f3db1e1e0e8c4662a316308808d0",
+      "bytes": 41696
     },
     {
       "path": "tools/key_sweep_findings.py",
