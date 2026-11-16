@@ -1792,6 +1792,10 @@ def collect() -> list[dict]:
     import dependency_findings
     out.extend(dependency_findings.from_files(paths.REGISTRY / "dependencies.json",
                                               paths.SCRATCH / "vulnerabilities.json", TODAY))
+    # OUR VALUES IN THE ESTATE'S REPOSITORIES (OBS-554, tools/key_sweep_findings.py): what the maintenance job's
+    # key sweep found in working trees and histories, by keyed digest and place. Silent until it has run once.
+    import key_sweep_findings
+    out.extend(key_sweep_findings.from_file(paths.SCRATCH / "key-sweep.json"))
     # THE REVIEW QUEUE, both halves (OBS-227, tools/review_findings.py): what waits for a person after
     # the standing review policy took what it may. The registry proposals had no finding before.
     import review_findings

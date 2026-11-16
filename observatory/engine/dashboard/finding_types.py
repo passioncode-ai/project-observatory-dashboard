@@ -190,6 +190,7 @@ LABELS: dict[str, str] = {
     "rollup.frozen_incomplete": "Weekly rollup frozen incomplete",
     "scan.stale": "Scan out of date",
     "secret.identifier_seen": "Account identifiers outside their files",
+    "secret.in_repository": "Key in a repository",
     "secret.journal_unreadable": "Key journal unreadable",
     "secret.leak_scan_blind": "Leak scan cannot read a source",
     "secret.leak_scan_partial": "Leak scan cut short",

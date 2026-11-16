@@ -1225,6 +1225,15 @@ def build():
         PAYLOAD["tooling"] = tooling_view.summary(_found.get("items") or [] if isinstance(_found, dict) else None)
     except Exception as exc:  # noqa: BLE001: a page, not a crash
         PAYLOAD["tooling"] = {"degraded": [{"source": "tooling", "reason": f"{type(exc).__name__}: {exc}"[:200]}]}
+    # THE KEY SWEEP (OBS-554, CP-08): per repository the open sightings by rule and how far it read, from
+    # store/raw/key-sweep.json; counts only. Rendered into findings.html (shell.slice_for keeps it off the data).
+    try:
+        import key_sweep_page
+        _ks = paths.SCRATCH / "key-sweep.json"
+        PAYLOAD["key_sweep"] = key_sweep_page.summary(json.loads(_ks.read_text(encoding="utf-8"))
+                                                      if _ks.is_file() else None)
+    except Exception as exc:  # noqa: BLE001: a page, not a crash
+        PAYLOAD["key_sweep"] = {"state": "not-run", "degraded": [f"{type(exc).__name__}"]}
     # THE DISK PAGE'S SETTINGS (OBS-562): every key the configuration door declares for the guard and the cleanup,
     # with its value, default and whether a file sets it. A door that cannot read is named, never a blank table.
     try:

@@ -395,6 +395,7 @@ def slice_for(page: str, payload: dict) -> dict:
     # The installed tools are rendered into their page (dashboard/tools_page.py) and no script reads them: a
     # machine holds a thousand skills, so they ride on no page's data.
     out["tooling"] = None
+    out["key_sweep"] = None                         # rendered into findings.html at build time (OBS-554)
     if page == "disk":
         out["machine"] = payload.get("machine")     # the Disk page reads the machine survey too (OBS-562)
     if page != "domains":

@@ -37,12 +37,13 @@ REQUIRED = ["observatory_status", "observatory_project", "observatory_timeline",
 #: Every tool name `mcp/server.py` publishes in `tools/list` (OSS-07: existing MCP tool
 #: names stay available). Changing this list is changing the published surface.
 GOLDEN_TOOLS = [
-    # observatory_* tools (31)
+    # observatory_* tools (33)
     "observatory_assistant_ask", "observatory_assistant_conversation", "observatory_assistant_status",
     "observatory_checkpoint_latest", "observatory_checkpoint_write", "observatory_configure", "observatory_credentials",
     "observatory_dependencies",
     "observatory_explain", "observatory_findings", "observatory_handoff_accept",
     "observatory_handoff_create", "observatory_handoff_get", "observatory_key_consumers",
+    "observatory_key_sweep", "observatory_key_sweep_settle",
     "observatory_learn", "observatory_lesson",
     "observatory_machine", "observatory_org_accounts", "observatory_org_keys", "observatory_org_selection",
     "observatory_overview", "observatory_project", "observatory_propose", "observatory_recall",
@@ -166,6 +167,15 @@ async def run() -> None:
                   and coverage_result["coverage"]["checkouts"]["snapshot_count"] is None
                   and coverage_result["coverage"]["caches"]["reclaimable_bytes"] is None)
             await check_move_section(session, machine_tool)
+            # OBS-554: the key sweep before any sweep says so in degraded, never "no key found".
+            sweep = payload(await session.call_tool("observatory_key_sweep", {}))
+            check("key sweep before a sweep: no rows, and degraded names it",
+                  sweep.get("repositories") == [] and {d.get("source") for d in sweep.get("degraded") or []}
+                  == {"key-sweep"}, json.dumps(sweep)[:200])
+            refused = payload(await session.call_tool("observatory_key_sweep_settle",
+                                                      {"fingerprint": "hmac-sha256:" + "0" * 64, "why": "test"}))
+            check("settling a sighting no sweep found is a typed refusal",
+                  (refused.get("error") or {}).get("code") == "unknown-fingerprint", json.dumps(refused)[:200])
             # OBS-553: the dependency inventory before any scan is an empty page that says why, never "none".
             deps = payload(await session.call_tool("observatory_dependencies", {"vulnerableOnly": True}))
             check("dependencies before a scan: no rows, and degraded names the missing inventory and watch",

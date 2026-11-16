@@ -317,6 +317,9 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                             "registry/derivations.json",
                             # the dependency inventory `emit` wrote and the watch's answer (OBS-553)
                             "registry/dependencies.json", "store/raw/vulnerabilities.json",
+                            # the key sweep's fingerprints and places, written by the maintenance job's sweep
+                            # outside the step graph (OBS-554): declared so the read is known
+                            "store/raw/key-sweep.json",
                             "store/raw/bitbucket.json", "store/raw/domains_live.json",
                             "store/raw/local.json", "store/raw/model.json",
                             "store/raw/projection.json", "store/raw/vault.json",
@@ -361,6 +364,8 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                   # so it adds no ordering edge — declared because the page
                   # renders it.
                   "reads": ["store/raw/serverd.json",
+                            # the key sweep (OBS-554), for the Findings page's section; written outside the graph
+                            "store/raw/key-sweep.json",
                             # the Heroku config trail (names only) — the keys
                             # page's «Движения ключей» reads it for the releases
                             # nobody recorded; written by `heroku`
