@@ -339,5 +339,79 @@ def _plain(markup: str) -> str:
     return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", markup)).split())
 
 
+
+class ByProjectTest(unittest.TestCase):
+    """Sessions per project (docs/design/control-plane/sessions-per-project.md): the live rows, the ledger's
+    sessions with the step their workflow last wrote, and the open workflows, joined by id."""
+
+    DOC = {"sessions": [
+        {"agent": "claude-code", "project": "project:alpha", "folder_name": "alpha", "pid": 1, "managed": True,
+         "launch_id": "L1", "account_group": "g1", "last_turn_at": "2026-11-14T17:20:00Z", "quiet": True,
+         "state": "quiet"},
+        {"agent": "codex", "project": "project:alpha", "folder_name": "alpha", "pid": 2, "managed": False,
+         "launch_id": None, "account_group": None, "last_turn_at": "2026-11-14T17:10:00Z", "quiet": False,
+         "state": "working"},
+        {"agent": "claude-code", "project": None, "folder_name": "scratch", "pid": 3, "managed": False,
+         "launch_id": None, "account_group": None, "last_turn_at": None, "quiet": False, "state": "working"}]}
+    FLOWS = [
+        {"workflowId": "wf_open", "projectId": "project:alpha", "status": "open", "goal": "ship it",
+         "step": {"stepId": "build", "status": "in_progress", "revision": 3, "at": "2026-11-14T17:25:00Z"},
+         "stalled": False, "lease": {"holder": "agent:claude-code", "leaseRef": "lease_x"}},
+        {"workflowId": "wf_done", "projectId": "project:alpha", "status": "closed", "goal": "old",
+         "step": {"stepId": "final", "status": "done", "revision": 9, "at": "2026-11-14T10:00:00Z"}}]
+    LEDGER = [
+        {"sessionId": "s-new", "projectId": "project:alpha", "lastTurnAt": "2026-11-14T17:25:00Z", "turns": 4,
+         "workflowId": "wf_open", "active": True},
+        {"sessionId": "s-old", "projectId": "project:alpha", "lastTurnAt": "2026-11-14T10:00:00Z", "turns": 2,
+         "workflowId": "wf_done", "active": False},
+        {"sessionId": "s-free", "projectId": "project:beta", "lastTurnAt": "2026-11-14T12:00:00Z", "turns": 1,
+         "workflowId": None, "active": False},
+        {"sessionId": "s-none", "projectId": None, "lastTurnAt": "2026-11-14T12:00:00Z", "turns": 1,
+         "workflowId": None, "active": False}]
+
+    def test_joins_live_recent_and_workflows_per_project(self):
+        out = sessions_view.by_project(self.DOC, self.LEDGER, self.FLOWS)
+        self.assertEqual(sorted(out), ["project:alpha", "project:beta"])   # no project is invented
+        a = out["project:alpha"]
+        self.assertEqual([r["agent"] for r in a["live"]], ["codex", "claude-code"])   # working first
+        self.assertEqual(a["counts"], {"live": 2, "working": 1, "recent": 2, "workflows": 1})
+        self.assertEqual([r["sessionId"] for r in a["recent"]], ["s-new", "s-old"])
+        self.assertEqual(a["recent"][0]["workflow"]["stepId"], "build")      # what it last did
+        self.assertEqual(a["recent"][1]["workflow"]["stepStatus"], "done")   # a closed workflow still names its step
+        self.assertEqual([w["workflowId"] for w in a["workflows"]], ["wf_open"])   # only open ones listed
+        self.assertEqual(a["workflows"][0]["executor"], "agent:claude-code")
+        self.assertIsNone(out["project:beta"]["recent"][0]["workflow"])
+        self.assertNotIn("pid", a["live"][0])
+        self.assertNotIn("leaseRef", json.dumps(out))                         # no lease handle leaves
+
+    def test_unknown_workflow_keeps_its_id_only(self):
+        out = sessions_view.by_project({}, [{"sessionId": "s", "projectId": "project:a", "lastTurnAt": "x",
+                                             "turns": 1, "workflowId": "wf_gone", "active": False}], [])
+        self.assertEqual(out["project:a"]["recent"][0]["workflow"], {"workflowId": "wf_gone"})
+
+    def test_empty_and_malformed_sources(self):
+        self.assertEqual(sessions_view.by_project(None, None, None), {})
+        self.assertEqual(sessions_view.by_project({"sessions": ["x", None]}, ["y"], ["z", {"x": 1}]), {})
+
+    def test_bounded(self):
+        doc = {"sessions": [dict(self.DOC["sessions"][1], pid=i) for i in range(sessions_view.MAX_PROJECT_ROWS + 5)]}
+        a = sessions_view.by_project(doc, [], [])["project:alpha"]
+        self.assertEqual(len(a["live"]), sessions_view.MAX_PROJECT_ROWS)
+        self.assertEqual(a["counts"]["live"], sessions_view.MAX_PROJECT_ROWS + 5)
+
+    def test_projects_without_store_says_so(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = sessions_view.projects(pathlib.Path(tmp), doc=self.DOC, now=NOW)
+        self.assertEqual(out["schema"], "project-sessions/1")
+        self.assertIn("no-store", [d["code"] for d in out["degraded"]])
+        self.assertEqual(out["projects"]["project:alpha"]["counts"]["live"], 2)
+
+    def test_projects_not_readable_reads_no_store(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = sessions_view.projects(pathlib.Path(tmp), doc=self.DOC, now=NOW, read_store=False)
+        self.assertIn("not-readable", [d["code"] for d in out["degraded"]])
+        self.assertEqual(out["projects"]["project:alpha"]["recent"], [])
+
+
 if __name__ == "__main__":
-    unittest.main(verbosity=2)
+    unittest.main()
