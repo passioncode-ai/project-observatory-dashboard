@@ -1250,6 +1250,17 @@ def build():
     except Exception as exc:  # noqa: BLE001 (a page, not a crash)
         PAYLOAD["machine"]["diskSettings"] = {"settings": [], "degraded": [
             {"source": "configuration", "code": "unreadable", "reason": f"{type(exc).__name__}"}]}
+    # THE INTEGRATIONS PAGE (OBS-557): each held key's validity, drift of a collector's answer, untracked providers
+    # (store/raw/integration-health.json) and the issue filer's map and banner (store/state/issues.json).
+    try:
+        import integration_health
+        import issue_filer
+        _view = integration_health.agent_view(raw_path=paths.SCRATCH / "integration-health.json")
+        _view["issues"] = issue_filer.agent_view(paths.STATE / "state" / "issues.json")
+        PAYLOAD["integrations"] = _view
+    except Exception as exc:  # noqa: BLE001 (a page, not a crash)
+        PAYLOAD["integrations"] = {"keys": [], "drift": [], "untracked": [], "issues": {}, "degraded": [
+            {"source": "integrations", "reason": f"{type(exc).__name__}: {exc}"[:200]}]}
     # THE AGENTS: workflows, handoffs and sessions, read-only from the store;
     # only the Agents page carries it (shell.slice_for), and the overview card
     # reads its counters.
@@ -1818,6 +1829,7 @@ body[data-page="agents"] #out, body[data-page="agents"] #list-tools,
 body[data-page="index"] #panel, body[data-page="findings"] #panel, body[data-page="health"] #panel,
 body[data-page="machine"] #panel, body[data-page="agents"] #panel,
 body[data-page="disk"] #out, body[data-page="disk"] #list-tools, body[data-page="disk"] #panel,
+body[data-page="integrations"] #out, body[data-page="integrations"] #list-tools, body[data-page="integrations"] #panel,
 body[data-page="digitalocean"] #out, body[data-page="digitalocean"] #list-tools, body[data-page="digitalocean"] #panel,
 body[data-page="cloudflare"] #out, body[data-page="cloudflare"] #list-tools, body[data-page="cloudflare"] #panel { display: none; }
 /* The Agents page: server-rendered cards (dashboard/agents_page.py). */
@@ -1858,7 +1870,7 @@ body[data-page="cloudflare"] #out, body[data-page="cloudflare"] #list-tools, bod
 @media (max-width: 640px) { .agents-lane { flex-direction: column; align-items: stretch; } }
 /* The Machine page: server-rendered cards (dashboard/machine_page.py). */
 .machine-h { font: 600 var(--t-section) var(--font-ui); margin: 0 0 var(--space-3); }
-#machine thead th.num, #disk thead th.num { text-align: right; }
+#machine thead th.num, #disk thead th.num, #integrations thead th.num { text-align: right; }
 /* The Installed tools page: server-rendered cards (dashboard/tools_page.py, OBS-552). */
 .tools-agent { margin-top: var(--space-4); }
 .tools-h { font: 600 var(--t-label) var(--font-ui); text-transform: uppercase; letter-spacing: .06em;
@@ -4975,6 +4987,24 @@ fromHash();
     const n = input && input.value !== "" ? Number(input.value) : NaN;
     if (!Number.isFinite(n)) { toast(T("enter a number first")); return; }
     preview(el.dataset.cfgKey, n);
+  });
+})();
+// THE ISSUES NOTICE'S DISMISS BUTTON (OBS-557, CP-14), on Home and the Integrations page. Built disabled; served by
+// the local control server with its token (LIVE) it posts the `issues-banner` action, which stores the dismissal
+// (the same store function as the agent's observatory_issues). Opened as a file there is no server to ask.
+(function issuesBanner() {
+  if (typeof document === "undefined" || !document.querySelectorAll) return;
+  const box = document.getElementById("issues-notice");
+  if (!box || !LIVE) return;
+  const btn = box.querySelector("[data-issues-dismiss]");
+  if (!btn) return;
+  btn.disabled = false;
+  for (const a of ["title", "data-t-title", "data-t-title-args"]) btn.removeAttribute(a);
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    try { await call("issues-banner", {op: "dismiss"}); box.remove(); }
+    catch (err) { btn.disabled = false; toast(err instanceof Uncertain ? T("the outcome is unknown: {why}", {why: err.message})
+                                                                      : T("not dismissed: {why}", {why: err.message})); }
   });
 })();
 // THE AGENTS PAGE'S BUTTONS (OBS-551, CP-02). A stalled workflow, or one whose handoff lapsed,

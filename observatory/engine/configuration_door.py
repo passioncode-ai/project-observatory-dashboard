@@ -121,6 +121,11 @@ FEATURE_TEXT = {
 INTEGRATION_TEXT = {
     "vulnerabilities": "the dependency watch: public package names and versions go to OSV; local ones never leave",
     "github_issues": "file findings as issues in the project's own repository",
+    "github_issues_dependencies": "the issue filer's class: vulnerable dependencies (needs github_issues)",
+    "github_issues_integrations": "the issue filer's class: refused provider keys, drifted provider answers and "
+                                  "providers nothing watches (needs github_issues)",
+    "github_issues_keys": "the issue filer's class: findings about keys and secrets, never into a public repository "
+                          "(needs github_issues)",
     "key_sweep": "the key sweep: the estate's repositories read for our own values and key-shaped text; "
                  "only keyed digests and places are kept, and nothing is sent",
 }

@@ -1093,6 +1093,55 @@ def observatory_mcp_accept(
     return mcp_supply.accept_pending(server_name, tool)
 
 
+@server.tool()
+def observatory_integrations(
+    state: Annotated[str | None, Field(description="Only keys in this state: `invalid`, `unreachable`, `unreadable` or "
+                                                    "`valid`.")] = None,
+) -> dict[str, Any]:
+    """Whether each held provider key is still accepted, whether a collector's stored provider answer lost a field
+    it relies on, and which providers a project uses that no door or collector here covers.
+
+    Read-only, from `store/raw/integration-health.json` (`checkedOn`): each key is asked once a UTC day through its
+    door's own validity call, and is named by its slot, never by value. A 401 or 403 is `invalid`; any other failure
+    is `unreachable` and says nothing about the key. `drift` rows carry the collector, the field and the day it was
+    last seen; `untracked` rows carry the project, the provider and the package or variable NAMES that point at it.
+    A step that has not run, or an offline run, is named in `degraded`. Design:
+    docs/design/control-plane/integration-health.md.
+    """
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
+    import integration_health
+    view = integration_health.agent_view()
+    if state:
+        view["keys"] = [k for k in view["keys"] if k.get("state") == state]
+    return view
+
+
+@server.tool()
+def observatory_issues(
+    state: Annotated[str | None, Field(description="Only issues in this state: `open`, `closed` or `not-filed`.")] = None,
+    dismissBanner: Annotated[bool, Field(validation_alias=AliasChoices("dismissBanner", "dismiss_banner"),
+                                         description="Dismiss the one-time notice that the engine opens issues "
+                                                     "(the same act as the dashboard's Dismiss button). Writes "
+                                                     "only that dismissal.")] = False,
+) -> dict[str, Any]:
+    """The issues the engine opened in projects' own repositories for findings: the map of fingerprint to
+    repository, issue number and state (`open`, `closed`, or `not-filed` with the reason: no project, no
+    repository, no write access, a public repository for a key finding), the last run (filed, closed, waiting
+    for the next run, stopped by a rate limit) and the notice's state.
+
+    Read-only from `store/state/issues.json`, except `dismissBanner`. Never a value: a body is built from the
+    finding's text and names. The filer is on by default for dependency and integration findings; switch it with
+    `observatory_configure` (`integrations.github_issues` and, per class, `github_issues_dependencies`,
+    `github_issues_integrations`, `github_issues_keys`). A filer that has not run, is off, or was stopped is named
+    in `degraded`. Design: docs/design/control-plane/integration-health.md.
+    """
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
+    import issue_filer
+    if dismissBanner:
+        issue_filer.dismiss_banner(issue_filer.default_path())
+    return issue_filer.agent_view(state=state)
+
+
 MACHINE_TOP = 10
 #: Skills per page of `observatory_machine(section="skills")`: a machine measured holding 1,269 skills made an
 #: unpaged answer of 151,536 characters, past what a host keeps of one tool result, and 200 skills beside its 116

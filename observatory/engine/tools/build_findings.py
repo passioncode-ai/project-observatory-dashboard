@@ -1792,6 +1792,10 @@ def collect() -> list[dict]:
     import dependency_findings
     out.extend(dependency_findings.from_files(paths.REGISTRY / "dependencies.json",
                                               paths.SCRATCH / "vulnerabilities.json", TODAY))
+    # INTEGRATION HEALTH (OBS-557, tools/integration_findings.py): a refused key, a collector's answer that changed
+    # shape, a provider no door covers. Silent until the step has run once.
+    import integration_findings
+    out.extend(integration_findings.from_file(paths.SCRATCH / "integration-health.json"))
     # OUR VALUES IN THE ESTATE'S REPOSITORIES (OBS-554, tools/key_sweep_findings.py): what the maintenance job's
     # key sweep found in working trees and histories, by keyed digest and place. Silent until it has run once.
     import key_sweep_findings

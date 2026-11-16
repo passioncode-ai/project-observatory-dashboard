@@ -42,8 +42,8 @@ GOLDEN_TOOLS = [
     "observatory_checkpoint_latest", "observatory_checkpoint_write", "observatory_configure", "observatory_credentials",
     "observatory_dependencies",
     "observatory_explain", "observatory_findings", "observatory_handoff_accept",
-    "observatory_handoff_create", "observatory_handoff_get", "observatory_key_consumers",
-    "observatory_key_sweep", "observatory_key_sweep_settle",
+    "observatory_handoff_create", "observatory_handoff_get", "observatory_integrations", "observatory_issues",
+    "observatory_key_consumers", "observatory_key_sweep", "observatory_key_sweep_settle",
     "observatory_learn", "observatory_lesson",
     "observatory_machine", "observatory_mcp_accept", "observatory_mcp_supply", "observatory_org_accounts", "observatory_org_keys", "observatory_org_selection",
     "observatory_overview", "observatory_project", "observatory_propose", "observatory_recall",
@@ -181,6 +181,18 @@ async def run() -> None:
             check("dependencies before a scan: no rows, and degraded names the missing inventory and watch",
                   deps.get("packages") == [] and {d.get("source") for d in deps.get("degraded") or []}
                   >= {"dependencies", "osv"}, json.dumps(deps)[:200])
+            # OBS-557: before any run, the integration health and the issue map are empty pages that say why.
+            health = payload(await session.call_tool("observatory_integrations", {}))
+            check("integrations before a run: no rows, and degraded says the step has not run",
+                  health.get("keys") == [] and bool(health.get("degraded")), json.dumps(health)[:200])
+            issues = payload(await session.call_tool("observatory_issues", {"state": "open"}))
+            check("issues before a run: no rows, the notice is shown, and degraded says the filer has not run",
+                  issues.get("issues") == [] and bool(issues.get("degraded"))
+                  and (issues.get("banner") or {}).get("show") is True, json.dumps(issues)[:200])
+            done = payload(await session.call_tool("observatory_issues", {"dismissBanner": True}))
+            check("dismissBanner stores the dismissal and the notice is no longer shown",
+                  (done.get("banner") or {}).get("show") is False
+                  and (done.get("banner") or {}).get("dismissed_on"), json.dumps(done)[:200])
             names = sorted(t.name for t in listed.tools)
             missing = [t for t in REQUIRED if t not in names]
             check("every required tool and capability is served", not missing, f"missing {missing}")

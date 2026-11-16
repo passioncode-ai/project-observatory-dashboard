@@ -81,6 +81,12 @@ ACROSS_TICKS: dict[tuple[str, str], str] = {
     ("vulnerabilities", "registry/dependencies.json"):
         "the daily OSV pass reads the inventory the previous emit wrote; a lockfile changed this "
         "tick is asked about at the next pass, which the watch runs as soon as the inventory moves.",
+    ("integration-health", "registry/dependencies.json"):
+        "the untracked providers are read from the inventory the previous emit wrote, the same fixpoint as the "
+        "vulnerability watch: a lockfile changed this tick is mapped at the next pass.",
+    ("integration-health", "registry/env-inventory.json"):
+        "the variable names come from the env inventory the previous emit wrote; a new variable is mapped at the "
+        "next pass.",
     ("vulnerabilities", "registry/projects.json"):
         "read only by the agent's view in the same file (`observatory_dependencies`), never by the step.",
     ("scan-sessions", "registry/projects.json"):
@@ -152,6 +158,13 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
     # The daily OSV pass over the inventory the emit wrote; its cache and state live in the store.
     "vulnerabilities": {"writes": ["store/raw/vulnerabilities.json"],
                         "reads": ["registry/dependencies.json", "registry/projects.json"]},
+    # Each held key asked once a day (OBS-557): the doors' stashes are the estate's files, not an artefact a step
+    # writes. Drift reads the raw answers of the collectors, untracked reads what the previous emit wrote.
+    "integration-health": {"writes": ["store/raw/integration-health.json"],
+                           "reads": ["registry/dependencies.json", "registry/env-inventory.json",
+                                     "store/raw/openrouter.json", "store/raw/cloudflare_zones.json",
+                                     "store/raw/cloudflare_account.json", "store/raw/digitalocean.json",
+                                     "store/raw/google.json"]},
     # WHAT PRODUCTION HOLDS. It reads the application list the
     # `heroku` step wrote — the ordering is real, there is nothing to ask about
     # without it — and the vault's archives, which no step writes.
@@ -317,6 +330,8 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                             "registry/derivations.json",
                             # the dependency inventory `emit` wrote and the watch's answer (OBS-553)
                             "registry/dependencies.json", "store/raw/vulnerabilities.json",
+                            # key validity, drift and untracked providers (OBS-557)
+                            "store/raw/integration-health.json",
                             # the key sweep's fingerprints and places, written by the maintenance job's sweep
                             # outside the step graph (OBS-554): declared so the read is known
                             "store/raw/key-sweep.json",
@@ -359,6 +374,10 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
     # of its source could see: both are resolved through `paths` and a glob.
     # `store/provider-health.json` and `store/wallet.json` are written by
     # `agent`, so declaring them is what puts the page after the run it reports.
+    # The issue filer (OBS-557): reads the findings `findings` wrote and the repository registry; the map of
+    # fingerprints to issues is kept in the store's state folder.
+    "issues": {"writes": ["store/state/issues.json"],
+               "reads": ["registry/findings.json", "registry/repositories.json", "registry/relations.json"]},
     "dashboard": {"writes": ["docs/projects-dashboard.html", "docs/dashboard"],
                   # `serverd.json` is the daemon's heartbeat: no step writes it,
                   # so it adds no ordering edge — declared because the page
@@ -383,6 +402,8 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                             "registry/relations.json", "registry/domains.json",
                             "registry/duplicate-repo-names.json",
                             "registry/findings.json", "registry/domain-liveness.json",
+                            # the Integrations page (OBS-557): key validity, drift, untracked, and the issue map
+                            "store/raw/integration-health.json", "store/state/issues.json",
                             "store/wallet.json", "store/provider-health.json",
                             "plugins"]},
     "smoke":     {"writes": [], "reads": ["docs/projects-dashboard.html"]},

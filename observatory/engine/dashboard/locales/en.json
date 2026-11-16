@@ -749,6 +749,14 @@
   "one": "{n} handoff waiting",
   "other": "{n} handoffs waiting"
  },
+ "{n} answers changed": {
+  "one": "{n} answer changed",
+  "other": "{n} answers changed"
+ },
+ "{n} keys refused": {
+  "one": "{n} key refused",
+  "other": "{n} keys refused"
+ },
  "{n} turns": {
   "one": "{n} turn",
   "other": "{n} turns"

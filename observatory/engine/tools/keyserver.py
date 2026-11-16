@@ -600,6 +600,15 @@ def act_workflow_handoff(body: dict) -> dict:
             "credentialsMissing": bool(out.get("credentialsMissing")), "degraded": out.get("degraded") or []}
 
 
+def act_issues_banner(body: dict) -> dict:
+    """Dismiss the issue filer's one-time notice (OBS-557, CP-14): stored in `store/state/issues.json`, the same
+    function the agent's `observatory_issues` calls with `dismissBanner`. Nothing else is written."""
+    if body.get("op") != "dismiss":
+        raise ValueError("op is dismiss")
+    import issue_filer
+    audit("issues-banner", "dismiss", {})
+    return {"ok": True, **issue_filer.dismiss_banner(issue_filer.default_path())}
+
 def act_mcp_accept(body: dict) -> dict:
     """The MCP page's Accept buttons (OBS-555, CP-09): make the definitions a probe found the pinned ones, for one
     server and tool or for every changed tool. The same function as `observatory_mcp_accept`. Audited with the server
@@ -616,7 +625,8 @@ def act_mcp_accept(body: dict) -> dict:
 ACTIONS = {"mint": act_mint, "limit": act_limit, "revoke": act_revoke,
            "leak": act_leak, "reveal": act_reveal, "annotate": act_annotate,
            "disable": act_disable, "enable": act_enable, "rotate-key": act_rotate_key,
-           "configure": act_configure, "workflow-handoff": act_workflow_handoff, "mcp-accept": act_mcp_accept}
+           "configure": act_configure, "workflow-handoff": act_workflow_handoff,
+           "issues-banner": act_issues_banner, "mcp-accept": act_mcp_accept}
 
 #: Refused on purpose, with the reason the caller needs rather than a 404.
 REFUSED = {

@@ -135,6 +135,10 @@ STEPS = {
     # Cached for twelve hours inside the scan: thirty-eight properties is
     # seventy-six calls and a minute, and analytics settle daily.
     "google":    [PY, "collectors/scan_google.py", "store/raw/google.json"],
+    # Each held key asked once a day, a collector's answer checked for drift, providers nothing here watches (OBS-557).
+    "integration-health": [PY, "tools/integration_health.py"],
+    # Findings of the allowed classes become issues in the project's own repository, closed with them (OBS-557).
+    "issues":    [PY, "tools/issue_filer.py"],
     "leaks":     [PY, "tools/scan_leaks.py"],
     "use":       [PY, "tools/use_secret.py", "--help"],
     "probes":    [PY, "tools/run_probes.py"],
@@ -657,6 +661,12 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   vulnerabilities [--force]    the daily OSV pass over that inventory and the known-exploited catalogue;
                                local and private packages are never sent (integration vulnerabilities, on
                                by default: `configure integrations vulnerabilities false` turns it off)
+  integration-health [--force] each held key asked once a day whether its provider still accepts it, the
+                               collectors' stored answers checked for a renamed field, and the providers a
+                               project uses that no door covers; no value is stored
+  issues [--dry-run]           open an issue in a project's own repository for a finding of an allowed class
+                               (vulnerable dependencies and integration findings by default; integration
+                               github_issues and one switch per class), close it with the finding; never a value
   key-sweep [--full] [--settle FINGERPRINT --why TEXT]  our own values and key-shaped text in the working
                                trees and Git history of every project's clone, on a resumable daily budget
                                (the maintenance job runs it); keeps keyed digests and places, never a value;
@@ -751,6 +761,8 @@ FIXTURE_HOME = re.compile(r"(?:/|[A-Za-z]:[\\/])[^\x00-\x1f]{0,4095}")
 STEP_OPTIONS: dict[str, dict[str, tuple[str | None, re.Pattern | None, str]]] = {
     "google": {"--force": (None, None, "re-fetch inside the twelve-hour cache window")},
     "vulnerabilities": {"--force": (None, None, "ask OSV now, even when today's pass is done")},
+    "issues": {"--dry-run": (None, None, "plan only: say what would be filed and closed, write nothing")},
+    "integration-health": {"--force": (None, None, "ask every held key now, even when today's check is done")},
     "key-sweep": {"--full": (None, None, "forget every history's place and read it again"),
                   "--settle": ("FINGERPRINT", SWEEP_FINGERPRINT, "close a sighting of an unknown value gone from "
                                                                    "the working tree"),

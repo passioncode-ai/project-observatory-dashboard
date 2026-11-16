@@ -144,6 +144,19 @@
         "handoffId"
       ]
     },
+    "observatory_integrations": {
+      "input": [
+        "state"
+      ],
+      "required": []
+    },
+    "observatory_issues": {
+      "input": [
+        "dismissBanner",
+        "state"
+      ],
+      "required": []
+    },
     "observatory_key_consumers": {
       "input": [
         "env",
@@ -345,6 +358,7 @@
     },
     "observatory_sessions": {
       "input": [
+        "projectId",
         "refresh"
       ],
       "required": []

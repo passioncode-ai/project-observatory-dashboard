@@ -88,6 +88,9 @@ LABELS: dict[str, str] = {
     "dep.vulnerable": "Dependency with a known vulnerability",
     "dep.watch_stale": "Vulnerability watch out of date",
     "domain.dark": "Domain does not resolve",
+    "integration.drift": "Provider answer changed shape",
+    "integration.key_invalid": "Key refused by its provider",
+    "integration.untracked": "Provider in use that nothing watches",
     "domain.expiring": "Domain expiring",
     "domain.hold": "Domain on registrar hold",
     "domain.hold_unknown": "Domain hold status unknown",
@@ -249,7 +252,7 @@ LABELS: dict[str, str] = {
 #: that does not answer.
 GROUPS: dict[str, str] = {
     "secret.": "security", "credential.": "security", "env.": "security", "ssh.": "security",
-    "dep.": "security", "agent.secret_": "security", "fixtures.leaked": "security", "wallet.shared_key": "security",
+    "dep.": "security", "integration.": "security", "agent.secret_": "security", "fixtures.leaked": "security", "wallet.shared_key": "security",
     "mcp.key_in_url": "security", "mcp.risky_command": "security", "mcp.tool_changed": "security",
     "harness.plaintext_secret": "security", "harness.hook_risk": "security",
     "harness.skill_risk": "security",
