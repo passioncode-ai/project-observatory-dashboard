@@ -364,7 +364,9 @@ python "$(project-observatory full-path)/tools/vault.py" put PROJECT ENV NAME   
 `PROJECT` is the project's folder name (`alpha-web`, the directory under your `projects` source);
 its registry id (`project:local-alpha-web`, or `local-alpha-web`) is accepted too and normalised to
 that folder, and the command prints which folder it used, so one project keeps one vault directory.
-A name two projects claim (a folder of one, the id of another) is refused with both named.
+A name two projects claim (a folder of one, the id of another) is refused with both named. One exception: when
+two projects keep checkouts of the same basename, the one whose id or name is that basename files its keys
+there, and the other files under the slug of its own id (OBS-574).
 `ENV` is one of `local`, `stage` or `prod`, and `NAME` is UPPER_SNAKE_CASE.
 The command accepts the value only on stdin. The same tool manages the slot afterwards —
 `list`, `rotate` (the new value on stdin; the old one is archived at mode 600), `leak` and

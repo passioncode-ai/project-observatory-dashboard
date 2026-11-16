@@ -64,7 +64,8 @@ signed app, a request is answered `no-client` with that step.
 All commands below are Python scripts under `OBSERVATORY_ROOT/tools`. `PROJECT`,
 `ENV` and `NAME` are placeholders for existing user-selected names. `PROJECT` is
 the project's folder name; its registry id (`project:<slug>` or the bare slug) is
-accepted and normalised to that folder, and a name two projects claim is refused.
+accepted and normalised to that folder, and a name two projects claim is refused. Two checkouts
+with one basename: the project named by it keeps that folder, the other files under its id's slug.
 `ENV` is `local`, `stage` or `prod`; choose production only when the task calls
 for it. A name or note shaped like a credential is refused, never stored.
 

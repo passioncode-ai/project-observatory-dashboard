@@ -1017,8 +1017,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "3df20a2599b50ea93673d3e950a23a84429390cd37f68639994767fc0129d401",
-      "bytes": 333437,
+      "export_sha256": "70c804758886cb5d13e5ed1ca9ac5eb782150d972c17efceab1e165aade99e31",
+      "bytes": 333631,
       "upstream_modified": true
     },
     {
@@ -4131,8 +4131,8 @@
     {
       "path": "skill/plugins/observatory-log/skills/handling-secrets/SKILL.md",
       "source_sha256": "67dc698443f16d1ca67204a3e54a0defad678947f00397268c5191cf77a4ed97",
-      "export_sha256": "e60ba4cf6b628276fbc414bb53f8033a1fae149d420fe220ad51a043080dc630",
-      "bytes": 28272,
+      "export_sha256": "0ae51a81e78c7602dd8eb9611d750de0a6d2b449de1e8a2fa524600ab06db00b",
+      "bytes": 28385,
       "upstream_modified": true
     },
     {
@@ -6845,8 +6845,8 @@
       "path": "tests/test_vault_project.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5dc8169336acc08cd6129915efaf9124da37a05e6811c869ae79325767d20956",
-      "bytes": 17003
+      "export_sha256": "2ee561aad087c756b6437a0b1fcd9556fa0b7ac525852674e62752e77642efa3",
+      "bytes": 19444
     },
     {
       "path": "tests/test_vector_namespaces.py",
@@ -8013,8 +8013,8 @@
       "path": "vault_project.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6e75866c66cf05d3eb89daec6dafbfd308de1fb0b02268f0be326169684a67e5",
-      "bytes": 7429
+      "export_sha256": "f742a136aaa1b804dfd125452063cb1cdae77c59d1af11501e8ab76a19830bf2",
+      "bytes": 9835
     },
     {
       "path": "why_asks.py",
