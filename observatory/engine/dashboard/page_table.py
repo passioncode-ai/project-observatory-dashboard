@@ -54,6 +54,9 @@ PAGE_TABLE: tuple[Page, ...] = (
          "infrastructure", 4),
     Page("health", "Health", "health", "Observer state, data freshness and the agents' records.",
          "monitoring", 0),
+    Page("integrations", "Integrations", "integrations",
+         "Are the held provider keys still accepted, did a provider change an answer, and which issues were filed.",
+         "monitoring", 3),
     Page("machine", "Machine", "machine",
          "What runs on this machine, where memory and disk go, and what was cleaned.", "system", 0),
     Page("tools", "Installed tools", "tools",
@@ -85,6 +88,7 @@ BODIES: dict[str, tuple[str, str, str, bool]] = {
     "machine": ("MACHINE", "machine_page", "machine_html", False),
     "tools": ("TOOLS", "tools_page", "tools_html", False),
     "disk": ("DISK", "disk_page", "disk_html", False),
+    "integrations": ("INTEGRATIONS", "integrations_page", "integrations_html", False),
     "agents": ("AGENTS", "agents_page", "agents_html", False),
     "infra": ("INFRA", "infra_page", "infra_html", True),
     # The Findings page's build-time section above its list: keys found in repositories (OBS-554).

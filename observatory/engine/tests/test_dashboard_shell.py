@@ -329,7 +329,7 @@ class MonitoringNavigation(unittest.TestCase):
         self.assertEqual([k for k, _l, _n in shell.NAV_GROUPS],
                          ["monitoring", "work", "infrastructure", "access", "system"])
         groups = {k: names for k, _l, names in shell.NAV_GROUPS}
-        self.assertEqual(groups["monitoring"], ("health", "security", "availability"))
+        self.assertEqual(groups["monitoring"], ("health", "security", "availability", "integrations"))
         self.assertEqual(groups["work"], ("index", "projects", "agents", "findings"))
         self.assertEqual(groups["system"], ("machine", "tools", "disk"))
         listed = [n for names in groups.values() for n in names if n not in shell.NAV_LINKS]

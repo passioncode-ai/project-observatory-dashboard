@@ -114,6 +114,16 @@
       "note": "the Agents page offers a stalled workflow, or one whose handoff lapsed, to another agent through the same store function (store/workflow.handoff_create) without a lease token: limit, crash or restart only"
     },
     {
+      "action": "issues-banner",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_issues_banner",
+      "tool": "observatory_issues",
+      "gate": null,
+      "status": "covered",
+      "row": "OBS-557",
+      "note": "Home and the Integrations page's Dismiss button stores the one-time notice's dismissal; the tool does the same with dismissBanner"
+    },
+    {
       "action": "mcp-accept",
       "kind": "dashboard",
       "where": "tools/keyserver.py: act_mcp_accept",
@@ -1131,6 +1141,13 @@
         "commit-registry",
         "scrub-companion",
         "vulnerabilities"
+      ]
+    },
+    {
+      "reason": "integration health and the issue filer (OBS-557): pipeline steps run by the tick; an agent reads the key checks through observatory_integrations and the issue map, the last run and the notice through observatory_issues, and switches the filer through observatory_configure",
+      "commands": [
+        "integration-health",
+        "issues"
       ]
     },
     {

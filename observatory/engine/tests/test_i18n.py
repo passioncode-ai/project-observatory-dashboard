@@ -239,7 +239,7 @@ UNTRANSLATED = {"Heroku", "ENV", "MCP", "Cloudflare", "DigitalOcean", "GA4", "RD
 class SourcesCarryNoRussian(unittest.TestCase):
     def test_dashboard_sources(self):
         for name in ("build_dashboard.py", "shell.py", "page_table.py", "workspace.css", "i18n.py",
-                     "finding_types.py", "subject_links.py", "machine_page.py", "infra_page.py", "tools_page.py", "disk_page.py"):
+                     "finding_types.py", "subject_links.py", "machine_page.py", "infra_page.py", "tools_page.py", "disk_page.py", "integrations_page.py"):
             text = (DASH / name).read_text(encoding="utf-8")
             if name == "i18n.py":
                 text = text.replace('"ru": "Русский"', "")

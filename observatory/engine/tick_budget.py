@@ -133,6 +133,8 @@ TAIL_ORDER: tuple[str, ...] = (
     "merge", "emit", "validate", "events", "snapshot", "diff", "fabric-attribution", "index",
     "retention", "sweep", "corroborate", "review-policy", "ledger", "lost", "plugins", "rollup",
     "learning-review-due", "learning-review", "agent", "findings",
+    # The integration issue filer (OBS-557): optional, after the findings it files from.
+    "issues",
     "dashboard", "smoke", "findings-recheck", "notify", "registry", "project-into-vault", "projection",
     "links", "logs",
 )

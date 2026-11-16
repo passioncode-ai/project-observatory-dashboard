@@ -84,6 +84,8 @@ READS_FROM: dict[str, tuple[str, ...]] = {
     "leaks": ("env",),
     "scrub-companion": ("env", "leaks"),
     "cleanup": ("machine", "git-hygiene"),
+    # drift is judged on the raw answers the provider collectors wrote this tick (OBS-557)
+    "integration-health": ("openrouter", "scan-cloudflare", "scan-cloudflare-account", "scan-digitalocean", "google"),
 }
 
 
@@ -669,6 +671,8 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     step("scan-spend", PY, "collectors/scan_spend.py", SCRATCH / "spend.json")
     step("remote-env", PY, "collectors/scan_remote_env.py", SCRATCH / "remote-env.json")
     step("google", PY, "collectors/scan_google.py", SCRATCH / "google.json")
+    # THE INTEGRATION HEALTH (OBS-557): each held key asked once a day, drift and untracked rebuilt from files.
+    step("integration-health", PY, "tools/integration_health.py")
     step("leaks", PY, "tools/scan_leaks.py")
     step("scrub-companion", PY, "tools/scrub_companion.py")
     # THE MACHINE: what runs, where memory and disk went, which worktrees and branches outlived
@@ -767,6 +771,9 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
             step("agent", PY, "agent/observe.py")
 
     step("findings", PY, "tools/build_findings.py")
+    # THE ISSUE FILER (OBS-557): findings of the allowed classes become issues in the project's own repository and
+    # close with them. Before the dashboard, which shows the map and the banner.
+    step("issues", PY, "tools/issue_filer.py")
     step("dashboard", PY, "dashboard/build_dashboard.py")
 
     # Smoke renders the page the way a browser would; how it ended decides whether findings are built again

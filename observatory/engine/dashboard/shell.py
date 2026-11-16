@@ -313,6 +313,16 @@ def _disk_line(payload: dict, t: Translator) -> str:
     return line
 
 
+def _integrations_line(payload: dict, t: Translator) -> str:
+    """The overview's Integrations card: keys refused and answers that changed, or that nothing was checked."""
+    v = payload.get("integrations") or {}
+    if not v.get("checkedOn"):
+        return t.mark("not checked")
+    keys = v.get("keys") or []
+    return (t.mark("{n} keys refused", n=sum(1 for k in keys if k.get("state") == "invalid")) + " · "
+            + t.mark("{n} answers changed", n=len(v.get("drift") or [])))
+
+
 def cards_html(payload: dict, counts: dict, t: Translator | None = None, skip: tuple[str, ...] = ()) -> str:
     """The index page's module cards: one sentence each, the number, the link. Home passes `skip`
     (HOME_COVERED), the pages a tile or a Home group already speaks for (CP-01)."""
@@ -340,6 +350,7 @@ def cards_html(payload: dict, counts: dict, t: Translator | None = None, skip: t
         "machine": _machine_line(payload, t),
         "tools": _tools_line(payload, t),
         "disk": _disk_line(payload, t),
+        "integrations": _integrations_line(payload, t),
         "agents": _agents_line(payload, t),
         # The observer's state alone: the agents' unconfirmed records ask nothing of a
         # person (operator, 2026-10-06), so they are no reason to open the page.
@@ -395,6 +406,8 @@ def slice_for(page: str, payload: dict) -> dict:
     # The installed tools are rendered into their page (dashboard/tools_page.py) and no script reads them: a
     # machine holds a thousand skills, so they ride on no page's data.
     out["tooling"] = None
+    if page != "integrations":
+        out["integrations"] = None                  # the Integrations page renders it at build time (OBS-557)
     out["key_sweep"] = None                         # rendered into findings.html at build time (OBS-554)
     if page == "disk":
         out["machine"] = payload.get("machine")     # the Disk page reads the machine survey too (OBS-562)

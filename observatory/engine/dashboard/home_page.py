@@ -473,6 +473,12 @@ def analytics_notice_html(payload: dict, t: Translator) -> str:
             + f'<p>{said}</p>{_copy(full_command(payload, "analytics off"), t)}</section>')
 
 
+def issues_notice_html(payload: dict, t: Translator) -> str:
+    """The issue filer's one-time notice (OBS-557, CP-14), shared with the Integrations page."""
+    import integrations_page
+    return integrations_page.banner_html(payload, t)
+
+
 def update_available_html(payload: dict, t: Translator) -> str:
     """A newer version found while automatic updates are off (OBS-333, ADR-0188 item 4): one calm row
     on Home with the command that installs it, while the engine has not caught up. Never a finding:
@@ -491,7 +497,7 @@ def update_available_html(payload: dict, t: Translator) -> str:
 def home_html(payload: dict, t: Translator | None = None) -> str:
     """Home's body, rendered at build time into the index page."""
     t = t or Translator()
-    notice = update_available_html(payload, t) + analytics_notice_html(payload, t)
+    notice = update_available_html(payload, t) + analytics_notice_html(payload, t) + issues_notice_html(payload, t)
     if not payload.get("rows"):
         return f'<div id="home" class="home">{notice}{empty_html(payload, t)}</div>'
     return (f'<div id="home" class="home">{notice}{band_html(payload, t)}{needs_html(payload, t)}'
