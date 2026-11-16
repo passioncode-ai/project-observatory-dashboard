@@ -148,4 +148,8 @@ def resolve(subject: object, index: dict) -> dict | None:
         return None
     if kind == "mcp" and rest in index["mcp"]:
         return {"href": "mcp.html#m-" + anchor_slug(rest), "label": rest}
+    if kind == "mcp" and rest.count("/") >= 2 and rest.rsplit("/", 1)[0] in index["mcp"]:
+        # `mcp:<agent>/<server>/<rule>` (OBS-555): one finding per rule of a server's command line, linked to its row.
+        server = rest.rsplit("/", 1)[0]
+        return {"href": "mcp.html#m-" + anchor_slug(server), "label": server}
     return None

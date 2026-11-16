@@ -218,6 +218,17 @@
       ],
       "required": []
     },
+    "observatory_mcp_accept": {
+      "input": [
+        "server_name",
+        "tool"
+      ],
+      "required": []
+    },
+    "observatory_mcp_supply": {
+      "input": [],
+      "required": []
+    },
     "observatory_org_accounts": {
       "input": [],
       "required": []
