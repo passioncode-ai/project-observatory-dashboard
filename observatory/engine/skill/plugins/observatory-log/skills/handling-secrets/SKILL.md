@@ -8,7 +8,7 @@ description: >-
   choosing an authentication architecture.
 license: AGPL-3.0-only OR LicenseRef-PassionCode-Commercial
 metadata:
-  version: "0.39.0"
+  version: "0.39.1"
 compatibility: >-
   Requires an initialized full Project Observatory installation, Python 3.11+
   and local shell access on macOS or Linux. Provider operations additionally
@@ -51,7 +51,7 @@ signed app, a request is answered `no-client` with that step.
 2. Select the user's initialized `OBSERVATORY_HOME`. Run
    `project-observatory full doctor`. A missing workspace
    needs the documented onboarding before secret operations.
-3. Run `"$OBSERVATORY_PYTHON" "${OBSERVATORY_ROOT:-$(project-observatory full-path)}/tools/skill_check.py" handling-secrets 0.39.0`
+3. Run `"$OBSERVATORY_PYTHON" "${OBSERVATORY_ROOT:-$(project-observatory full-path)}/tools/skill_check.py" handling-secrets 0.39.1`
    (`full agent install` records that interpreter; the stock macOS `python3` is too old). An
    empty `OBSERVATORY_ROOT`, or one naming a folder that is gone (a venv rebuilt on another
    Python), is replaced by what `project-observatory full-path` prints.
@@ -64,7 +64,8 @@ signed app, a request is answered `no-client` with that step.
 All commands below are Python scripts under `OBSERVATORY_ROOT/tools`. `PROJECT`,
 `ENV` and `NAME` are placeholders for existing user-selected names. `PROJECT` is
 the project's folder name; its registry id (`project:<slug>` or the bare slug) is
-accepted and normalised to that folder, and a name two projects claim is refused.
+accepted and normalised to that folder, and a name two projects claim is refused. Two checkouts
+with one basename: the project named by it keeps that folder, the other files under its id's slug.
 `ENV` is `local`, `stage` or `prod`; choose production only when the task calls
 for it. A name or note shaped like a credential is refused, never stored.
 

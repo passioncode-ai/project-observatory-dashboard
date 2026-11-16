@@ -52,6 +52,12 @@ PROJECTS = [
     {"id": "project:eta", "name": "eta", "local_folders": ["local-zeta"]},
     {"id": "project:remote-only", "name": "remote-only", "local_folders": []},
     {"id": "project:local-delta", "name": "delta-brand", "local_folders": ["delta"]},
+    # Two checkouts with one basename: omega's own, and a checkout of theta inside another tree.
+    {"id": "project:omega", "name": "omega", "local_folders": ["omega"]},
+    {"id": "project:theta", "name": "theta", "local_folders": ["umbrella/omega"]},
+    # Neither of these two is named by its shared basename: nobody owns `shared`.
+    {"id": "project:iota", "name": "iota", "local_folders": ["shared"]},
+    {"id": "project:kappa", "name": "kappa", "local_folders": ["x/shared"]},
 ]
 
 
@@ -97,6 +103,28 @@ class ResolverTests(unittest.TestCase):
         self.assertIn("project:gamma keeps folders", r.sentence(), "one sentence, not one character per entry")
         self.assertEqual(vault_project.resolve("gamma-two", PROJECTS).folder, "gamma-two")
 
+    def test_a_shared_basename_belongs_to_the_project_it_names(self):
+        for text in ("omega", "project:omega"):
+            r = vault_project.resolve(text, PROJECTS)
+            self.assertEqual((r.folder, r.project_id), ("omega", "project:omega"), text)
+            self.assertNotEqual(r.how, "ambiguous", text)
+        for text in ("theta", "project:theta"):
+            r = vault_project.resolve(text, PROJECTS)
+            self.assertEqual((r.folder, r.project_id), ("theta", "project:theta"),
+                             "the other checkout files under its id's slug, never in omega's folder")
+
+    def test_a_shared_basename_nobody_is_named_by_stays_ambiguous(self):
+        r = vault_project.resolve("shared", PROJECTS)
+        self.assertEqual((r.how, r.folder), ("ambiguous", None))
+        r = vault_project.resolve("project:iota", PROJECTS)
+        self.assertEqual((r.how, r.folder), ("ambiguous", None))
+
+    def test_the_fallback_slug_claimed_by_another_project_stays_ambiguous(self):
+        rows = [*PROJECTS, {"id": "project:theta-twin", "name": "theta", "local_folders": []}]
+        r = vault_project.resolve("project:theta", rows)
+        self.assertEqual((r.how, r.folder), ("ambiguous", None))
+        self.assertIn("project:theta-twin", r.sentence())
+
     def test_unknown_is_kept_and_a_folderless_project_uses_its_slug(self):
         r = vault_project.resolve("acme-ads", PROJECTS)
         self.assertEqual((r.how, r.folder, r.project_id), ("unknown", "acme-ads", None))
@@ -132,6 +160,16 @@ class DoorTests(unittest.TestCase):
         self.assertIn("project:eta", p.stderr)
         self.assertIn("project:local-zeta", p.stderr)
         self.assertFalse(list(STORE.rglob("AMBIGUOUS_KEY")))
+
+    def test_a_new_slot_goes_into_a_shared_basename_folder_its_owner_already_uses(self):
+        plant_slot("omega", "prod", "EXISTING_KEY")
+        p = run("vault.py", "put", "omega", "prod", "NEW_KEY", stdin="synthetic-omega")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertTrue((STORE / "omega/prod/NEW_KEY").is_file())
+        p = run("vault.py", "put", "project:theta", "prod", "THETA_KEY", stdin="synthetic-theta")
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertTrue((STORE / "theta/prod/THETA_KEY").is_file())
+        self.assertFalse((STORE / "omega/prod/THETA_KEY").exists(), "never in the other project's folder")
 
     def test_an_unknown_name_is_an_organisations_folder_and_a_legacy_slot_stays_reachable(self):
         p = run("vault.py", "put", "acme-ads", "prod", "ADS_TOKEN", stdin="synthetic-four")

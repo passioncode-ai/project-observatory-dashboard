@@ -3,6 +3,28 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.39.1 (2026-11-16)
+
+A new vault slot can be filed again for a project whose checkout shares its folder name with another project's nested
+checkout, and the Cloudflare door gains two presets: one that turns Email Routing on in a zone and one that adds a
+domain to an account. The observatory-log plugin moves to 0.39.1 with the release.
+
+### Added
+
+- **Cloudflare door presets `email-routing-setup` and `zone-create`** (OBS-573, #553): `email-routing-setup` turns
+  Email Routing on in one zone (Zone Read, Zone Settings Write, DNS Write and Email Routing Rules Write on the zone,
+  Email Routing Addresses Read on its account); `zone-create` adds a bought domain to one account with Zone Read and
+  Zone Write on its zones, the only group Cloudflare offers for `POST /zones`, so it also reaches the account's other
+  zones; it has a short expiry and is never offered to credential requests.
+
+### Fixed
+
+- **Vault folder of two checkouts with one basename** (OBS-574, #554): when two projects kept checkouts with the same
+  folder name, `vault_project.resolve` read both as claims on that vault folder and refused every new slot of either
+  project, while their existing slots stayed readable. The project whose id or name is that folder name now owns the
+  vault folder; the other project files under its id's slug unless a third project claims that slug. A string claimed
+  by one project's id and another project's folder stays ambiguous and is still refused.
+
 ## 0.39.0 (2026-11-16)
 
 The disk guard reaches a Colima VM in every state it can be trimmed in, and reports a VM whose disk has errors; the

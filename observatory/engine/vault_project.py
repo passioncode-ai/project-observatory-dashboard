@@ -30,6 +30,18 @@ of the three ways, is AMBIGUOUS: writes refuse it and name the candidates,
 and readers report it rather than pick. So is a project with two folders of
 different names when the string names neither.
 
+ONE EXCEPTION: TWO CHECKOUTS WITH ONE BASENAME. Two projects may each keep a
+local folder of the same basename (`~/DATA/omega` of one project and
+`~/DATA/<other>/omega`, a checkout of another). The vault folder is one flat
+name, so only one of them can file keys there: the one that claims the
+string by its id or name as well (`project:omega`). It owns the
+folder; every other project with a folder of that basename files its keys
+under the slug of its own id instead, unless another project claims that slug
+too. This decides nothing the trap above protects: a string claimed by one
+project's id and by ANOTHER project's folder still has a claimant that does
+not keep the folder, and stays ambiguous (measured 2026-11-16: a new slot
+of such a project was refused while its three existing slots stayed readable).
+
 A string nobody claims is kept as typed: an organisation's key (an ad account
 shared by several products) legitimately has a folder of its own.
 """
@@ -99,6 +111,14 @@ def _slug(project_id: str) -> str:
     return project_id.split(":", 1)[1] if project_id.startswith("project:") else project_id
 
 
+def _basename_owner(folder: str, projects: list[dict]) -> str | None:
+    """The one project that keeps a local folder of this basename AND is named by it (its id's
+    slug or its registry name), or None when none or several are."""
+    owners = [p["id"] for p in projects if folder in _folders(p)
+              and (folder == _slug(p["id"]) or folder == str(p.get("name") or ""))]
+    return owners[0] if len(owners) == 1 else None
+
+
 def resolve(text: str, projects: list[dict] | None = None, *, loaded: bool = False) -> Resolution:
     """The vault folder `text` means. `projects` is the registry's rows; omitted,
     the registry is read (pass `loaded=True` with `None` to say it was
@@ -121,6 +141,12 @@ def resolve(text: str, projects: list[dict] | None = None, *, loaded: bool = Fal
             claims.setdefault(pid, []).append("name")
     if not claims:
         return Resolution(text, text, None, "unknown")
+    if len(claims) > 1 and all("folder" in ways for ways in claims.values()):
+        # Every claimant keeps a folder of this basename: the one whose id or name
+        # is the string owns the vault folder (the module's ONE EXCEPTION).
+        owner = _basename_owner(text, projects)
+        if owner and owner in claims:
+            claims = {owner: claims[owner]}
     if len(claims) > 1:
         return Resolution(text, None, None, "ambiguous", tuple(
             f"{pid} by its {' and '.join(sorted(set(ways)))}" for pid, ways in sorted(claims.items())))
@@ -142,6 +168,20 @@ def resolve(text: str, projects: list[dict] | None = None, *, loaded: bool = Fal
     # The folder the string led to must not be ANOTHER project's folder too:
     # then one directory would hold two projects' keys.
     others = sorted(q["id"] for q in projects if q["id"] != pid and folder in _folders(q))
+    owner = _basename_owner(folder, projects) if others else None
+    if owner == pid:
+        others = []
+    elif owner and "folder" not in ways:
+        # Another project owns this basename's vault folder: this one files under its id's slug,
+        # unless some other project claims that slug as well.
+        slug = _slug(pid)
+        rivals = sorted(q["id"] for q in projects if q["id"] != pid and (
+            slug in _folders(q) or slug == _slug(q["id"]) or slug == str(q.get("name") or "")))
+        if not rivals:
+            return Resolution(text, slug, pid, ways[0])
+        return Resolution(text, None, pid, "ambiguous", (
+            f"{pid} files its keys under {slug!r}: {owner} owns the folder {folder!r}",
+            *(f"{o} claims {slug!r} too" for o in rivals)))
     if others:
         return Resolution(text, None, pid, "ambiguous", (
             f"{pid} files its keys under {folder!r}",
