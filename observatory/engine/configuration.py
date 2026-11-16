@@ -143,12 +143,13 @@ LEARNING_REVIEW_SETTINGS = ("settle_hour_utc",)
 #: fails when one is missing here. A metric plugin's `integration:KEY` adds itself.
 KNOWN_INTEGRATIONS = frozenset({
     "bitbucket", "cloudflare", "cloudflare_analytics", "digitalocean", "domains", "ga4", "git_remotes",
-    "github", "github_issues", "google", "harness", "heroku", "mcp", "openrouter", "remote_env", "search_console",
-    "sessions", "vulnerabilities", "wiki"})
+    "github", "github_issues", "google", "harness", "heroku", "key_sweep", "mcp", "openrouter", "remote_env",
+    "search_console", "sessions", "vulnerabilities", "wiki"})
 #: Switches that are on until a person switches them off; every other switch is off until switched on.
 #: The vulnerability watch (OBS-553, decision D2) sends only public package names and versions, and the issue
-#: filer (OBS-557, decision D6) writes only to a project's own repository, so both are on.
-DEFAULT_ON = {"integrations": frozenset({"vulnerabilities", "github_issues"}), "features": frozenset()}
+#: filer (OBS-557, decision D6) writes only to a project's own repository, and the key sweep (OBS-554, decision D3)
+#: reads only this machine's repositories and keeps digests, so all three are on.
+DEFAULT_ON = {"integrations": frozenset({"vulnerabilities", "github_issues", "key_sweep"}), "features": frozenset()}
 KNOWN_FEATURES = frozenset({
     "agent", "auto_cleanup", "companion_remediation", "embeddings", "fixture_cleanup",
     "machine_watch", "notifications", "probe_fixture", "registry_history", "retention",

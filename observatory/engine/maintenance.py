@@ -1136,6 +1136,52 @@ def step_guard(base: Path, state: dict, at: datetime.datetime, runner=None) -> d
     return result
 
 
+#: The key sweep's own share of a pass (tools/key_sweep.py PASS_BUDGET_S), and the ceiling the pass waits for it.
+KEY_SWEEP_BUDGET = 120
+KEY_SWEEP_TIMEOUT = 300
+
+
+def step_key_sweep(base: Path, state: dict, at: datetime.datetime, runner=None) -> dict:
+    """The key sweep over the estate's repositories (tools/key_sweep.py, OBS-554, CP-08): one resumable slice of
+    today's budget each pass, in a process of its own, so the values it holds in memory leave with that process.
+    On unless `integrations.key_sweep` is false. Never raises; the sweep's own output is one JSON line of counts,
+    never a value."""
+    try:
+        doc = json.loads((base / "config" / "settings.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        doc = {}
+    if not config.enabled("key_sweep", settings=doc if isinstance(doc, dict) else {}):
+        state["key_sweep"] = {"at": iso(at), "result": "off"}
+        return {"result": "off"}
+    if not (base / "registry" / "projects.json").is_file() and not os.environ.get("OBSERVATORY_REGISTRY"):
+        return {"result": "no-registry"}    # no project yet, so no repository to sweep
+    environ = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "OBSERVATORY_ROOT"}}
+    environ["OBSERVATORY_HOME"] = str(base)
+    environ[IN_PASS_ENV] = "1"
+    run = runner or subprocess.run
+    try:
+        p = run([engine_python(), "-P", str(Path(__file__).resolve().parent / "tools" / "key_sweep.py"), "--json",
+                 "--budget", str(KEY_SWEEP_BUDGET)],
+                capture_output=True, text=True, timeout=KEY_SWEEP_TIMEOUT, env=environ, cwd=tempfile.gettempdir(),
+                stdin=subprocess.DEVNULL)
+        code, line = p.returncode, ((p.stdout or "").strip().splitlines() or [""])[-1]
+    except subprocess.TimeoutExpired:
+        code, line = 124, ""
+    except OSError:
+        code, line = 125, ""
+    try:
+        out = json.loads(line) if line.startswith("{") else {}
+    except ValueError:
+        out = {}
+    if code != 0 or not out:
+        result = {"result": "failed", "exit": code}
+    else:
+        result = {"result": out.get("result") or "ran",
+                  **{k: out[k] for k in ("repositories", "open", "complete", "spent_s", "external") if k in out}}
+    state["key_sweep"] = {"at": iso(at), **result}
+    return result
+
+
 def step_hung(base: Path, at: datetime.datetime, survey=None) -> dict:
     """Commands an agent session left hanging (tools/hung_commands.py, OBS-530): sampled every pass, so
     two samples are fifteen minutes apart; the leaf commands of its short list are stopped only when
@@ -1297,6 +1343,10 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
                 report["jobs"] = step_jobs(base=base)
         if not report["update"]["result"].startswith("updated"):
             report["opsDigests"] = step_ops_digests(base)
+            try:
+                report["keySweep"] = step_key_sweep(base, state, at)
+            except Exception as exc:  # noqa: BLE001: a sweep never stops the pass
+                report["keySweep"] = {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
             report["org"] = step_org(base, commands or Commands(base))
             try:
                 report["shares"] = step_shares(base, state, at, commands or Commands(base))

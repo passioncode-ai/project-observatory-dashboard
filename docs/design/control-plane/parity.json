@@ -131,6 +131,14 @@
       "status": "covered"
     },
     {
+      "action": "key-sweep --settle",
+      "kind": "cli",
+      "where": "tools/key_sweep.py: settle",
+      "tool": "observatory_key_sweep_settle",
+      "gate": null,
+      "status": "covered"
+    },
+    {
       "action": "migrate-local --apply",
       "kind": "cli",
       "where": "workspace.py: migrate-local",

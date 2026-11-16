@@ -156,6 +156,22 @@
         "project"
       ]
     },
+    "observatory_key_sweep": {
+      "input": [
+        "repository"
+      ],
+      "required": []
+    },
+    "observatory_key_sweep_settle": {
+      "input": [
+        "fingerprint",
+        "why"
+      ],
+      "required": [
+        "fingerprint",
+        "why"
+      ]
+    },
     "observatory_learn": {
       "input": [
         "failureId",

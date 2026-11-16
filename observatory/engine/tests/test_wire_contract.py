@@ -264,7 +264,8 @@ def test_the_served_instructions_describe_the_served_surface() -> None:
     # Twenty-nine with `observatory_org_selection` (OBS-417), named on the WRITE line.
     # Thirty-three with the tools of wave 1: `observatory_sessions` (OBS-550), `observatory_dependencies` (OBS-553),
     # `observatory_key_consumers` (OBS-561) and `observatory_configure` (OBS-563).
-    check("the server serves thirty-three observatory tools (wave 1: OBS-550, OBS-553, OBS-561, OBS-563)", tools == 33,
+    # Thirty-five with the key sweep's read and settle (OBS-554).
+    check("the server serves thirty-five observatory tools (wave 1, and the key sweep OBS-554)", tools == 35,
           str(tools))
     check("the instructions name the coding sessions beside the machine",
           "`observatory_machine` (`section`, `move`, `explainPid`); `_sessions`" in src.split("instructions=(", 1)[1][:2600])

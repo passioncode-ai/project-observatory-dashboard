@@ -986,6 +986,64 @@ def observatory_dependencies(
     return vuln_watch.agent_view(project_id=projectId, vulnerable_only=vulnerableOnly, limit=limit, cursor=cursor)
 
 
+def _key_sweep_doc():
+    import paths
+    try:
+        return json.loads((paths.SCRATCH / "key-sweep.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+@server.tool()
+def observatory_key_sweep(
+    repository: Annotated[str | None, Field(description="Only this repository, as the sweep names it (a project's "
+                                                        "local folder, e.g. `alpha-web`).")] = None,
+) -> dict[str, Any]:
+    """The key sweep over the estate's repositories (OBS-554): per repository the history read through
+    (`history_through`, `history_complete`), the day its working tree was read, and the open sightings by
+    rule; then each sighting: its keyed digest (`fingerprint`), rules, the slot it matches when known
+    (`slot_state` current, rotated or gone), whether it is in a working tree, `status` open or closed, and
+    its places (repository, path, line, commit).
+
+    Read-only, from `store/raw/key-sweep.json`, which the maintenance job's sweep writes on a daily budget.
+    No value, matched text or line is ever kept, so none can be returned. A sweep that has not run, is
+    switched off (`integrations.key_sweep`) or read a repository in part is named in `degraded`. Each open
+    sighting is also the finding `secret.in_repository`. Design: docs/design/control-plane/key-sweep.md.
+    """
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
+    import key_sweep
+    return key_sweep.agent_view(_key_sweep_doc(), repository=repository)
+
+
+@server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=True))
+def observatory_key_sweep_settle(
+    fingerprint: Annotated[str, Field(description="The sighting's `fingerprint` from `observatory_key_sweep`: "
+                                                  "`hmac-sha256:` and 64 hex digits.")],
+    why: Annotated[str, Field(min_length=1, max_length=300,
+                              description="How it was dealt with, in one line (revoked at the issuer, a test "
+                                          "value that never worked).")],
+) -> dict[str, Any]:
+    """Settle a key sweep sighting of a value no slot here holds now, once it is gone from every working
+    tree: the next sweep closes it and its `secret.in_repository` finding. The same act as
+    `full key-sweep --settle FINGERPRINT --why TEXT`. Refused, with a typed `error`: an unknown
+    fingerprint, a value still in a working tree (`still-in-tree`), a value its slot still holds
+    (`slot-holds-it`: rotate it, and the sighting closes by itself), an empty reason. Writes only
+    `key-sweep-settled.json` in the store folder; no value is read or written."""
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
+    import atomic
+    import key_sweep
+    f = key_sweep.files()
+    try:
+        settled = json.loads(f["settled"].read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        settled = None
+    got = key_sweep.settle(_key_sweep_doc(), settled, fingerprint, why, by="agent:mcp")
+    if "error" in got:
+        return got
+    atomic.write_json(f["settled"], got["settled"])
+    return {"settled": fingerprint, "closes": "at the next sweep"}
+
+
 MACHINE_TOP = 10
 #: Skills per page of `observatory_machine(section="skills")`: a machine measured holding 1,269 skills made an
 #: unpaged answer of 151,536 characters, past what a host keeps of one tool result, and 200 skills beside its 116

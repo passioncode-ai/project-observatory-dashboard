@@ -2734,5 +2734,22 @@
  "Readings": "Замеров",
  "Setting": "Настройка",
  "Default": "По умолчанию",
- "Change": "Изменить"
+ "Change": "Изменить",
+ "Key in a repository": "Ключ в репозитории",
+ "A value of {slot} is in the repository {repo}": "Значение {slot} лежит в репозитории {repo}",
+ "A key-shaped value is in the repository {repo}": "Похожее на ключ значение лежит в репозитории {repo}",
+ "Keys found in repositories": "Ключи, найденные в репозиториях",
+ "Swept {at}: our own values and key-shaped text in working trees and Git history. Only places and keyed digests are kept, never a value.": "Проверено {at}: наши собственные значения и похожий на ключи текст в рабочих копиях и истории Git. Хранятся только места и ключевые отпечатки, значения никогда.",
+ "External scanner: {name}, with redaction.": "Внешний сканер: {name}, со скрытием значений.",
+ "External scanner: not installed; our own values are still looked for.": "Внешний сканер не установлен; наши собственные значения всё равно ищутся.",
+ "Open": "Открыто",
+ "By rule": "По правилам",
+ "History": "История",
+ "Working tree": "Рабочая копия",
+ "Read to the last commit": "Прочитана до последнего коммита",
+ "Read in part": "Прочитана частично",
+ "Not read yet": "Ещё не прочитана",
+ "the key sweep has not run yet": "проверка ключей ещё не запускалась",
+ "the key sweep is switched off": "проверка ключей выключена",
+ "No repository with a local clone to sweep.": "Нет репозиториев с локальной копией для проверки."
 }

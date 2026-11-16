@@ -220,6 +220,8 @@ STATE_FAMILIES = {
     "node/relay": "0.31.0",
     # The dependency inventory and the vulnerability watch's answer (OBS-553).
     "store/raw/dependencies.json": "0.37.0", "store/raw/vulnerabilities.json": "0.37.0",
+    # The key sweep's fingerprints and places (OBS-554).
+    "store/raw/key-sweep.json": "0.40.0",
 }
 ROW_FROM = (0, 26, 0)
 

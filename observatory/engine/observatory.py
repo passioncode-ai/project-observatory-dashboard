@@ -127,6 +127,8 @@ STEPS = {
     "scan-dependencies": [PY, "collectors/scan_dependencies.py", "store/raw/dependencies.json"],
     # The daily OSV and known-exploited pass over that inventory (OBS-553): public names only.
     "vulnerabilities": [PY, "tools/vuln_watch.py"],
+    # The key sweep over the estate's repositories (OBS-554): fingerprints and places only, never a value.
+    "key-sweep": [PY, "tools/key_sweep.py"],
     # Gated to once a day inside the scan itself: every run pulls every
     # production secret of every application into one process.
     "remote-env": [PY, "collectors/scan_remote_env.py", "store/raw/remote-env.json"],
@@ -655,6 +657,11 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   vulnerabilities [--force]    the daily OSV pass over that inventory and the known-exploited catalogue;
                                local and private packages are never sent (integration vulnerabilities, on
                                by default: `configure integrations vulnerabilities false` turns it off)
+  key-sweep [--full] [--settle FINGERPRINT --why TEXT]  our own values and key-shaped text in the working
+                               trees and Git history of every project's clone, on a resumable daily budget
+                               (the maintenance job runs it); keeps keyed digests and places, never a value;
+                               --settle closes a sighting of an unknown value gone from the tree (integration
+                               key_sweep, on by default)
   scan-harness                 the skills and instruction files every agent session loads, their
                                listing budget and security rules (integration harness)
   harness [--accept KEY|--accept-all]  the last harness scan; --accept records a changed skill's
@@ -720,6 +727,8 @@ USD = re.compile(r"\d{1,9}(\.\d{1,6})?")
 TOKEN_JTI = re.compile(r"[A-Za-z0-9._~-]{16,128}")
 GRANT_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:~/@+-]{0,250}#\d{1,9}")
 RECEIPT = re.compile(r"rcpt_[A-Za-z0-9_-]{8,64}")
+#: A key sweep sighting's keyed digest (tools/key_sweep.py).
+SWEEP_FINGERPRINT = re.compile(r"hmac-sha256:[0-9a-f]{64}")
 PURPOSE = re.compile(r"[^\x00-\x1f]{1,200}")
 #: The one path an option forwards: the probe runner's synthetic workspace. Absolute
 #: only, because the step runs from the engine directory and a relative path would
@@ -742,6 +751,10 @@ FIXTURE_HOME = re.compile(r"(?:/|[A-Za-z]:[\\/])[^\x00-\x1f]{0,4095}")
 STEP_OPTIONS: dict[str, dict[str, tuple[str | None, re.Pattern | None, str]]] = {
     "google": {"--force": (None, None, "re-fetch inside the twelve-hour cache window")},
     "vulnerabilities": {"--force": (None, None, "ask OSV now, even when today's pass is done")},
+    "key-sweep": {"--full": (None, None, "forget every history's place and read it again"),
+                  "--settle": ("FINGERPRINT", SWEEP_FINGERPRINT, "close a sighting of an unknown value gone from "
+                                                                   "the working tree"),
+                  "--why": ("TEXT", PURPOSE, "--settle: how it was dealt with")},
     # A maintainer's synthetic workspace (fabric/FABRIC-CONFORMANCE.md). The steps
     # ran the runner without it, so `full probes` could only fail (OBS-224).
     "probes": {"--fixture-home": ("PATH", FIXTURE_HOME,
