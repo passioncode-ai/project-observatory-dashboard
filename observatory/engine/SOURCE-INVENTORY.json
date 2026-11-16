@@ -712,6 +712,13 @@
       "bytes": 17867
     },
     {
+      "path": "dashboard/mcp_page.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "bacebceb0135d25eb14c6f5ed3b0a4eb59dc1d83a8fd2de5c8a05d57eaedbb65",
+      "bytes": 7217
+    },
+    {
       "path": "dashboard/page_table.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -3370,6 +3377,13 @@
       "bytes": 9958
     },
     {
+      "path": "mcp_supply.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "ead85797a3da62c219c517198e28a57ee26fb7bbea6576589772e8c3c18601f7",
+      "bytes": 22025
+    },
+    {
       "path": "memory_access.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -5697,6 +5711,20 @@
       "upstream_modified": true,
       "export_sha256": "57d371760c3d1304e83b37728e4e572551c87a26139bc42aeaa73a334ac141f8",
       "bytes": 19124
+    },
+    {
+      "path": "tests/test_mcp_supply.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "ebe3e842fed4bcf8a6403cbce365a6bcef1f48f3e4aa4eb8b60b9a8d5a92c2aa",
+      "bytes": 21087
+    },
+    {
+      "path": "tests/test_mcp_supply_board.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "304f0d131b3c2689cac79f0f4b94b12711944b1345c59eceaa22fe03fa80e69c",
+      "bytes": 2745
     },
     {
       "path": "tests/test_mcp_wire.py",
@@ -8058,7 +8086,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 1087,
+  "file_count": 1091,
   "excluded": [
     "git-history",
     "operator-registries",

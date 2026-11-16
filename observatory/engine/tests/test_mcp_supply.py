@@ -23,6 +23,7 @@ import mcp_supply as S                                                      # no
 import scan_mcp                                                             # noqa: E402
 from mcp_config_fixture import PLANTED, leaked, write_home                  # noqa: E402
 
+HOME = "/srv/example-home"
 SECRET = "planted-supply-secret-4c1e9a"
 
 
@@ -33,7 +34,7 @@ def tool(name="read", description="Reads one note.", schema=None):
 
 class CommandRules(unittest.TestCase):
     def rules(self, command, *args):
-        return S.judge(command, list(args), "/home/user")
+        return S.judge(command, list(args), HOME)
 
     def test_an_unpinned_runner_is_judged(self):
         for command, args in (("npx", ["-y", "alpha-mcp"]), ("npx", ["-y", "alpha-mcp@latest"]),
@@ -63,21 +64,21 @@ class CommandRules(unittest.TestCase):
 
     def test_a_program_outside_the_install_places_is_judged(self):
         for command in ("/tmp/work/server", "/private/tmp/x/mcp", "./server", "../bin/server",
-                        "/home/user/Downloads/server", "/srv/random/server"):
+                        HOME + "/Downloads/server", "/srv/random/server"):
             with self.subTest(command=command):
                 self.assertEqual(self.rules(command), ["outside-install-places"])
 
     def test_ordinary_commands_trip_nothing(self):
         for command, args in (("python3", ["-m", "alpha_mcp"]), ("/usr/bin/env", ["python3", "s.py"]),
                               ("/opt/homebrew/bin/node", ["server.js"]), ("/usr/local/bin/alpha", []),
-                              ("/home/user/.local/bin/alpha", []), ("~/bin/alpha", []), ("alpha-mcp", ["serve"]),
+                              (HOME + "/.local/bin/alpha", []), ("~/bin/alpha", []), ("alpha-mcp", ["serve"]),
                               ("node", ["server.js", "--port", "8080"]), ("/opt/example/bin/gamma-mcp", [])):
             with self.subTest(command=command):
                 self.assertEqual(self.rules(command, *args), [])
 
     def test_the_list_form_of_opencode_is_judged(self):
-        self.assertEqual(S.judge(["uvx", "eta-mcp"], [], "/home/user"), ["unpinned-runner"])
-        self.assertEqual(S.judge(["uvx", "eta-mcp==1.0.0"], [], "/home/user"), [])
+        self.assertEqual(S.judge(["uvx", "eta-mcp"], [], HOME), ["unpinned-runner"])
+        self.assertEqual(S.judge(["uvx", "eta-mcp==1.0.0"], [], HOME), [])
 
     def test_a_row_holds_the_rule_and_never_the_command_line(self):
         row = scan_mcp.classify("alpha", {"command": "npx", "args": ["-y", "alpha-mcp", "--api-key", SECRET],

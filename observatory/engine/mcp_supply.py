@@ -58,7 +58,7 @@ FETCHER = re.compile(r"\b(curl|wget|fetch)\b")
 URL = re.compile(r"^https?://", re.I)
 #: Absolute locations an installer or a package manager owns, as prefixes; and home-relative ones.
 KNOWN_ROOTS = ("/usr/", "/bin/", "/sbin/", "/opt/", "/nix/", "/snap/", "/Applications/", "/System/", "/Library/",
-               "/home/linuxbrew/", "/run/current-system/")
+               "/home/linuxbrew", "/run/current-system/")
 KNOWN_HOME = (".local/", ".cargo/", ".bun/", ".nvm/", ".volta/", ".deno/", ".asdf/", ".pyenv/", ".rbenv/", ".fnm/",
               ".npm-global/", ".claude/", ".codex/", ".cursor/", ".config/", "go/bin/", ".rustup/", ".sdkman/",
               "bin/", "Library/", ".mise/", ".local/share/")
