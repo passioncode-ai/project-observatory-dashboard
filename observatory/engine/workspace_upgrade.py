@@ -1481,6 +1481,12 @@ def parser() -> argparse.ArgumentParser:
     backup.add_argument('--plaintext',action='store_true',
                         help='with --output: write the plaintext copy even though it holds the vault\'s secrets')
     backup.add_argument('--writers-stopped',action='store_true')
+    backup.add_argument('--pause-writers',action='store_true',
+                        help='stop this workspace\'s tick and server for the copy and start them again, as the '
+                             'daily snapshot of `maintain` does (OBS-583); refused while a tick, an update or a '
+                             'maintenance pass runs')
+    backup.add_argument('--json',action='store_true',
+                        help='a refusal or failure as {"error": {"code", "message"}} on stdout')
     up = commands.add_parser('upgrade', prog='project-observatory full upgrade')
     up.add_argument('--apply',action='store_true')
     up.add_argument('--writers-stopped',action='store_true')
@@ -1527,7 +1533,15 @@ def main(argv: list[str]) -> int:
         # Read once, before any other work: a refusal of the value comes before anything is touched.
         stdin_value = backup_vault.read_passphrase_stdin() if getattr(args, 'passphrase_stdin', False) else None
         base = config.home()
-        if args.command == 'backup':
+        if args.command == 'backup' and args.pause_writers:
+            if args.output is not None or args.plaintext:
+                raise config.ConfigurationError('--pause-writers takes the managed encrypted snapshot; it takes no '
+                                                '--output or --plaintext')
+            import maintenance
+            result = maintenance.backup_pausing_writers(base)
+            if result.get('result') != 'taken':
+                raise maintenance.PauseWritersFailed(result)
+        elif args.command == 'backup':
             result = snapshot(base,args.output,writers_stopped=args.writers_stopped,plaintext=args.plaintext)
         elif args.command == 'upgrade':
             result = upgrade(base,apply=args.apply,writers_stopped=args.writers_stopped)

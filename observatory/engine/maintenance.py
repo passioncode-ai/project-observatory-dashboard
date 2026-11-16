@@ -964,11 +964,20 @@ def step_snapshot(base: Path, state: dict, at: datetime.datetime, services=None,
     if failed_at and (taken_at is None or failed_at > taken_at) and at - failed_at < SNAPSHOT_RETRY:
         return {"result": "backing-off", "detail": "the last attempt failed; the next one is "
                                                    f"after {iso(failed_at + SNAPSHOT_RETRY)}"}
+    return snapshot_pausing_writers(base, state, at, services, sleep)
+
+
+def snapshot_pausing_writers(base: Path, state: dict, at: datetime.datetime, services,
+                             sleep=time.sleep) -> dict:
+    """The snapshot with this workspace's writers paused: the daily step's and
+    `full workspace-backup --pause-writers`'s one path (OBS-583). Defers (`result: deferred`,
+    with `reason` tick-running or update-running) rather than interrupt a tick or an update."""
     import engine_update
     if _tick_busy(base):
         # Booting a running tick out would interrupt it every day (review F10); the next
         # pass tries again.
-        return {"result": "deferred", "detail": "a tick or another workspace operation is running"}
+        return {"result": "deferred", "reason": "tick-running",
+                "detail": "a tick or another workspace operation is running"}
     # A person's `full update` stops and starts the same jobs (audit A12). A check was not
     # enough: an update started while the snapshot had the jobs down found nothing to
     # stop, and this step's `finally` then started them in the middle of its install.
@@ -978,7 +987,62 @@ def step_snapshot(base: Path, state: dict, at: datetime.datetime, services=None,
         with engine_update.update_lock(base):
             return _snapshot_with_jobs_stopped(base, state, at, services, sleep)
     except engine_update.UpdateError:
-        return {"result": "deferred", "detail": "an update is running"}
+        return {"result": "deferred", "reason": "update-running", "detail": "an update is running"}
+
+
+class PauseWritersRefused(config.ConfigurationError):
+    """`workspace-backup --pause-writers` refused before stopping anything; `code` is stable."""
+
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+class PauseWritersFailed(RuntimeError):
+    """The snapshot was attempted with the writers paused and failed; they were started again."""
+
+    def __init__(self, result: dict):
+        super().__init__(f"the snapshot failed: {result.get('detail', '')}".strip())
+        self.code = "snapshot-failed"
+        self.result = result
+
+
+def backup_pausing_writers(base: Path, *, at: datetime.datetime | None = None, services=...,
+                           store=None, sleep=time.sleep) -> dict:
+    """`full workspace-backup --pause-writers` (OBS-583): the daily snapshot now, whatever its
+    cadence, for a scheduled job that wants a snapshot younger than an hour while the tick and the
+    server always run. The same path as `maintain`'s daily step (`snapshot_pausing_writers`): the
+    update lock, the managed jobs stopped, the snapshot verified, the jobs started again in a
+    `finally`, the outcome in store/maintenance.json `snapshot`. Refused (PauseWritersRefused)
+    while a maintenance pass, a tick or an update runs, before anything is stopped; a failed
+    snapshot is recorded as the daily one's is and returned with `result: failed`."""
+    at = at or now()
+    config.validate_workspace(base, required=True)
+    with pass_lock(base) as held:
+        if not held:
+            raise PauseWritersRefused("maintenance-running", "a maintenance pass is running; it takes its own "
+                                                             "snapshot when one is due, try again in a few minutes")
+        state = read_state(base)
+        services = _services() if services is ... else services
+        restarted = restart_left_stopped(base, state, services)
+        _passphrase(base, state, store)
+        stopped = [job["name"] for job in services.managed() if services.loaded(job["label"])] \
+            if services is not None else []
+        try:
+            result = snapshot_pausing_writers(base, state, at, services, sleep)
+        finally:
+            write_state(base, state)
+    if result["result"] == "deferred":
+        raise PauseWritersRefused(result["reason"], result["detail"] + "; nothing was stopped, try again "
+                                                                       "in a few minutes")
+    answer = {**result, "at": iso(at), "stopped": stopped}
+    if state.get("snapshot", {}).get("file") and result["result"] == "taken":
+        answer["file"] = state["snapshot"]["file"]
+    if restarted:
+        answer["restarted_after_interruption"] = restarted
+    if state.get("services_not_restarted"):
+        answer["services_not_restarted"] = state["services_not_restarted"]
+    return answer
 
 
 def _snapshot_with_jobs_stopped(base: Path, state: dict, at: datetime.datetime, services,
@@ -1275,6 +1339,19 @@ def step_shares(base: Path, state: dict, at: datetime.datetime, commands: "Comma
     return result
 
 
+def _passphrase(base: Path, state: dict, store) -> dict:
+    """The backup passphrase a snapshot is encrypted with, generated once when none is set."""
+    try:
+        answer = backup_vault.ensure_passphrase(base, store)
+    except (backup_vault.BackupError, OSError) as exc:
+        answer = {"error": str(exc)[:300]}
+    # Where the passphrase is kept is part of what doctor and Health show (audit A14):
+    # recorded by name and place, never the value.
+    state["passphrase"] = {k: v for k, v in answer.items()
+                           if k in ("passphrase", "kept_outside", "warning", "error")}
+    return answer
+
+
 def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Commands | None = None,
              services=..., store=None, app=None, sleep=time.sleep, first_check_delay: float = 0,
              clock=time.monotonic, guard=step_guard, machine=None, hung=None) -> dict:
@@ -1295,14 +1372,7 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
         recovered = restart_left_stopped(base, state, services)
         if recovered:
             report["restarted_after_interruption"] = recovered
-        try:
-            report["passphrase"] = backup_vault.ensure_passphrase(base, store)
-        except (backup_vault.BackupError, OSError) as exc:
-            report["passphrase"] = {"error": str(exc)[:300]}
-        # Where the passphrase is kept is part of what doctor and Health show (audit A14):
-        # recorded by name and place, never the value.
-        state["passphrase"] = {k: v for k, v in report["passphrase"].items()
-                               if k in ("passphrase", "kept_outside", "warning", "error")}
+        report["passphrase"] = _passphrase(base, state, store)
         try:
             report["guard"] = guard(base, state, at)
         except Exception as exc:  # noqa: BLE001 — the guard never stops an update or a backup
