@@ -940,6 +940,11 @@ def observatory_ssh_keys(
 def observatory_sessions(
     refresh: Annotated[bool, Field(description="Ask the account manager now (one call, at most 10 s) instead of "
                                                "reading what the last tick wrote.")] = False,
+    projectId: Annotated[str | None,
+                         Field(validation_alias=AliasChoices("projectId", "project_id"),
+                               description="Also answer `project`: this 'project:<slug>''s sessions now (`live`), the "
+                                           "ledger's sessions of the last day with the workflow each carried and its "
+                                           "last step (`recent`), and its open workflows (`workflows`).")] = None,
 ) -> dict[str, Any]:
     """Every coding session on this machine as one count in three facets (OBS-550): `processes`
     per agent (what runs), `managed` (of them, run by the account manager, Fabric Switchboard),
@@ -956,6 +961,18 @@ def observatory_sessions(
     doc = sessions_view.load()
     if refresh or any(d.get("code") == "not-collected" for d in doc.get("degraded") or []):
         doc = sessions_view.summary()
+    if projectId is not None:
+        if not isinstance(projectId, str) or not projectId.startswith("project:") or len(projectId) > 200:
+            return {**doc, "error": "InvalidInput", "detail": "projectId must be a 'project:<slug>' id"}
+        try:
+            grant = _readable(MA.authorize("observatory_workflow_list", project_id=projectId))
+            joined = sessions_view.projects(doc=doc, workflow_ids=grant.binding.workflows)
+        except MA.Refused:
+            joined = sessions_view.projects(doc=doc, read_store=False)
+        empty = {"live": [], "recent": [], "workflows": [],
+                 "counts": {"live": 0, "working": 0, "recent": 0, "workflows": 0}}
+        doc = {**doc, "project": {"projectId": projectId, **joined["projects"].get(projectId, empty)},
+               "degraded": joined["degraded"]}
     return doc
 
 

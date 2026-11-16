@@ -1263,6 +1263,13 @@ def build():
     try:
         import sessions_view
         PAYLOAD["sessions"] = sessions_view.load()
+        # SESSIONS PER PROJECT: who works in each project now and what each session last did,
+        # the same join `observatory_sessions(projectId=…)` answers (docs/design/control-plane/sessions-per-project.md).
+        try:
+            PAYLOAD["project_sessions"] = sessions_view.projects(doc=PAYLOAD["sessions"])
+        except Exception as exc:                                                     # noqa: BLE001
+            PAYLOAD["project_sessions"] = {"projects": {}, "degraded": [
+                {"source": "project-sessions", "reason": f"{type(exc).__name__}"[:200]}]}
     except Exception as exc:  # noqa: BLE001: a page, not a crash
         PAYLOAD["sessions"] = {"degraded": [{"source": "sessions", "reason": f"{type(exc).__name__}: {exc}"[:200]}]}
     build.last_payload = PAYLOAD
@@ -3206,6 +3213,34 @@ function detail(id) {
             <span class="none">${E(labelOf(NOTE_STATE_LABEL, n.state))}${n.conf != null ? ", " + T("confidence {value}", {value: n.conf}) : ""}</span></li>`)}
     ${                                                                       
                                                           ""}
+    <h3 id="panel-sessions">${T("Who works on it now")}</h3>
+    ${(() => {
+      // Sessions per project: the account manager's live rows attributed here, the ledger's
+      // sessions of the last day with the step their workflow last wrote, and the open workflows.
+      const PS = D.project_sessions || {};
+      const ps = (PS.projects || {})[r.id];
+      if (!ps) {
+        const why = (PS.degraded || []).length ? " · " + T("some sources could not be read") : "";
+        return `<p class="none">${T("no coding session runs in this project now and none recorded a turn here in the last day")}${why}</p>`;
+      }
+      const step = w => w && w.stepId
+        ? `<span class="mono">${E(w.stepId)}</span>${w.stepStatus ? " · " + E(w.stepStatus) : ""}${w.stepAt ? " · " + E(w.stepAt) : ""}` +
+          (w.stalled ? ` ${chip(T("stalled"), "warn")}` : "") + (w.goal ? `<span class="none"> · ${E(w.goal)}</span>` : "")
+        : (w && w.workflowId ? `<span class="mono">${E(w.workflowId)}</span>` : `<span class="none">${T("no workflow")}</span>`);
+      const live = list(ps.live, T("no coding session runs in this project now"),
+        s => `<li>${E(s.agent || "?")} · ${s.state === "working" ? chip(T("working")) : chip(T("quiet"), "warn")}` +
+             ` ${s.managed ? chip(T("managed")) : chip(T("not managed"), "warn")}` +
+             `<span class="none">${s.folder_name ? " · " + E(s.folder_name) : ""}${s.account_group ? " · " + E(s.account_group) : ""}` +
+             `${s.last_turn_at ? " · " + T("last turn") + " " + E(s.last_turn_at) : ""}</span></li>`);
+      const recent = list(ps.recent, T("no session recorded a turn here in the last day"),
+        s => `<li><span class="mono">${E(String(s.sessionId || "").slice(0, 8))}</span>` +
+             ` · ${E(s.lastTurnAt || "")} · ${T("{n} turns", {n: Number(s.turns || 0)})}` +
+             `${s.active ? " " + chip(T("active")) : ""} · ${step(s.workflow)}</li>`);
+      const flows = list(ps.workflows, T("no open workflow"),
+        w => `<li>${step(w)}${w.executor ? `<span class="none"> · ${E(w.executor)}</span>` : ""}</li>`);
+      return `<h4>${T("Running now")}</h4>${live}<h4>${T("What each session last did")}</h4>${recent}` +
+             `<h4>${T("Open workflows")}</h4>${flows}`;
+    })()}
     <h3>${T("Analytics")}</h3>
     ${(() => {
       const tr = (D.traffic || {})[r.id];
