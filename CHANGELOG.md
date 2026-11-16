@@ -3,6 +3,15 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Added
+
+- **Sessions per project**: the project panel gains "Who works on it now" (the coding sessions running in the project,
+  what each session of the last day last did through its workflow's latest step, and the project's open workflows),
+  and `observatory_sessions` takes `projectId` and answers the same block as `project`, within the caller's memory
+  binding. Design: `docs/design/control-plane/sessions-per-project.md`.
+
 ## 0.39.1 (2026-11-16)
 
 A new vault slot can be filed again for a project whose checkout shares its folder name with another project's nested

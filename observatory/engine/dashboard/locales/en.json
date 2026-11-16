@@ -748,5 +748,9 @@
  "{n} handoffs waiting": {
   "one": "{n} handoff waiting",
   "other": "{n} handoffs waiting"
+ },
+ "{n} turns": {
+  "one": "{n} turn",
+  "other": "{n} turns"
  }
 }

@@ -2751,5 +2751,26 @@
  "Not read yet": "Ещё не прочитана",
  "the key sweep has not run yet": "проверка ключей ещё не запускалась",
  "the key sweep is switched off": "проверка ключей выключена",
- "No repository with a local clone to sweep.": "Нет репозиториев с локальной копией для проверки."
+ "No repository with a local clone to sweep.": "Нет репозиториев с локальной копией для проверки.",
+ "Who works on it now": "Кто работает в проекте сейчас",
+ "some sources could not be read": "часть источников не прочитана",
+ "no coding session runs in this project now and none recorded a turn here in the last day": "сейчас в проекте не работает ни одна сессия, и за последние сутки ни одна не записала здесь ход",
+ "stalled": "застрял",
+ "no workflow": "без задачи",
+ "no coding session runs in this project now": "сейчас в проекте не работает ни одна сессия",
+ "quiet": "затихла",
+ "managed": "под Switchboard",
+ "not managed": "не под Switchboard",
+ "last turn": "последний ход",
+ "no session recorded a turn here in the last day": "за последние сутки ни одна сессия не записала здесь ход",
+ "{n} turns": {
+  "one": "{n} ход",
+  "few": "{n} хода",
+  "many": "{n} ходов",
+  "other": "{n} хода"
+ },
+ "no open workflow": "открытых задач нет",
+ "Running now": "Работают сейчас",
+ "What each session last did": "Что каждая сессия сделала последним",
+ "Open workflows": "Открытые задачи"
 }

@@ -341,6 +341,119 @@ def facets(doc: dict | None) -> dict:
             "measuredAt": doc.get("measuredAt")}
 
 
+#: Bounds on what one project's block carries.
+MAX_PROJECT_ROWS = 20
+
+
+def _workflow_line(w: dict) -> dict:
+    """What a workflow last did, as a session row carries it: never a lease, a body or a path."""
+    step = w.get("step") if isinstance(w.get("step"), dict) else {}
+    return {"workflowId": w.get("workflowId"), "goal": (w.get("goal") or "")[:200] or None,
+            "stepId": step.get("stepId"), "stepStatus": step.get("status"), "stepAt": step.get("at"),
+            "stalled": w.get("stalled") is True}
+
+
+def by_project(doc: dict | None, ledger: list[dict] | None, workflows: list[dict] | None) -> dict:
+    """Sessions per project (OBS sessions-per-project; docs/design/control-plane/sessions-per-project.md).
+
+    One block per project id: `live` (the account manager's rows attributed to it: who runs in
+    it now), `recent` (the ledger's sessions of the last day that recorded turns for it, each
+    with the workflow it carried and that workflow's last step: what it last did) and
+    `workflows` (its open workflows with their last step). A session the manager lists in no
+    project, and a workflow without a project, are not invented a project. Pure: the caller
+    reads the three sources, so the dashboard and the MCP tool join them the same way."""
+    out: dict[str, dict] = {}
+
+    def block(pid: str) -> dict:
+        return out.setdefault(pid, {"live": [], "recent": [], "workflows": []})
+
+    for s in (doc or {}).get("sessions") or []:
+        pid = s.get("project") if isinstance(s, dict) else None
+        if isinstance(pid, str) and pid:
+            block(pid)["live"].append({k: s.get(k) for k in (
+                "agent", "folder_name", "managed", "account_group", "launch_id", "state", "last_turn_at")})
+    flows: dict[str, dict] = {}
+    for w in workflows or []:
+        if not isinstance(w, dict) or not isinstance(w.get("workflowId"), str):
+            continue
+        flows[w["workflowId"]] = w
+        pid = w.get("projectId")
+        if isinstance(pid, str) and pid and w.get("status") == "open":
+            line = _workflow_line(w)
+            line["executor"] = ((w.get("lease") or {}).get("holder")) if isinstance(w.get("lease"), dict) else None
+            block(pid)["workflows"].append(line)
+    for s in ledger or []:
+        pid = s.get("projectId") if isinstance(s, dict) else None
+        if not (isinstance(pid, str) and pid):
+            continue
+        w = flows.get(s.get("workflowId")) if s.get("workflowId") else None
+        block(pid)["recent"].append({
+            "sessionId": s.get("sessionId"), "lastTurnAt": s.get("lastTurnAt"), "turns": s.get("turns"),
+            "active": s.get("active") is True,
+            "workflow": _workflow_line(w) if w else (
+                {"workflowId": s["workflowId"]} if s.get("workflowId") else None)})
+    for b in out.values():
+        b["live"].sort(key=lambda r: r.get("last_turn_at") or "", reverse=True)
+        b["live"].sort(key=lambda r: r.get("state") != "working")
+        b["recent"].sort(key=lambda r: r.get("lastTurnAt") or "", reverse=True)
+        b["workflows"].sort(key=lambda r: r.get("stepAt") or "", reverse=True)
+        b["counts"] = {"live": len(b["live"]), "working": sum(1 for r in b["live"] if r.get("state") == "working"),
+                       "recent": len(b["recent"]), "workflows": len(b["workflows"])}
+        for k in ("live", "recent", "workflows"):
+            b[k] = b[k][:MAX_PROJECT_ROWS]
+    return out
+
+
+def projects(home: pathlib.Path | None = None, *, doc: dict | None = None,
+             now: datetime | None = None, workflow_ids: list[str] | None = None,
+             read_store: bool = True) -> dict:
+    """`by_project` over what the tick wrote and the store: {"projects": {...}, "degraded": [...]}.
+    A store that cannot be read leaves `recent` and `workflows` empty and says so; the live rows
+    still come from the coding sessions file. `workflow_ids` narrows the workflows to a memory
+    binding's (None: all); `read_store=False` (a binding that may not read workflow memory)
+    reads neither the ledger nor the workflows."""
+    now = now or _now()
+    doc = doc if isinstance(doc, dict) else load(home)
+    degraded = list(doc.get("degraded") or [])
+    db = pathlib.Path(home) / "store" / "observatory.db" if home else paths.DB  # paths-check: allow: a workspace home the caller names, not this engine's
+    ledger: list[dict] | None = None
+    flows: list[dict] | None = None
+    if not read_store:
+        degraded.append(_gap("workflows", "not-readable",
+                             "this caller may not read workflow memory: only the live sessions are shown"))
+    elif not db.is_file():
+        degraded.append(_gap("ledger", "no-store", "the store does not exist yet"))
+    else:
+        import agents_view
+        try:
+            conn = sqlite3.connect(paths.sqlite_uri(db), uri=True, timeout=10)
+            conn.row_factory = sqlite3.Row
+            try:
+                ledger = agents_view.recent_sessions(conn, now)
+                if workflow_ids is not None:
+                    ledger = [x for x in ledger if x.get("workflowId") in set(workflow_ids)]
+                tables = {r[0] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                if {"workflows", "workflow_leases"} <= tables:
+                    from store import workflow as W
+                    flows = W.workflow_list(conn, status="open", limit=200,
+                                            workflow_ids=workflow_ids)["workflows"]
+                    wanted = {s["workflowId"] for s in ledger if s.get("workflowId")} - {w["workflowId"] for w in flows}
+                    if wanted:
+                        flows += [w for w in W.workflow_list(conn, status="closed", limit=200,
+                                                             workflow_ids=workflow_ids)["workflows"]
+                                  if w["workflowId"] in wanted]
+                else:
+                    degraded.append(_gap("workflows", "before-agent-memory",
+                                         "the store predates agent memory; the next engine start migrates it"))
+            finally:
+                conn.close()
+        except (sqlite3.Error, ValueError, KeyError) as exc:
+            degraded.append(_gap("ledger", "unreadable", f"the ledger is unreadable: {type(exc).__name__}"))
+    return {"schema": "project-sessions/1", "measuredAt": _iso(now),
+            "sessionsAt": doc.get("measuredAt"),
+            "projects": by_project(doc, ledger, flows), "degraded": degraded}
+
+
 def main(argv: list[str]) -> int:
     """`sessions_view.py [OUT]`: read the three sources now and write the summary (the tick's step)."""
     out = pathlib.Path(argv[1]) if len(argv) > 1 else paths.SCRATCH / FILE
