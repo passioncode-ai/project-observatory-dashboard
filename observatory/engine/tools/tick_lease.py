@@ -421,6 +421,8 @@ TAIL_STEPS = frozenset({
     "agent", "index", "retention", "sweep", "corroborate", "review-policy", "ledger", "lost", "findings",
     # The daily learning review (OBS-331): its probe and its step, both optional, after `rollup`.
     "learning-review-due", "learning-review",
+    # The integration issue filer (OBS-557): optional, so it yields to the core tail.
+    "issues",
     "dashboard", "smoke", "findings-recheck", "notify", "registry", "project-into-vault",
     "projection", "links", "logs",
 })
