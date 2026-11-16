@@ -1,0 +1,34 @@
+{
+  "description": "A service that lists a degraded source in its well-known answer and reads ok in its health report: FAC-SEM-181 (DEC-0179 HL-7).",
+  "kind": "agent-health-service",
+  "expect": [
+    "FAC-SEM-181"
+  ],
+  "input": {
+    "wellKnown": {
+      "status": "degraded",
+      "degraded": [
+        {
+          "source": "telegram",
+          "setup": true,
+          "reason": "sign-in: the person signs in to Telegram"
+        }
+      ]
+    },
+    "health": {
+      "schema": "agent-health/1",
+      "product": "switchboard",
+      "version": "0.7.102",
+      "at": 1794830000,
+      "state": "ok",
+      "checks": [
+        {
+          "id": "owner",
+          "area": "lifecycle",
+          "state": "ok",
+          "count": 0
+        }
+      ]
+    }
+  }
+}

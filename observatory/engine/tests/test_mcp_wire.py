@@ -41,7 +41,7 @@ GOLDEN_TOOLS = [
     "observatory_assistant_ask", "observatory_assistant_conversation", "observatory_assistant_status",
     "observatory_checkpoint_latest", "observatory_checkpoint_write", "observatory_configure", "observatory_credentials",
     "observatory_dependencies",
-    "observatory_explain", "observatory_findings", "observatory_handoff_accept",
+    "observatory_explain", "observatory_findings", "observatory_handoff_accept", "observatory_health",
     "observatory_handoff_create", "observatory_handoff_get", "observatory_integrations", "observatory_issues",
     "observatory_key_consumers", "observatory_key_sweep", "observatory_key_sweep_settle",
     "observatory_learn", "observatory_lesson",
