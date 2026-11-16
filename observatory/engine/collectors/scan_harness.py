@@ -562,8 +562,9 @@ def codex_skills(home: Path, roots: list[Path]) -> tuple[dict, list[dict], list[
     """Codex's harness: the skills it loads from `~/.codex/skills` and the shared `~/.agents/skills`. (Its listing
     — skills and description characters, counted the way the Agent Skills standard truncates — and rule hits,
     named `codex/skill`.) A skill linked into both folders is counted once. The third list is one row per skill for
-    the node summary (OBS-192): its name, `source` `user` (both folders are the person's own) and its content
-    digest; no path."""
+    the node summary (OBS-192): its name, `source` `user` (both folders are the person's own), its content
+    digest and the provenance `tier` its rule hits were judged at (OBS-572: the Installed tools page shows it
+    as the skill's source, as it does for Claude Code's); no path."""
     seen: set[str] = set()
     rows, hits, skill_rows = [], [], []
     for folder in (home / ".codex" / "skills", home / ".agents" / "skills"):
@@ -581,7 +582,7 @@ def codex_skills(home: Path, roots: list[Path]) -> tuple[dict, list[dict], list[
             rows.append(listing_chars(meta, name))
             tier = tier_of(skill.parent, None, roots, set())
             sha, _n, _s, files = digest(skill.parent)
-            skill_rows.append({"name": name, "source": "user", "digest": sha})
+            skill_rows.append({"name": name, "source": "user", "tier": tier, "digest": sha})
             for h in hits_for(name, skill.parent, files, meta, tier):
                 hits.append({**h, "skill": f"codex/{name}", "harness": "codex", "digest": sha})
     return {"skills": len(rows), "listing_chars": sum(rows)}, hits, skill_rows

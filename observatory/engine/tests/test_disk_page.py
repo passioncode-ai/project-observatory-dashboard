@@ -114,6 +114,29 @@ class Page(unittest.TestCase):
         self.assertNotIn("Running simulators", text, "simulators hold memory: they stay on the Machine page")
         relocalizes(self, en, ru)
 
+    def test_the_daily_free_space_is_a_short_trend_and_a_table_of_the_last_days(self):
+        """OBS-572: a sparkline over the series and the newest seven days; one day is a table without a line."""
+        days = [{"day": f"2026-11-{d:02d}", "min_gb": 40.0 - d, "last_gb": 41.0 - d, "samples": 3} for d in range(1, 11)]
+        en, ru = both(machine(freeSeries=days))
+        text = shown(en)
+        self.assertIn("Free space by day", text)
+        self.assertEqual(en.count("<polyline"), 1)
+        self.assertIn("Lowest 30 GB on", text)
+        self.assertRegex(text, r"2026-11-10\s+30 GB\s+31 GB\s+3")
+        self.assertNotIn("2026-11-03", text, "the table holds the newest seven days; the line holds them all")
+        self.assertIn("Свободное место по дням", shown(ru))
+        self.assertIsNone(COMMAND.search(en))
+        relocalizes(self, en, ru)
+        one, _ = both(machine(freeSeries=days[:1]))
+        self.assertNotIn("<polyline", one)
+        self.assertIn("2026-11-01", shown(one))
+
+    def test_no_series_says_so_instead_of_drawing_a_flat_line(self):
+        en, ru = both(machine())
+        self.assertIn("No daily history yet", shown(en))
+        self.assertNotIn("<polyline", en)
+        relocalizes(self, en, ru)
+
     def test_what_auto_cleanup_removes_and_keeps_with_its_idle_days(self):
         en, _ = both(machine())
         text = shown(en)

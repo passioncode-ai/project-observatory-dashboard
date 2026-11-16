@@ -1255,7 +1255,10 @@ def build():
     locale = build_locale()
     t = i18n.Translator(locale)
     title = "Projects — the operator's registry"
-    return (template_for(locale).replace("__PAGE__", "").replace("__NAV__", "").replace("__CARDS__", "").replace("__MACHINE__", "").replace("__TOOLS__", "").replace("__DISK__", "").replace("__AGENTS__", "").replace("__INFRA__", "")
+    page = template_for(locale)
+    for slot in ("PAGE", "NAV", "CARDS", *_shell.SLOTS):     # the single page carries no page's own body
+        page = page.replace(f"__{slot}__", "")
+    return (page
             .replace("__TITLE__", html.escape(t(title)))
             .replace("__PAGE_TITLE__", "")
             .replace("__H1__", t.mark(title, tag="h1"))
@@ -1990,11 +1993,7 @@ __NAV__
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 <section id="panel" class="card panel" role="dialog" aria-labelledby="panel-title" hidden></section>
 __CARDS__
-__MACHINE__
-__TOOLS__
-__DISK__
-__AGENTS__
-__INFRA__
+__BODY_SLOTS__
 <div id="list-tools" class="list-tools"></div>
 <main id="out" aria-live="polite"></main>
 
@@ -4741,6 +4740,17 @@ if (!PAGE && bar) new ResizeObserver(stick).observe(bar);
     let group = typeof location !== "undefined" && location.search
       ? new URLSearchParams(location.search).get("group") : null;
     if (!GROUP_WORDS[group]) group = null;
+    // The entry that opened this view is the current page, not Findings (OBS-572): the navigation names the
+    // page one place only, and a reset or a finding link gives it back.
+    const navView = group && document.querySelector
+      ? document.querySelector('#pages a.pg-view[href$="group=' + group + '"]') : null;
+    const navFindings = document.querySelector ? document.querySelector('#pages a.pg[href="findings.html"]') : null;
+    const navMark = on => {
+      if (!navView || !navFindings) return;
+      (on ? navView : navFindings).setAttribute("aria-current", "page");
+      (on ? navFindings : navView).removeAttribute("aria-current");
+    };
+    navMark(true);
     const apply = () => {
       const type = bar.querySelector(".ftype").value;
       const q = bar.querySelector(".fq").value.trim().toLowerCase();
@@ -4779,7 +4789,7 @@ if (!PAGE && bar) new ResizeObserver(stick).observe(bar);
     host.addEventListener("click", ev => {
       if (!(ev.target.closest && ev.target.closest("[data-fclear]"))) return;
       sevOn.clear();
-      group = null;
+      group = null; navMark(false);
       bar.querySelectorAll("[data-sev]").forEach(b => b.setAttribute("aria-pressed", "false"));
       bar.querySelector(".ftype").value = ""; bar.querySelector(".fq").value = "";
       apply();
@@ -4792,7 +4802,7 @@ if (!PAGE && bar) new ResizeObserver(stick).observe(bar);
       const target = location.hash && location.hash.startsWith("#f-") && document.getElementById(location.hash.slice(1));
       if (target) {
         const body = target.querySelector(".finding-body"); if (body) body.open = true;
-        sevOn.clear(); group = null; bar.querySelector(".ftype").value = ""; bar.querySelector(".fq").value = "";
+        sevOn.clear(); group = null; navMark(false); bar.querySelector(".ftype").value = ""; bar.querySelector(".fq").value = "";
         bar.querySelectorAll("[data-sev]").forEach(b => b.setAttribute("aria-pressed", "false"));
         apply(); target.scrollIntoView({block: "center"});
       }
@@ -4979,13 +4989,32 @@ if (PAGE === "agents" && typeof document !== "undefined" && document.addEventLis
   let last = null;
   const keep = box => new Set([...box.querySelectorAll("details[open]")]
     .map(d => (d.querySelector("summary .mono") || {}).textContent));
+  // What a person picked in a workflow's offer (provider, reason) and what its status line said, by
+  // control: the swap rebuilds the rows, so these are read before it and put back after it (OBS-572).
+  const FORM = "[data-wf-provider], [data-wf-reason], [data-wf-said]";
+  const formKey = el => ["data-wf-provider", "data-wf-reason", "data-wf-said"]
+    .map(a => el.hasAttribute(a) ? a + "=" + el.getAttribute(a) : "").join("");
+  const formState = box => new Map([...box.querySelectorAll(FORM)]
+    .map(el => [formKey(el), el.hasAttribute("data-wf-said") ? el.textContent : el.value]));
+  const formRestore = (box, state) => box.querySelectorAll(FORM).forEach(el => {
+    const was = state.get(formKey(el));
+    if (was === undefined || was === "") return;
+    if (el.hasAttribute("data-wf-said")) el.textContent = was;
+    else if ([...el.options || []].some(o => o.value === was)) el.value = was;
+  });
+  // A control the person is using is never rebuilt under them: an open list would close.
+  const inUse = box => {
+    const a = document.activeElement;
+    return !!(a && box.contains(a) && a.matches && a.matches("select, input, textarea"));
+  };
   const refresh = () => fetch("/agents?locale=" + encodeURIComponent(LOCALE), {cache: "no-store"})
     .then(r => { if (!r.ok) throw new Error(String(r.status)); return r.text(); })
     .then(markup => {
       const box = document.getElementById("agents");
-      if (!box) return;
+      if (!box || inUse(box)) return;
 
       const open = keep(box);
+      const form = formState(box);
       const within = document.activeElement && box.contains(document.activeElement)
         ? document.activeElement.closest("details") : null;
       const focused = within ? (within.querySelector("summary .mono") || {}).textContent : null;
@@ -5006,6 +5035,7 @@ if (PAGE === "agents" && typeof document !== "undefined" && document.addEventLis
       last = sig;
       box.replaceWith(fresh);
       agentsActions();
+      formRestore(fresh, form);
       if (focused) {
         const again = [...fresh.querySelectorAll("details summary")].find(
           s => (s.querySelector(".mono") || {}).textContent === focused);
@@ -5037,7 +5067,8 @@ TEMPLATE = (TEMPLATE
             .replace("__PC_TOKENS__", (BRAND / "passioncode-tokens.css").read_text(encoding="utf-8"))
             .replace("</style>", (Path(__file__).with_name("workspace.css").read_text(encoding="utf-8")) + "\n</style>"))
 import shell as _shell
-TEMPLATE = TEMPLATE.replace("__ICON__", _shell.ICON)
+TEMPLATE = (TEMPLATE.replace("__ICON__", _shell.ICON)
+            .replace("__BODY_SLOTS__", "\n".join(f"__{slot}__" for slot in _shell.SLOTS)))
 
 if __name__ == "__main__":
     OUT.parent.mkdir(parents=True, exist_ok=True)

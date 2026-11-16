@@ -276,6 +276,12 @@ def summary(explain_pid: int | None = None) -> dict:
                         "largeFiles": guard.get("large_files"),
                         "memory": guard.get("memory")}
         degraded += guard.get("degraded") or []
+    # The days before the last pass, for the Disk page's trend (OBS-572): `[]` when the guard has not recorded any.
+    tools = str(paths.ROOT / "tools")
+    if tools not in sys.path:
+        sys.path.append(tools)
+    import disk_free_series
+    out["freeSeries"] = disk_free_series.read()
     if explain_pid is not None:
         sys.path.insert(0, str(paths.ROOT / "collectors"))
         import scan_machine

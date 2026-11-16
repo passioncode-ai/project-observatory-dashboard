@@ -106,6 +106,49 @@ def _tiles(m: dict, auto, t: Translator) -> str:
     return f'<div class="tiles machine-tiles">{cells}</div>'
 
 
+#: The days the table lists; the line over them holds the whole series.
+TREND_ROWS = 7
+SPARK_W, SPARK_H, SPARK_PAD = 240, 48, 4
+
+
+def _spark(rows: list[dict], t: Translator) -> str:
+    """The lowest free space of each day as one line, zero at the bottom. Drawn only from two days on."""
+    values = [r["min_gb"] for r in rows]
+    top = max(values) or 1.0
+    step = (SPARK_W - 2 * SPARK_PAD) / (len(values) - 1)
+    points = " ".join(f"{SPARK_PAD + i * step:.1f},{SPARK_H - SPARK_PAD - v / top * (SPARK_H - 2 * SPARK_PAD):.1f}"
+                      for i, v in enumerate(values))
+    return (f'<svg class="free-spark" viewBox="0 0 {SPARK_W} {SPARK_H}" role="img" preserveAspectRatio="none"'
+            f'{t.attr("aria-label", "Lowest free space of each day, {n} days", n=len(values))}>'
+            f'<polyline points="{points}"/></svg>')
+
+
+def trend_html(series, t: Translator) -> str:
+    """The free space of the days before the last pass (OBS-572): a short line and the newest days as a table, kept
+    by the guard (`tools/disk_free_series.py`). No series says so, and a single day draws no line."""
+    rows = [r for r in series or [] if isinstance(r, dict) and r.get("day") and isinstance(r.get("min_gb"), (int, float))
+            and isinstance(r.get("last_gb"), (int, float))]
+    head = t.mark("Free space by day", tag="h2", attrs=HEADING)
+    if not rows:
+        return (f'<section class="card panel">{head}'
+                f'{t.mark("No daily history yet. The guard records the free space each time it runs.", tag="p", attrs=EMPTY)}'
+                "</section>")
+    low = min(rows, key=lambda r: r["min_gb"])
+    parts = [f'<section class="card panel">{head}']
+    if len(rows) > 1:
+        parts.append(_spark(rows, t))
+        parts.append(t.mark("Lowest {low} GB on {date}, newest day {last} GB.", tag="p", attrs=HINT,
+                            low=low["min_gb"], date=low["day"], last=rows[-1]["last_gb"]))
+    table = [[t.date(r["day"]), _gigabytes(r["min_gb"], t), _gigabytes(r["last_gb"], t), t.number(r.get("samples") or 1)]
+             for r in reversed(rows[-TREND_ROWS:])]
+    heads = [("Day", False), ("Lowest", True), ("Last reading", True), ("Readings", True)]
+    th = "".join(f'<th scope="col"{NUM if num else ""}>{t.mark(h)}</th>' for h, num in heads)
+    body = "".join("<tr>" + "".join(f'<td{NUM if num else ""}{t.attr("data-label", h)}>{c}</td>'
+                                    for (h, num), c in zip(heads, r)) + "</tr>" for r in table)
+    parts.append(f'<table><thead><tr>{th}</tr></thead><tbody>{body}</tbody></table></section>')
+    return "".join(parts)
+
+
 def guard_html(g: dict | None, t: Translator) -> str:
     """The disk guard's last pass, what it planned at that pressure, the folders it keeps and the largest files."""
     if not g:
@@ -279,6 +322,7 @@ def disk_html(payload: dict, t: Translator | None = None) -> str:
     elif auto is False:
         parts.append(t.mark("Auto cleanup is off: nothing is removed by itself. Turn it on under Settings.", tag="p",
                             attrs=' class="machine-at"'))
+    parts.append(trend_html(m.get("freeSeries"), t))
     parts.append(guard_html(m.get("guard"), t))
     parts.append(_runs(cleanup, t))
     parts.append(_classes(cleanup, values, t))
@@ -291,5 +335,7 @@ def disk_html(payload: dict, t: Translator | None = None) -> str:
 
 #: Values the page translates through a variable, named here so the catalog test sees them.
 DYNAMIC = (tuple(SETTING_LABELS.values()) + tuple(c[1] for c in CLASSES)
-           + ("Turn on", "Turn off", "Nothing to free at this pressure.", "No file above the size line.",
+           + ("Day", "Lowest", "Last reading", "Readings",      # the trend table's heads (`trend_html`)
+              "Setting", "Value", "Default", "Source", "Change",  # the settings table's heads (`settings_html`)
+              "Turn on", "Turn off", "Nothing to free at this pressure.", "No file above the size line.",
               "incomplete measurement", "Not measured", DISABLED))

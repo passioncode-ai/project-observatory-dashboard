@@ -61,6 +61,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "collectors"))
 sys.path.insert(0, str(ROOT / "tools"))
 import configuration  # noqa: E402
+import disk_free_series  # noqa: E402
 import osprivacy  # noqa: E402
 import osproc  # noqa: E402
 import paths  # noqa: E402
@@ -1948,6 +1949,13 @@ def run(argv: list[str]) -> dict:
     base["surveys"] = {"memory": memory_survey}
     base["degraded"] = ([] if memory_survey in ("refreshed", "fresh") else
                         [{"source": "memory-refresh", "reason": memory_survey}])
+    # The day's free-space reading for the Disk page's trend (OBS-572), before any early return: a pass that is
+    # not due still saw the disk. A write that fails is named and the run goes on.
+    try:
+        disk_free_series.record(round(free0 / GB, 1))
+    except OSError as exc:
+        base["degraded"].append({"source": "free-series", "reason": f"the daily free-space series could not be "
+                                                                    f"written ({type(exc).__name__})"})
     # HOW OFTEN: at `normal` once per `normal_every_minutes`, measured from the previous
     # run's START with half an interval's tolerance; below `low`, every pass.
     if auto and level == "normal" and previous and previous.get("acting"):

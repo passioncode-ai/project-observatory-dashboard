@@ -152,6 +152,14 @@ class View(unittest.TestCase):
         self.assertIsNone(codex["tier"], "a tier the scan did not record is unknown, not guessed")
         self.assertEqual([f["id"] for f in codex["findings"]], ["f-codex"])
 
+    def test_a_codex_skill_takes_the_tier_the_scan_recorded_in_its_own_list(self):
+        """OBS-572: `codex_skills` rows carry the tier their rule hits were judged at; the page shows it."""
+        doc = {**HARNESS, "codex_skills": [{"name": "review", "source": "user", "tier": 3, "digest": "0" * 64}]}
+        codex = {a["id"]: a for a in view(doc)["agents"]}["codex"]["skills"]["user"][0]
+        self.assertEqual(codex["tier"], 3)
+        shown = tools_page.tools_html({"tooling": view(doc)}, EN)
+        self.assertNotIn("not recorded", shown, "no skill is left without its source")
+
     def test_hooks_and_agent_findings_sit_beside_what_they_are_about(self):
         v = view()
         by = {a["id"]: a for a in v["agents"]}
@@ -316,6 +324,8 @@ class Shell(unittest.TestCase):
         template = next(ast.literal_eval(node.value) for node in source.body
                         if isinstance(node, ast.Assign)
                         and any(isinstance(t, ast.Name) and t.id == "TEMPLATE" for t in node.targets))
+        # The template's body slots are written once in the page table and expanded where it is built.
+        template = template.replace("__BODY_SLOTS__", "\n".join(f"__{slot}__" for slot in shell.SLOTS))
         payload = {"tooling": view()}
         page = shell.page_html(template, "tools", payload)
         self.assertIn('id="tools"', page)

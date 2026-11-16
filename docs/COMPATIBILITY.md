@@ -325,6 +325,22 @@ the registry document yet is named there too. New command `project-observatory f
 COPY`, which reads only and prints the sync steps; it writes nothing. An older engine ignores both
 files; deleting `registry/derivations.json` loses nothing the next emit does not rebuild.
 
+## Dashboard pages: one page table, new pages, live refresh (OBS-572, after 0.38.0)
+
+The pages themselves are generated files, so nothing in a workspace needs migrating. What changed in them: Security
+and Availability in the navigation are marked as the current page on `findings.html?group=...`; the Agents page keeps
+what a person picked in a workflow's offer through its 15-second refresh; the sessions tile lists its source and its
+agents on separate lines; the Disk page gains a "Free space by day" section. One new state file holds that section's
+data, and `harness` rows of Codex skills gain a `tier` member.
+
+| Path | Since | What it holds | Upgrade and downgrade |
+|---|---|---|---|
+| `<state>/disk-free-series.json` | after 0.38.0 | the disk guard's daily free-space series (`schema_version` 1): per UTC day `day`, `min_gb`, `last_gb` and `samples`, the newest 30 days, numbers only; written by every guard run, due or not (`tools/disk_free_series.py`) | `observatory_machine` and the Disk page read it; absent or unreadable, the page says there is no daily history. An older engine never opens it, and deleting it only restarts the series |
+
+`store/raw/harness.json` keeps `codex_skills` rows as before (`name`, `source`, `digest`) with an added `tier` (1, 2 or 3, as
+Claude Code's skills carry it); the node summary reads only the old members, and an older engine ignores `tier`, so
+the Installed tools page shows "not recorded" for Codex skills until the next harness scan.
+
 ## Registry: dependencies and the vulnerability watch (OBS-553)
 
 New registry document `registry/dependencies.json` (`schema_version` 1), written by `emit` from
