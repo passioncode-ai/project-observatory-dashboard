@@ -6,7 +6,7 @@ Each OSS id is defined once, as a table row or a `### OSS-n:` heading; a heading
 `### OSS-n, in detail:`. A new scenario takes the next free id and moves this line
 (the repository's `ScenarioIds` test checks both, and that every id below it is defined or vacant).
 
-**Next free OSS id:** `OSS-122`
+**Next free OSS id:** `OSS-123`
 
 **Vacant OSS ids:** `OSS-59` (claimed by an open pull request on 2026-10-18 when the SSH-key scenarios took OSS-62; never written)
 

@@ -47,7 +47,7 @@ first proves the unmodified list passes.
 
 | status | count |
 |---|---|
-| covered | 11 |
+| covered | 12 |
 | gate | 8 |
 | missing | 93 |
 
