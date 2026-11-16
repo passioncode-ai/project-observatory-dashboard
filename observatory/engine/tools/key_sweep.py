@@ -264,7 +264,7 @@ def run_external(scanner: str, mode: str, repo: pathlib.Path, *, log_opts: str |
 
     Answers (rows, problem). The report is deleted in every case, a failed or stopped run included; the
     scanner's own output is discarded unread, so nothing it printed reaches a record."""
-    folder = tempfile.mkdtemp(prefix="observatory-key-sweep-")
+    folder = tempfile.mkdtemp(prefix="observatory-key-sweep-")  # paths-check: allow - owner-only report folder, removed in the finally below on every path
     report = os.path.join(folder, "report.json")
     try:
         fd = os.open(report, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
