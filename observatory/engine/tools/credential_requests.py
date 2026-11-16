@@ -494,8 +494,8 @@ class CloudflareDoor(Door):
     #: The presets a request may ask for: one token per slot, each reaching one zone or one account's one
     #: product. Not offered: a token named by zone (`dns-edit`, `zone-analytics-read`: issuing one for a slot
     #: would roll the token another slot holds), the plugin and bucket presets, which deliver elsewhere, and the
-    #: Fabric Inbox ones, which reach every zone of the account.
-    OFFERED = ("email-routing", "redirect-rules", "workers-routes", "email-sending-domain", "cache-purge",
+    #: Fabric Inbox ones and `zone-create`, which reach every zone of the account.
+    OFFERED = ("email-routing", "email-routing-setup", "redirect-rules", "workers-routes", "email-sending-domain", "cache-purge",
                "zone-edge-rules", "zaraz-edit", "d1-edit", "email-send", "workers-edit", "workers-observability-read",
                "access-app")
 

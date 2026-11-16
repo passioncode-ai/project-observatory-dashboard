@@ -1617,6 +1617,113 @@ def _preset_fake(m, log, groups, probe_prefix, value_prefix):
     m._request = fake
 
 
+def test_cf_routing_setup_preset_turns_routing_on_in_one_zone() -> None:
+    """Turning Email Routing on (`POST /zones/{z}/email/routing/dns`) and reading its settings take Zone
+    Settings Write, which the rules preset lacks (it answered 10000 on a real zone, 2026-11-16): the zone's
+    own resource for Zone Read, Zone Settings Write, DNS Write and Email Routing Rules Write, and the
+    account for reading its destination addresses, as two policies. A token that cannot read the routing
+    settings never reaches the vault, and an addresses group offered only at the zone level is never taken."""
+    import contextlib, io
+    m = cf(); _cf_with_admin(m)
+    log, delivered = [], []
+    preset = m.PRESETS["email-routing-setup"]
+    offered = [(g, "zone") for g in preset["groups"]] + [(g, "account") for g in preset["account_groups"]]
+    _preset_fake(m, log, offered, "/zones/z1/email/routing", "es-value-")
+    m.deliver_to_vault = lambda value, p, e, n, d=delivered: d.append((value, p, e, n))
+    m._journal = lambda *a, **k: None
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_issue_zone("email-routing-setup", "example.com", "proj/prod/CF_EMAIL_SETUP", None, wait=0)
+    check("email-routing-setup issues", rc == 0, str(rc))
+    create = [pl for _m, path, _t, pl in log if path == "/accounts/a1/tokens" and pl]
+    pols = create[0]["policies"] if create else []
+    check("email-routing-setup grants its four zone groups on the zone's own resource",
+          len(pols) == 2 and pols[0]["resources"] == {"com.cloudflare.api.account.zone.z1": "*"}
+          and [g["id"] for g in pols[0]["permission_groups"]]
+          == [f"id-zone-{g}" for g in ("Zone Read", "Zone Settings Write", "DNS Write", "Email Routing Rules Write")],
+          str(pols))
+    check("email-routing-setup reads the account's destination addresses, as its own policy",
+          len(pols) == 2 and pols[1]["resources"] == {"com.cloudflare.api.account.a1": "*"}
+          and [g["id"] for g in pols[1]["permission_groups"]] == ["id-account-Email Routing Addresses Read"],
+          str(pols))
+    check("email-routing-setup is named after the zone and the slot",
+          bool(create) and create[0]["name"]
+          == "observatory-email-routing-setup example.com proj/prod/CF_EMAIL_SETUP (managed)", str(create))
+    check("email-routing-setup is verified with the NEW token by reading the zone's routing settings",
+          any(path == "/zones/z1/email/routing" and tok.startswith("es-value-") for _m, path, tok, _p in log),
+          str(log[-3:]))
+    check("email-routing-setup lands in the slot and is never printed",
+          [d[1:] for d in delivered] == [("proj", "prod", "CF_EMAIL_SETUP")] and "es-value-" not in out.getvalue(),
+          out.getvalue())
+
+    m2 = cf(); _cf_with_admin(m2)
+    log2 = []
+    _preset_fake(m2, log2, [(g, "zone") for g in preset["groups"] + preset["account_groups"]],
+                 "/zones/z1/email/routing", "es-value-")
+    m2.deliver_to_vault = lambda *a: (_ for _ in ()).throw(AssertionError("nothing to deliver"))
+    m2._journal = lambda *a, **k: None
+    check("email-routing-setup: an addresses group offered only at the zone level is never taken",
+          m2.cmd_issue_zone("email-routing-setup", "example.com", "proj/prod/CF_EMAIL_SETUP", None, wait=0) == 1
+          and not any(p == "/accounts/a1/tokens" and pl for _m, p, _t, pl in log2), str(log2))
+
+    m3 = cf(); _cf_with_admin(m3)
+    log3, delivered3 = [], []
+    _preset_fake(m3, log3, offered, "/zones/z1/never-answered", "es-value-")
+    base = m3._request
+    def refusing(path, token, payload=None, method=None):
+        if path == "/zones/z1/email/routing":
+            log3.append(("GET", path, token, None))
+            raise RuntimeError("cloudflare answered HTTP 403; provider response withheld")
+        return base(path, token, payload, method)
+    m3._request = refusing
+    m3.deliver_to_vault = lambda value, p, e, n, d=delivered3: d.append((value, p, e, n))
+    m3._journal = lambda *a, **k: None
+    with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+        rc3 = m3.cmd_issue_zone("email-routing-setup", "example.com", "proj/prod/CF_EMAIL_SETUP", None, wait=0)
+    check("email-routing-setup: a token that cannot read the routing settings is not delivered",
+          rc3 == 1 and not delivered3, str(rc3))
+
+
+def test_cf_zone_create_preset_adds_zones_to_one_account() -> None:
+    """Adding a bought domain is `POST /zones`, offered only as Zone Write on the account's zones: two
+    policies on the one account (Account Settings Read on it, Zone Read and Zone Write on `zone.*`), named
+    after the slot, verified by listing the account's zones with the NEW value, delivered to the vault.
+    The why says the holder can also edit the account's other zones; the request door never offers it."""
+    m = cf(); _cf_with_admin(m)
+    preset = m.PRESETS["zone-create"]
+    log, delivered = [], []
+    offered = [(g, "account") for g in preset["groups"]] + [(g, "zone") for g in preset["zone_groups"]]
+    _preset_fake(m, log, offered, "/zones?account.id=a1&per_page=1", "zc-value-")
+    m.deliver_to_vault = lambda value, p, e, n, d=delivered: d.append((value, p, e, n))
+    m._journal = lambda *a, **k: None
+    import contextlib, io
+    out = io.StringIO()
+    with contextlib.redirect_stdout(out):
+        rc = m.cmd_issue_account("zone-create", "proj/prod/CF_ZONE_TOKEN", None, wait=0)
+    check("zone-create issues", rc == 0, str(rc))
+    create = [pl for _m, path, _t, pl in log if path == "/accounts/a1/tokens" and pl]
+    pols = create[0]["policies"] if create else []
+    check("zone-create: Account Settings Read on the account, Zone Read and Zone Write on its zones",
+          len(pols) == 2 and pols[0]["resources"] == {"com.cloudflare.api.account.a1": "*"}
+          and [g["id"] for g in pols[0]["permission_groups"]] == ["id-account-Account Settings Read"]
+          and pols[1]["resources"] == {"com.cloudflare.api.account.a1": {"com.cloudflare.api.account.zone.*": "*"}}
+          and [g["id"] for g in pols[1]["permission_groups"]] == ["id-zone-Zone Read", "id-zone-Zone Write"],
+          str(pols))
+    check("zone-create is verified by listing the account's zones with the NEW token",
+          any(path == "/zones?account.id=a1&per_page=1" and tok.startswith("zc-value-") for _m, path, tok, _p in log),
+          str(log[-3:]))
+    check("zone-create lands in the slot and is never printed",
+          [d[1:] for d in delivered] == [("proj", "prod", "CF_ZONE_TOKEN")] and "zc-value-" not in out.getvalue(),
+          out.getvalue())
+    check("zone-create says it reaches the account's other zones",
+          "other zones" in preset["why"], preset["why"])
+    import credential_requests
+    check("a credential request is never offered zone-create, and is offered email-routing-setup",
+          "zone-create" not in credential_requests.CloudflareDoor.OFFERED
+          and "email-routing-setup" in credential_requests.CloudflareDoor.OFFERED,
+          str(credential_requests.CloudflareDoor.OFFERED))
+
+
 def test_cf_email_presets_grant_exactly_what_the_email_service_needs() -> None:
     """Transactional email through Cloudflare Email Service: a
     runtime SENDER on one account, a zone's ROUTING-rule writer, and a Workers
@@ -3711,6 +3818,8 @@ if __name__ == "__main__":
                test_cf_zone_edge_rules_preset_proves_its_read_on_a_zone_without_cache_rules,
                test_cf_zaraz_edit_preset_takes_the_narrow_group_and_proves_the_gateway_read,
                test_cf_access_app_preset_reads_the_team_domain_and_changes_no_organization,
+               test_cf_routing_setup_preset_turns_routing_on_in_one_zone,
+               test_cf_zone_create_preset_adds_zones_to_one_account,
                test_or_stash_demands_a_label_because_the_provider_names_nothing,
                test_or_rotation_creates_and_delivers_before_deleting,
                test_or_issue_deletes_the_key_when_delivery_fails,

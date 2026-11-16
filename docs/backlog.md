@@ -1,6 +1,6 @@
 # Local backlog
 
-**Next free ID:** `OBS-573`
+**Next free ID:** `OBS-574`
 
 **Vacant ids:** `OBS-91` (skipped when the OBS register began reserving: #277 wrote OBS-92 and OBS-93, and no row was ever written under 91); `OBS-422` (reserved on 2026-11-08 for the provider-account organization rules, which became OBS-412 part 1 when the organization onboarding rows OBS-411 to OBS-420 were written)
 
@@ -597,3 +597,4 @@ still open and needs nothing, and a reservation older than that with no row must
 | OBS-570 | Read Switchboard's `org-seats/1` (`switchboard --json organizations`, field `seats`, SB-381) into `observatory_org_accounts`: seats per organization by provider and class, placed_by, enabled, here or elsewhere; no account ids or machine names | open | Fabric board thread `8df590e8`, 2026-11-15 |
 | OBS-571 | A Heroku door preset `billing-read` for a team's invoices: `GET /teams/TEAM/invoices` answers only to scope `global` (measured 2026-11-15: read-protected 403, read 403, global 200), so the preset issues `global` with `--team` required, at most 365 days, probes the invoices before the value reaches the vault slot, deletes the authorization when the probe fails, and records why `global` is wider than the read needs | done in 0.39.0 (#550) | Fabric board thread `772ad5ed` (Data Room DR-099) |
 | OBS-572 | After 0.38.0: interface polish, one page table, docs for waves 1 and 2. Current-page mark for Security and Availability, the Agents refresh keeping a picked provider and reason, the sessions tile in two lines, a source tier for Codex skills, a daily free-space series on the Disk page, every page declared once in `dashboard/page_table.py`, and the control plane docs for both waves | done in 0.39.0 (#551) | the operator, 2026-11-15: finish everything, then interface polish, refactoring and documentation; the polish packet of the estate control plane run |
+| OBS-573 | Two Cloudflare door presets: `email-routing-setup` turns Email Routing on in one zone (Zone Read, Zone Settings Write, DNS Write, Email Routing Rules Write on the zone, Email Routing Addresses Read on its account; the rules preset answered 10000 on the routing settings, measured 2026-11-16), and `zone-create` adds a bought domain to one account (Zone Read and Zone Write on its zones, the only group Cloudflare offers for `POST /zones`, so it also reaches the other zones; short expiry, never offered to credential requests) | done — merged (#553) | Fabric board threads `ca515df7` and `47a1e9f8` (two projects adding bought domains) |
