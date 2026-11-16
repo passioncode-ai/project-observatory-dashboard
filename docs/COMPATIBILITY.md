@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The application release is **0.38.0**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
+The application release is **0.39.0**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
 
 ## SQLite runtime prerequisite
 
@@ -325,7 +325,7 @@ the registry document yet is named there too. New command `project-observatory f
 COPY`, which reads only and prints the sync steps; it writes nothing. An older engine ignores both
 files; deleting `registry/derivations.json` loses nothing the next emit does not rebuild.
 
-## Dashboard pages: one page table, new pages, live refresh (OBS-572, after 0.38.0)
+## Dashboard pages: one page table, new pages, live refresh (OBS-572, 0.39.0)
 
 The pages themselves are generated files, so nothing in a workspace needs migrating. What changed in them: Security
 and Availability in the navigation are marked as the current page on `findings.html?group=...`; the Agents page keeps
@@ -335,7 +335,7 @@ data, and `harness` rows of Codex skills gain a `tier` member.
 
 | Path | Since | What it holds | Upgrade and downgrade |
 |---|---|---|---|
-| `<state>/disk-free-series.json` | after 0.38.0 | the disk guard's daily free-space series (`schema_version` 1): per UTC day `day`, `min_gb`, `last_gb` and `samples`, the newest 30 days, numbers only; written by every guard run, due or not (`tools/disk_free_series.py`) | `observatory_machine` and the Disk page read it; absent or unreadable, the page says there is no daily history. An older engine never opens it, and deleting it only restarts the series |
+| `<state>/disk-free-series.json` | 0.39.0 | the disk guard's daily free-space series (`schema_version` 1): per UTC day `day`, `min_gb`, `last_gb` and `samples`, the newest 30 days, numbers only; written by every guard run, due or not (`tools/disk_free_series.py`) | `observatory_machine` and the Disk page read it; absent or unreadable, the page says there is no daily history. An older engine never opens it, and deleting it only restarts the series |
 
 `store/raw/harness.json` keeps `codex_skills` rows as before (`name`, `source`, `digest`) with an added `tier` (1, 2 or 3, as
 Claude Code's skills carry it); the node summary reads only the old members, and an older engine ignores `tier`, so
@@ -1355,8 +1355,8 @@ code's path constants, so a path built another way is not seen (OBS-182).
 | `secrets/digitalocean-read.d/` | 0.27.0 | each team's installed `observatory-read` token, which the collector prefers over the stashed one | the collector falls back to the stashed token when a team has none |
 | `secrets/digitalocean-issued/` | 0.27.0 | one `<label>.meta.json` per installed narrow token (team, preset, declared scopes, slot, dates; never a value) and its lock | removing a record makes the door forget the token, not revoke it |
 | `store/raw/cloudflare_account.json` | 0.30.0 | per Cloudflare account: Workers, Pages projects with their source repository, R2 buckets, D1 databases, zones with plan and price, DNS record count and certificate expiry, and named `degraded`, written by `full scan-cloudflare-account` | `emit` turns it into `registry/cloudflare-account.json` for the Cloudflare page; an older engine never reads it, and absent, the page says the account inventory is not measured |
-| `store/raw/dependencies.json` | 0.38.0 | every lockfile each project's folders hold (OBS-553, schema `dependencies-scan/1`): per file its folder, path, format, size, time and parsed packages, or `error`; written by `full scan-dependencies` and the tick | `emit` turns it into `registry/dependencies.json`; an older engine never reads it, and deleting it only makes the next scan parse every lockfile again |
-| `store/raw/vulnerabilities.json` | 0.38.0 | the last OSV answer over the inventory (OBS-553, schema `vulnerabilities/1`): matches, summarized advisories, the catalogue's day and `degraded`; beside it `vuln-watch.json` in the store folder (the day of the last complete pass and the inventory digest) and `store/state/osv-cache/` (advisory records, `kev.json`) | the findings and `observatory_dependencies` read it; an older engine never does. Deleting it makes the next tick ask OSV again; deleting the cache only refetches records |
+| `store/raw/dependencies.json` | 0.37.0 | every lockfile each project's folders hold (OBS-553, schema `dependencies-scan/1`): per file its folder, path, format, size, time and parsed packages, or `error`; written by `full scan-dependencies` and the tick | `emit` turns it into `registry/dependencies.json`; an older engine never reads it, and deleting it only makes the next scan parse every lockfile again |
+| `store/raw/vulnerabilities.json` | 0.37.0 | the last OSV answer over the inventory (OBS-553, schema `vulnerabilities/1`): matches, summarized advisories, the catalogue's day and `degraded`; beside it `vuln-watch.json` in the store folder (the day of the last complete pass and the inventory digest) and `store/state/osv-cache/` (advisory records, `kev.json`) | the findings and `observatory_dependencies` read it; an older engine never does. Deleting it makes the next tick ask OSV again; deleting the cache only refetches records |
 | `secrets/cloudflare-inventory.d/` | 0.30.0 | one `inventory-read` token per account, owner-only, with its `<account>.meta.json` (account, groups, dates, expiry; never a value) | read by `collectors/scan_cloudflare_account.py` and managed by `tools/cloudflare.py`; an older engine never opens it, and deleting a file only stops the scan of that account, the token stays live at Cloudflare until `revoke` |
 | `secrets/sentry-issued.json` | 0.31.0 | the ledger of Sentry tokens the Sentry door issued or installed (kind, scopes, organization, project, hosts, token id, dates, last verification) and the broad tokens it retired, each with a keyed digest of the value a Sentry accepted; never a value or a plain hash. Beside it, `sentry-proof.key`: the random key of those digests, owner-only | written and read by `tools/sentry.py` only; deleting the key makes every recorded proof stale, so a broad token needs a new one before its revocation counts; an older engine never opens it, and removing it makes the door forget what it recorded, not revoke anything at Sentry |
 | `node/device/` | 0.25.0 | this machine's agent-network device keys from `full node --init`: `device.json`, `sig.pem`, `kem.pem`, owner-only; never replaced | an older engine ignores it; deleting it gives the machine a new device id at the next `--init` |

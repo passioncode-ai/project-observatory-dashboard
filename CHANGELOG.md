@@ -3,6 +3,41 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.39.0 (2026-11-16)
+
+The disk guard reaches a Colima VM in every state it can be trimmed in, and reports a VM whose disk has errors; the
+Heroku door issues a key that reads a team's invoices; the dashboard declares each page once and the wave-2 pages are
+polished. The observatory-log plugin moves to 0.39.0 with the release.
+
+### Added
+
+- **Heroku door preset `billing-read`** (OBS-571, #550): scope `global` with `--team`, at most 365 days, the team's
+  invoices probed before the value reaches the vault slot, the authorization deleted when the probe fails, and the
+  reason recorded that `global` is wider than the read needs (team invoices answer to nothing narrower).
+- **Free space by day on the Disk page** (OBS-572, #551): the guard keeps a bounded 30-day daily series and the page
+  shows its trend and the last 7 days.
+- **Finding `vm.disk_errors`** (OBS-565, #550): a VM's kernel log showing an aborted journal or a filesystem mounted with
+  errors is a critical finding with the repair steps; the guard never runs the repair itself.
+
+### Changed
+
+- **The disk guard and Colima** (OBS-565, #550): every Lima home is read (the default, `LIMA_HOME`, Colima's `_lima`),
+  and each instance is trimmed through `limactl shell` under its own home, also when Colima reports it Broken while its
+  VM driver runs; at the critical level Docker's unused images and build cache are pruned through that VM's own socket
+  first (never volumes), each journalled with the space the disk itself reports freed.
+- **One page table** (OBS-572, #551): each dashboard page is declared once; the navigation, the page questions, the
+  template slots and the build outputs follow from it, with every existing page built byte-identical.
+- **Wave-2 pages polished** (OBS-572, #551): Security and Availability show as the current page; the Agents page keeps
+  a picked provider and reason across its live refresh; the sessions tile reads in two lines; Codex skills show their
+  source tier.
+
+### Fixed
+
+- **Disk settings table in Russian** (OBS-572, #551): its heads were shown in English; ids passed through a variable are
+  now named for the catalogue test.
+- **The compatibility notes name the release a file appeared in** (#552): `store/raw/dependencies.json` and
+  `store/raw/vulnerabilities.json` appeared in 0.37.0, which the 0.38.0 notes had overwritten with 0.38.0.
+
 ## 0.38.0 (2026-11-15)
 
 The second wave of the estate control plane (docs/design/CONTROL-PLANE.md): the pages a person reads. Home answers "is
