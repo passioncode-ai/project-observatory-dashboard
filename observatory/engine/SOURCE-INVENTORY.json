@@ -3387,8 +3387,8 @@
       "path": "mcp_supply.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ead85797a3da62c219c517198e28a57ee26fb7bbea6576589772e8c3c18601f7",
-      "bytes": 22025
+      "export_sha256": "c5c7958c89ef798ad1eb19dca90923ce8686e4c8356b0c24a87a15bcf264b4e4",
+      "bytes": 22193
     },
     {
       "path": "memory_access.py",
@@ -5730,8 +5730,8 @@
       "path": "tests/test_mcp_supply.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ebe3e842fed4bcf8a6403cbce365a6bcef1f48f3e4aa4eb8b60b9a8d5a92c2aa",
-      "bytes": 21087
+      "export_sha256": "ae7a6530c6894f4cf2da302fbd109d3e23a1fbeae2c485a6d9bf1059be425359",
+      "bytes": 21167
     },
     {
       "path": "tests/test_mcp_supply_board.py",
@@ -5841,8 +5841,8 @@
       "path": "tests/test_no_silent_truncation.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "db939ea762352d81e4aef79e8bb95c814046f8fd89fcc4ee92f53d841cea1991",
-      "bytes": 12632
+      "export_sha256": "c1f2051a90b0d528715126e42d0549492e5f733e8d875b7c0d4426c775f7f352",
+      "bytes": 12886
     },
     {
       "path": "tests/test_node_actions.py",

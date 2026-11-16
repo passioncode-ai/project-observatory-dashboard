@@ -24,7 +24,7 @@ import scan_mcp                                                             # no
 from mcp_config_fixture import PLANTED, leaked, write_home                  # noqa: E402
 
 HOME = "/srv/example-home"
-SECRET = "planted-supply-secret-4c1e9a"
+SECRET = PLANTED["claude-arg"]           # a planted value: the shared fixture keeps them where the secret scan expects
 
 
 def tool(name="read", description="Reads one note.", schema=None):

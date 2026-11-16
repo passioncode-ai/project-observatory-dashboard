@@ -152,8 +152,10 @@ def _outside(command: str, home: str) -> bool:
         return True
     if any(text.startswith(p) for p in KNOWN_ROOTS):
         return False
-    if home and text.startswith(home.rstrip("/\\") + os.sep):
-        rel = text[len(home.rstrip("/\\")) + 1:].replace("\\", "/")
+    base = home.rstrip("/\\") if home else ""
+    if base and text.startswith(base) and text[len(base):len(base) + 1] in ("/", "\\"):
+        # Either separator: a config written on one system is read on another (a POSIX path read on Windows).
+        rel = text[len(base) + 1:].replace("\\", "/")
         return not any(rel.startswith(p) for p in KNOWN_HOME)
     return True
 
