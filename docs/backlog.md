@@ -1,6 +1,6 @@
 # Local backlog
 
-**Next free ID:** `OBS-583`
+**Next free ID:** `OBS-585`
 
 **Vacant ids:** `OBS-91` (skipped when the OBS register began reserving: #277 wrote OBS-92 and OBS-93, and no row was ever written under 91); `OBS-422` (reserved on 2026-11-08 for the provider-account organization rules, which became OBS-412 part 1 when the organization onboarding rows OBS-411 to OBS-420 were written)
 
@@ -605,3 +605,5 @@ still open and needs nothing, and a reservation older than that with no row must
 | OBS-579 | The MCP page's not-scanned state prints raw `project-observatory full ...` commands with the workspace path, the only page left with command text in a row (CP-01): a button or the MCP tool name instead | open | the supply-chain page screenshot, 2026-11-16 |
 | OBS-581 | The automatic update on a workspace whose maintenance job runs in launchd's system domain ended `undetermined: exit 3` (0.38.0 to 0.39.1, one machine, 2026-11-16) and left nothing to read: `maintain.log` and `maintain.err` were empty, while the same update by hand from the user's shell completed every step. Record the failing step and the command's last lines in `update.jsonl`, and find why the scheduled run fails where the shell run succeeds | open | Fabric board request `3ba45881` |
 | OBS-582 | `backups status` names `newest_counted_as_daily`: the newest copy of any kind that satisfies the daily rule (`daily`, `before-upgrade`, `snapshot`) with its date and kind, so a reader needs no list of kinds and never reads a nine-day-old daily beside a fresh before-upgrade copy | open | Fabric board request `3ba45881` |
+| OBS-583 | `full workspace-backup --pause-writers`: one command a scheduled job can call that does what the daily snapshot of `maintain` does (the update lock, stop the managed jobs, snapshot, verify each database copy, start them again, record it in `maintenance-state.json`), so a workspace whose writers always run gets a snapshot younger than an hour on demand. Acceptance: with the maintain schedule live, the command writes an `OBSENC1` snapshot that `restore --second-machine` restores with every vault slot | open | Fabric board request `3116e671` (C2) |
+| OBS-584 | The Disk page's manual tier lists Docker volumes that no container uses inside each Lima or Colima VM, with size and the owner a label or compose project names, for their owner to delete; the guard keeps never pruning volumes | open | Fabric board finding `a1c6ffc3`, Fabric's reply `7e7f07c6` (25 such volumes, 2.1 GB, 2026-11-16) |
