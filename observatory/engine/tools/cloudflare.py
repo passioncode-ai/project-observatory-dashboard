@@ -18,6 +18,8 @@
     python "$T/cloudflare.py" issue --preset email-sending-domain --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset redirect-rules --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset workers-routes --zone example.com --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset email-routing-setup --zone example.com --vault PROJECT/ENV/NAME --token-expire-days 7
+    python "$T/cloudflare.py" issue --preset zone-create --account <slug> --vault PROJECT/ENV/NAME --token-expire-days 7
     python "$T/cloudflare.py" issue --preset cache-purge --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset zone-edge-rules --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset zaraz-edit --zone example.com --vault PROJECT/ENV/NAME
@@ -241,6 +243,31 @@ PRESETS: dict[str, dict] = {
         "scope": "zone",
         "probe": "/zones/{zone_id}/email/routing/rules?per_page=1",
     },
+    # TURNING EMAIL ROUTING ON, ONE ZONE, INTO THE VAULT. `email-routing` edits
+    # rules once routing is on; turning it on is `POST /zones/{z}/email/routing/dns`
+    # (adds and locks the MX and SPF records), which takes Zone Settings Write, as
+    # does reading the routing settings (`GET /zones/{z}/email/routing`): the rules
+    # token answers 10000 there (measured on a real zone 2026-11-16, board thread
+    # ca515df7). A rule that forwards to an address needs the account's verified
+    # destination addresses, readable only at the account level (Email Routing
+    # Addresses Read), so two policies: the zone's own resource for Zone Read, Zone
+    # Settings Write, DNS Write and Email Routing Rules Write, and the account for
+    # the addresses' read. Zone Settings Write reaches every setting of that ONE
+    # zone (TLS, cache, security level): wider than routing alone needs, and the
+    # catalogue offers nothing narrower; issue it with a short `--token-expire-days`
+    # and roll it away after setup. Confirming a destination address stays a
+    # person's click in the mail Cloudflare sends. Named after the zone AND the
+    # slot, like email-routing. Verified by reading the zone's routing settings.
+    "email-routing-setup": {
+        "name": "observatory-email-routing-setup {zone} {slot} (managed)",
+        "groups": ("Zone Read", "Zone Settings Write", "DNS Write", "Email Routing Rules Write"),
+        "account_groups": ("Email Routing Addresses Read",),
+        "why": ("turns Email Routing on in one zone, adds its records and rules, and reads the account's "
+                "destination addresses, for the project named by the vault slot; Zone Settings Write "
+                "covers every setting of that zone"),
+        "scope": "zone",
+        "probe": "/zones/{zone_id}/email/routing",
+    },
     # SINGLE REDIRECTS, ONE ZONE, INTO THE VAULT. Sending one hostname to
     # another at the edge (`www.example.com` → `example.com`, 301, query kept) is
     # a rule in the zone's `http_request_dynamic_redirect` phase — Single
@@ -390,6 +417,27 @@ PRESETS: dict[str, dict] = {
         "why": "the Fabric Inbox Worker manages its own account's domains, mail, sign-in and updates",
         "scope": "account-vault",
         "probe": "/accounts/{account_id}/workers/scripts?per_page=1",
+    },
+    # ADDING A ZONE TO ONE ACCOUNT, INTO THE VAULT. Every zone preset above needs
+    # a zone that exists; `POST /zones` creates one (a bought domain, before its
+    # nameservers move), and the catalogue offers that right only as Zone Write on
+    # the account's zones (`zone.*`): there is no "create, but not edit the others"
+    # group, so the holder can also edit and delete EVERY zone of that account
+    # (requested 2026-11-16, board threads ca515df7 and 47a1e9f8, which asked for
+    # exactly that narrower right; Cloudflare has none). The account-level half is
+    # Account Settings Read, which a create needs to name its account. Short by
+    # design: issue it with `--token-expire-days 7`, create the zones, then roll
+    # the zone's own presets (dns-edit, workers-routes) and revoke this one.
+    # Verified by listing the account's zones with the NEW value.
+    "zone-create": {
+        "name": "observatory-zone-create {slot} (managed)",
+        "groups": ("Account Settings Read",),
+        "level": "account",
+        "zone_groups": ("Zone Read", "Zone Write"),
+        "why": ("adds zones to one account for the project named by the vault slot; Zone Write on the "
+                "account's zones also edits and deletes its other zones (the catalogue has no narrower group)"),
+        "scope": "account-vault",
+        "probe": "/zones?account.id={account_id}&per_page=1",
     },
     # READING ONE ACCOUNT'S WORKER LOGS, INTO THE VAULT. Finding what a deployed
     # Worker actually failed on needs its telemetry — Workers Observability Read

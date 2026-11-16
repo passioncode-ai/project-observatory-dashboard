@@ -314,6 +314,13 @@ Until a domain is onboarded to Email Sending, that token reaches only verified r
 destinations; onboarding one zone's domain is `--preset email-sending-domain --zone <zone>`:
 Zone Read and DNS Write on that zone plus Email Sending on its account, verified by listing
 the zone's sending subdomains.
+Turning Email Routing on in one zone (its MX and SPF records, the routing settings) is
+`--preset email-routing-setup --zone <zone>`: Zone Read, Zone Settings Write, DNS Write and
+Email Routing Rules Write on that zone plus Email Routing Addresses Read on its account,
+verified by reading the zone's routing settings; Zone Settings Write covers every setting of
+that zone, so give it a short `--token-expire-days`. A domain bought but not yet in Cloudflare
+is added with `--preset zone-create --account <slug>` (Zone Write on the account's zones, so
+it can also edit the others: `--token-expire-days 7`, then revoke it).
 Adding an Email Routing rule in one zone — one address to a Worker — is
 `--preset email-routing --zone <zone>`, and deploying that Worker with its KV
 namespace is `--preset workers-edit --account <slug>`; putting a Worker in front of

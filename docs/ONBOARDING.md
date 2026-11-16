@@ -489,9 +489,9 @@ refuses any write while it cannot read who holds that role.
 **Cloudflare presets.** `tools/cloudflare.py issue --preset P` mints one narrow token from the
 stashed admin token: `analytics` for the observatory's own traffic reader (filed where the plugin
 reads it), and into a vault slot (`--vault PROJECT/ENV/NAME`) `zone-analytics-read` (one zone's
-counters), `dns-edit`, `email-routing`, `email-sending-domain`, `redirect-rules`, `workers-routes`,
+counters), `dns-edit`, `email-routing`, `email-routing-setup`, `email-sending-domain`, `redirect-rules`, `workers-routes`,
 `cache-purge`, `zone-edge-rules`, `zaraz-edit` (one zone each, `--zone`), and `d1-edit`, `email-send`, `workers-edit`,
-`workers-observability-read`, `access-app`, `fabric-inbox-server`, `fabric-inbox-account` (one account each,
+`workers-observability-read`, `access-app`, `fabric-inbox-server`, `fabric-inbox-account`, `zone-create` (one account each,
 `--account`). `r2-bucket` is one bucket (`--account --bucket NAME`) and delivers an S3 pair to three
 slots under `--vault PROJECT/ENV/PREFIX`: `PREFIX_ACCESS_KEY_ID`, `PREFIX_SECRET_ACCESS_KEY`,
 `PREFIX_ENDPOINT`. Each is verified with its own value before delivery; the handling-secrets skill says
