@@ -106,7 +106,7 @@ class Setting:
 
 
 #: Integrations that read only this machine's files: turning them on sends nothing out.
-LOCAL_INTEGRATIONS = frozenset({"harness", "sessions", "wiki"})
+LOCAL_INTEGRATIONS = frozenset({"harness", "key_sweep", "sessions", "wiki"})
 #: Features that change only the engine's own behaviour; the others delete, spend or send.
 SAFE_FEATURES = frozenset({"machine_watch", "notifications", "probe_fixture", "registry_history", "scheduler",
                            "wiki_projection"})
@@ -121,6 +121,8 @@ FEATURE_TEXT = {
 INTEGRATION_TEXT = {
     "vulnerabilities": "the dependency watch: public package names and versions go to OSV; local ones never leave",
     "github_issues": "file findings as issues in the project's own repository",
+    "key_sweep": "the key sweep: the estate's repositories read for our own values and key-shaped text; "
+                 "only keyed digests and places are kept, and nothing is sent",
 }
 
 #: The disk guard's thresholds (tools/disk_guard.py) and the cleanup's auto tier (tools/cleanup.py): lower days or

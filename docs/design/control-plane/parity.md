@@ -51,14 +51,14 @@ first proves the unmodified list passes.
 | gate | 8 |
 | missing | 93 |
 
-112 actions: 12 dashboard (8 missing, the reveal a gate, the Disk page's `configure`, the Agents page's `workflow-handoff` and the MCP page's `mcp-accept` covered) and 100 CLI verbs (8 covered, 7 gates, 85 missing).
+113 actions: 12 dashboard (8 missing, the reveal a gate, the Disk page's `configure`, the Agents page's `workflow-handoff` and the MCP page's `mcp-accept` covered) and 101 CLI verbs (9 covered, 7 gates, 85 missing).
 79 top-level commands are excluded by name and the `test*` and `scan-*` families by prefix.
 
 Covered today: `workflow handoff` (`observatory_handoff_create`, `observatory_handoff_accept`), `workflow
 close` (`observatory_checkpoint_write` with `close`), `org select` (`observatory_org_selection`),
 `scan-mcp` (`machine.mcp.refresh`), `grant --check` (`grant.check`), `assistant ask`
-(`observatory_assistant_ask`), `assistant cancel` (`fabric.job.cancel`) and `configure`
-(`observatory_configure`, OBS-563), the Disk page's `configure` action on the key server
+(`observatory_assistant_ask`), `assistant cancel` (`fabric.job.cancel`), `configure`
+(`observatory_configure`, OBS-563) and `key-sweep --settle` (`observatory_key_sweep_settle`, OBS-554), the Disk page's `configure` action on the key server
 (`observatory_configure`, OBS-562), and the Agents page's `workflow-handoff` action
 (`observatory_handoff_create`, OBS-551), and the MCP page's `mcp-accept` action (`observatory_mcp_accept`, OBS-555).
 

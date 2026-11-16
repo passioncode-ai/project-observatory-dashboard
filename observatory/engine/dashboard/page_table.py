@@ -87,6 +87,8 @@ BODIES: dict[str, tuple[str, str, str, bool]] = {
     "disk": ("DISK", "disk_page", "disk_html", False),
     "agents": ("AGENTS", "agents_page", "agents_html", False),
     "infra": ("INFRA", "infra_page", "infra_html", True),
+    # The Findings page's build-time section above its list: keys found in repositories (OBS-554).
+    "findings": ("FINDINGS", "key_sweep_page", "key_sweep_html", False),
 }
 HOME_BODY = ("home_page", "home_html")
 #: A section a `table` page carries above its table, drawn at build time: page name -> (template slot, module,

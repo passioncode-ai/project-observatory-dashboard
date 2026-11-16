@@ -212,6 +212,8 @@ BOUNDARY += ('node_ceremony',)
 BOUNDARY += ('ssh_keys',)
 # OBS-553: lockfile readers, the OSV and known-exploited watch, `dep.vulnerable`, `observatory_dependencies`.
 BOUNDARY += ('dependencies',)
+# OBS-554: the key sweep over working trees and histories, its findings, page section and MCP read and settle.
+BOUNDARY += ('key_sweep',)
 # Vault slots across the operator's machines by keyed digests (OBS-194, step 1).
 BOUNDARY += ('vault_digests',)
 # OBS-476: one slot copied into another store on this machine; the value stays in one process.

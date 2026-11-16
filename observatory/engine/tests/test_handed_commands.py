@@ -77,6 +77,8 @@ SAMPLES = {
     "{wid}": "wf_0123456789abcdef",
     "PROJECT": "project:alpha", "TEXT": "texts of alpha are sent to OpenAI",
     "MEMORY_ID": "mem:0123456789abcdef",
+    # A key sweep sighting's keyed digest (OBS-554).
+    "{fp}": "hmac-sha256:" + "0" * 64,
     "PRINCIPAL": "agent:example-bot", "BINDING_ID": "bnd_0123456789ab",
     "LABEL": "example-ws-0badc0de",
     # A job's move between two machines (OBS-283): the other machine's id, a launchd label, this machine's id.
