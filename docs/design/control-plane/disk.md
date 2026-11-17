@@ -92,3 +92,55 @@ under "Not listed" with the reason, never shown as having none; a guard that has
   volume name that is not a plain Docker name is dropped.
 - Tests: `test_disk_guard.py` (`UnusedVolumes`), `test_disk_page.py`
   (`test_unused_docker_volumes_are_listed_for_their_owner_and_never_removed`). Scenario: OSS-131.
+
+## The user's temporary folder (OBS-585)
+
+Two reports on 2026-11-16: the user's temporary folder filled the disk (about 100 thousand entries in two days, 8 GB;
+a test suite's `mkdtemp` folders without cleanup made 86 folders every 10 minutes). The guard now treats that folder
+as a class of its own, `user-temp`, and samples it on every pass for a growth finding.
+
+- The folder: `disk_guard.user_temp_dir()`, which asks `getconf DARWIN_USER_TEMP_DIR` on macOS (a session may point
+  `TMPDIR` elsewhere), else `$TMPDIR`, else `tempfile.gettempdir()`. While the class runs, the `temp` class leaves
+  that root to it (`plan_temp(..., skip_roots=)`), so one entry is never planned twice.
+- Removal (auto tier, `plan_user_temp`): top-level entries older than `guard.user_temp_hours` (default 12; shorter
+  only when `temp_days` at the pressure is shorter; 0 switches the class off), oldest first, that no process holds
+  (the complete `lsof` listing the class takes, and the fresh one `act` takes before each removal). Without a
+  complete listing nothing goes and `degraded` names `user-temp`. Never a socket, a pipe, a link (not followed), an
+  entry another account owns (at any depth), a name of `USER_TEMP_KEEP` (`com.apple.*`, `tsx-*`, `swift-*`,
+  `TemporaryItems`) or `temp_keep`, another temporary root, a Git checkout, live state a service marks or declares,
+  or one of the engine's own test sandboxes (`observatory-portable-*`) while `run_portable.py` runs or whether it
+  runs cannot be read. Each removal is a journal row with `prefix` (the name class), `kb`, `age_hours` and
+  `freed_mb` by the disk's own count; never file contents.
+- Name classes (`prefix_class`): `tmp*`, `pytest-*`, `observatory-portable-*`, else the letters-and-separator words
+  up to the first digit or made-up part (`claude-501` is `claude-*`), a name of plain words is its own class, and one
+  with none is `other`.
+- Growth (`user_temp_section`, in every pass's report as `user_temp`): entries and bytes per class, and those made
+  since the previous pass's sample (the window is clamped to between one and six hours, shorter than the removal
+  age; made means the birth time where the system keeps one, else the modification time). A class arriving faster
+  than `guard.tmp_growth.entries_per_day` (1000) or `guard.tmp_growth.gb_per_day` (1) is listed under `growing`;
+  for those, one `lsof -F pcn` listing names the executables holding files there (the command name only, never a
+  command line or environment). The first pass has no window and measures nothing. A sample stops at 200,000
+  entries or its time and says so in `degraded`.
+- Finding `disk.tmp_growth` (`machine_findings.tmp_findings`): one per growing class, subject
+  `machine:tmp:<class>`, warning, with the rate and the writers, so the owner of a leaking test gets a row.
+- Page and agent: the Disk page's "Temporary folder" section (size, entries, the five busiest classes with their
+  rate and the writer of a growing one, what the guard removed last); `observatory_machine` returns the same under
+  `guard.userTemp` (`null` when not sampled). No command line on a row.
+
+```
+Temporary folder
+100,512 entries, 8.2 GB, sampled 2026-11-16 10:00 UTC
+The guard removes its entries older than 12 hours that no process holds open; ...
+Names     Entries   Size    New a day   Growth
+tmp*       98,000   7.9 GB     12,384   growing fast . python3.12
+claude-*       12   0.1 GB          0   -
+Last removed 2026-11-16 09:45 UTC: 820 entries, 0.4 GB by the disk's own count
+```
+
+- Failure: the folder not found, not readable or cut short is named in `degraded`; unknown holders or service state
+  remove nothing; a failed sample never stops the report.
+- Not in `full cleanup`: that command is the cleanup's git tier only (branches, worktrees); path classes, this one
+  included, are the guard's, planned and run with `full disk-guard` and the maintenance job.
+- Tests: `test_disk_guard.py` (`UserTemp`, `UserTempPlace`, `UserTempGrowth`), `test_machine_findings.py`
+  (`TemporaryFolderGrowth`), `test_disk_page.py`
+  (`test_the_temporary_folder_shows_its_size_fastest_growing_classes_and_last_removal`). Scenarios: OSS-133, OSS-134.

@@ -78,7 +78,7 @@ EXTRA_PATH = ("/opt/homebrew/bin", "/usr/local/bin", "~/.local/bin", "~/.cargo/b
 WALK_LIMIT = 50_000
 #: The class order of a run. Paths first, the tools' commands last (a lock wait in one
 #: command once spent a whole run with nothing removed).
-CLASSES = ("cache-dir", "build-output", "temp", "trash", "browser-clone", "cache-command")
+CLASSES = ("cache-dir", "build-output", "user-temp", "temp", "trash", "browser-clone", "cache-command")
 #: The most the pass's first holder listing may take (OBS-534): the first `lsof` of a scheduled pass is the slow one.
 WARMUP_SECONDS = 60.0
 #: Set by the guard for the cleanup it starts, which then does not take the lock again.
@@ -641,10 +641,12 @@ def protected(st) -> bool:
 
 
 def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget | None = None,
-              degraded: list | None = None, kept: list | None = None, state: dict | None = None) -> list[dict]:
+              degraded: list | None = None, kept: list | None = None, state: dict | None = None,
+              skip_roots=()) -> list[dict]:
     """Entries of the temporary roots nobody touched for `temp_days`, held by nobody.
     One a service marks or declares as live state goes to `kept` instead; while the
-    descriptors are unknown, nothing goes."""
+    descriptors are unknown, nothing goes. A root in `skip_roots` (the user's temporary
+    folder while its own class runs, OBS-585) is left to that class."""
     state = service_state(cfg, degraded) if state is None else state
     if _unknown_state(state, "temp", degraded):
         return []
@@ -667,6 +669,8 @@ def plan_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget
               at - by_level(r, "hours", level, days * 24) * 3600 if isinstance(r.get("hours"), dict) else cutoff,
               expand(r["transcripts"]) if isinstance(r.get("transcripts"), str) else "")
              for r in every if LEVELS.index(r.get("level", "normal")) <= LEVELS.index(level)]
+    skipped = {os.path.realpath(r) for r in skip_roots if r}
+    roots = [r for r in roots if os.path.realpath(r[0]) not in skipped]
     out = []
     for root, depth, cutoff, transcripts in roots:
         if guarded(root, degraded):
@@ -747,6 +751,301 @@ def _transcript_time(transcripts: str, session: str) -> float | None:
         return newest
     except OSError:
         return None
+
+
+# --- the user's temporary folder (OBS-585) --------------------------------------------
+
+#: Never removed from the user's temporary folder, whatever their age: the system's own
+#: folders (`com.apple.*`, `TemporaryItems`), tsx's and Swift's compile caches a running tool
+#: reuses. Sockets, links and another account's entries are refused by kind, not by name.
+USER_TEMP_KEEP = ("com.apple.*", "tsx-*", "swift-*", "TemporaryItems")
+#: The prefix classes a name is counted under before the general rule.
+FIXED_PREFIXES = ("tmp", "pytest-", "observatory-portable-")
+#: The engine's own test sandboxes (tests/run_portable.py): kept while a run of it may use one.
+SANDBOX_PREFIX = "observatory-portable-"
+SANDBOX_RUNNER = "run_portable.py"
+#: The growth window: at least an hour back from this pass, at most six (shorter than the
+#: removal age, so what the guard removed is not yet missing from what it counts as arrived).
+GROWTH_MIN_SECONDS, GROWTH_MAX_SECONDS = 3600, 6 * 3600
+#: The most entries a sample walks for its sizes; past it the sample is marked incomplete.
+SAMPLE_LIMIT = 200_000
+COMMAND_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}")
+
+
+def _getconf(argv: list[str]) -> str | None:
+    try:
+        p = subprocess.run(argv, capture_output=True, text=True, timeout=5, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return p.stdout if p.returncode == 0 else None
+
+
+def user_temp_dir(run=None, platform: str | None = None) -> str | None:
+    """The user's temporary folder: `getconf DARWIN_USER_TEMP_DIR` on macOS (a session may
+    point TMPDIR elsewhere), else `$TMPDIR`, else `tempfile.gettempdir()`. Absolute, without
+    a trailing slash; None when none of them names an absolute folder."""
+    platform = platform or sys.platform
+    if platform == "darwin":
+        said = ((run or _getconf)(["getconf", "DARWIN_USER_TEMP_DIR"]) or "").strip()
+        if said.startswith("/") and "\n" not in said:
+            return said.rstrip("/") or None
+    for candidate in (os.environ.get("TMPDIR") or "", tempfile.gettempdir()):
+        candidate = candidate.strip()
+        if candidate.startswith("/") or (os.name == "nt" and os.path.isabs(candidate)):
+            return candidate.rstrip("/\\") or None
+    return None
+
+
+def _random(word: str) -> bool:
+    """A part of a name that a program made up: a digit, or three capitals after the first letter."""
+    return any(c.isdigit() for c in word) or (len(word) >= 6 and sum(c.isupper() for c in word[1:]) >= 3)
+
+
+def prefix_class(name: str) -> str:
+    """The class a temporary entry is counted under: `tmp*`, `pytest-*`, `observatory-portable-*`, else its
+    letters-and-separator words up to the first digit or made-up part (`claude-501` is `claude-*`); a name of
+    plain words is its own class, one with no such word is `other`. At most 40 characters."""
+    for fixed in FIXED_PREFIXES:
+        if name.startswith(fixed):
+            return fixed + "*"
+    head = ""
+    for part in re.split(r"(?<=[-_.])", name):
+        word = part.rstrip("-_.")
+        if not word or not word.isascii() or not word.isalpha() or _random(word):
+            return (head[:40] + "*") if head else "other"
+        head += part
+    return head[:40] or "other"
+
+
+def plan_user_temp(cfg: dict, level: str, holders: Holders, at: float, budget: Budget | None = None,
+                   degraded: list | None = None, kept: list | None = None, state: dict | None = None) -> list[dict]:
+    """Top-level entries of the user's temporary folder older than `user_temp_hours` (lower under pressure when
+    `temp_days` is shorter) that no process holds, oldest first. Never a socket, a link, an entry of another
+    account, a name of `USER_TEMP_KEEP` or `temp_keep`, another temporary root, or one of the engine's own
+    sandboxes while a test run may use it. Without a complete listing of open files nothing goes, and
+    `degraded` says so."""
+    hours = _number(cfg.get("user_temp_hours", 12), 12)
+    if hours <= 0:
+        return []
+    root = user_temp_dir()
+    if not root:
+        if degraded is not None:
+            degraded.append({"source": "user-temp", "reason": "the user's temporary folder could not be found; "
+                                                              "nothing in it is removed"})
+        return []
+    if not holders.known:
+        if degraded is not None and not any(d.get("source") == "user-temp" for d in degraded):
+            degraded.append({"source": "user-temp", "reason": "open files could not be listed; nothing in the "
+                                                              "temporary folder is removed"})
+        return []
+    if guarded(root, degraded):
+        return []
+    state = service_state(cfg, degraded) if state is None else state
+    if _unknown_state(state, "user-temp", degraded):
+        return []
+    cutoff = at - min(hours * 3600, by_level(cfg, "temp_days", level, 3) * 86400)
+    keep = list(USER_TEMP_KEEP) + [k for k in cfg.get("temp_keep") or [] if isinstance(k, str)]
+    others = {os.path.realpath(expand(r["path"])) for r in cfg.get("temp_roots") or []
+              if isinstance(r, dict) and r.get("path") and expand(r["path"])} - {os.path.realpath(root)}
+    entries = []
+    for e in _scan(root):
+        with contextlib.suppress(OSError):
+            st = e.stat(follow_symlinks=False)
+            if not (stat.S_ISDIR(st.st_mode) or stat.S_ISREG(st.st_mode)):
+                continue                        # a socket, a pipe, a link: never
+            if protected(st):
+                if st.st_mtime < cutoff:
+                    _note_kept(kept, "user-temp", e.path, PROTECTED_REASON)
+                continue
+            entries.append((st.st_mtime, e))
+    sandboxes: bool | None = False
+    asked = False
+    out = []
+    for top, e in sorted(entries, key=lambda x: x[0]):
+        if top >= cutoff:
+            break
+        if budget and budget.out("user-temp"):
+            return out
+        full = e.path
+        if (any(fnmatch.fnmatch(e.name, k) for k in keep) or os.path.realpath(full) in others
+                or e.is_symlink() or not owned(full) or git_ancestry(full)):
+            continue
+        if e.name.startswith(SANDBOX_PREFIX):
+            if not asked:
+                sandboxes, asked = running([SANDBOX_RUNNER]), True
+            if sandboxes is not False:
+                _note_kept(kept, "user-temp", full, "an Observatory test run may be using it" if sandboxes
+                           else "whether an Observatory test run uses it could not be read")
+                continue
+        why = keep_reason(full, state)
+        if why:
+            _note_kept(kept, "user-temp", full, why)
+            continue
+        r = inspect(full, cutoff, time.monotonic() + max(1.0, budget.left()) if budget else None)
+        if r["reason"] == KEEP_REASON:
+            _note_kept(kept, "user-temp", full, KEEP_REASON)
+        if r["complete"] and not holders.busy(full):
+            out.append({"class": "user-temp", "target": full, "bytes": r["size"], "cutoff": cutoff,
+                        "identity": r["identity"], "prefix": prefix_class(e.name),
+                        "age_hours": round((at - r["newest"]) / 3600, 1),
+                        "why": f"untouched {(at - r['newest']) / 3600:.0f} hours, nobody holds it"})
+    return out
+
+
+def _born(st) -> float:
+    """When an entry was made: its birth time where the system keeps one (macOS, BSD), else its modification time."""
+    return getattr(st, "st_birthtime", None) or st.st_mtime
+
+
+def sample_user_temp(root: str, at: float, since: float | None, deadline: float | None = None,
+                     limit: int = SAMPLE_LIMIT) -> dict:
+    """Entries and bytes of the user's temporary folder per prefix class, and of those made since `since`.
+    Bytes are the regular files' sizes, links never followed; past `limit` entries or the deadline the sample
+    stops, keeps what it counted and says `complete: False`."""
+    out = {"root": root, "at": at, "since": since, "entries": 0, "bytes": 0, "classes": {}, "complete": True}
+    seen = 0
+    try:
+        listing = list(os.scandir(root))
+    except OSError:
+        out.update(complete=False, reason="the folder could not be read")
+        return out
+    for e in listing:
+        try:
+            st = e.stat(follow_symlinks=False)
+        except OSError:
+            continue
+        cls = out["classes"].setdefault(prefix_class(e.name),
+                                        {"entries": 0, "bytes": 0, "new_entries": 0, "new_bytes": 0})
+        new = since is not None and _born(st) >= since
+        size = st.st_size if stat.S_ISREG(st.st_mode) else 0
+        if stat.S_ISDIR(st.st_mode) and out["complete"]:
+            stack = [e.path]
+            while stack and out["complete"]:
+                try:
+                    with os.scandir(stack.pop()) as inner:
+                        for f in inner:
+                            seen += 1
+                            if seen > limit or (deadline is not None and time.monotonic() >= deadline):
+                                out.update(complete=False, reason=f"stopped after {limit} entries or at its time")
+                                break
+                            fs = f.stat(follow_symlinks=False)
+                            if stat.S_ISDIR(fs.st_mode):
+                                stack.append(f.path)
+                            elif stat.S_ISREG(fs.st_mode):
+                                size += fs.st_size
+                except OSError:
+                    continue
+        out["entries"] += 1
+        out["bytes"] += size
+        cls["entries"] += 1
+        cls["bytes"] += size
+        if new:
+            cls["new_entries"] += 1
+            cls["new_bytes"] += size
+    return out
+
+
+def growing(sample: dict, cfg: dict) -> list[dict]:
+    """The prefix classes arriving faster than `tmp_growth` (entries or GB a day), fastest first."""
+    since, at = sample.get("since"), sample.get("at")
+    if since is None or at is None or at - since <= 0:
+        return []
+    limits = cfg.get("tmp_growth") or {}
+    per_day = 86400 / (at - since)
+    most_entries = _number(limits.get("entries_per_day"), 1000)
+    most_gb = _number(limits.get("gb_per_day"), 1)
+    out = []
+    for prefix, c in (sample.get("classes") or {}).items():
+        entries, gb = round(c["new_entries"] * per_day), round(c["new_bytes"] * per_day / GB, 2)
+        if entries > most_entries or gb > most_gb:
+            out.append({"prefix": prefix, "entries_per_day": entries, "gb_per_day": gb, "entries": c["entries"],
+                        "gb": round(c["bytes"] / GB, 2)})
+    return sorted(out, key=lambda g: (-g["entries_per_day"], -g["gb_per_day"]))
+
+
+def _lsof_names(argv: list[str]) -> str | None:
+    tool = shutil.which("lsof")
+    if not tool:
+        return None
+    try:
+        p = subprocess.run([tool, *argv[1:]], capture_output=True, timeout=15, stdin=subprocess.DEVNULL,
+                           env=_utf8_env())
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return p.stdout.decode("utf-8", errors="replace") if p.returncode == 0 and p.stdout else None
+
+
+def temp_writers(root: str, prefixes: list[str], run=None) -> dict | None:
+    """Which executables hold files open in each of these prefix classes, from one `lsof -F pcn` listing: the
+    command name only (never its command line or environment), at most five a class. None when the listing
+    could not be read."""
+    text = (run or _lsof_names)(["lsof", "-n", "-P", "+c", "0", "-F", "pcn"])
+    if text is None:
+        return None
+    base = root.rstrip("/") + "/"
+    wanted = set(prefixes)
+    found: dict[str, list[str]] = {}
+    command = ""
+    for line in text.splitlines():
+        if line.startswith("p"):
+            command = ""
+        elif line.startswith("c"):
+            name = os.path.basename(line[1:].strip())
+            command = name if COMMAND_NAME.fullmatch(name) else ""
+        elif line.startswith("n") and command and line[1:].startswith(base):
+            entry = line[1 + len(base):].split("/", 1)[0]
+            cls = prefix_class(entry) if entry else ""
+            if cls in wanted and command not in found.setdefault(cls, []) and len(found[cls]) < 5:
+                found[cls].append(command)
+    return {k: v for k, v in found.items() if v}
+
+
+def user_temp_section(cfg: dict, previous: dict | None, at: float, rows: list[dict], seconds: float,
+                      run=None) -> dict:
+    """What the Disk page and `observatory_machine` show of the user's temporary folder: its size, its classes
+    (busiest first), the classes growing past `tmp_growth` with the executables writing there, and what the guard
+    removed last (carried from the previous pass until it removes again)."""
+    root = user_temp_dir()
+    hours = _number(cfg.get("user_temp_hours", 12), 12)
+    out = {"at": now(), "sampled_at": at, "hours": hours, "root": root, "entries": None, "gb": None,
+           "complete": False, "window_hours": None, "classes": [], "growing": [], "writers_read": None,
+           "last_removed": (previous or {}).get("last_removed"), "degraded": []}
+    removed = [r for r in rows if r.get("class") == "user-temp" and r.get("result") == "removed"]
+    if removed:
+        by: dict[str, int] = {}
+        for r in removed:
+            by[r.get("prefix") or "other"] = by.get(r.get("prefix") or "other", 0) + 1
+        out["last_removed"] = {"at": max(r.get("at") or "" for r in removed), "removed": len(removed),
+                               "gb": round(sum(r.get("kb") or 0 for r in removed) / 1048576, 2),
+                               "freed_gb": round(sum(max(0, r.get("freed_mb") or 0) for r in removed) / 1024, 2),
+                               "by_prefix": by}
+    if not root:
+        out["degraded"].append({"source": "user-temp", "reason": "the user's temporary folder could not be found"})
+        return out
+    before = (previous or {}).get("sampled_at")
+    since = None
+    if isinstance(before, (int, float)) and not isinstance(before, bool) and before < at:
+        since = min(max(before, at - GROWTH_MAX_SECONDS), at - GROWTH_MIN_SECONDS)
+    sample = sample_user_temp(root, at, since, time.monotonic() + max(1.0, seconds))
+    if not sample["complete"]:
+        out["degraded"].append({"source": "user-temp", "reason": "the temporary folder was sampled only in part: "
+                                + sample.get("reason", "")})
+    grown = growing(sample, cfg)
+    if grown:
+        writers = temp_writers(root, [g["prefix"] for g in grown], run)
+        out["writers_read"] = writers is not None
+        for g in grown:
+            g["writers"] = (writers or {}).get(g["prefix"], [])
+    per_day = 86400 / (at - since) if since is not None else None
+    classes = [{"prefix": p, "entries": c["entries"], "gb": round(c["bytes"] / GB, 2),
+                "entries_per_day": round(c["new_entries"] * per_day) if per_day else None,
+                "gb_per_day": round(c["new_bytes"] * per_day / GB, 2) if per_day else None}
+               for p, c in sample["classes"].items()]
+    classes.sort(key=lambda c: (-(c["entries_per_day"] or 0), -c["entries"]))
+    out.update(entries=sample["entries"], gb=round(sample["bytes"] / GB, 2), complete=sample["complete"],
+               window_hours=round((at - since) / 3600, 1) if since is not None else None,
+               classes=classes[:20], growing=grown)
+    return out
 
 
 def clone_root() -> pathlib.Path | None:
@@ -1725,6 +2024,10 @@ def act(a: dict, holders: Holders, state: dict | None = None) -> dict:
     rec = {"at": now(), "class": a["class"], "target": a["target"], "mode": "guard", "tier": "auto"}
     if a.get("bytes"):
         rec["kb"] = int(a["bytes"] / 1024)
+    # The user's temporary folder is journalled by name prefix class and age, never by contents (OBS-585).
+    for key in ("prefix", "age_hours"):
+        if key in a:
+            rec[key] = a[key]
     before = free_bytes()
     if a["class"] == "cache-command":
         needs = running(a["needs"]) if a.get("needs") else True
@@ -1846,12 +2149,12 @@ def act(a: dict, holders: Holders, state: dict | None = None) -> dict:
             return {**rec, "result": "skipped", "reason": "the target is protected, linked or no longer owned"}
         # A marker written since the plan, or (read again when called alone) a service installed.
         state = service_state() if state is None else state
-        if a["class"] in ("cache-dir", "temp") and not state.get("complete", True):
+        if a["class"] in ("cache-dir", "temp", "user-temp") and not state.get("complete", True):
             return {**rec, "result": "skipped", "reason": UNKNOWN_STATE}
         why = keep_reason(target, state) or (scheduled_job_reason(a["checkout"]) if a.get("checkout") else "")
         if why:
             return {**rec, "result": "skipped", "reason": why}
-        if a["class"] == "temp" and git_ancestry(target):
+        if a["class"] in ("temp", "user-temp") and git_ancestry(target):
             return {**rec, "result": "skipped", "reason": "temporary target belongs to a Git checkout"}
         if a["class"] == "build-output":
             root = a.get("checkout")
@@ -1936,10 +2239,13 @@ def planners(cfg: dict, level: str, holders: Holders, at: float, degraded: list,
     class the largest go first. What a service keeps as live state is appended to `kept`."""
     big = lambda xs: sorted(xs, key=lambda a: -(a.get("bytes") or 0))  # noqa: E731
     state = service_state(cfg, degraded) if state is None else state
+    # While its own class runs, the user's temporary folder is that class's alone (OBS-585).
+    user_root = (lambda: user_temp_dir() if _number(cfg.get("user_temp_hours", 12), 12) > 0 else None)  # noqa: E731
     return [
         ("cache-dir", lambda b: big(plan_cache_dirs(cfg, level, holders, at, b, degraded, kept, state))),
         ("build-output", lambda b: big(plan_builds(cfg, level, holders, at, artifact_names(), b, degraded, kept, state))),
-        ("temp", lambda b: big(plan_temp(cfg, level, holders, at, b, degraded, kept, state))),
+        ("user-temp", lambda b: plan_user_temp(cfg, level, holders, at, b, degraded, kept, state)),
+        ("temp", lambda b: big(plan_temp(cfg, level, holders, at, b, degraded, kept, state, skip_roots=[user_root()]))),
         ("trash", lambda b: big(plan_trash(cfg, level, at, degraded, kept, state))),
         ("browser-clone", lambda b: plan_clones(cfg, holders, at, kept, state)),
         ("cache-command", lambda b: plan_commands(cfg, level, last_commands, at)),
@@ -2221,6 +2527,15 @@ def run(argv: list[str]) -> dict:
                    "service_state": ({k: state[k] for k in ("complete", "refused", "seconds", "unknown_services")}
                                      | {"paths": len(state["paths"])}) if state else None,
                    "surveys": surveys, "large_files": found, "memory": memory_report(), "degraded": degraded}
+            # The user's temporary folder (OBS-585): its size, its fastest-growing classes and the last removal,
+            # sampled on every pass so the next one measures what arrived between them.
+            try:
+                doc["user_temp"] = user_temp_section(cfg, (previous or {}).get("user_temp"), time.time(), rows,
+                                                     min(20.0, max(1.0, left() / 10)))
+                doc["degraded"].extend(doc["user_temp"]["degraded"])
+            except Exception as exc:  # noqa: BLE001 - a sample that fails is named, never stops the report
+                doc["degraded"].append({"source": "user-temp", "reason": f"the temporary folder could not be "
+                                                                         f"sampled ({type(exc).__name__})"})
             try:
                 doc["vms"] = vm_disks(time.time())
                 doc["warnings"] = vm_warnings(level, doc["vms"])

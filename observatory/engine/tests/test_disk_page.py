@@ -161,6 +161,36 @@ class Page(unittest.TestCase):
         self.assertIn("Unused Docker volumes", shown(unmeasured))
         self.assertIn("Not listed yet", shown(unmeasured))
 
+    def test_the_temporary_folder_shows_its_size_fastest_growing_classes_and_last_removal(self):
+        """OBS-585: the user's temporary folder filled a disk; the page shows how big it is, which name classes
+        arrive fastest (with the program writing there) and what the guard removed last."""
+        temp = {"at": "2026-11-16T10:00:00Z", "hours": 12, "entries": 100512, "gb": 8.2, "complete": True,
+                "window_hours": 2.0,
+                "classes": [{"prefix": "tmp*", "entries": 98000, "gb": 7.9, "entries_per_day": 12384,
+                             "gb_per_day": 1.1},
+                            {"prefix": "claude-*", "entries": 12, "gb": 0.1, "entries_per_day": 0, "gb_per_day": 0.0}],
+                "growing": [{"prefix": "tmp*", "entries_per_day": 12384, "gb_per_day": 1.1, "entries": 98000,
+                             "gb": 7.9, "writers": ["python3.12"]}],
+                "last_removed": {"at": "2026-11-16T09:45:00Z", "removed": 820, "gb": 0.4, "freed_gb": 0.4,
+                                 "by_prefix": {"tmp*": 820}}}
+        en, ru = both(machine(guard={**GUARD, "userTemp": temp}))
+        text = shown(en)
+        for want in ("Temporary folder", "100,512", "8.2 GB", "tmp*", "12,384", "python3.12", "growing fast",
+                     "820", "12 hours"):
+            self.assertIn(want, text)
+        self.assertIn("Временная папка", shown(ru))
+        for page in (en, ru):
+            self.assertIsNone(COMMAND.search(page))
+        relocalizes(self, en, ru)
+        first = {**temp, "window_hours": None, "growing": [], "last_removed": None,
+                 "classes": [{**c, "entries_per_day": None, "gb_per_day": None} for c in temp["classes"]]}
+        en, ru = both(machine(guard={**GUARD, "userTemp": first}))
+        self.assertIn("measured from the next pass", shown(en))
+        self.assertIn("has removed nothing here yet", shown(en))
+        relocalizes(self, en, ru)
+        unsampled, _ = both(machine())
+        self.assertIn("Not sampled yet", shown(unsampled))
+
     def test_what_auto_cleanup_removes_and_keeps_with_its_idle_days(self):
         en, _ = both(machine())
         text = shown(en)
