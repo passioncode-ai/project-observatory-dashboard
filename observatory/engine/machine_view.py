@@ -276,6 +276,8 @@ def summary(explain_pid: int | None = None) -> dict:
                         "largeFiles": guard.get("large_files"),
                         # Unused Docker volumes inside the VMs, for their owner to delete (OBS-584).
                         "vmVolumes": guard.get("vm_volumes"),
+                        # The user's temporary folder: size, fastest-growing classes, last removal (OBS-585).
+                        "userTemp": guard.get("user_temp"),
                         "memory": guard.get("memory")}
         degraded += guard.get("degraded") or []
     # The days before the last pass, for the Disk page's trend (OBS-572): `[]` when the guard has not recorded any.

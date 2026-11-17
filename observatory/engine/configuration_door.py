@@ -144,6 +144,13 @@ GUARD_KEYS = (
     *((("trash_days", level), "int", "lower", f"days an item stays in the Trash at the {level} level")
       for level in ("normal", "low", "critical")),
     (("clone_min_age_hours",), "int", "lower", "hours an abandoned browser clone is kept before removal"),
+    (("user_temp_hours",), "int", "lower",
+     "hours an entry of the user's temporary folder is kept before removal (0 switches it off)"),
+    # Thresholds of the `disk.tmp_growth` finding: they remove nothing, so no direction needs the person.
+    (("tmp_growth", "entries_per_day"), "int", "never",
+     "new entries a day in one name class of the temporary folder above which it is a finding"),
+    (("tmp_growth", "gb_per_day"), "number", "never",
+     "gigabytes a day written in one name class of the temporary folder above which it is a finding"),
 )
 CLEANUP_AUTO = {
     "merged_branch_idle_days": "days a merged branch is idle before the auto tier removes it",
@@ -220,7 +227,8 @@ def catalogue() -> dict[str, Setting]:
     for path, kind, rule, text in GUARD_KEYS:
         rows.append(Setting("guard." + ".".join(path), kind, "cleanup", ("guard", *path),
                             _dig(cleanup.get("guard") or {}, path), "the disk guard: " + text, rule, minimum=0,
-                            maximum=10000 if kind == "number" else 3650 if "days" in path[0] else 8760))
+                            maximum=10000 if kind == "number" else 3650 if "days" in path[0]
+                            else 10_000_000 if path[0] == "tmp_growth" else 8760))
     for name, text in CLEANUP_AUTO.items():
         rows.append(Setting(f"cleanup.auto.{name}", "int", "cleanup", ("auto", name),
                             (cleanup.get("auto") or {}).get(name), "the cleanup: " + text, "lower", minimum=0,

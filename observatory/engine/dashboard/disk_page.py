@@ -46,6 +46,9 @@ SETTING_LABELS = {
     "guard.trash_days.low": "Trash kept, days (low space)",
     "guard.trash_days.critical": "Trash kept, days (critical)",
     "guard.clone_min_age_hours": "Abandoned browser clones kept, hours",
+    "guard.user_temp_hours": "Entries of the temporary folder kept, hours",
+    "guard.tmp_growth.entries_per_day": "Temporary folder growth worth a finding, new entries a day",
+    "guard.tmp_growth.gb_per_day": "Temporary folder growth worth a finding, GB a day",
     "cleanup.auto.merged_branch_idle_days": "Merged branches kept, idle days",
     "cleanup.auto.pushed_branch_idle_days": "Pushed branches kept, idle days",
     "cleanup.auto.clean_worktree_idle_days": "Clean worktrees kept, idle days",
@@ -261,6 +264,59 @@ def volumes_html(g: dict | None, t: Translator) -> str:
     return "".join(parts)
 
 
+#: The temporary folder's classes shown (busiest first).
+TEMP_ROWS = 5
+TEMP_HINT = ("The guard removes its entries older than {hours} hours that no process holds open; sockets, links, the "
+             "system's own folders and another account's entries stay. A name class arriving faster than the setting "
+             "below is a finding naming the program writing there.")
+
+
+def temp_html(g: dict | None, t: Translator) -> str:
+    """The user's temporary folder (OBS-585): its size, the name classes arriving fastest with the program writing
+    there, and what the guard removed last. No command line on a row."""
+    head = t.mark("Temporary folder", tag="h2", attrs=HEADING)
+    temp = (g or {}).get("userTemp")
+    if not isinstance(temp, dict) or not isinstance(temp.get("entries"), int):
+        return (f'<section class="card panel" id="disk-temp">{head}'
+                f'{t.mark("Not sampled yet. The guard samples it on every pass.", tag="p", attrs=EMPTY)}</section>')
+    hours = temp.get("hours")
+    parts = [f'<section class="card panel" id="disk-temp">{head}',
+             t.mark("{entries} entries, {gb} GB, sampled {at}", tag="p", attrs=' class="machine-at"',
+                    entries=temp["entries"], gb=temp.get("gb") if temp.get("gb") is not None else NONE,
+                    at=stamp(temp.get("at"))),
+             t.mark(TEMP_HINT, tag="p", attrs=HINT, hours=hours if isinstance(hours, (int, float)) else NONE)]
+    growing = {gr.get("prefix"): gr for gr in temp.get("growing") or [] if isinstance(gr, dict)}
+    if temp.get("window_hours") is None:
+        parts.append(t.mark("Growth is measured from the next pass.", tag="p", attrs=HINT))
+    classes = [c for c in temp.get("classes") or [] if isinstance(c, dict) and c.get("prefix")][:TEMP_ROWS]
+    if classes:
+        heads = [("Names", False), ("Entries", True), ("Size", True), ("New a day", True), ("Growth", False)]
+        th = "".join(f'<th scope="col"{NUM if num else ""}>{t.mark(h)}</th>' for h, num in heads)
+        body = []
+        for c in classes:
+            rate = c.get("entries_per_day")
+            writers = (growing.get(c["prefix"]) or {}).get("writers") or []
+            state = NONE
+            if c["prefix"] in growing:
+                state = t.mark("growing fast") + "".join(f' · <span class="mono">{_e(w)}</span>' for w in writers)
+            cells = [f'<span class="mono">{_e(c["prefix"])}</span>', t.number(c.get("entries") or 0),
+                     _gigabytes(c.get("gb"), t), t.number(rate) if isinstance(rate, int) else NONE, state]
+            body.append("<tr>" + "".join(f'<td{NUM if num else ""}{t.attr("data-label", h)}>{cell}</td>'
+                                         for (h, num), cell in zip(heads, cells)) + "</tr>")
+        parts.append(f'<table><thead><tr>{th}</tr></thead><tbody>{"".join(body)}</tbody></table>')
+    else:
+        parts.append(t.mark("The folder is empty.", tag="p", attrs=EMPTY))
+    last = temp.get("last_removed")
+    if isinstance(last, dict) and isinstance(last.get("removed"), int) and last["removed"]:
+        parts.append(t.mark("Last removed {at}: {count} entries, {gb} GB by the disk's own count", tag="p", attrs=HINT,
+                            at=stamp(last.get("at")), count=last["removed"],
+                            gb=last.get("freed_gb") if last.get("freed_gb") is not None else NONE))
+    else:
+        parts.append(t.mark("The guard has removed nothing here yet.", tag="p", attrs=HINT))
+    parts.append("</section>")
+    return "".join(parts)
+
+
 def _runs(cleanup: dict | None, t: Translator) -> str:
     runs = (cleanup or {}).get("guardRuns") or []
     return _table(t, "Guard passes in 7 days",
@@ -374,6 +430,7 @@ def disk_html(payload: dict, t: Translator | None = None) -> str:
     parts.append(guard_html(m.get("guard"), t))
     parts.append(_runs(cleanup, t))
     parts.append(_classes(cleanup, values, t))
+    parts.append(temp_html(m.get("guard"), t))
     parts.append(volumes_html(m.get("guard"), t))
     parts.append(_journal(cleanup, t))
     parts.append(settings_html(listing, t))
@@ -389,4 +446,6 @@ DYNAMIC = (tuple(SETTING_LABELS.values()) + tuple(c[1] for c in CLASSES)
               "Turn on", "Turn off", "Nothing to free at this pressure.", "No file above the size line.",
               "incomplete measurement", "Not measured", DISABLED,
               "Virtual machine", "Volume", "Owner", "Size",       # the volumes table's heads (`volumes_html`)
-              "unreadable", VOLUME_HINT) + tuple(VOLUME_UNREAD.values()))
+              "unreadable", VOLUME_HINT,
+              "Names", "Entries", "New a day", "Growth", TEMP_HINT)   # the temporary folder's section (`temp_html`)
+           + tuple(VOLUME_UNREAD.values()))

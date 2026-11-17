@@ -169,5 +169,44 @@ class VirtualMachineDiskErrors(unittest.TestCase):
         self.assertEqual(F.vm_findings({"warnings": [{"code": "vm-disk-errors", "instances": [1]}]}), [])
 
 
+class TemporaryFolderGrowth(unittest.TestCase):
+    """OBS-585: a name class of the user's temporary folder arriving faster than its threshold is a row naming the
+    class, its rate and the executable writing there, so the owner of a leaking test gets it."""
+
+    GUARD = {"user_temp": {"at": "2026-11-16T10:00:00Z", "window_hours": 2.0,
+                           "growing": [{"prefix": "tmp*", "entries_per_day": 12384, "gb_per_day": 1.1,
+                                        "entries": 98000, "gb": 7.9, "writers": ["python3.12"]},
+                                       {"prefix": "pytest-*", "entries_per_day": 0, "gb_per_day": 2.5,
+                                        "entries": 40, "gb": 3.0, "writers": []}]}}
+
+    def test_each_growing_class_is_a_finding_with_its_rate_and_writer(self):
+        found = F.tmp_findings(self.GUARD)
+        self.assertEqual([(f["type"], f["subject"]) for f in found],
+                         [("disk.tmp_growth", "machine:tmp:tmp*"), ("disk.tmp_growth", "machine:tmp:pytest-*")])
+        self.assertIn("12384", found[0]["title"].replace(",", ""))
+        self.assertIn("python3.12", found[0]["detail"])
+        self.assertIn("no program", found[1]["detail"])
+        for f in found:
+            self.assertEqual(f["severity"], "warning")
+            self.assertNotIn("--", f["detail"] + f["action"])
+        sys.path.insert(0, str(ROOT / 'dashboard'))
+        import finding_types
+        self.assertIn("disk.tmp_growth", finding_types.LABELS)
+
+    def test_nothing_without_growth_or_with_a_malformed_section(self):
+        self.assertEqual(F.tmp_findings(None), [])
+        self.assertEqual(F.tmp_findings({"user_temp": {"growing": "x"}}), [])
+        self.assertEqual(F.tmp_findings({"user_temp": {"growing": [{"entries_per_day": 5}, 3]}}), [])
+
+    def test_the_board_reads_it(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / 'logs').mkdir()
+            (root / 'disk-guard.json').write_text(json.dumps({**self.GUARD, "at": "2026-01-01T12:00:00Z"}))
+            found = F.findings(root, root / 'logs', {}, now=datetime(2026, 1, 1, 12, tzinfo=timezone.utc),
+                               auto_cleanup=False)
+        self.assertIn("disk.tmp_growth", [f["type"] for f in found])
+
+
 if __name__ == '__main__':
     unittest.main()

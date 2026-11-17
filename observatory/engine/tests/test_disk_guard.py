@@ -99,7 +99,12 @@ class Base(unittest.TestCase):
         self.clones = self.base / "X"
         self.clones.mkdir()
         (self.base / "tmpdir").mkdir()
+        # The user's temporary folder (OBS-585) is this test's own too: on macOS the guard asks
+        # `getconf DARWIN_USER_TEMP_DIR`, which would name the machine's real one.
+        self.usertmp = self.base / "usertmp"
+        self.usertmp.mkdir()
         for p in (patch.object(self.g, "clone_root", return_value=self.clones),
+                  patch.object(self.g, "user_temp_dir", return_value=str(self.usertmp)),
                   patch.object(tempfile, "tempdir", str(self.base / "tmpdir"))):
             p.start()
             self.addCleanup(p.stop)
@@ -3704,6 +3709,260 @@ class FreeSpaceSeries(Base):
                 patch.object(m, "record", side_effect=OSError("disk full")):
             doc = self.g.run(["--auto"])
         self.assertIn("free-series", [d["source"] for d in doc["degraded"]])
+
+
+HOUR = 3600
+
+
+def hours_old(path: Path, hours: float) -> None:
+    age(path, hours / 24)
+
+
+class UserTemp(Base):
+    """OBS-585: the user's temporary folder filled a disk (about 100 thousand entries in two days, 8 GB; a test
+    suite's `mkdtemp` folders without cleanup, 86 every 10 minutes). The guard removes its old unheld top-level
+    entries in a class of its own, journals each by name prefix class, and samples it for a growth finding.
+    Every folder here is this test's own: `user_temp_dir` is patched in Base."""
+
+    def entry(self, name: str, hours: float, size: int = 10) -> Path:
+        d = self.usertmp / name
+        d.mkdir()
+        (d / "f").write_text("x" * size)
+        hours_old(d, hours)
+        return d
+
+    def cfg(self, **over):
+        return super().cfg(**{"user_temp_hours": 12, **over})
+
+    def names(self, plan):
+        return sorted(Path(a["target"]).name for a in plan)
+
+    def test_old_unheld_entries_go_and_what_must_stay_stays(self):
+        self.entry("tmpab1cd2ef", 20, 100)
+        for keep in ("tsx-501", "swift-generated-abc", "com.apple.launchd.x1", "TemporaryItems"):
+            self.entry(keep, 40)
+        self.entry("fresh-one", 2)
+        held = self.entry("held-one", 30)
+        outside = self.base / "outside"
+        outside.mkdir()
+        hours_old(outside, 50)
+        (self.usertmp / "a-link").symlink_to(outside)
+        with_socket = self.entry("with-socket", 30)
+        import socket
+        s = socket.socket(socket.AF_UNIX)
+        try:
+            s.bind(str(with_socket / "s"))
+        except OSError:
+            s = None                 # a socket path too long here: the case is left out
+            import shutil
+            shutil.rmtree(with_socket)
+        else:
+            hours_old(with_socket, 30)
+        try:
+            plan = self.g.plan_user_temp(self.cfg(), "normal", self.free(held / "f"), time.time())
+        finally:
+            if s:
+                s.close()
+        self.assertEqual(self.names(plan), ["tmpab1cd2ef"])
+        a = plan[0]
+        self.assertEqual((a["class"], a["prefix"], a["bytes"]), ("user-temp", "tmp*", 100))
+        self.assertAlmostEqual(a["age_hours"], 20, delta=0.2)
+        self.assertTrue(outside.exists())
+
+    def test_the_hours_are_a_setting_and_pressure_only_shortens_them(self):
+        self.entry("pytest-of-user", 8)
+        self.assertEqual(self.g.plan_user_temp(self.cfg(), "normal", self.free(), time.time()), [])
+        self.assertEqual(len(self.g.plan_user_temp(self.cfg(user_temp_hours=6), "normal", self.free(), time.time())), 1)
+        self.assertEqual(self.g.plan_user_temp(self.cfg(user_temp_hours=0), "critical", self.free(), time.time()), [],
+                         "0 switches the class off")
+
+    def test_unknown_holders_remove_nothing_and_say_so(self):
+        self.entry("tmpold1x", 30)
+        degraded = []
+        self.assertEqual(self.g.plan_user_temp(self.cfg(), "normal", self.g.Holders(None), time.time(),
+                                               degraded=degraded), [])
+        self.assertIn("user-temp", [d["source"] for d in degraded])
+
+    def test_another_accounts_entry_and_an_unknown_folder_stay(self):
+        mine, theirs = self.entry("tmpmine1", 30), self.entry("tmptheirs1", 30)
+        with patch.object(self.g, "owned", side_effect=lambda p: Path(p) != theirs):
+            self.assertEqual(self.names(self.g.plan_user_temp(self.cfg(), "normal", self.free(), time.time())),
+                             [mine.name])
+        degraded = []
+        with patch.object(self.g, "user_temp_dir", return_value=None):
+            self.assertEqual(self.g.plan_user_temp(self.cfg(), "normal", self.free(), time.time(), degraded=degraded), [])
+        self.assertIn("user-temp", [d["source"] for d in degraded])
+
+    def test_a_live_engine_sandbox_stays(self):
+        self.entry("observatory-portable-k2j4", 30)
+        for answer, planned in ((True, 0), (None, 0), (False, 1)):
+            with self.subTest(running=answer), patch.object(self.g, "running", return_value=answer):
+                kept = []
+                plan = self.g.plan_user_temp(self.cfg(), "normal", self.free(), time.time(), kept=kept)
+                self.assertEqual(len(plan), planned)
+                self.assertEqual(len(kept), 1 - planned)
+
+    def test_the_temp_class_leaves_the_user_folder_to_its_own_class(self):
+        self.entry("tmpold9z", 24 * 9)
+        cfg = self.cfg(temp_roots=[{"path": str(self.usertmp), "depth": 1}])
+        self.assertEqual(len(self.g.plan_temp(cfg, "normal", self.free(), time.time())), 1)
+        self.assertEqual(self.g.plan_temp(cfg, "normal", self.free(), time.time(), skip_roots=[str(self.usertmp)]), [])
+        planners = dict(self.g.planners(cfg, "normal", self.free(), time.time(), []))
+        self.assertEqual([a["class"] for a in planners["temp"](None)], [])
+        self.assertEqual([a["class"] for a in planners["user-temp"](None)], ["user-temp"])
+        self.assertIn("user-temp", self.g.CLASSES)
+
+    def test_a_removal_is_journalled_by_prefix_size_and_age_never_by_contents(self):
+        d = self.entry("tmpq8w7e6r5", 20)
+        (d / "f").write_text("SYNTHETIC_CONTENT_SENTINEL")
+        hours_old(d, 20)
+        action = self.g.plan_user_temp(self.cfg(), "normal", self.free(), time.time())[0]
+        frees = iter([1000 * 1048576, 1001 * 1048576])
+        with patch.object(self.g, "free_bytes", side_effect=lambda *_: next(frees)):
+            rec = self.g.act(action, self.free())
+        self.assertEqual(rec["result"], "removed")
+        self.assertFalse(d.exists())
+        self.assertEqual((rec["class"], rec["prefix"], rec["freed_mb"]), ("user-temp", "tmp*", 1))
+        self.assertAlmostEqual(rec["age_hours"], 20, delta=0.2)
+        self.g.journal(self.g.action_rows(rec))
+        text = self.g.journal_file().read_text()
+        self.assertIn('"prefix": "tmp*"', text)
+        self.assertNotIn("SYNTHETIC_CONTENT_SENTINEL", text)
+
+    def test_a_removal_rechecks_the_service_state_and_git(self):
+        d = self.entry("tmpcheck1", 20)
+        action = self.g.plan_user_temp(self.cfg(), "normal", self.free(), time.time())[0]
+        rec = self.g.act(action, self.free(), {"complete": False, "paths": []})
+        self.assertEqual(rec["result"], "skipped")
+        self.assertTrue(d.exists())
+
+
+class UserTempPlace(unittest.TestCase):
+    def setUp(self):
+        import disk_guard
+        self.g = disk_guard
+
+    def test_macos_asks_getconf_and_elsewhere_reads_tmpdir(self):
+        calls = []
+        def run(argv):
+            calls.append(argv)
+            return "/data/user-temp/T/\n"
+        self.assertEqual(self.g.user_temp_dir(run=run, platform="darwin"), "/data/user-temp/T")
+        self.assertEqual(calls, [["getconf", "DARWIN_USER_TEMP_DIR"]])
+        with patch.dict(os.environ, {"TMPDIR": "/data/user/tmp/"}):
+            self.assertEqual(self.g.user_temp_dir(run=lambda a: None, platform="darwin"), "/data/user/tmp")
+            self.assertEqual(self.g.user_temp_dir(run=run, platform="linux"), "/data/user/tmp")
+        with patch.dict(os.environ, {}, clear=True), patch.object(tempfile, "tempdir", "/data/user/t"):
+            self.assertEqual(self.g.user_temp_dir(run=lambda a: "relative/path\n", platform="darwin"), "/data/user/t")
+
+    def test_prefix_classes(self):
+        for name, cls in (("tmpa1b2c3d4", "tmp*"), ("tmp_x9", "tmp*"), ("pytest-of-user", "pytest-*"),
+                          ("observatory-portable-k2j4", "observatory-portable-*"), ("claude-501", "claude-*"),
+                          ("node-compile-cache", "node-compile-cache"), ("abc_XyZ12", "abc_*"),
+                          ("7f3a9", "other"), (".hidden", "other"), ("go-build1234", "go-*"),
+                          ("x" * 80, "x" * 40)):
+            with self.subTest(name=name):
+                self.assertEqual(self.g.prefix_class(name), cls)
+
+
+class UserTempGrowth(Base):
+    """The guard samples the folder on every pass: entries and bytes per prefix class, and those born since the
+    previous sample (at least an hour back, at most six); a class arriving faster than its threshold is a finding."""
+
+    def made(self, name, hours, size=10):
+        d = self.usertmp / name
+        d.mkdir()
+        (d / "f").write_text("x" * size)
+        if hours:
+            hours_old(d, hours)
+        return d
+
+    def test_a_sample_counts_classes_and_what_arrived_in_the_window(self):
+        for i in range(3):
+            self.made(f"tmpnew{i}x", 0, 100)
+        for i in range(2):
+            self.made(f"tmpold{i}x", 30, 50)
+        self.made("pytest-of-user", 30, 7)
+        at = time.time()
+        s = self.g.sample_user_temp(str(self.usertmp), at, at - HOUR)
+        self.assertTrue(s["complete"])
+        self.assertEqual((s["entries"], s["bytes"]), (6, 407))
+        tmp = s["classes"]["tmp*"]
+        self.assertEqual((tmp["entries"], tmp["bytes"], tmp["new_entries"], tmp["new_bytes"]), (5, 400, 3, 300))
+        self.assertEqual(s["classes"]["pytest-*"]["new_entries"], 0)
+        cut = self.g.sample_user_temp(str(self.usertmp), at, at - HOUR, limit=2)
+        self.assertFalse(cut["complete"])
+
+    def test_growth_over_a_threshold_names_its_class(self):
+        sample = {"at": 10 * HOUR, "since": 9 * HOUR, "classes": {
+            "tmp*": {"entries": 600, "bytes": 3 * self.g.GB, "new_entries": 50, "new_bytes": 10},
+            "pytest-*": {"entries": 40, "bytes": 2 * self.g.GB, "new_entries": 30, "new_bytes": self.g.GB // 10},
+        }}
+        cfg = {"tmp_growth": {"entries_per_day": 1000, "gb_per_day": 1}}
+        grown = self.g.growing(sample, cfg)
+        self.assertEqual([(g["prefix"], g["entries_per_day"]) for g in grown], [("tmp*", 1200), ("pytest-*", 720)])
+        self.assertAlmostEqual(grown[1]["gb_per_day"], 2.4, places=1)
+        self.assertEqual(self.g.growing({**sample, "since": None}, cfg), [], "no window, no rate")
+
+    def test_writers_are_named_by_executable_only(self):
+        root = str(self.usertmp)
+        listing = (f"p12\ncpython3.12\nn{root}/tmpab12/x\n"
+                   f"p13\ncnode\nn/elsewhere/tmpab12\n"
+                   f"p14\ncsh -c rm -rf\nn{root}/tmpzz/y\n"
+                   f"p15\ncpytest\nn{root}/pytest-of-user/z\n")
+        self.assertEqual(self.g.temp_writers(root, ["tmp*", "pytest-*"], run=lambda argv: listing),
+                         {"tmp*": ["python3.12"], "pytest-*": ["pytest"]})
+        self.assertIsNone(self.g.temp_writers(root, ["tmp*"], run=lambda argv: None))
+
+    def test_the_section_measures_from_the_previous_pass_and_names_the_writer(self):
+        for i in range(30):
+            self.made(f"tmpleak{i:02d}x", 0)
+        at = time.time()
+        cfg = self.cfg(tmp_growth={"entries_per_day": 100, "gb_per_day": 1}, user_temp_hours=12)
+        first = self.g.user_temp_section(cfg, None, at, [], 10, run=lambda argv: None)
+        self.assertEqual(first["entries"], 30)
+        self.assertEqual(first["growing"], [])
+        self.assertIsNone(first["window_hours"], "the first pass has nothing to measure from")
+        listing = f"p1\ncpython3.12\nn{self.usertmp}/tmpleak01x/f\n"
+        rows = [{"at": "2026-11-16T10:00:00Z", "class": "user-temp", "result": "removed", "kb": 2048,
+                 "prefix": "tmp*", "freed_mb": 3}]
+        second = self.g.user_temp_section(cfg, {**first, "at": self.g.now(), "sampled_at": at - 2 * HOUR},
+                                          at, rows, 10, run=lambda argv: listing)
+        self.assertEqual(second["window_hours"], 2.0)
+        self.assertEqual(second["growing"][0]["prefix"], "tmp*")
+        self.assertEqual(second["growing"][0]["entries_per_day"], 360)
+        self.assertEqual(second["growing"][0]["writers"], ["python3.12"])
+        self.assertEqual(second["last_removed"]["removed"], 1)
+        self.assertEqual(second["last_removed"]["by_prefix"], {"tmp*": 1})
+        third = self.g.user_temp_section(cfg, second, at, [], 10, run=lambda argv: None)
+        self.assertEqual(third["last_removed"], second["last_removed"], "carried until the next removal")
+
+    def test_a_run_reports_the_section(self):
+        self.made("tmpold1x", 30)
+        with patch.object(self.g, "load_config", return_value=self.cfg(user_temp_hours=12)), \
+                patch.object(self.g.Holders, "take", return_value=self.free()), \
+                patch.object(self.g, "refresh", return_value="fresh"), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g, "temp_writers", return_value=None), \
+                patch.object(self.g.subprocess, "run", side_effect=OSError):
+            doc = self.g.run(["--apply"])
+        self.assertEqual(doc["planned"]["user-temp"], 1)
+        self.assertFalse((self.usertmp / "tmpold1x").exists())
+        self.assertEqual(doc["user_temp"]["last_removed"]["by_prefix"], {"tmp*": 1})
+        self.assertEqual(doc["user_temp"]["entries"], 0)
+
+    def test_the_machine_tool_returns_the_section(self):
+        sys.path.insert(0, str(ROOT / "mcp"))
+        import server, machine_view
+        section = {"at": "2026-11-16T10:00:00Z", "entries": 5, "gb": 0.1, "classes": [{"prefix": "tmp*"}] * 30,
+                   "growing": [{"prefix": "tmp*", "entries_per_day": 2000, "gb_per_day": 0.1, "writers": ["python3"]}],
+                   "last_removed": None}
+        with patch.object(machine_view, "summary", return_value={"degraded": [], "guard": {"userTemp": section}}):
+            got = server.observatory_machine()["guard"]["userTemp"]
+        self.assertEqual(got["growing"][0]["writers"], ["python3"])
+        self.assertLessEqual(len(got["classes"]), 10)
+        with patch.object(machine_view, "summary", return_value={"degraded": [], "guard": {"level": "normal"}}):
+            self.assertIsNone(server.observatory_machine()["guard"]["userTemp"])
 
 
 if __name__ == "__main__":
