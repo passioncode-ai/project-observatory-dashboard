@@ -474,7 +474,7 @@ PUBLIC_SOURCE_ONLY = {
 }
 WORKSPACE_COMMANDS = {"init", "doctor", "version", "configure", "onboard", "migrate-local", "open", "agent",
                       "workspace-backup", "upgrade", "restore", "backups", "backup-passphrase", "machine", "cleanup", "disk-guard",
-                      "machine-backup", "machine-restore", "machine-move", "ports",
+                      "machine-backup", "machine-restore", "machine-move", "ports", "health",
                       "update", "profile", "maintain", "auto-update", "analytics", "track", "untrack", "tracked"}
 #: Commands `main` hands to a parser of their own before the step table is read. The dispatcher's
 #: whole surface is this, WORKSPACE_COMMANDS, STEPS and GROUPS; `tests/test_cli_compatibility.py`
@@ -533,6 +533,8 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
                                the port of each listener for this OS account: one account keeps the
                                historical ports; on a host shared by several accounts each records a
                                block of its own and claims it, so clients never reach another account
+  health [--json]              one agent-health/1 reading of this engine: the worst state of its checks, counts
+                               and codes only (the MCP tool observatory_health answers the same document)
   upgrade                      preview; --apply requires --writers-stopped
   restore SNAPSHOT | --latest  restore a snapshot dir or encrypted .obsnap into a new empty workspace;
                                --latest finds the newest backup a workspace at this path left;

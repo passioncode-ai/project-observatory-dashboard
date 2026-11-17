@@ -144,6 +144,10 @@
         "handoffId"
       ]
     },
+    "observatory_health": {
+      "input": [],
+      "required": []
+    },
     "observatory_integrations": {
       "input": [
         "state"

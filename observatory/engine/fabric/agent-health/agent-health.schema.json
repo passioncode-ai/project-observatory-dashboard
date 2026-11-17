@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://fabric.passioncode.ai/agent-contract/0.1.0/schemas/agent-health.schema.json",
+  "title": "agent-health/1 (DEC-0179): one reading of what is wrong with a product or agent now, as counts and codes",
+  "description": "What a product or agent answers about its own health at one instant: the worst state of its checks and, for each check, its area, its state, a count and the fix that clears it. Counts, kinds and codes only (DEC-0157): no account label, path, session id, host name or free text, so every object is closed. FAC-SEM-181: the report's state is the worst of its checks in the order ok < unknown < warn < fail, and unknown when it has none; each check id once; no name shaped like a credential or holding a home folder. A reader counts a report that fails this schema or FAC-SEM-181 as unknown, never ok (HL-5). docs/specification/agent-health.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "product",
+    "version",
+    "at",
+    "state",
+    "checks"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agent-health/1"
+    },
+    "product": {
+      "$ref": "common.schema.json#/$defs/slug",
+      "description": "The product or agent the reading is about, by its product id (DEC-0016): a lower-case letter, then letters, digits and hyphens, 2 to 63 characters."
+    },
+    "version": {
+      "$ref": "common.schema.json#/$defs/semver",
+      "description": "The version of the product that took the reading."
+    },
+    "at": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 253402300799,
+      "description": "When the reading was taken: whole seconds since 1970-01-01T00:00:00Z (Unix time), at most 9999-12-31T23:59:59Z."
+    },
+    "state": {
+      "$ref": "#/$defs/state",
+      "description": "The worst state of checks in the order ok < unknown < warn < fail, unknown when checks is empty (FAC-SEM-181, HL-2)."
+    },
+    "checks": {
+      "type": "array",
+      "maxItems": 256,
+      "items": {
+        "$ref": "#/$defs/check"
+      },
+      "description": "Every check the product ran for this reading, each id once (FAC-SEM-181)."
+    }
+  },
+  "$defs": {
+    "state": {
+      "enum": [
+        "ok",
+        "warn",
+        "fail",
+        "unknown"
+      ],
+      "description": "ok: measured and well; warn: works, needs attention; fail: broken now; unknown: not measured, never read as ok (HL-2)."
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "area",
+        "state",
+        "count"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]{0,63}$",
+          "description": "The check's stable name in snake_case, at most 64 characters; a watcher keys an episode by product and id (HL-6), so it never changes between readings or versions."
+        },
+        "area": {
+          "enum": [
+            "lifecycle",
+            "sessions",
+            "accounts",
+            "crash",
+            "errors",
+            "update",
+            "environment",
+            "security",
+            "connection"
+          ],
+          "description": "What the check is about, from a closed list (HL-3): a new area is a new revision of this schema."
+        },
+        "state": {
+          "$ref": "#/$defs/state"
+        },
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991,
+          "description": "How many things the check found in its state (stuck sessions, leaked keys, errors today); 0 when it counts nothing."
+        },
+        "fix": {
+          "description": "What clears the check (HL-4): absent or null for none, or exactly one of tool (an MCP tool of the product to call) and capability (a board capability of the owning project to ask). A step only a person can do (a sign-in, a payment) is named by a tool that answers human-step-required.",
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "tool"
+              ],
+              "properties": {
+                "tool": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z0-9_.-]{1,128}$",
+                  "description": "An MCP tool name (1 to 128 of ASCII letters, digits, '_', '-' and '.')."
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "capability"
+              ],
+              "properties": {
+                "capability": {
+                  "$ref": "common.schema.json#/$defs/capabilityName"
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}

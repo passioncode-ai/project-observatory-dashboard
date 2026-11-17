@@ -931,6 +931,9 @@ def parse(argv: list[str]) -> argparse.Namespace:
     if name == "ports":
         import local_ports
         return local_ports.parser().parse_args(rest)
+    if name == "health":
+        import machine_health
+        return machine_health.parser().parse_args(rest)
     return _parse_workspace(argv)
 
 
@@ -1000,6 +1003,9 @@ def main(argv: list[str]) -> int:
     if argv and argv[0] == "ports":
         import local_ports
         return local_ports.main(argv[1:])
+    if argv and argv[0] == "health":
+        import machine_health
+        return machine_health.main(argv[1:])
     a = _parse_workspace(argv)
     try:
         base = config.home()

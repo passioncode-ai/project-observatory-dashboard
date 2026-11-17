@@ -1012,6 +1012,19 @@ def _key_sweep_doc():
 
 
 @server.tool()
+def observatory_health() -> dict[str, Any]:
+    """One `agent-health/1` reading of this engine (OBS-577, DEC-0179): `{schema, product, version, at, state,
+    checks:[{id, area, state, count, fix}]}`, the worst state of its checks (ok < unknown < warn < fail) and, for
+    each check, a count and the MCP tool that shows or clears it. Counts and codes only: no path, name or id.
+
+    Read-only, from the findings the engine last built. A source not read is `unknown`, never `ok`. The same
+    document as `project-observatory full health --json`. It carries no `degraded` field because the contract's
+    schema is closed: what could not be read is a check with state `unknown`."""
+    import machine_health
+    return machine_health.report()
+
+
+@server.tool()
 def observatory_key_sweep(
     repository: Annotated[str | None, Field(description="Only this repository, as the sweep names it (a project's "
                                                         "local folder, e.g. `alpha-web`).")] = None,
