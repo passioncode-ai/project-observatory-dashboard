@@ -2681,7 +2681,7 @@ On a workspace whose tick and server always run (the maintain schedule is live),
 `workspace-backup --pause-writers` takes the same snapshot the daily step of
 `maintain` takes, now: it holds the update lock, stops this workspace's tick and
 server, writes and verifies the encrypted snapshot, starts them again even when the
-snapshot fails, and records the outcome as `snapshot` in `store/maintenance.json`.
+snapshot fails, and records the outcome as `snapshot` in `<home>/store/maintenance.json`.
 It refuses before stopping anything while a tick, an update or a maintenance pass
 runs (exit 2; with `--json` the code is `tick-running`, `update-running` or
 `maintenance-running`), and a failed snapshot exits 1 with `snapshot-failed`. It
