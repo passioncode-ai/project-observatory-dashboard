@@ -1,0 +1,41 @@
+{
+  "schema": "agent-health/1",
+  "product": "switchboard",
+  "version": "0.7.102",
+  "at": 1794830000,
+  "state": "fail",
+  "checks": [
+    {
+      "id": "owner",
+      "area": "lifecycle",
+      "state": "ok",
+      "count": 0,
+      "fix": null
+    },
+    {
+      "id": "sign_in",
+      "area": "accounts",
+      "state": "warn",
+      "count": 1,
+      "fix": {
+        "tool": "switchboard_login"
+      },
+      "detail": "account work@example.org signed out"
+    },
+    {
+      "id": "sessions_stuck",
+      "area": "sessions",
+      "state": "fail",
+      "count": 2,
+      "fix": {
+        "capability": "incident.fix"
+      }
+    },
+    {
+      "id": "update_available",
+      "area": "update",
+      "state": "unknown",
+      "count": 0
+    }
+  ]
+}
