@@ -228,6 +228,8 @@ BOUNDARY += ('vault_copy',)
 BOUNDARY += ('access_binding',)
 # OBS-260: the secret prompt's server half: agent bindings, the node's request queue, the job, no value anywhere.
 BOUNDARY += ('secret_prompt',)
+# OBS-590: a cancel asks the runner first and stops it by force only after a bounded wait, on every OS.
+BOUNDARY += ('jobs_cancel',)
 # OBS-264, OBS-276: a key shared with another person's estate (contract DEC-0142): the protocol over the contract's
 # vectors, both nodes' stores against an in-process mailbox, and `full share` between two workspaces.
 BOUNDARY += ('node_peer_share', 'shares', 'share_cli')

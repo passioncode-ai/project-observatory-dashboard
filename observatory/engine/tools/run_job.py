@@ -5,8 +5,11 @@ The MCP server that accepted the job may exit at any moment — a stdio server
 lives as long as one host session — so the work runs here, in its own session,
 and reports only through the job's record: a heartbeat while it works, then the
 result envelope or an error. A record that is already terminal (a caller
-cancelled it) is never overwritten; SIGTERM, which is what a cancel sends to
-this process group, ends the work and whatever it started.
+cancelled it) is never overwritten. A cancel asks first: a runner that listens
+(`jobs.listen`, `jobs.pause`) sees the record turn `cancelled` and ends with
+`jobs.Cancelled`, a SystemExit, after its own cleanup. Whatever is still running
+after the cancel's bounded wait, and a runner that never listened, gets the forced
+stop: SIGTERM to this process group on POSIX, `taskkill /T /F` on Windows (OBS-590).
 
 The one job today is `machine.mcp.refresh`: take a new MCP inventory with the
 collector the tick runs, then answer `machine.mcp.inventory` from it. The
@@ -132,7 +135,8 @@ def main(argv: list[str]) -> int:
         with deadline:
             result = work(job)
     except SystemExit:
-        # A cancel: the record already says `cancelled`, and `update` leaves it.
+        # A cancel (SIGTERM, or `jobs.Cancelled` from a listening runner): the record
+        # already says `cancelled`, and `update` leaves it.
         jobs.update(job_id, status="cancelled", statusMessage="stopped")
         return 0
     except Exception as exc:                                          # noqa: BLE001

@@ -3433,8 +3433,8 @@
       "path": "jobs.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c6d9f40788638f33390edafc4303a03925c688140cd6c36efc49e40f438593e5",
-      "bytes": 12927
+      "export_sha256": "cdef0ce13640577f18458438ff4ca048f2c72c58bae6b91dbda7dfd29ff0fac8",
+      "bytes": 15851
     },
     {
       "path": "key_acts.py",
@@ -4218,8 +4218,8 @@
       "path": "secret_client.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "309d7f392906a2a3a758268d12ec0fcb3d56f29d350299f7a4e76da997814b62",
-      "bytes": 9630
+      "export_sha256": "723e72b2a39608e27cb63f30b08378ea82734ed0ca0f1dd7e512c401aab3a54d",
+      "bytes": 9974
     },
     {
       "path": "secret_prompt.py",
@@ -4724,8 +4724,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "1c38fc805be6cf7003944123bea2bd600cdca7e4ef2253d66e68b007a8cd51b7",
-      "bytes": 58989,
+      "export_sha256": "3331c7431b19e0bf4a48354ef1f65f987b06d477ef9dbde359456853a6bb9562",
+      "bytes": 59122,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -5740,6 +5740,13 @@
       "upstream_modified": true,
       "export_sha256": "4b5fc2f406707b1956b80e0c77f75498cc2fd136fd375aefb0face7567efc6f2",
       "bytes": 7463
+    },
+    {
+      "path": "tests/test_jobs_cancel.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "074f1f47a8742404bd499257ccfd1cc0b2634ebedcdd7be3d63295ce375b42fd",
+      "bytes": 7873
     },
     {
       "path": "tests/test_key.py",
@@ -8031,8 +8038,8 @@
       "path": "tools/run_job.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9face45b0f5d47a65ae5aa0f1b95f3ce2ddb72daaa211bf134ae5ff9c2f8e671",
-      "bytes": 7749
+      "export_sha256": "663c906409d3c59b62900bb26318329d91399ebe3ee7457cbef7fd6a3c18f4e8",
+      "bytes": 8083
     },
     {
       "path": "tools/run_probes.py",
@@ -8394,7 +8401,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 1135,
+  "file_count": 1136,
   "excluded": [
     "git-history",
     "operator-registries",

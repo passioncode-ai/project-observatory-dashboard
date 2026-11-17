@@ -10,7 +10,8 @@ is shown by anyone.
 The job's runner (`tools/run_job.py`, capability `secret.request`) polls `secret.get` until the request is final,
 then completes with `output.outcome`: `stored`, `declined`, `no-answer`, `unconfirmed` or `no-client`, never a value.
 `fabric.job.cancel` stops the runner, and the runner withdraws the request first (`secret.cancel`), so the person is
-not left with a window nobody waits for.
+not left with a window nobody waits for. The runner listens for the cancel between its polls (`jobs.pause`, OBS-590):
+on Windows the forced stop runs no handler, so the withdrawal must happen before it.
 """
 from __future__ import annotations
 
@@ -142,7 +143,8 @@ def follow(job: dict) -> dict:
     args = job["arguments"]
     started = time.monotonic()
     give_up = None
-    jobs.update(job["id"], statusMessage="waiting for the person to answer in Observatory's window")
+    # Listening before the status says "waiting": a cancel sent from then on is seen between polls (OBS-590).
+    jobs.listen(job["id"], statusMessage="waiting for the person to answer in Observatory's window")
     try:
         while True:
             try:
@@ -156,16 +158,17 @@ def follow(job: dict) -> dict:
                 give_up = give_up or (time.monotonic() + SP.MAX_DEADLINE_SECONDS + GRACE_SECONDS)
                 if time.monotonic() > give_up:
                     raise RuntimeError("Observatory stopped answering before the request ended") from None
-                time.sleep(POLL_SECONDS)
+                jobs.pause(job["id"], POLL_SECONDS)
                 continue
             if "error" in answer:
                 raise RuntimeError(answer.get("message") or answer["error"])
             r = answer["request"]
             if r["state"] != SP.OPEN:
                 break
-            time.sleep(POLL_SECONDS)
+            jobs.pause(job["id"], POLL_SECONDS)
     except SystemExit:
-        # fabric.job.cancel: withdraw the request before this runner stops, so no window waits for nobody.
+        # fabric.job.cancel (`jobs.Cancelled`, or SIGTERM on POSIX): withdraw the request before this runner stops,
+        # so no window waits for nobody.
         withdraw(args["requestId"])
         raise
     output = {"outcome": r["outcome"], "message": r["message"], "requestId": r["requestId"], "agent": r["agent"],
