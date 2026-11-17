@@ -1038,15 +1038,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "a24c7c09d113ee9f9fa435bd7bad6fe75c524e2dfb4fb1460c79bf092dec9756",
-      "bytes": 334367,
+      "export_sha256": "014ba186213fd03242f80a0b5a11af02dd73b3e56a96244a2974e8b38d095cdc",
+      "bytes": 334849,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "cd12d6c205284c08b909da17f8e357ed9d891827ac68c58aba990366cffa391f",
-      "bytes": 262023,
+      "export_sha256": "1abfc3999319f0f8f1436286872db0e5dd726a9e267a6511c1639e3406b5cb4c",
+      "bytes": 262986,
       "upstream_modified": true
     },
     {
@@ -4931,8 +4931,8 @@
     {
       "path": "tests/test_credential_doors.py",
       "source_sha256": "f008811e75e70131f87e329de7768c58b166901a4900dcfa483f4bc570c29afc",
-      "export_sha256": "e0454bc778ea26936be65f3de427b39cc778f09a7c3a8256398f855f3928b264",
-      "bytes": 223472,
+      "export_sha256": "0583967c7fcb7245e0fa679843386cda9d09f03aa051942339e6d063c489bdc5",
+      "bytes": 229487,
       "python_comments_removed": 14,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
@@ -7249,8 +7249,8 @@
     {
       "path": "tools/cloudflare.py",
       "source_sha256": "554f7d6d0d677c887404479e33a84d40e76f022ecd49ce15e85cf409d5e6738f",
-      "export_sha256": "f381c7830f73f6aed5cda03e5616ec0bc2ec7617daf4ab3ba1d04e8e38284d14",
-      "bytes": 132607,
+      "export_sha256": "406a622aad806a5eba0c78186768d3f20682bbba1fd6a5d80c3babe4deb02918",
+      "bytes": 137339,
       "python_comments_removed": 37,
       "python_docstrings_removed": 16,
       "tool_descriptions_retained": 0,

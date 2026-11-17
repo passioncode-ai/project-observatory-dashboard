@@ -497,7 +497,11 @@ counters), `dns-edit`, `email-routing`, `email-routing-setup`, `email-sending-do
 `--account`). `r2-bucket` is one bucket (`--account --bucket NAME`) and delivers an S3 pair to three
 slots under `--vault PROJECT/ENV/PREFIX`: `PREFIX_ACCESS_KEY_ID`, `PREFIX_SECRET_ACCESS_KEY`,
 `PREFIX_ENDPOINT`. Each is verified with its own value before delivery; the handling-secrets skill says
-what each grants.
+what each grants. A token delivered to a slot is revoked with `tools/cloudflare.py revoke --vault
+PROJECT/ENV/NAME` (OBS-575): the door finds it by the slot its managed name records, deletes it at
+Cloudflare, reads the account's tokens again to confirm it is gone, then removes the slot and journals
+the revocation; anything it could not confirm keeps the slot. `revoke <label>` stays the verb for a
+token filed in the plugin folder. An R2 pair is not named after its slot and is not found this way.
 
 **The Cloudflare page** (OBS-271). `tools/cloudflare.py issue --preset inventory-read --account
 <slug>` mints one read-only token per account (Workers Scripts, Pages, R2 Storage and D1 Read on the
