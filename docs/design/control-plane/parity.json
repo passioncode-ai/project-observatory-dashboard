@@ -249,10 +249,11 @@
       "action": "workspace-backup",
       "kind": "cli",
       "where": "workspace.py: workspace-backup",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action workspace-backup: the managed encrypted snapshot with the tick and server paused (`--pause-writers`, OBS-583), a job; `--output`/`--plaintext` (a plaintext copy of the vault's secrets) and `--writers-stopped` (a person's claim) are not offered; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "upgrade --apply",
@@ -276,19 +277,21 @@
       "action": "backups migrate",
       "kind": "cli",
       "where": "workspace.py: backups",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action backups-migrate: removes the older legacy copies, so it needs the operator's words (backups.migrate, target legacy-copies); a job; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "backups decrypt",
       "kind": "cli",
       "where": "workspace.py: backups",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action backups-decrypt: writes a backup's plaintext only to a new path inside the workspace, never into an answer, with the operator's words (backups.decrypt, target the path from the home); a job; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "backup-passphrase set",
@@ -314,28 +317,31 @@
       "action": "cleanup --apply",
       "kind": "cli",
       "where": "workspace.py: cleanup",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action cleanup (and cleanup-plan): removes the plan's tier, so it needs the operator's words (disk.cleanup, target auto or manual); a job; the same workspace.machine_command with its JSON summary (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "disk-guard --apply",
       "kind": "cli",
       "where": "workspace.py: disk-guard",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action disk-guard (and disk-guard-plan): removes temporary files, the Trash, caches and build output, so it needs the operator's words (disk.guard, target the level or current); a job; the same workspace.machine_command with its JSON summary (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "machine-backup now",
       "kind": "cli",
       "where": "workspace.py: machine-backup",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action machine-backup: one encrypted .obmachine bundle, a job; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "machine-restore --apply",
@@ -404,10 +410,11 @@
       "action": "update --apply",
       "kind": "cli",
       "where": "workspace.py: update",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action update: replaces the running engine, so it needs the operator's words (engine.update, target the version or latest); unattended, in a process group of its own so a cancel never stops it half-way; `--no-rollback` is not offered; a job (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "profile import",
@@ -422,55 +429,61 @@
       "action": "maintain run",
       "kind": "cli",
       "where": "workspace.py: maintain",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action maintain-run: one maintenance pass with OBSERVATORY_SYSTEM_SETUP=1 as the scheduler runs it, a job; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "maintain ensure",
       "kind": "cli",
       "where": "workspace.py: maintain",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action maintain-ensure: schedules the pass (undone by maintain-uninstall), a job; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "maintain uninstall",
       "kind": "cli",
       "where": "workspace.py: maintain",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action maintain-uninstall: unschedules the pass (undone by maintain-ensure), a job; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "maintain app",
       "kind": "cli",
       "where": "workspace.py: maintain",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action maintain-app: swaps a verified app bundle that waited for a quit, a job; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "auto-update on",
       "kind": "cli",
       "where": "workspace.py: auto-update",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action auto-update-on: the switch, reversible, a job; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "auto-update off",
       "kind": "cli",
       "where": "workspace.py: auto-update",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action auto-update-off: the switch, reversible, a job; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "analytics on",

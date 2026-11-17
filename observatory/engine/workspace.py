@@ -1206,12 +1206,14 @@ def _configure_models(base: Path, a) -> int:
     return 0
 
 
-def machine_command(name: str, argv: list[str]) -> int:
+def machine_command(name: str, argv: list[str], *, json_summary: bool = False) -> int:
     """`machine [--disk] [--explain PID]` surveys and prints; `cleanup [--apply]
     [--include manual]` refreshes the git survey, then plans or acts.
 
     Parsed BEFORE the workspace is touched, so `--help` and a refused flag cost
-    nothing; anything undeclared is refused rather than ignored."""
+    nothing; anything undeclared is refused rather than ignored. `json_summary`
+    (not a flag a person types): `cleanup` and `disk-guard` end with the one JSON
+    summary line the maintenance job reads, for `observatory_ops` (OBS-559)."""
     a = machine_parser(name).parse_args(argv)
     config.validate_workspace(config.home(), required=True)
     for sub in ("collectors", "tools"):
@@ -1220,7 +1222,8 @@ def machine_command(name: str, argv: list[str]) -> int:
     if name == "disk-guard":
         import disk_guard
         return disk_guard.main((["--apply"] if a.apply else []) + (["--level", a.level] if a.level else [])
-                               + (["--large-files", "--refresh"] if a.large_files else ["--refresh"]))
+                               + (["--large-files", "--refresh"] if a.large_files else ["--refresh"])
+                               + (["--json"] if json_summary else []))
     import scan_machine
     if name == "machine":
         if a.open_unlinked:
@@ -1274,7 +1277,7 @@ def machine_command(name: str, argv: list[str]) -> int:
     import cleanup
     scan_git_hygiene.main(["scan_git_hygiene.py", str(paths.SCRATCH / "git-hygiene.json")])
     args = (["cleanup.py"] + (["--apply"] if a.apply else []) + (["manual"] if a.include == "manual" else [])
-            + (["--level", a.level] if a.level else []))
+            + (["--level", a.level] if a.level else []) + (["--json"] if json_summary else []))
     return cleanup.main(args)
 
 

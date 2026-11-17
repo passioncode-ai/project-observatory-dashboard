@@ -117,23 +117,24 @@ server = InteropServer(
     # a host keeps about 2,048 and drops the rest, and the earlier text was cut
     # exactly at the WRITE rule (tests/test_mcp_wire.py checks the length).
     instructions=(
-        "SPENDS: `observatory_assistant_ask` (configured model; private dialogue/job — "
+        "SPENDS: `observatory_assistant_ask` (configured model; private dialogue/job: "
         "`fabric.job.get`/`.cancel`). `observatory_search` stays local "
         "(embedding-policy/1, lexical); `degraded` says so.\n"
         "WRITE: `observatory_record`, `_lesson` and `_propose` append PROPOSALS below "
         "confidence 1; only the operator or independent corroboration promotes one; "
-        "`_org_selection`, gated `_configure`/`_key_act` changes need the operator's `decision`.\n"
+        "`_org_selection`, gated `_configure`/`_key_act`/`_ops` need the operator's `decision`; "
+        "`_ops` is a job.\n"
         "SECRETS: `observatory_credentials` names keys and CANNOT return a value; run its command, "
         "open no file. Missing key: `observatory_secret_request`, no chat.\n"
-        "DEGRADED: every read carries `degraded` (empty: full coverage; else it "
-        "names gaps); treat a read without one as a bug (writes/job handles have none). "
+        "DEGRADED: every read carries `degraded` (empty: full coverage, else the "
+        "gaps); treat a read without one as a bug (writes/job handles have none). "
         "Refusals are typed `error`s; isError: malformed input, unknown tool "
         "or invalid output.\n"
         "WORKFLOW: `observatory_checkpoint_write` after each step (keep `leaseId`); "
         "`observatory_handoff_create`/`_accept` moves it; `observatory_workflow_list` finds it.\n"
-        "START with `observatory_overview` (counts, findings, disk). Folders outside Git go to `config/tracked.json`; "
+        "START with `observatory_overview` (counts, findings, disk). Folders outside Git: `config/tracked.json`; "
         "no grant/registry writes.\n"
-        "READ, paged with `limit` and `cursor` → `nextCursor`, totals over the "
+        "READ, paged with `limit`/`cursor` → `nextCursor`, totals per "
         "scope: `observatory_status` (pass `limit`, `detail: summary`; unpaged is "
         "huge); `observatory_findings` takes `projectId`; "
         "`observatory_recall`. `limit` only: `observatory_project`, `observatory_timeline`. "
@@ -623,6 +624,78 @@ def observatory_credential_mark(
     return key_acts.credential_mark(action, project=project, env=env, name=name, where=where, id=id,
                                     purpose=purpose, evidence=evidence, owner=owner, rotationDays=rotationDays,
                                     tags=tags)
+
+
+def _meta_trace(ctx: "Context | None") -> dict[str, Any]:
+    """The `_meta.traceparent`/`tracestate` a call carries, as `interop.span_for` reads them, or {}."""
+    try:
+        meta = ctx.request_context.meta if ctx is not None else None
+    except (ValueError, AttributeError):
+        return {}
+    if meta is None:
+        return {}
+    if isinstance(meta, dict):
+        return meta
+    extra = getattr(meta, "model_extra", None) or {}
+    return {k: extra.get(k, getattr(meta, k, None)) for k in ("traceparent", "tracestate")}
+
+
+@server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False))
+def observatory_ops(
+    action: Annotated[Literal["workspace-backup", "machine-backup", "backups-migrate", "backups-decrypt",
+                              "cleanup-plan", "cleanup", "disk-guard-plan", "disk-guard", "update", "maintain-run",
+                              "maintain-ensure", "maintain-uninstall", "maintain-app", "auto-update-on",
+                              "auto-update-off"],
+                      Field(description="The CLI verb: workspace-backup (--pause-writers), machine-backup (now), "
+                                        "backups-migrate, backups-decrypt, cleanup-plan, cleanup (--apply), "
+                                        "disk-guard-plan, disk-guard (--apply), update (--apply), maintain-run, "
+                                        "-ensure, -uninstall, -app, auto-update-on, -off. backups-migrate, "
+                                        "backups-decrypt, cleanup, disk-guard and update need the operator's "
+                                        "`decision`.")],
+    file: Annotated[str | None, Field(description="backups-decrypt: the backup's name in the backups root (as "
+                                                  "`backups status` names it), or its path.")] = None,
+    output: Annotated[str | None, Field(description="backups-decrypt: a NEW path inside the workspace, relative to "
+                                                    "its home, whose folder exists; also the decision's target.")] = None,
+    include: Annotated[Literal["manual"] | None, Field(description="cleanup: also archive and remove the manual "
+                                                                   "tier (the decision's target is then manual, "
+                                                                   "else auto).")] = None,
+    level: Annotated[Literal["normal", "low", "critical"] | None, Field(
+        description="cleanup, cleanup-plan, disk-guard, disk-guard-plan: act or plan as at this disk pressure "
+                    "(disk-guard's decision target; current without it).")] = None,
+    largeFiles: Annotated[bool | None, Field(validation_alias=AliasChoices("largeFiles", "large_files"),
+                                             description="disk-guard, disk-guard-plan: re-walk the home for large "
+                                                         "files now.")] = None,
+    version: Annotated[str | None, Field(description="update: the release X.Y.Z (the decision's target; latest "
+                                                     "without it).")] = None,
+    reinstall: Annotated[bool | None, Field(description="update: allow the version already running.")] = None,
+    decision: Annotated[dict[str, Any] | None, Field(
+        description="backups-migrate, backups-decrypt, cleanup, disk-guard and update: the operator's words in "
+                    "contract DEC-0121's shape: {by: operator, via: relayed-instruction, action: backups.migrate|"
+                    "backups.decrypt|disk.cleanup|disk.guard|engine.update, target, instruction: their words "
+                    "verbatim, at: when, source?}. Also read from _meta.decision.")] = None,
+    ctx: "Context | None" = None,
+) -> dict[str, Any]:
+    """The operations verbs for an agent (OBS-559): backups, the disk, the engine update and the maintenance job,
+    each the SAME function the CLI runs (`project-observatory full <verb>`), in a detached job: the answer is a job
+    handle {action, job: {id, status}}; follow it with fabric.job.get (its result's output carries the command's
+    `exit`, its JSON `result` and the last lines it `said`, scrubbed) and stop it with fabric.job.cancel (an update
+    runs in a process of its own and is never stopped half-way: a cancel stops following it).
+
+    workspace-backup takes the managed encrypted snapshot with the tick and server paused (no plaintext --output);
+    machine-backup bundles the agent setup; backups-migrate moves legacy copies into the backups root and removes
+    the older ones; backups-decrypt writes a backup's plaintext to a new path inside the workspace (never in an
+    answer); cleanup and disk-guard remove what their plan names (the -plan actions only write the plan, read with
+    observatory_machine); update installs a release unattended, rolling back on failure; maintain-run runs one
+    maintenance pass, -ensure schedules it, -uninstall unschedules it, -app swaps a verified app bundle;
+    auto-update-on/-off flip the switch. The five that delete or are hard to undo need the operator's words as
+    `decision`, kept with the caller agent:mcp in store/logs/ops-acts.jsonl. Refusals are typed `error` {code,
+    message}: invalid-argument, operator-decision-required (with the action and target to ask for),
+    decision-invalid, system-setup-off, busy, failed. Design: docs/design/control-plane/ops-tools.md."""
+    import ops_acts
+    words = decision if decision is not None else _meta_decision(ctx)
+    return ops_acts.act(action, file=file, output=output, include=include, level=level, largeFiles=largeFiles,
+                        version=version, reinstall=reinstall, decision=words,
+                        span_record=interop.span_for(_meta_trace(ctx)).record())
 
 
 @server.tool()

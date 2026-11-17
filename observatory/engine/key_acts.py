@@ -88,9 +88,16 @@ def _check_arguments(action: str, taken: dict[str, set], given: dict[str, Any]) 
 def _decided(action: str, target: str, decision: Any) -> dict:
     """The operator's words for this act and object (DEC-0121 AP-2, checked by `node/actions.py`), or a refusal."""
     act, title = DECISION_ACTIONS[action]
+    return decided(act, title, "observatory.key_act", target, decision, label=action)
+
+
+def decided(act: str, title: str, tool: str, target: str, decision: Any, *, label: str,
+            why: str = "spends money or cannot be undone") -> dict:
+    """The operator's words for the act `act` on `target`, checked by `node/actions.py` as every relayed act is; the
+    record the journal keeps, or a refusal. Shared with `ops_acts.py` (OBS-559, the operations verbs)."""
     if decision is None:
         raise Refusal("operator-decision-required",
-                      f"{action} spends money or cannot be undone: ask the person, then call again with their words "
+                      f"{label} {why}: ask the person, then call again with their words "
                       f"as `decision` (by operator, via relayed-instruction, action {act}, target {target}, the words "
                       "verbatim, when they said them)", action=act, target=target)
     if not isinstance(decision, dict):
@@ -103,7 +110,7 @@ def _decided(action: str, target: str, decision: Any) -> dict:
                       action=act)
     import engine_node
     answer = engine_node.module("actions").action_decision(
-        action={"id": act, "title": title, "tool": "observatory.key_act", "gate": "relayed"}, tier="T0",
+        action={"id": act, "title": title, "tool": tool, "gate": "relayed"}, tier="T0",
         caller=CALLER, decision=decision, target=target, now=_now())
     if answer.get("ok") is not True or decision.get("target") != target:
         raise Refusal("decision-invalid", "the decision is not the operator's for this action and object, or is "

@@ -286,6 +286,22 @@
       "input": [],
       "required": []
     },
+    "observatory_ops": {
+      "input": [
+        "action",
+        "decision",
+        "file",
+        "include",
+        "largeFiles",
+        "level",
+        "output",
+        "reinstall",
+        "version"
+      ],
+      "required": [
+        "action"
+      ]
+    },
     "observatory_org_accounts": {
       "input": [],
       "required": []

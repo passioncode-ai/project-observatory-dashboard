@@ -8,8 +8,9 @@ result envelope or an error. A record that is already terminal (a caller
 cancelled it) is never overwritten; SIGTERM, which is what a cancel sends to
 this process group, ends the work and whatever it started.
 
-The one job today is `machine.mcp.refresh`: take a new MCP inventory with the
-collector the tick runs, then answer `machine.mcp.inventory` from it. The
+Jobs: `machine.mcp.refresh`, an assistant's question, a secret request, and the operations acts of
+`observatory_ops` (`ops_acts.run`, OBS-559). The refresh takes a new MCP inventory with the
+collector the tick runs, then answers `machine.mcp.inventory` from it. The
 collector receives the job's trace as `TRACEPARENT`/`TRACESTATE`, the
 environment carrier OpenTelemetry defines for a child process, on a child span
 of the job's (fabric-interop/0.1, C3.4 b).
@@ -94,10 +95,13 @@ def refresh(job: dict) -> dict:
 
 
 from agent import assistant
+import ops_acts                                                     # noqa: E402
 import secret_client                                                # noqa: E402
 WORK = {"machine.mcp.refresh": refresh, "agent.ask": assistant.run_question,
         # OBS-260: follow one secret request to its outcome; never a value (secret_client.follow).
-        secret_client.CAPABILITY: secret_client.follow}
+        secret_client.CAPABILITY: secret_client.follow,
+        # OBS-559: one operations act (a backup, the disk, an update, maintenance) through the CLI's own function.
+        **{capability: ops_acts.run for capability in sorted(ops_acts.CAPABILITIES)}}
 
 
 def main(argv: list[str]) -> int:
