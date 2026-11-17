@@ -151,15 +151,30 @@ def _yes(t: Translator, value) -> str:
     return t.mark("answer@@yes") if value else t.mark("answer@@no")
 
 
-def _machine_sessions(sessions: dict | None, t: Translator, names: dict | None = None) -> str:
+def _session_rows(doc: dict, ledger: list[dict] | None) -> list[dict]:
+    """The running sessions, each with `active`, the one rule for "working" (OBS-599): as sessions_view wrote it,
+    or, for a list written before the rule, joined here with the ledger's turns of the last hour by the same
+    function. `ledger` None (not read) leaves every row unknown."""
+    import sessions_view
+    rows = [r for r in doc.get("sessions") or [] if isinstance(r, dict) and r.get("agent")]
+    if all("active" in r for r in rows):
+        return rows
+    recent = None if ledger is None else [s for s in ledger if isinstance(s, dict) and s.get("active")]
+    return sessions_view.mark_active(rows, recent)
+
+
+def _machine_sessions(sessions: dict | None, t: Translator, names: dict | None = None,
+                      ledger: list[dict] | None = None) -> str:
     """Every coding session running here (sessions_view, CP-02): the three counts with their sources, then the
-    list grouped by agent and project. A list the account manager did not give says why, never "none"."""
+    one list grouped by agent and project. A row is "working" when it runs and recorded a turn in the last hour,
+    the rule the "Active in the last hour" count uses (OBS-599). A list the account manager did not give says
+    why, never "none"."""
     import sessions_view
     doc = sessions if isinstance(sessions, dict) else {}
     f = sessions_view.facets(doc)
     parts = [f'<section class="card panel" id="agents-sessions">'
              f'{t.mark("Sessions on this machine", tag="h2", attrs=HEADING)}', _tiles(_session_tiles(f, t), t)]
-    rows = [r for r in doc.get("sessions") or [] if isinstance(r, dict) and r.get("agent")]
+    rows = _session_rows(doc, ledger)
     if not rows:
         if f["managerState"] == "read":
             parts.append(t.mark("No session is running: the account manager lists none.", tag="p", attrs=EMPTY))
@@ -184,8 +199,8 @@ def _machine_sessions(sessions: dict | None, t: Translator, names: dict | None =
                      f'{t.mark("{n} sessions", n=len(group))}</h3>')
         body = []
         for r in group:
-            quiet = r.get("state") == "quiet" or r.get("quiet") is True
-            state = _chip(t, "session@@quiet") if quiet else _chip(t, "working", "ok")
+            state = (_chip(t, "working", "ok") if r.get("active") is True
+                     else _chip(t, "session@@quiet") if r.get("active") is False else NOT_READ)
             cells = (_project(r.get("project"), names) if r.get("project") else NOT_READ,
                      f'<span class="mono">{_e(r.get("folder_name") or NOT_READ)}</span>',
                      _yes(t, r.get("managed") is True),
@@ -195,6 +210,8 @@ def _machine_sessions(sessions: dict | None, t: Translator, names: dict | None =
             tds = "".join(f'<td{t.attr("data-label", h)}>{c}</td>' for h, c in zip(heads, cells))
             body.append(f'<tr data-session="{_e(r.get("pid"))}">{tds}</tr>')
         parts.append(f'<table><thead><tr>{th}</tr></thead><tbody>{"".join(body)}</tbody></table>')
+    parts.append(t.mark("A session is working when it runs and recorded a turn in the last hour.",
+                        tag="p", attrs=HINT))
     return "".join(parts) + "</section>"
 
 
@@ -356,28 +373,6 @@ def _workflow(w: dict, t: Translator, names: dict | None = None) -> str:
     return f'<details class="card panel agents-wf" id="wf-{_e(wid)}"{is_open}>{head}{"".join(body)}</details>'
 
 
-def _sessions(sessions: list[dict], t: Translator, names: dict | None = None) -> str:
-    """The ledger's sessions with a recorded turn in the last day, and the workflow each worked on."""
-    if not sessions:
-        return (f'<section class="card panel">{t.mark("Recorded turns", tag="h2", attrs=HEADING)}'
-                f'{t.mark("No agent session recorded a turn in the last day.", tag="p", attrs=EMPTY)}</section>')
-    th = "".join(f'<th scope="col"{NUM if h == "Turns" else ""}>{t.mark(h)}</th>'
-                 for h in ("Session", "Project", "Last turn", "Turns", "Workflow"))
-    rows = []
-    for s in sessions:
-        live = _chip(t, "working", "ok") if s.get("active") else ""
-        rows.append(
-            "<tr>"
-            f'<td{t.attr("data-label", "Session")}><span class="mono">{_e((s.get("sessionId") or "")[:8])}</span> {live}</td>'
-            f'<td{t.attr("data-label", "Project")}>{_project(s.get("projectId"), names)}</td>'
-            f'<td{t.attr("data-label", "Last turn")}>{t.date(stamp(s.get("lastTurnAt"), NO_VALUE))}</td>'
-            f'<td{t.attr("data-label", "Turns")} class="num">{t.number(s.get("turns"))}</td>'
-            f'<td{t.attr("data-label", "Workflow")}><span class="mono">{_e(s.get("workflowId") or NO_VALUE)}</span></td>'
-            "</tr>")
-    return (f'<section class="card panel">{t.mark("Recorded turns", tag="h2", attrs=HEADING)}'
-            f'<table><thead><tr>{th}</tr></thead><tbody>{"".join(rows)}</tbody></table></section>')
-
-
 def signature(a: dict, sessions: dict | None = None) -> str:
     """What the page SAYS, without its clocks: the live refresh announces a change to
     a screen reader only when this differs (audit A27), not every 15 seconds."""
@@ -388,14 +383,13 @@ def signature(a: dict, sessions: dict | None = None) -> str:
             "workflows": [(w.get("workflowId"), w.get("status"), w.get("stalled"),
                            w.get("step"),
                            w.get("handoffs")) for w in a.get("workflows") or []],
-            "sessions": [(s.get("sessionId"), s.get("turns"), s.get("active")) for s in a.get("sessions") or []],
             "degraded": [d.get("code") or d.get("reason") for d in a.get("degraded") or []]}
     if sessions is not None:
         import sessions_view
         f = sessions_view.facets(sessions)
         said["sessionCount"] = (f["running"], f["managed"], f["activeHour"], f["managerState"])
-        said["machineSessions"] = sorted((str(r.get("agent")), str(r.get("pid")), r.get("managed"), r.get("state"))
-                                         for r in (sessions.get("sessions") or []) if isinstance(r, dict))
+        said["machineSessions"] = sorted((str(r.get("agent")), str(r.get("pid")), r.get("managed"), r.get("active"))
+                                         for r in _session_rows(sessions, a.get("sessions")))
     return hashlib.sha256(json.dumps(said, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 
@@ -414,7 +408,7 @@ def agents_html(payload: dict, t: Translator | None = None, live: bool = False) 
     parts.append(t.mark("Read {at}", tag="p", attrs=' class="machine-at" id="agents-at"',
                         at=stamp(a.get("measuredAt"), NO_VALUE)))
     parts.append(f'<p class="machine-hint" id="agents-live" role="status" aria-live="polite"></p>')
-    parts.append(_machine_sessions(payload.get("sessions"), t, names))
+    parts.append(_machine_sessions(payload.get("sessions"), t, names, a.get("sessions") if "sessions" in a else None))
     needs = a.get("needsYou") or []
     parts.append(f'<section class="card panel" id="agents-needs">{t.mark("Needs you", tag="h2", attrs=HEADING)}')
     if needs:
@@ -437,7 +431,6 @@ def agents_html(payload: dict, t: Translator | None = None, live: bool = False) 
         parts.append(f'<section class="card panel">'
                      f'{t.mark("No workflow yet. An agent starts one by writing its first checkpoint: observatory_checkpoint_write.", tag="p", attrs=EMPTY)}'
                      f'</section>')
-    parts.append(_sessions(a.get("sessions") or [], t, names))
     degraded = a.get("degraded") or []
     if degraded:
         def reason(d: dict) -> str:
@@ -464,8 +457,8 @@ def agents_html(payload: dict, t: Translator | None = None, live: bool = False) 
 DYNAMIC = (DOT_TITLE, *DOT_TITLES.values(), "Sessions running", "Managed", "Active in the last hour",
            "Workflows open",
            "held by an executor", "Handoffs waiting", "to be accepted", "Stalled",
-           "silent 30 min", "Steps kept", "for review", "Session", "Project", "Last turn",
-           "Turns", "Workflow", "{n} s", "{n} min", "{n} h", "{n} d",
+           "silent 30 min", "Steps kept", "for review", "Project", "Last turn",
+           "{n} s", "{n} min", "{n} h", "{n} d",
            # `_chip` takes its label as an argument, which the catalog scan does not see.
            "working", "session@@quiet", DISABLED, "answer@@yes", "answer@@no",
            *NEED_WORDS.values(),

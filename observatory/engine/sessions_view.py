@@ -18,6 +18,9 @@ project counts at most its running sessions and at most its sessions with a rece
 the manager's rows (the survey counts processes, it lists none) nothing can be joined, and
 `active_hour` is None with `needs-session-list` in `degraded`. `ledger_hour` keeps the ledger's own
 count, every session with a turn in the last hour, under its own name.
+Each session row carries the same rule as `active` (OBS-599, `mark_active`): True when it counts, None
+when the ledger was not read. It is the one meaning of "working" on the Agents page; `quiet` and
+`state` stay what the manager said (its transcript silent 30 minutes).
 
 The page used to show only the third, under the name of the first. A source that could not
 be read is `None` with its reason in `degraded`, never 0: "the manager manages nothing" and
@@ -199,18 +202,29 @@ def _ledger(db: pathlib.Path, now: datetime, degraded: list[dict]) -> list[dict]
         return None
 
 
-def _active_running(sessions: list[dict], recent: list[dict]) -> int:
-    """The running sessions that also have a ledger turn in the last hour (OBS-597): per project,
-    the smaller of its running sessions and its sessions with a recent turn. A session in no
-    project pairs with a turn recorded in no project, the same way."""
-    running: dict[str | None, int] = {}
+def mark_active(sessions: list[dict], recent: list[dict] | None) -> list[dict]:
+    """The running sessions, each with `active` (OBS-597, OBS-599): the one rule for "working". A ledger
+    row names a project, never a process, so the join is per project: a project's sessions with a turn
+    in the last hour make at most that many of its running sessions active, the ones written to most
+    recently first. A session in no project pairs with a turn recorded in no project, the same way.
+    `recent` None (the ledger was not read) marks every session None, never inactive. New rows; the
+    rows passed in are not changed."""
+    out = [dict(s) for s in sessions]
+    if recent is None:
+        for s in out:
+            s["active"] = None
+        return out
     turned: dict[str | None, int] = {}
-    for s in sessions:
-        running[s.get("project")] = running.get(s.get("project"), 0) + 1
     for s in recent:
         pid = s.get("projectId") if isinstance(s.get("projectId"), str) and s.get("projectId") else None
         turned[pid] = turned.get(pid, 0) + 1
-    return sum(min(n, turned.get(pid, 0)) for pid, n in running.items())
+    order = sorted(range(len(out)), key=lambda i: (str(out[i].get("last_turn_at") or ""), -i), reverse=True)
+    for i in order:
+        pid = out[i].get("project") if isinstance(out[i].get("project"), str) and out[i].get("project") else None
+        out[i]["active"] = turned.get(pid, 0) > 0
+        if out[i]["active"]:
+            turned[pid] -= 1
+    return out
 
 
 def _row(raw, attribute, degraded_attribution: list[str]) -> dict | None:
@@ -297,9 +311,10 @@ def summary(home: pathlib.Path | None = None, *, now: datetime | None = None,
         processes_source = {"at": survey_at, "from": "machine-survey" if survey is not None else None}
 
     recent = _ledger(db, now, degraded)
+    sessions = mark_active(sessions, recent)
     active = None
     if recent is not None and data is not None:
-        active = _active_running(sessions, recent)
+        active = sum(1 for s in sessions if s["active"])
     elif recent is not None:
         degraded.append(_gap("active_hour", "needs-session-list",
                              "which running sessions recorded a turn in the last hour needs the account manager's "

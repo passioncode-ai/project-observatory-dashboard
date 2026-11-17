@@ -611,8 +611,8 @@
       "path": "dashboard/agents_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "42db0954d8d1de3c82207776dd253172aba212f1df819dacdf457d7cd80ab6c7",
-      "bytes": 29105
+      "export_sha256": "d53b533e36cc0e1a7821c6871afd1f92ec62aa922e727b3739ef79ffc99c4c02",
+      "bytes": 28434
     },
     {
       "path": "dashboard/audit_pack.py",
@@ -722,8 +722,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "bef6ecd037f06962adc58724b5c68c41cf83308f84a223e1f3c62b5541554c13",
-      "bytes": 255040
+      "export_sha256": "9bc441de8470bb76b969f86791169925a543d9f9f3c1336f2f9ba36db0c43229",
+      "bytes": 254948
     },
     {
       "path": "dashboard/machine_page.py",
@@ -1059,8 +1059,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "4115476340585bd719d941a0e7cb1d8dc52a9f3e95640b1f2f1fac720e93e206",
-      "bytes": 273336,
+      "export_sha256": "be5dfaf3b23e89f3925f163efddd12ae5d3483d7253e4b7da21ea5ad3e835092",
+      "bytes": 273797,
       "upstream_modified": true
     },
     {
@@ -4288,8 +4288,8 @@
       "path": "sessions_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5fa0ef4a54e18a5a986dbf3254f02f79278e8bcfbe84bc1ef26718b1b5441d53",
-      "bytes": 26379
+      "export_sha256": "fb6b9dced16ff67df1ee703f2765ccaa63a157b6956fa7ac024994d4139ec88b",
+      "bytes": 27287
     },
     {
       "path": "skill/.claude-plugin/marketplace.json",
@@ -4874,8 +4874,8 @@
       "path": "tests/test_agents_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "cd0f41ce69634ea0f52cbcdce38e86d5dbc1194608ec7af05dca5e6c1c5d13d5",
-      "bytes": 29578
+      "export_sha256": "1e6050f2bd3fe4dbe5c94454e415114bc50eda7b67922d84c1b1e213ace1d694",
+      "bytes": 32112
     },
     {
       "path": "tests/test_analytics_plugins.py",
@@ -6850,8 +6850,8 @@
       "path": "tests/test_sessions_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "aa19935ce740a8fd0f300ed5321aa254bf48fb2ff21392a6f1f2ca24d0384ff2",
-      "bytes": 25836
+      "export_sha256": "59dcfbd957b9588920e5e095b9a277eebf75f1ff0f7ed1a67029f78367ed4b0e",
+      "bytes": 28392
     },
     {
       "path": "tests/test_share_cli.py",

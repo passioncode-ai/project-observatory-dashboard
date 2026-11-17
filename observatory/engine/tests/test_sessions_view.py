@@ -167,6 +167,39 @@ class Summary(unittest.TestCase):
         self.assertIsNone(by_pid[104]["project"])
         self.assertNotIn("/srv/example", json.dumps(doc), "a full folder path reached the summary")
 
+    def test_each_running_session_says_whether_it_is_active(self) -> None:
+        """OBS-599: one rule for "working", carried on each row. A running session is active when its project
+        holds a ledger turn of the last hour; with fewer turns than running sessions, the sessions written to
+        most recently take them. The count is the rows marked, so the tile and the list agree."""
+        ws = Workspace(SURVEY, ledger_projects=("project:alpha-web",))
+        self.addCleanup(ws.close)
+        rows = [row(101, "/srv/example/projects/alpha-web", last_write_at=STAMP - 600),
+                row(102, "/srv/example/projects/alpha-web/docs", last_write_at=STAMP - 60, quiet=True),
+                row(103, "/srv/example/projects/beta-api"),
+                row(104, "/srv/example/scratch/notes", agent="codex")]
+        doc = sessions_view.summary(ws.home, now=NOW, runner=Runner(manager_answer(rows)),
+                                    manager="/usr/local/bin/switchboard", attribute=attribute)
+        active = {s["pid"]: s["active"] for s in doc["sessions"]}
+        self.assertEqual(active, {101: False, 102: True, 103: False, 104: False})
+        self.assertEqual(doc["active_hour"], 1)
+        self.assertEqual(doc["active_hour"], sum(1 for s in doc["sessions"] if s["active"]))
+        bare = tempfile.TemporaryDirectory()
+        self.addCleanup(bare.cleanup)
+        unread = sessions_view.summary(pathlib.Path(bare.name), now=NOW, runner=Runner(manager_answer(rows)),
+                                       manager="/usr/local/bin/switchboard", attribute=attribute)
+        self.assertEqual({s["active"] for s in unread["sessions"]}, {None}, "an unread ledger is not 'no turn'")
+
+    def test_mark_active_is_the_one_join(self) -> None:
+        running = [{"pid": 1, "project": "project:a", "last_turn_at": "2026-11-14T17:00:00Z"},
+                   {"pid": 2, "project": "project:a", "last_turn_at": "2026-11-14T17:30:00Z"},
+                   {"pid": 3, "project": None, "last_turn_at": None},
+                   {"pid": 4, "project": "project:b", "last_turn_at": None}]
+        recent = [{"projectId": "project:a"}, {"projectId": None}, {"projectId": "project:gone"}]
+        marked = sessions_view.mark_active(running, recent)
+        self.assertEqual([(r["pid"], r["active"]) for r in marked], [(1, False), (2, True), (3, True), (4, False)])
+        self.assertNotIn("active", running[0], "the rows passed in are not changed")
+        self.assertEqual([r["active"] for r in sessions_view.mark_active(running, None)], [None] * 4)
+
     def test_manager_not_installed_is_none_never_zero(self) -> None:
         runner = Runner(manager_answer(SESSIONS))
         doc = self.run_summary(runner, manager=None)
