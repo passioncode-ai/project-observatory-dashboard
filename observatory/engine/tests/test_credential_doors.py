@@ -3528,7 +3528,8 @@ def test_or_policy_fix_five() -> None:
 
     def disk_refuses(doc):
         raise OSError("the disk refused the ledger write")
-    m.paths.SCRATCH = pathlib.Path(tmpdir.mkdtemp())      # no consumer scan: an earlier case set one
+    m.paths.SCRATCH = pathlib.Path(tmpdir.mkdtemp())      # a clean consumer scan: an earlier case set one that reads
+    (m.paths.SCRATCH / "openrouter.json").write_text(json.dumps({"keys": []}), encoding="utf-8")   # (OBS-594)
     m.save_ledger = disk_refuses
     try:
         with contextlib.redirect_stderr(io.StringIO()) as e4:

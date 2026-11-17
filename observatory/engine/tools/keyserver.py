@@ -94,6 +94,8 @@ import peer_check  # noqa: E402  OBS-355: another OS account's connection refuse
 
 import stat
 from runtime_identity import IdentityError, load as load_identity
+sys.path.insert(0, str(ROOT / "tools"))
+import key_consumers  # noqa: E402  OBS-594: the one consumer guard every revoke runs
 
 TOKEN_FILE = paths.STATE / ".keyserver-token"
 #: UNDER `STATE`, NOT `STORE` — the same knob `tools/use_secret.py` honours, and
@@ -314,18 +316,17 @@ def act_revoke(body: dict) -> dict:
     label = body.get("label") or body.get("name") or ""
     if not label:
         raise ValueError("a label is required")
-    # REFUSED FOR A KEY IN SERVICE — the door checks the scan's `serves`, and
-    # so did this file before it; the refusal stays here too so a button
-    # answers instantly, without a provider round-trip.
-    scan = paths.SCRATCH / "openrouter.json"
-    if scan.is_file():
-        for kk in json.loads(scan.read_text(encoding="utf-8")).get("keys", []):
-            if kk.get("label") == label and kk.get("serves"):
-                raise ValueError(f"{label} is what {kk['serves']} is reading right now; "
-                                 f"mint its replacement first, then revoke this one")
+    # REFUSED FOR A KEY IN SERVICE, AND WHEN WHO READS IT CANNOT BE READ: the
+    # one consumer guard (OBS-594) the door runs too, run here first so a
+    # button answers instantly, without a provider round-trip. A missing scan
+    # refuses; it never skips the check.
+    key_consumers.revoke_guard(label, {"labels": {label}, "names": {label}},
+                               [key_consumers.OpenRouterScanSource()])
     audit("revoke", label, {})
     try:
         r = _door().revoke_key(label)
+    except key_consumers.RevokeRefused:
+        raise
     except (ValueError, LookupError, RuntimeError) as exc:
         raise LookupError(str(exc)) from None
     return {"ok": True, **r}
@@ -1028,6 +1029,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         try:
             self._send(200, fn(body))
+        except key_consumers.RevokeRefused as exc:
+            # The consumer guard's typed refusal (OBS-594): its code and what it named, never a value.
+            self._send(400, {"error": str(exc), "code": exc.code, "consumers": exc.consumers,
+                             "unread": exc.unread})
         except ValueError as exc:
             self._send(400, {"error": str(exc)})
         except LookupError as exc:

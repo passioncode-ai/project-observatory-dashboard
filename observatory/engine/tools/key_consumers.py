@@ -25,7 +25,14 @@ THE SOURCES.
 
 A SOURCE THAT COULD NOT BE READ IS `degraded`, NEVER "NO CONSUMER". The door holds the revocation on it. A source
 that is not in use on this machine (no Heroku token stashed and the integration off; no vault slot to look up
-services by) is `skipped`, with the reason, and holds nothing.
+services by) is `skipped`, with the reason, and holds nothing. Every degraded and skipped entry carries a `code`.
+
+ONE GUARD FOR EVERY REVOKE (OBS-594). `revoke_guard` is the check every revoke runs before its provider call: the
+OpenRouter door, the key server, the MCP key act, `tools/revoke_key.py` and the DigitalOcean door. It reads the
+sources above, the OpenRouter scan (`OpenRouterScanSource`, by the key's hash, label and name) and the App Platform
+apps that bind a database cluster (`DigitalOceanAppsSource`, the DigitalOcean door's finder), and refuses with a typed
+code (`consumer-in-use`, `consumer-source-unreadable`, `consumer-source-unknown`) instead of revoking blind. Design:
+docs/design/control-plane/revoke-guard.md.
 """
 from __future__ import annotations
 
@@ -76,6 +83,12 @@ def describe(c: dict) -> str:
         return f"env file {c.get('path')}, variable {c.get('var')}"
     if kind == "launchd":
         return f"service {c.get('label')}"
+    if kind == "openrouter-destination":
+        return f"destination {c.get('destination')} (found by the key's {c.get('by')} in the OpenRouter scan)"
+    if kind == "openrouter-serves":
+        return f"{c.get('serves')} (the OpenRouter scan says the key serves it)"
+    if kind == "digitalocean-app":
+        return f"App Platform app {c.get('name')} ({c.get('app')})"
     return str(kind)
 
 
@@ -323,14 +336,19 @@ def find(old: str | None, sources: list) -> dict:
     """Every consumer of `old` the sources can see, what could not be read, and what was not in use."""
     out = {"consumers": [], "degraded": [], "skipped": [], "_sources": {}}
     if not old:
-        out["skipped"].append({"source": "value", "reason": "the destination holds no value, so there is no copy "
-                                                            "of it to look for"})
+        out["skipped"].append({"source": "value", "code": "no-value",
+                               "reason": "the destination holds no value, so there is no copy of it to look for"})
         return out
     for src in sources:
         try:
             found, degraded, skipped = src.find(old)
         except Exception as exc:                                                # noqa: BLE001  degraded, named
-            found, degraded, skipped = [], [{"source": src.name, "reason": f"{type(exc).__name__} while reading"}], []
+            found, degraded, skipped = [], [{"source": src.name, "code": "source-failed",
+                                             "reason": f"{type(exc).__name__} while reading"}], []
+        for d in degraded:
+            d.setdefault("code", "source-unreadable")
+        for d in skipped:
+            d.setdefault("code", "not-in-use")
         for c in found:
             out["_sources"][id(c)] = src
         out["consumers"] += found
@@ -440,3 +458,207 @@ def roll_guard(old: str | None, sources: list, why: str | None = None) -> tuple[
     restart = [f"{describe(c)}: reads the slot at start; restart it: launchctl kickstart -k gui/$(id -u)/{c['label']}"
                for c in found["consumers"] if c.get("kind") == "launchd"]
     return refuse, restart
+
+
+# ─────────────────────────── DigitalOcean App Platform ──────────────────────
+
+class DigitalOceanAppsSource:
+    """App Platform apps whose spec binds a managed database cluster, and the literal database-ish variables they hold
+    themselves (the DigitalOcean door's `db consumers`, folded here by OBS-594). `list_apps` answers `doctl apps
+    list`; `is_literal(key, value)` and `form(key, value)` are the door's own readings of a variable. A literal is
+    named by its scope, key and form, never by its value."""
+
+    name = "digitalocean-apps"
+
+    def __init__(self, list_apps, is_literal, form):
+        self._list_apps = list_apps
+        self._is_literal = is_literal
+        self._form = form
+
+    def apps(self, cluster: str) -> list[dict]:
+        """The door's rows, unchanged: {app, name, binds, literals} per app that binds `cluster`. Errors of the
+        listing reach the caller as they are."""
+        out = []
+        for app in self._list_apps() or []:
+            spec = app.get("spec") or {}
+            bound = [d for d in spec.get("databases") or [] if d.get("cluster_name") == cluster]
+            if not bound:
+                continue
+            literals = []
+            for scope in [spec, *[x for k in ("services", "workers", "jobs") for x in spec.get(k) or []]]:
+                for e in scope.get("envs") or []:
+                    v = str(e.get("value", ""))
+                    if "${" not in v and self._is_literal(e["key"], v):
+                        literals.append(f"{scope.get('name', 'app')}:{e['key']} ({self._form(e['key'], v)})")
+            out.append({"app": app["id"], "name": spec.get("name"),
+                        "binds": [(d.get("name"), d.get("db_user") or "default") for d in bound],
+                        "literals": literals})
+        return out
+
+    def find_key(self, key: dict) -> tuple[list[dict], list[dict], list[dict]]:
+        cluster = key.get("cluster")
+        if not cluster:
+            return [], [], [{"source": self.name, "code": "not-a-cluster",
+                             "reason": "the key is not a managed database's credential, so no app binds it"}]
+        try:
+            rows = self.apps(cluster)
+        except Exception as exc:                                                # noqa: BLE001  degraded, named
+            return [], [{"source": self.name, "code": "app-list-unreadable",
+                         "reason": f"the App Platform app list could not be read ({type(exc).__name__})"}], []
+        return [{"kind": "digitalocean-app", "app": r["app"], "name": r["name"]} for r in rows], [], []
+
+
+# ─────────────────────────── the revoke guard (OBS-594, CP-11) ──────────────
+
+#: The guard's refusal codes. A door, the key server and an MCP tool answer the same code for the same reason.
+IN_USE = "consumer-in-use"
+SOURCE_UNREADABLE = "consumer-source-unreadable"
+SOURCE_UNKNOWN = "consumer-source-unknown"
+
+
+class RevokeRefused(ValueError):
+    """A revoke refused before the provider was asked: a consumer still holds the key (`consumer-in-use`), a consumer
+    source could not be read (`consumer-source-unreadable`), or the caller named a source the guard does not know
+    (`consumer-source-unknown`). `consumers` and `unread` name each one by name and place, never a value. A
+    ValueError, so a caller that already refused on ValueError keeps refusing."""
+
+    def __init__(self, code: str, message: str, consumers: list[str] | None = None, unread: list[dict] | None = None):
+        super().__init__(message)
+        self.code = code
+        self.consumers = list(consumers or [])
+        self.unread = list(unread or [])
+
+    def answer(self) -> dict:
+        return {"error": {"code": self.code, "message": str(self), "consumers": self.consumers,
+                          "unread": self.unread}}
+
+
+class OpenRouterScanSource:
+    """The OpenRouter scan (`collectors/scan_openrouter.py`, written to `store/raw/openrouter.json` by every tick and by
+    `project-observatory full openrouter`): which destination holds which key, by the key's hash (the provider's own
+    fingerprint of it) or its label, and which key `serves` a consumer. A key is matched by its hash first: a key
+    renamed in the provider's dashboard is still the key a consumer holds. A label two keys share matches too: the
+    safe side. A scan that is missing or unreadable is `degraded`, never "no consumer"."""
+
+    name = "openrouter-scan"
+
+    def __init__(self, scan: pathlib.Path | None = None):
+        self._scan = scan
+
+    @property
+    def path(self) -> pathlib.Path:
+        return pathlib.Path(self._scan) if self._scan else paths.SCRATCH / "openrouter.json"
+
+    def find_key(self, key: dict) -> tuple[list[dict], list[dict], list[dict]]:
+        path = self.path
+        if not path.is_file():
+            return [], [{"source": self.name, "code": "scan-missing",
+                         "reason": "the OpenRouter scan has not been taken on this machine, so who reads the key is "
+                                   "unknown; run `project-observatory full openrouter`, then revoke again"}], []
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(doc, dict):
+                raise ValueError("the scan is not an object")
+            hashes = doc.get("destination_hashes") or {}
+            labels_at = doc.get("destinations") or {}
+            keys = doc.get("keys") or []
+            if not isinstance(hashes, dict) or not isinstance(labels_at, dict) or not isinstance(keys, list):
+                raise ValueError("the scan has an unknown shape")
+        except (OSError, ValueError, UnicodeError) as exc:
+            return [], [{"source": self.name, "code": "scan-unreadable",
+                         "reason": f"the OpenRouter scan could not be read ({type(exc).__name__}); run "
+                                   f"`project-observatory full openrouter`, then revoke again"}], []
+        want_hash = key.get("hash")
+        labels = {x for x in key.get("labels") or () if x}
+        names = {x for x in key.get("names") or () if x}
+        found = []
+        for dest, held in sorted(hashes.items()):
+            if want_hash and isinstance(held, dict) and held.get("hash") == want_hash:
+                found.append({"kind": "openrouter-destination", "destination": dest, "by": "hash"})
+        seen = {c["destination"] for c in found}
+        for dest, label in sorted(labels_at.items()):
+            if label in labels and dest not in seen:
+                found.append({"kind": "openrouter-destination", "destination": dest, "by": "label"})
+        served = set()
+        for k in keys:
+            if (isinstance(k, dict) and k.get("serves") and k["serves"] not in served
+                    and (k.get("name") in names or k.get("label") in labels)):
+                served.add(k["serves"])
+                found.append({"kind": "openrouter-serves", "serves": k["serves"]})
+        return found, [], []
+
+
+#: The sources a caller may name instead of passing one: each is built from the key being revoked.
+GUARD_SOURCES = {
+    "openrouter-scan": lambda key: OpenRouterScanSource(),
+    "heroku": lambda key: HerokuSource(),
+    "env-file": lambda key: EnvFileSource(exclude=tuple(key.get("exclude") or ())),
+    "launchd": lambda key: LaunchdSource(key.get("slot")),
+}
+
+
+def revoke_guard(subject: str, key: dict, sources: list, value: str | None = None) -> dict:
+    """The one check every revoke runs BEFORE it asks the provider (OBS-594). `key` names what is being revoked by
+    its fingerprints: `hash`, `labels`, `names` (a scan's matches), `cluster` (a managed database), `unread` (why the
+    door could not read the value). `value` travels apart from that record, as its own argument: held in memory,
+    compared in constant time by the value sources, never printed or kept. `sources` are source objects or names
+    from `GUARD_SOURCES`.
+
+    Raises `RevokeRefused` when a consumer holds the key (`consumer-in-use`, each consumer named), when a source
+    could not be read (`consumer-source-unreadable`, each one with its own `code`), or when a source is not one the
+    guard knows, or none is named (`consumer-source-unknown`): a revoke never proceeds blind. Returns the finding
+    (empty `consumers` and `degraded`, and what was `skipped` as not in use) when the revoke may go ahead. No
+    override lives here: a door that offers a person's override today (`rotate --force`) journals it itself."""
+    built, unknown = [], []
+    for src in sources or []:
+        if isinstance(src, str):
+            make = GUARD_SOURCES.get(src)
+            if make is None:
+                unknown.append(src)
+                continue
+            src = make(key)
+        if not hasattr(src, "find_key") and not hasattr(src, "find"):
+            unknown.append(getattr(src, "name", type(src).__name__))
+            continue
+        built.append(src)
+    if unknown or not built:
+        names = ", ".join(map(str, unknown)) or "none"
+        raise RevokeRefused(SOURCE_UNKNOWN, f"{subject}: the revoke was refused because its consumer check names a "
+                                            f"source the guard does not know ({names}); nothing was revoked",
+                            unread=[{"source": str(u), "code": "source-unknown"} for u in unknown])
+    out = {"consumers": [], "degraded": [], "skipped": []}
+    for src in built:
+        name = getattr(src, "name", type(src).__name__)
+        try:
+            if hasattr(src, "find_key"):
+                found, degraded, skipped = src.find_key(key)
+            elif key.get("unread"):
+                found, degraded, skipped = [], [{"source": name, "code": "value-unreadable",
+                                                 "reason": str(key["unread"])}], []
+            elif not value:
+                found, degraded, skipped = [], [], [{"source": name, "code": "no-value",
+                                                     "reason": "the key's value is held nowhere here, so there is no "
+                                                               "copy of it to look for"}]
+            else:
+                found, degraded, skipped = src.find(value)
+        except Exception as exc:                                                # noqa: BLE001  degraded, named
+            found, degraded, skipped = [], [{"source": name, "reason": f"{type(exc).__name__} while reading"}], []
+        for d in degraded:
+            d.setdefault("source", name)
+            d.setdefault("code", "source-unreadable")
+        for d in skipped:
+            d.setdefault("source", name)
+            d.setdefault("code", "not-in-use")
+        out["consumers"] += found
+        out["degraded"] += degraded
+        out["skipped"] += skipped
+    if out["consumers"]:
+        held_by = [describe(c) for c in out["consumers"]]
+        raise RevokeRefused(IN_USE, f"{subject} is what {'; '.join(held_by)} is reading right now; issue its "
+                                    f"replacement first (`mint` on the key server), then revoke this one",
+                            consumers=held_by, unread=out["degraded"])
+    if out["degraded"]:
+        lines = [f"{d['source']} ({d['code']}): {d.get('reason', 'could not be read')}" for d in out["degraded"]]
+        raise RevokeRefused(SOURCE_UNREADABLE, f"{subject}: a revoke never proceeds blind, and who reads this key "
+                                               f"could not be checked: {'; '.join(lines)}", unread=out["degraded"])
+    return out

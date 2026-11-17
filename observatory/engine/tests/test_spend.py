@@ -212,6 +212,8 @@ class Door:
                         patch.object(openrouter.paths, "SCRATCH", Path(tmp).resolve())]
         for p_ in self.patches:
             p_.start()
+        # A clean OpenRouter scan: the consumer guard every revoke runs (OBS-594) refuses when it is missing.
+        (Path(tmp).resolve() / "openrouter.json").write_text(json.dumps({"keys": []}), encoding="utf-8")
         openrouter.save_ledger(issued if "issued" in issued else {"issued": issued})
 
     def ledger(self) -> dict:

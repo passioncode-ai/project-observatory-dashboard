@@ -2144,37 +2144,21 @@ def forget_pending_key(name: str, reason: str) -> dict:
 def revoke_key(name_or_label: str) -> dict:
     """Delete at the provider, then clear the ledger row — in that order: a
     forgotten live key is worse than a stale row. REFUSED for a key something
-    is reading right now (`serves` in the OpenRouter scan): revoking the key a
-    consumer holds takes the consumer down with no way back."""
+    is reading right now, and when who reads it cannot be read
+    (`key_consumers.revoke_guard`): revoking the key a consumer holds takes the
+    consumer down with no way back."""
     name, rec = resolve_issued(name_or_label)
-    scan = paths.SCRATCH / "openrouter.json"
-    if scan.is_file():
-        try:
-            doc_scan = json.loads(scan.read_text(encoding="utf-8"))
-            # By HASH first (round 4): a key renamed in the provider's dashboard is still the key a
-            # consumer holds, and the scan records each consumer's key hash.
-            for dest, held in (doc_scan.get("destination_hashes") or {}).items():
-                if rec.get("hash") and isinstance(held, dict) and held.get("hash") == rec["hash"]:
-                    raise ValueError(f"{name} is what {dest} is reading right now; "
-                                     f"issue its replacement first, then revoke this one")
-            # A key past the listing appears in the scan only as the label a destination holds
-            # (`destinations`, fix 5). A label two keys share refuses too: the safe side.
-            for dest, lab in (doc_scan.get("destinations") or {}).items():
-                if rec.get("label") and lab == rec["label"]:
-                    raise ValueError(f"{name} is what {dest} is reading right now (by its label); "
-                                     f"issue its replacement first, then revoke this one")
-            for k in doc_scan.get("keys", []):
-                names = {name, rec.get("provider_name")} - {None}
-                labels = {name_or_label, rec.get("label")} - {None}
-                # A claimed key carries the provider's name, not the ledger's, and the scan has no
-                # hash; its label (recorded at claim) is what a consumer is found by. A label two
-                # keys share refuses here too: a consumer that may be reading it is not taken down.
-                if k.get("serves") and (k.get("name") in names or k.get("label") in labels):
-                    raise ValueError(f"{name} is what {k['serves']} is reading right now; "
-                                     f"issue its replacement first, then revoke this one")
-        except (OSError, ValueError) as exc:
-            if isinstance(exc, ValueError) and "reading right now" in str(exc):
-                raise
+    # The one consumer guard every revoke runs (OBS-594): the OpenRouter scan read by the key's hash first (a key
+    # renamed in the provider's dashboard is still the key a consumer holds), then by the label a destination holds
+    # (the only trace of a key past the listing, fix 5), then by `serves`. A claimed key carries the provider's name,
+    # not the ledger's, so both names and both labels are asked. A scan that is missing or unreadable REFUSES: a
+    # revoke never proceeds blind.
+    sys.path.insert(0, str(ROOT / "tools"))
+    import key_consumers
+    key_consumers.revoke_guard(name, {"hash": rec.get("hash"),
+                                      "labels": {name_or_label, rec.get("label")} - {None},
+                                      "names": {name, rec.get("provider_name")} - {None}},
+                               [key_consumers.OpenRouterScanSource()])
     if rec.get("successor_pending") or rec.get("stale_successors"):
         raise ValueError(f"{name}: a rotation left a successor whose delivery is unknown; `rotate {name}` "
                          f"finishes it (and deletes that successor once a new one holds the slot), then revoke")
@@ -2226,7 +2210,8 @@ def cmd_revoke(name: str, forget_pending: bool = False, reason: str | None = Non
     try:
         r = revoke_key(name)
     except (ValueError, LookupError) as exc:
-        print(f"refused: {exc}", file=sys.stderr)
+        code = getattr(exc, "code", None)
+        print(f"refused{f' ({code})' if code else ''}: {exc}", file=sys.stderr)
         return 1
     except OSError as exc:
         # The ledger could not be written (a full disk): the provider may already have deleted the

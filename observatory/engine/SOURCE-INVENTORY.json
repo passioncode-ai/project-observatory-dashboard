@@ -3440,8 +3440,8 @@
       "path": "key_acts.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0da8720ba96dfcf54c135dcd8553cca149de2dcc5207e0e508cb7c11ac920c51",
-      "bytes": 12566
+      "export_sha256": "c5271e4452052fc29b1e1e348efd48df9e965ce03eb36273bc999bf86a779194",
+      "bytes": 12824
     },
     {
       "path": "key_source.py",
@@ -4731,8 +4731,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "5ca4296f802e14b4e6a56f3ccc7974734fb5eadbc7f69f1314d201549514b57a",
-      "bytes": 59512,
+      "export_sha256": "9c680484ca9fa0165df9f016491dae71ccea58018ab3f97ab1120528ea092979",
+      "bytes": 59773,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -5127,8 +5127,8 @@
     {
       "path": "tests/test_credential_doors.py",
       "source_sha256": "f008811e75e70131f87e329de7768c58b166901a4900dcfa483f4bc570c29afc",
-      "export_sha256": "0583967c7fcb7245e0fa679843386cda9d09f03aa051942339e6d063c489bdc5",
-      "bytes": 229487,
+      "export_sha256": "9a328f574696274f9d41ed9c047c90d49b2926e8f8b76b6d03ad5d321f6a81fe",
+      "bytes": 229614,
       "python_comments_removed": 14,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
@@ -5766,8 +5766,8 @@
       "path": "tests/test_key_acts.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5ab5fd0a93f150a2c397964a329bc11eb32224dd731511a896b3883808da45df",
-      "bytes": 17123
+      "export_sha256": "91661341f2935858f7207d6531d711d2a7ed688d6689dcadeb6802eb50432bd5",
+      "bytes": 17396
     },
     {
       "path": "tests/test_key_expiry.py",
@@ -5807,8 +5807,8 @@
     {
       "path": "tests/test_keyserver_boundary.py",
       "source_sha256": "2d1679c184b45707a5c31e4bb503a6fdb37d458a04706b4c469fb6e3e654a2ab",
-      "export_sha256": "aa65706594436d126ef71daa4bcbdf14f7db49049e206c2c7ec012e007cb8d83",
-      "bytes": 32920,
+      "export_sha256": "5428bb7a34965baeadcc2a03a4fd865239ea52337dfc59056c9c072d44bcd2d8",
+      "bytes": 33466,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -6673,6 +6673,13 @@
       "bytes": 14271
     },
     {
+      "path": "tests/test_revoke_guard.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "f83a5677dc4061fbfc99be491a69e66bb2fa75747177bf3e29aa389478850e6f",
+      "bytes": 16179
+    },
+    {
       "path": "tests/test_rollup.py",
       "source_sha256": "e10922fce2aeb03078c34b7e1a441f4db3f0b346592eb2d4a10ff9985efc3470",
       "export_sha256": "8e4d70c2f8eab49c095dd7a1f3ee5ace158a00cc86b32e2f70572eb35e93b050",
@@ -6693,8 +6700,8 @@
       "path": "tests/test_rotation_consumers.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4f963033546a5a21d28bef4adc2e106ac6d011753bd8a17340c6f43da5a73659",
-      "bytes": 21556
+      "export_sha256": "bc10bf35ceda89ae00a501712c30bf48b8570d7eadccbf602d53694772e6e6cb",
+      "bytes": 21915
     },
     {
       "path": "tests/test_runtime_identity.py",
@@ -6899,8 +6906,8 @@
       "path": "tests/test_spend.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2496cffb2d795166990e1bb6906bfdaadc72f75c5920306f496746d49094a419",
-      "bytes": 148907
+      "export_sha256": "b25114461481b9807f64dbd360ceadc1ba5a8d1a67cf33a0dd3fbd9292848183",
+      "bytes": 149122
     },
     {
       "path": "tests/test_ssh_keys.py",
@@ -7601,8 +7608,8 @@
       "path": "tools/digitalocean.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d07a5e09b8c3a5b8e18546476a4d93f103789097a5d8a1a2039ffdb02b8cd36e",
-      "bytes": 92049
+      "export_sha256": "088e0808c9c52d441a7363e97b3f0425eae21af3f7f473bbb3a93c179e716a7e",
+      "bytes": 92519
     },
     {
       "path": "tools/digitalocean_findings.py",
@@ -7793,8 +7800,8 @@
       "path": "tools/key_consumers.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f243cf2ada2da70d6e70b0e4af7702008326df6ed17a02210e844267b1f441e7",
-      "bytes": 21506
+      "export_sha256": "2267c5c34ae5cd6d8ce2cb5ff7f461b523708e34b920753226b360b8fa2c1a5e",
+      "bytes": 34458
     },
     {
       "path": "tools/key_expiry.py",
@@ -7820,8 +7827,8 @@
     {
       "path": "tools/keyserver.py",
       "source_sha256": "5dfc52b15ea31b3d4d608cf4892bc16c274bacca224dacb28ef88c53fd92c571",
-      "export_sha256": "d0d7ecadb2d6e42d6a005defa0f95572496f1f8ab6a3b802abaeb2d271964319",
-      "bytes": 58927,
+      "export_sha256": "c1fa9205212d5bd1faa6f48ed018d8e74058f8d3e3efce537f7ceb39e8812a6c",
+      "bytes": 59231,
       "python_comments_removed": 46,
       "python_docstrings_removed": 15,
       "tool_descriptions_retained": 0,
@@ -7923,8 +7930,8 @@
     {
       "path": "tools/openrouter.py",
       "source_sha256": "756267c2e19482f5445b9cea2de0d13678ec7d7753131331c33ef9f708654749",
-      "export_sha256": "f51c2ef47831bf9d1ae0383374f9878f6f93423ad10c161272ab58eaa7426765",
-      "bytes": 144826,
+      "export_sha256": "eaa4452aaa9a18c4304cbceda9d82020019ce6915f152016bab61bc9b569cecf",
+      "bytes": 143723,
       "python_comments_removed": 31,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,
@@ -8048,8 +8055,8 @@
     {
       "path": "tools/revoke_key.py",
       "source_sha256": "4906a9d248f7120a82aaffb9eb82d87e4eb7631e99454f6f3111c961f4cc83b0",
-      "export_sha256": "370713903d5bd9b70a4b4c1c55161d75f8cd9be268a1350f6cf07f13864ff471",
-      "bytes": 5265,
+      "export_sha256": "edcd94f7c98726ba3cd5ff10519458991486b9091b2e22f370c3acf854954eb5",
+      "bytes": 6666,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -8429,7 +8436,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 1140,
+  "file_count": 1141,
   "excluded": [
     "git-history",
     "operator-registries",

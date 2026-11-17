@@ -350,6 +350,9 @@ BOUNDARY += ('space_daemons',)
 # OBS-561 (CP-11): a rotation finds the other copies of a key's value (fake Heroku, env files, services), delivers and
 # reads them back before it revokes, and holds the old key when one is out of reach.
 BOUNDARY += ('rotation_consumers',)
+# OBS-594 (CP-11): every revoke runs one consumer guard, refusing typed when a consumer holds the key or a source
+# cannot be read (the OpenRouter door, the key server, the MCP key act, tools/revoke_key.py, the DigitalOcean door).
+BOUNDARY += ('revoke_guard',)
 # OBS-552 (CP-05): the Installed tools page, coding agents, skills, plugins and hooks with their findings.
 BOUNDARY += ('tools_page',)
 # OBS-555 (CP-09): the supply-chain watch over MCP servers: command-line rules, tool definition pins, the scanners switch.
