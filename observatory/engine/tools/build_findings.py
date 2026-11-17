@@ -1800,6 +1800,10 @@ def collect() -> list[dict]:
     # key sweep found in working trees and histories, by keyed digest and place. Silent until it has run once.
     import key_sweep_findings
     out.extend(key_sweep_findings.from_file(paths.SCRATCH / "key-sweep.json"))
+    # THE DAILY DOCTOR (OBS-558, tools/doctor_findings.py): what its catalogue found that no other rule raises and
+    # no safe fix could settle. Silent until the maintenance job has run it once.
+    import doctor_findings
+    out.extend(doctor_findings.from_file(paths.STATE / "state" / "doctor.json"))
     # THE REVIEW QUEUE, both halves (OBS-227, tools/review_findings.py): what waits for a person after
     # the standing review policy took what it may. The registry proposals had no finding before.
     import review_findings

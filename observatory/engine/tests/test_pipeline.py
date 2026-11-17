@@ -335,6 +335,9 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                             # the key sweep's fingerprints and places, written by the maintenance job's sweep
                             # outside the step graph (OBS-554): declared so the read is known
                             "store/raw/key-sweep.json",
+                            # the daily doctor's last run, written by the maintenance job outside the step graph
+                            # (OBS-558): declared so the read is known
+                            "store/state/doctor.json",
                             "store/raw/bitbucket.json", "store/raw/domains_live.json",
                             "store/raw/local.json", "store/raw/model.json",
                             "store/raw/projection.json", "store/raw/vault.json",

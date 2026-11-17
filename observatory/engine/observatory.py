@@ -129,6 +129,8 @@ STEPS = {
     "vulnerabilities": [PY, "tools/vuln_watch.py"],
     # The key sweep over the estate's repositories (OBS-554): fingerprints and places only, never a value.
     "key-sweep": [PY, "tools/key_sweep.py"],
+    # The daily doctor (OBS-558): its fixed catalogue now; the maintenance job runs it once a day.
+    "doctor-daily": [PY, "tools/daily_doctor.py"],
     # Gated to once a day inside the scan itself: every run pulls every
     # production secret of every application into one process.
     "remote-env": [PY, "collectors/scan_remote_env.py", "store/raw/remote-env.json"],
@@ -667,6 +669,10 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   issues [--dry-run]           open an issue in a project's own repository for a finding of an allowed class
                                (vulnerable dependencies and integration findings by default; integration
                                github_issues and one switch per class), close it with the finding; never a value
+  doctor-daily [--json] [--undo ID | --undo-last N]  run the daily doctor's checks now, or undo its fixes
+                               (the maintenance job runs it once a day): a safe fix moves an engine file it can
+                               no longer use aside and journals its undo, the rest become findings; --undo ID or
+                               --undo-last N reverses fixes, never over a newer file
   key-sweep [--full] [--settle FINGERPRINT --why TEXT]  our own values and key-shaped text in the working
                                trees and Git history of every project's clone, on a resumable daily budget
                                (the maintenance job runs it); keeps keyed digests and places, never a value;
@@ -740,6 +746,9 @@ RECEIPT = re.compile(r"rcpt_[A-Za-z0-9_-]{8,64}")
 #: A key sweep sighting's keyed digest (tools/key_sweep.py).
 SWEEP_FINGERPRINT = re.compile(r"hmac-sha256:[0-9a-f]{64}")
 PURPOSE = re.compile(r"[^\x00-\x1f]{1,200}")
+#: A daily doctor fix's journal id (tools/daily_doctor.py) and how many of the newest fixes an undo takes.
+DOCTOR_FIX = re.compile(r"doc_[0-9a-f]{16}")
+UNDO_COUNT = re.compile(r"[1-9][0-9]?")
 #: The one path an option forwards: the probe runner's synthetic workspace. Absolute
 #: only, because the step runs from the engine directory and a relative path would
 #: silently name a folder there; the runner itself refuses anything that is not an
@@ -763,6 +772,9 @@ STEP_OPTIONS: dict[str, dict[str, tuple[str | None, re.Pattern | None, str]]] = 
     "vulnerabilities": {"--force": (None, None, "ask OSV now, even when today's pass is done")},
     "issues": {"--dry-run": (None, None, "plan only: say what would be filed and closed, write nothing")},
     "integration-health": {"--force": (None, None, "ask every held key now, even when today's check is done")},
+    "doctor-daily": {"--json": (None, None, "print the run or the undo as JSON"),
+                     "--undo": ("ID", DOCTOR_FIX, "reverse the fix with this journal id"),
+                     "--undo-last": ("N", UNDO_COUNT, "reverse the newest N fixes")},
     "key-sweep": {"--full": (None, None, "forget every history's place and read it again"),
                   "--settle": ("FINGERPRINT", SWEEP_FINGERPRINT, "close a sighting of an unknown value gone from "
                                                                    "the working tree"),

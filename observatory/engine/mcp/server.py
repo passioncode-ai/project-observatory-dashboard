@@ -1142,6 +1142,41 @@ def observatory_issues(
     return issue_filer.agent_view(state=state)
 
 
+@server.tool()
+def observatory_doctor(
+    action: Annotated[str, Field(description="`read` (the default): the last daily doctor run. `undo`: reverse the "
+                                             "one fix `journalId` names (the same act as `full doctor-daily --undo`). "
+                                             "`run`: run the catalogue now (`full doctor-daily`).")] = "read",
+    journalId: Annotated[str | None, Field(validation_alias=AliasChoices("journalId", "journal_id"),
+                                           description="With `undo`: the fix's journal id, `doc_` and 16 hex digits, "
+                                                       "from `fixes` or `undoable`.")] = None,
+) -> dict[str, Any]:
+    """The daily doctor (OBS-558): a fixed catalogue of checks the maintenance job runs once a day. Each check's
+    `state` is `ok`, `fixed` (a safe fix ran: a file the engine can no longer use was moved aside into
+    `store/state/doctor-quarantine/`, never deleted), `finding` (its own `doctor.*` finding type, or `covered_by`
+    the existing rule that already raises it), `fix-failed` or `unknown` (its source could not be read; named in
+    `degraded`). `fixes` and `undoable` carry the journal ids an `undo` takes; an undo never overwrites a newer file
+    and names what it kept (`refused`). `summary` is the model's paragraph, written only when the result changed and
+    inside the engine's model budget, or why not. Refusals are typed `error` answers. Design:
+    docs/design/control-plane/daily-doctor.md.
+    """
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
+    import daily_doctor
+    if action == "undo":
+        if not journalId:
+            return {"error": {"code": "invalid-argument", "message": "undo needs journalId"}, "degraded": []}
+        return daily_doctor.undo(paths.HOME, journal_id=journalId)
+    if action == "run":
+        doc = daily_doctor.run(paths.HOME)
+        if doc.get("status") != "ran":
+            return {"error": {"code": "busy", "message": "another doctor run or undo holds the lock"},
+                    "degraded": doc.get("degraded") or []}
+        return daily_doctor.agent_view(paths.HOME)
+    if action != "read":
+        return {"error": {"code": "invalid-argument", "message": "action is read, run or undo"}, "degraded": []}
+    return daily_doctor.agent_view(paths.HOME)
+
+
 MACHINE_TOP = 10
 #: Skills per page of `observatory_machine(section="skills")`: a machine measured holding 1,269 skills made an
 #: unpaged answer of 151,536 characters, past what a host keeps of one tool result, and 200 skills beside its 116
