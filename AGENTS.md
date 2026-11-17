@@ -195,6 +195,29 @@ every agent and person who changes this repository, in every copy of it:
 - **Every change is logged.** Each change, by an agent or a person, has its `docs/backlog.md`
   row and its `CHANGELOG.md` line (written at the release) with its reason and basis.
 
+## Telegram: two channels by who the message is for
+
+Operator rule, 2026-11-15 (rule R33 O9 of the organization's agent templates), for every agent
+working in this repository. The engine itself sends no Telegram message: no code path here
+reaches Telegram, and a change that adds one follows this split.
+
+- **To the operator himself: his own notification channel**, the one that reaches only his
+  private chat. Results, build, release and test-build links, approval requests, failures,
+  recoveries, and a question (also asked through `fabric_question_ask`). One stable event id
+  per event, the same on every retry, so a repeat never sends twice; text only, 1 to 3,500
+  characters, so a file goes as a link, never an attachment. Check the channel's status first;
+  when it is not connected, say so in the reply and keep the link there. Never the messaging
+  gateway for this: the gateway acts as an account, so a message to the operator through his
+  own account comes from him to himself.
+- **To anyone else, or acting as an account: the organization's messaging gateway**, under the
+  agent's own grant, allowlist and approvals: another person, a group, a team chat (the
+  operator being a member changes nothing), a channel, a bot the gateway holds, reading chats
+  and admin acts. Never the notification channel for these: it reaches only the operator.
+- A file the operator explicitly orders delivered to him in Telegram goes through the gateway
+  to the chat he names.
+- An organization's copy of this engine reports to its own administrator through its
+  organization's channel, never the operator's.
+
 ## How a change reaches `main`
 
 1. Branch from `main`; commit in small logical commits.
