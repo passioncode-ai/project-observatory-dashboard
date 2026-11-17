@@ -448,7 +448,10 @@ class ByProjectTest(unittest.TestCase):
         out = sessions_view.by_project(self.DOC, self.LEDGER, self.FLOWS)
         self.assertEqual(sorted(out), ["project:alpha", "project:beta"])   # no project is invented
         a = out["project:alpha"]
-        self.assertEqual([r["agent"] for r in a["live"]], ["codex", "claude-code"])   # working first
+        # OBS-599: working is the one rule (`mark_active`), never the manager's `state`: alpha's one turn of the
+        # last hour goes to its session written to most recently, the one the manager calls quiet.
+        self.assertEqual([r["agent"] for r in a["live"]], ["claude-code", "codex"])   # working first
+        self.assertEqual([r["active"] for r in a["live"]], [True, False])
         self.assertEqual(a["counts"], {"live": 2, "working": 1, "recent": 2, "workflows": 1})
         self.assertEqual([r["sessionId"] for r in a["recent"]], ["s-new", "s-old"])
         self.assertEqual(a["recent"][0]["workflow"]["stepId"], "build")      # what it last did
@@ -458,6 +461,32 @@ class ByProjectTest(unittest.TestCase):
         self.assertIsNone(out["project:beta"]["recent"][0]["workflow"])
         self.assertNotIn("pid", a["live"][0])
         self.assertNotIn("leaseRef", json.dumps(out))                         # no lease handle leaves
+
+    def test_working_is_the_one_rule_and_never_the_managers_state(self):
+        """OBS-599: a project's `working` count and its live rows read `active`, the rule the Agents page and the
+        session count use; a row the manager calls working without a turn in the last hour is not working, and a
+        ledger that was not read leaves the state unknown, never quiet."""
+        doc = {"sessions": [dict(r, active=False) for r in self.DOC["sessions"]]}
+        doc["sessions"][0]["active"] = True                                  # quiet by the manager, a turn by the rule
+        a = sessions_view.by_project(doc, self.LEDGER, self.FLOWS)["project:alpha"]
+        self.assertEqual([(r["agent"], r["active"]) for r in a["live"]], [("claude-code", True), ("codex", False)])
+        self.assertEqual(a["counts"]["working"], 1)
+        unread = sessions_view.by_project(self.DOC, None, None)["project:alpha"]
+        self.assertEqual([r["active"] for r in unread["live"]], [None, None])
+        self.assertEqual(unread["counts"]["working"], 0)
+
+    def test_the_projects_page_reads_the_one_rule(self):
+        """OBS-599: the Projects page's "Running now" list colours a row by `active`, never by `state`."""
+        src = (ROOT / "dashboard/build_dashboard.py").read_text(encoding="utf-8")
+        live = src[src.index("const live = list(ps.live"):src.index("const recent = list(ps.recent")]
+        self.assertIn("s.active === true", live)
+        self.assertNotIn("s.state", live)
+
+    def test_the_tool_names_the_rule(self):
+        src = (ROOT / "mcp/server.py").read_text(encoding="utf-8")
+        doc = src[src.index("def observatory_sessions("):]
+        doc = doc[doc.index('"""'):doc.index('"""', doc.index('"""') + 3)]
+        self.assertIn("`active`", doc)
 
     def test_unknown_workflow_keeps_its_id_only(self):
         out = sessions_view.by_project({}, [{"sessionId": "s", "projectId": "project:a", "lastTurnAt": "x",

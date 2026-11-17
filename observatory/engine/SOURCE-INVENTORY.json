@@ -611,8 +611,8 @@
       "path": "dashboard/agents_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d53b533e36cc0e1a7821c6871afd1f92ec62aa922e727b3739ef79ffc99c4c02",
-      "bytes": 28434
+      "export_sha256": "278c5d023c9ef651ad78b2e7afc18faee41bec70c762da685a6d714cd0f5cc23",
+      "bytes": 28031
     },
     {
       "path": "dashboard/audit_pack.py",
@@ -655,8 +655,8 @@
     {
       "path": "dashboard/build_dashboard.py",
       "source_sha256": "9169551d891a47eb7e9d96011b07f6b0a621338884beeba4c868c10d3f84724a",
-      "export_sha256": "85edc4e5c128d7bc740909bfa9c7a4b218cbdeb52da363bf5613eacf1cd725c2",
-      "bytes": 329903,
+      "export_sha256": "256105f18f5b27aa014c164521445a7005d8ed60a8dd9e8e875c61e2ad987f79",
+      "bytes": 330058,
       "python_comments_removed": 235,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,
@@ -3558,8 +3558,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "02843d79711b8ece2230a6d0bbc413a2f550263647931c7367ad0a38347cacae",
-      "bytes": 166543,
+      "export_sha256": "9767f0b504731873a20f1a337c7041456a3002d5f44d2e1f50c0d5df5a51f8c0",
+      "bytes": 166822,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -4288,8 +4288,8 @@
       "path": "sessions_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fb6b9dced16ff67df1ee703f2765ccaa63a157b6956fa7ac024994d4139ec88b",
-      "bytes": 27287
+      "export_sha256": "7da7092ce479f416fb0167508937c7cbdf57dbe6a16d3c94f4662b31fd63e0f1",
+      "bytes": 28116
     },
     {
       "path": "skill/.claude-plugin/marketplace.json",
@@ -6850,8 +6850,8 @@
       "path": "tests/test_sessions_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "59dcfbd957b9588920e5e095b9a277eebf75f1ff0f7ed1a67029f78367ed4b0e",
-      "bytes": 28392
+      "export_sha256": "57036114be6dd7d6244fe478f790aab972554fdcc8bc152392492530d7eed8d8",
+      "bytes": 30449
     },
     {
       "path": "tests/test_share_cli.py",

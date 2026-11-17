@@ -227,6 +227,19 @@ def mark_active(sessions: list[dict], recent: list[dict] | None) -> list[dict]:
     return out
 
 
+def session_rows(doc: dict | None, ledger: list[dict] | None) -> list[dict]:
+    """The running sessions of a summary, each with `active` (OBS-599): as `summary` wrote it, or, for a file
+    written before the rule, joined now with `ledger` (`agents_view.recent_sessions` rows; None when the ledger
+    was not read) by `mark_active`. Every surface that says "working" reads these rows: the Agents page, the
+    Projects page and the tool's per-project counts (`by_project`); the manager's `quiet` and `state` are kept
+    in the file and read by none of them as "working"."""
+    rows = [r for r in ((doc or {}).get("sessions") or []) if isinstance(r, dict)]
+    if all("active" in r for r in rows):
+        return rows
+    recent = None if ledger is None else [s for s in ledger if isinstance(s, dict) and s.get("active")]
+    return mark_active(rows, recent)
+
+
 def _row(raw, attribute, degraded_attribution: list[str]) -> dict | None:
     if not isinstance(raw, dict):
         return None
@@ -410,11 +423,11 @@ def by_project(doc: dict | None, ledger: list[dict] | None, workflows: list[dict
     def block(pid: str) -> dict:
         return out.setdefault(pid, {"live": [], "recent": [], "workflows": []})
 
-    for s in (doc or {}).get("sessions") or []:
-        pid = s.get("project") if isinstance(s, dict) else None
+    for s in session_rows(doc, ledger):
+        pid = s.get("project")
         if isinstance(pid, str) and pid:
             block(pid)["live"].append({k: s.get(k) for k in (
-                "agent", "folder_name", "managed", "account_group", "launch_id", "state", "last_turn_at")})
+                "agent", "folder_name", "managed", "account_group", "launch_id", "state", "last_turn_at", "active")})
     flows: dict[str, dict] = {}
     for w in workflows or []:
         if not isinstance(w, dict) or not isinstance(w.get("workflowId"), str):
@@ -437,10 +450,10 @@ def by_project(doc: dict | None, ledger: list[dict] | None, workflows: list[dict
                 {"workflowId": s["workflowId"]} if s.get("workflowId") else None)})
     for b in out.values():
         b["live"].sort(key=lambda r: r.get("last_turn_at") or "", reverse=True)
-        b["live"].sort(key=lambda r: r.get("state") != "working")
+        b["live"].sort(key=lambda r: r.get("active") is not True)
         b["recent"].sort(key=lambda r: r.get("lastTurnAt") or "", reverse=True)
         b["workflows"].sort(key=lambda r: r.get("stepAt") or "", reverse=True)
-        b["counts"] = {"live": len(b["live"]), "working": sum(1 for r in b["live"] if r.get("state") == "working"),
+        b["counts"] = {"live": len(b["live"]), "working": sum(1 for r in b["live"] if r.get("active") is True),
                        "recent": len(b["recent"]), "workflows": len(b["workflows"])}
         for k in ("live", "recent", "workflows"):
             b[k] = b[k][:MAX_PROJECT_ROWS]

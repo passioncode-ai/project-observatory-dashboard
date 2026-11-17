@@ -152,15 +152,9 @@ def _yes(t: Translator, value) -> str:
 
 
 def _session_rows(doc: dict, ledger: list[dict] | None) -> list[dict]:
-    """The running sessions, each with `active`, the one rule for "working" (OBS-599): as sessions_view wrote it,
-    or, for a list written before the rule, joined here with the ledger's turns of the last hour by the same
-    function. `ledger` None (not read) leaves every row unknown."""
+    """The running sessions with `active`, the one rule for "working" (OBS-599, `sessions_view.session_rows`)."""
     import sessions_view
-    rows = [r for r in doc.get("sessions") or [] if isinstance(r, dict) and r.get("agent")]
-    if all("active" in r for r in rows):
-        return rows
-    recent = None if ledger is None else [s for s in ledger if isinstance(s, dict) and s.get("active")]
-    return sessions_view.mark_active(rows, recent)
+    return [r for r in sessions_view.session_rows(doc, ledger) if r.get("agent")]
 
 
 def _machine_sessions(sessions: dict | None, t: Translator, names: dict | None = None,

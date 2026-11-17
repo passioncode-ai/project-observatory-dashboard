@@ -71,7 +71,9 @@ A manager that is installed but failed raises nothing: that is a gap in the read
   project holds a ledger turn of the last hour (the sessions written to most recently take the turns first),
   `None` when the ledger was not read; `active_hour` is the count of the marked rows. The Agents page shows one
   list, the running sessions, and a row reads "working" only by `active`; the manager's own `quiet` and `state`
-  (its transcript silent 30 minutes) stay in the file under their names and no longer colour the row. The
+  (its transcript silent 30 minutes) stay in the file under their names and no surface reads them as
+  "working": the Projects page and the tool's per-project `counts.working` read `active` through
+  `sessions_view.session_rows` as well. The
   ledger's turns of the last day are no second list. A file written before the rule is joined on the page by
   the same function. Tests: `test_each_running_session_says_whether_it_is_active`,
   `test_mark_active_is_the_one_join` (suite `sessions_view`), `test_one_session_list_with_one_rule_for_working`

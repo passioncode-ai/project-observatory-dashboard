@@ -1111,8 +1111,11 @@ def observatory_sessions(
     """Every coding session on this machine as one count in three facets (OBS-550): `processes`
     per agent (what runs), `managed` (of them, run by the account manager, Fabric Switchboard),
     `active_hour` (of them, with a turn recorded in the last hour); then each session with its
-    agent, project id, folder name, pid, managed or not, launch id, account group, last turn
-    and state (working or quiet), and where each number came from (`sources`).
+    agent, project id, folder name, pid, managed or not, launch id, account group, last turn,
+    `active` (the one rule for "working": it runs and its project recorded a turn in the last hour;
+    null when the ledger was not read; `active_hour` counts these rows) and `state` (the account
+    manager's own word, quiet after 30 silent minutes), and where each number came from (`sources`).
+    A project's `counts.working` counts its `active` rows.
 
     Read-only. A source that could not be read is null with its reason in `degraded`, never 0:
     `managed: null` means the account manager is not installed or did not answer. No folder path
