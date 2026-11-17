@@ -360,6 +360,8 @@ BOUNDARY += ('key_source',)
 BOUNDARY += ('key_acts',)
 # OBS-559, the operations verbs (backup, disk, update, maintenance) as one MCP tool, through the CLI's own functions.
 BOUNDARY += ('ops_acts',)
+# The Prowl key door (tools/prowl.py): issue straight into a vault slot, revoke, list, against a fake Prowl API.
+BOUNDARY += ('prowl_door',)
 SUITES = LEGACY + BOUNDARY
 #: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
 #: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.
