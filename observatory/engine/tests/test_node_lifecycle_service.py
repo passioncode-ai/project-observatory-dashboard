@@ -18,6 +18,7 @@ import contextlib
 import io
 import json
 import os
+import socket
 import sqlite3
 import stat
 import sys
@@ -605,6 +606,50 @@ class HTTPTests(Workspace, unittest.TestCase):
         self.assertEqual(self.mcp(self.LIST, who=BETA)[0], 403, 'a binding without a lifecycle grant')
         self.assertEqual(self.request('/mcp')[0], 405)
         self.assertEqual(self.mcp({'jsonrpc': '2.0', 'method': 'notifications/initialized'})[0], 202)
+
+    def raw_post(self, who, *, body_after_answer: bool, extra: str = '') -> tuple[bytes, int]:
+        """POST /mcp over a plain socket: the head, then the body only once the whole answer arrived (a slow
+        client, or a body the network delivered late). Returns the answer and the socket error seen after it."""
+        body = json.dumps(self.LIST).encode()
+        head = (f'POST /mcp HTTP/1.1\r\nHost: 127.0.0.1:{self.port}\r\nContent-Type: application/json\r\n'
+                f'Content-Length: {len(body)}\r\n' + (f'Authorization: Bearer {bearer(who)}\r\n' if who else '')
+                + extra + '\r\n').encode()
+        with socket.create_connection(('127.0.0.1', self.port), timeout=10) as sock:
+            sock.sendall(head if body_after_answer else head + body)
+            answer = b''
+            while b'\r\n\r\n' not in answer or len(answer.split(b'\r\n\r\n', 1)[1]) < int(
+                    answer.split(b'Content-Length: ', 1)[1].split(b'\r\n', 1)[0]):
+                chunk = sock.recv(65536)
+                if not chunk:
+                    break
+                answer += chunk
+            if body_after_answer:
+                sock.sendall(body)
+            while sock.recv(65536):
+                pass
+            # A reset comes back within milliseconds of the body; a clean close never brings one.
+            deadline = time.monotonic() + 0.5
+            error = 0
+            while not error and time.monotonic() < deadline:
+                error = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+                time.sleep(0.02)
+        return answer, error
+
+    def test_a_refusal_before_the_body_is_read_never_resets_the_answer_away(self):
+        # OBS-589: the bearer is checked before the body is read, and the refusal closed the connection with the
+        # body unread (or still on its way: http.client sends the head and the body in two writes). The close then
+        # reset the connection, and Windows discards an answer the client has received but not yet read when a
+        # reset arrives: test_mcp_auth_scopes_and_trace failed now and then on the Windows runner. The server now
+        # reads and discards the declared body after it answers, so the close is clean.
+        with mock.patch.object(self.serverd, 'UNREAD_BODY_SECONDS', 5):
+            for who, extra, code in ((None, '', b'401'), (BETA, '', b'403'),
+                                     (ALPHA, 'Origin: https://evil.example\r\n', b'403')):
+                with self.subTest(who=who, extra=extra):
+                    answer, error = self.raw_post(who, body_after_answer=True, extra=extra)
+                    self.assertEqual(answer.split(b' ', 2)[1], code)
+                    self.assertEqual(error, 0, 'the connection was reset after the answer')
+        answer, error = self.raw_post(ALPHA, body_after_answer=False)
+        self.assertEqual((answer.split(b' ', 2)[1], error), (b'200', 0), 'a served call reads its body as before')
 
     def test_malformed_rpc_returns_400(self):
         for params in ([], {'_meta': []}, {'arguments': []}):

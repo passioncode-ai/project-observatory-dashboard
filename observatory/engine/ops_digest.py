@@ -68,14 +68,42 @@ _DAY = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})")
 
 # ── the shared detectors (`src/secret-shape.ts`, `src/activity-rules.ts`) ─────────────────────────────────────
 
-#: A JWT or JWS anywhere in a value: three base64url segments, the first a JSON object's `eyJ`. Case-sensitive.
+#: A JWT or JWS anywhere in a value: three base64url segments, the first a JSON object's `eyJ`. Case-sensitive. The
+#: contract's `JWT_SHAPE`; `secret_value` reads it with `has_jwt`, in one pass.
 JWT_SHAPE = re.compile(r"eyJ[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]*")
-#: A value that says it is a credential, or a provider key's shape, in either case. JavaScript's `.` is any code unit
-#: but a line terminator, written out here; `re.ASCII` keeps the case folding to ASCII, as JavaScript's (no `u` flag).
+#: A value that says it is a credential (`Bearer` at its start, in any case), or a provider key's shape with its prefix
+#: in its canonical case only, after a boundary (the start, a character that is no ASCII letter or digit, or an
+#: escape), and an `sk-` key only with its strength (DEC-0151, OBS-587). The contract's `SECRET_VALUE`, with no case
+#: flag: JavaScript's `\s` is `JS_SPACE`, its `.` any code unit but a line terminator, its `\d` is `[0-9]`.
 SECRET_VALUE = re.compile(
-    r"(\Abearer[" + JS_SPACE + r"][^\n\r  ]|sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}"
-    r"|xox[abposr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|glpat-[A-Za-z0-9_-]{20,})", re.IGNORECASE | re.ASCII)
+    r"(\A[Bb][Ee][Aa][Rr][Ee][Rr][" + JS_SPACE + r"][^\n\r\u2028\u2029]"
+    r"|(?:\A|[^A-Za-z0-9]|%[0-9A-Fa-f]{2}|\\[nrt\"']|\\u[0-9A-Fa-f]{4}|\\x[0-9A-Fa-f]{2}"
+    r"|\\[bfv0ae]|\\[0-7]{1,3}|%25[0-9A-Fa-f]{2}|\x1b\[[0-9;:]*m|(?:\\u001[bB]|\\x1[bB]|\\e|\\033|\\33)\[[0-9;:]*m)"
+    r"(?:sk-(?=[A-Za-z0-9_-]{0,255}?[0-9])(?:(?=[A-Za-z0-9_-]{0,255}?[A-Z])[A-Za-z0-9_-]{16,}|[A-Za-z0-9_-]{32,})"
+    r"|gh[pousr]_[A-Za-z0-9]{20,}|xox[abposr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|glpat-[A-Za-z0-9_-]{20,}))")
 _LONG_RUN = re.compile(r"[A-Za-z0-9+/=_-]{40,}")
+_BASE64URL = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
+
+
+def _run_end(text: str, start: int) -> int:
+    end = start
+    while end < len(text) and text[end] in _BASE64URL:
+        end += 1
+    return end
+
+
+def has_jwt(text: str) -> bool:
+    """`hasJwt`: whether `JWT_SHAPE` matches anywhere in `text`, read in one pass (the regex backtracks from every
+    `eyJ` of a long run): every `eyJ` of one base64url run shares that run's end, so only its first is tried."""
+    at = text.find("eyJ")
+    while at >= 0:
+        one = _run_end(text, at + 3)
+        if one - at - 3 >= 2 and one < len(text) and text[one] == ".":
+            two = _run_end(text, one + 1)
+            if two - one - 1 >= 2 and two < len(text) and text[two] == ".":
+                return True
+        at = text.find("eyJ", one)
+    return False
 
 
 def long_secret(value: str) -> bool:
@@ -86,7 +114,7 @@ def long_secret(value: str) -> bool:
 
 def secret_value(value: str) -> bool:
     """`secretValue`: a JWT anywhere, a provider key or `Bearer ...`, or a long secret-shaped run."""
-    return bool(JWT_SHAPE.search(value) or SECRET_VALUE.search(value) or long_secret(value))
+    return has_jwt(value) or bool(SECRET_VALUE.search(value)) or long_secret(value)
 
 
 _SLASH = r"(?:[/\\]|%(?:25)?2[fF])"
@@ -133,7 +161,7 @@ def name_refusal(op: Any) -> str | None:
 
 def source_refused(source: Any) -> str | None:
     """A `source` label: its grammar (OD-9), and `FAC-SEM-168`'s clause that it is not shaped like a credential
-    (a lower-case label can still hold `sk-` and sixteen more characters). None for a lawful label."""
+    (a lower-case label can still hold a Slack or a GitLab key's shape after a boundary). None for a lawful label."""
     if not isinstance(source, str) or SOURCE.fullmatch(source) is None:
         return "a source is a lower-case label: a letter, then up to 31 letters, digits or '-'"
     if secret_value(source):

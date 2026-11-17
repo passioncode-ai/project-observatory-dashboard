@@ -8,81 +8,81 @@
       "action": "mint",
       "kind": "dashboard",
       "where": "tools/keyserver.py: act_mint",
-      "tool": null,
+      "tool": "observatory_key_act",
       "gate": null,
-      "status": "missing",
+      "status": "covered",
       "row": "OBS-559",
-      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+      "note": "action mint; the operator's words as `decision` (keys.mint, target the destination); the same keyserver.act_mint (OBS-559 part 2, docs/design/control-plane/key-tools.md)"
     },
     {
       "action": "limit",
       "kind": "dashboard",
       "where": "tools/keyserver.py: act_limit",
-      "tool": null,
+      "tool": "observatory_key_act",
       "gate": null,
-      "status": "missing",
+      "status": "covered",
       "row": "OBS-559",
-      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+      "note": "action limit; a ceiling above the ledger's, or one it cannot compare, needs the operator's words (keys.limit); the same keyserver.act_limit (OBS-559 part 2, docs/design/control-plane/key-tools.md)"
     },
     {
       "action": "disable",
       "kind": "dashboard",
       "where": "tools/keyserver.py: act_disable",
-      "tool": null,
+      "tool": "observatory_key_act",
       "gate": null,
-      "status": "missing",
+      "status": "covered",
       "row": "OBS-559",
-      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+      "note": "action disable; reversible at the provider, no decision; the same keyserver.act_disable (OBS-559 part 2, docs/design/control-plane/key-tools.md)"
     },
     {
       "action": "enable",
       "kind": "dashboard",
       "where": "tools/keyserver.py: act_enable",
-      "tool": null,
+      "tool": "observatory_key_act",
       "gate": null,
-      "status": "missing",
+      "status": "covered",
       "row": "OBS-559",
-      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+      "note": "action enable; reversible at the provider, no decision; the same keyserver.act_enable (OBS-559 part 2, docs/design/control-plane/key-tools.md)"
     },
     {
       "action": "rotate-key",
       "kind": "dashboard",
       "where": "tools/keyserver.py: act_rotate_key",
-      "tool": null,
+      "tool": "observatory_key_act",
       "gate": null,
-      "status": "missing",
+      "status": "covered",
       "row": "OBS-559",
-      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+      "note": "action rotate; mints a successor and revokes the old key, so it needs the operator's words (keys.rotate); the same keyserver.act_rotate_key (OBS-559 part 2, docs/design/control-plane/key-tools.md)"
     },
     {
       "action": "revoke",
       "kind": "dashboard",
       "where": "tools/keyserver.py: act_revoke",
-      "tool": null,
+      "tool": "observatory_key_act",
       "gate": null,
-      "status": "missing",
+      "status": "covered",
       "row": "OBS-559",
-      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+      "note": "action revoke; cannot be undone, so it needs the operator's words (keys.revoke); the same keyserver.act_revoke (OBS-559 part 2, docs/design/control-plane/key-tools.md)"
     },
     {
       "action": "leak",
       "kind": "dashboard",
       "where": "tools/keyserver.py: act_leak",
-      "tool": null,
+      "tool": "observatory_credential_mark",
       "gate": null,
-      "status": "missing",
+      "status": "covered",
       "row": "OBS-559",
-      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+      "note": "action leak; a draft record, no decision; the same keyserver.act_leak and its vault receipt (OBS-559 part 2, docs/design/control-plane/key-tools.md)"
     },
     {
       "action": "annotate",
       "kind": "dashboard",
       "where": "tools/keyserver.py: act_annotate",
-      "tool": null,
+      "tool": "observatory_credential_mark",
       "gate": null,
-      "status": "missing",
+      "status": "covered",
       "row": "OBS-559",
-      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+      "note": "action annotate; a draft record, no decision, signed by the agent; the same keyserver.act_annotate (OBS-559 part 2, docs/design/control-plane/key-tools.md)"
     },
     {
       "action": "reveal",
@@ -132,6 +132,32 @@
       "status": "covered",
       "row": "OBS-555",
       "note": "the MCP page's Accept buttons make the definitions a probe found the pinned ones: the same function (mcp_supply.accept_pending), by server and tool or for every changed tool"
+    },
+    {
+      "action": "assistant",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_assistant",
+      "tool": [
+        "observatory_assistant_status",
+        "observatory_assistant_ask",
+        "observatory_assistant_conversation",
+        "fabric.job.get",
+        "fabric.job.cancel"
+      ],
+      "gate": null,
+      "status": "covered",
+      "row": "OBS-560",
+      "note": "the Assistant page's chat: status, ask, the assistant's job and its cancel, and a conversation, through the assistant's own functions (agent/assistant.py); the page's status leaves out the path and the steps written as command lines"
+    },
+    {
+      "action": "doctor",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_doctor",
+      "tool": "observatory_doctor",
+      "gate": null,
+      "status": "covered",
+      "row": "OBS-560",
+      "note": "the Assistant page's Undo beside a doctor's fix: the same function (daily_doctor.undo) as observatory_doctor with action undo"
     },
     {
       "action": "init",

@@ -122,7 +122,7 @@ server = InteropServer(
         "(embedding-policy/1, lexical); `degraded` says so.\n"
         "WRITE: `observatory_record`, `_lesson` and `_propose` append PROPOSALS below "
         "confidence 1; only the operator or independent corroboration promotes one; "
-        "`_org_selection` and gated `_configure` changes need the operator's `decision`.\n"
+        "`_org_selection`, gated `_configure`/`_key_act` changes need the operator's `decision`.\n"
         "SECRETS: `observatory_credentials` names keys and CANNOT return a value; run its command, "
         "open no file. Missing key: `observatory_secret_request`, no chat.\n"
         "DEGRADED: every read carries `degraded` (empty: full coverage; else it "
@@ -132,7 +132,7 @@ server = InteropServer(
         "WORKFLOW: `observatory_checkpoint_write` after each step (keep `leaseId`); "
         "`observatory_handoff_create`/`_accept` moves it; `observatory_workflow_list` finds it.\n"
         "START with `observatory_overview` (counts, findings, disk). Folders outside Git go to `config/tracked.json`; "
-        "no grants or registry writes.\n"
+        "no grant/registry writes.\n"
         "READ, paged with `limit` and `cursor` → `nextCursor`, totals over the "
         "scope: `observatory_status` (pass `limit`, `detail: summary`; unpaged is "
         "huge); `observatory_findings` takes `projectId`; "
@@ -550,6 +550,79 @@ def observatory_key_consumers(
     except vault.VaultBoundaryError as exc:
         return {"error": {"code": "invalid-slot", "message": str(exc)}, "degraded": []}
     return key_consumers.vault_answer(project, env, name)
+
+
+@server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False))
+def observatory_key_act(
+    action: Annotated[Literal["mint", "limit", "disable", "enable", "rotate", "revoke"],
+                      Field(description="The key page's act on an OpenRouter key. mint, rotate, revoke and a limit "
+                                        "above the recorded ceiling need the operator's `decision`.")],
+    name: Annotated[str | None, Field(description="The key's name in the door's ledger, or its provider label. "
+                                                  "mint: the new key's name (default observatory-<destination>).")] = None,
+    destination: Annotated[str | None, Field(description="mint: where the door writes the value, `observatory`, "
+                                                         "`claude-mem` or a vault slot `vault:<project>/<env>/<NAME>`; "
+                                                         "also the decision's target.")] = None,
+    limit: Annotated[float | None, Field(description="mint and limit: the ceiling in USD, above 0.")] = None,
+    limitReset: Annotated[str | None, Field(validation_alias=AliasChoices("limitReset", "limit_reset"),
+                                            description="mint and limit: daily, weekly or monthly; a limit without "
+                                                        "it keeps the key's period.")] = None,
+    account: Annotated[str | None, Field(description="mint: the door's account label to mint from.")] = None,
+    project: Annotated[str | None, Field(description="mint: the project the key is for.")] = None,
+    decision: Annotated[dict[str, Any] | None, Field(
+        description="mint, rotate, revoke and a raised limit: the operator's words in contract DEC-0121's shape: {by: "
+                    "operator, via: relayed-instruction, action: keys.mint|keys.limit|keys.rotate|keys.revoke, target: "
+                    "the destination (mint) or the key's name, instruction: their words verbatim, at: when, source?}. "
+                    "Also read from _meta.decision.")] = None,
+    ctx: "Context | None" = None,
+) -> dict[str, Any]:
+    """The key page's acts on an OpenRouter key for an agent (OBS-559): the SAME functions the local control server
+    runs for the person at the page (`keyserver.ACTIONS`), with its checks, its journal and its door. `mint` issues
+    a key with a ceiling and the door writes the value straight to `destination`; `limit` moves the ceiling; `disable`
+    and `enable` stop and resume spending at the provider; `rotate` delivers a successor to the key's own destination
+    and every copy of the old value before it revokes the old key (a copy out of reach answers `held`); `revoke`
+    deletes the key, refused while a consumer reads it.
+
+    No value is ever returned, taken or journalled: an argument shaped like a credential is refused and not echoed.
+    mint, rotate, revoke and a limit above the ceiling the ledger records (or one it cannot compare) spend money or
+    cannot be undone, so they need the operator's words as `decision`; the journal row keeps them beside the caller
+    `agent:mcp`. Answers the door's result with `action` (and `recordedAs` for a decided act). Refusals are typed
+    `error` {code, message}: `invalid-argument`, `operator-decision-required` (with the action and target to ask
+    for), `decision-invalid`, `not-found`, `held`, `provider-refused`, `unconfirmed`, `failed`."""
+    import key_acts
+    words = decision if decision is not None else _meta_decision(ctx)
+    return key_acts.key_act(action, name=name, destination=destination, limit=limit, limitReset=limitReset,
+                            account=account, project=project, decision=words)
+
+
+@server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False))
+def observatory_credential_mark(
+    action: Annotated[Literal["leak", "annotate"],
+                      Field(description="leak: mark a vault slot's value seen somewhere it should not be; annotate: "
+                                        "sign a credential with its purpose and evidence.")],
+    project: Annotated[str | None, Field(description="leak: the slot's vault folder.")] = None,
+    env: Annotated[str | None, Field(description="leak: local, stage or prod.")] = None,
+    name: Annotated[str | None, Field(description="leak: the slot's NAME, UPPER_SNAKE_CASE.")] = None,
+    where: Annotated[str | None, Field(description="leak: where the value was seen, in words (never the value).")] = None,
+    id: Annotated[str | None, Field(description="annotate: the credential id as registry/credentials.json prints "
+                                                "it.")] = None,
+    purpose: Annotated[str | None, Field(description="annotate: what the credential is for.")] = None,
+    evidence: Annotated[str | None, Field(description="annotate: where that can be checked (a file and line, a "
+                                                      "page).")] = None,
+    owner: Annotated[str | None, Field(description="annotate: who owns it.")] = None,
+    rotationDays: Annotated[int | None, Field(validation_alias=AliasChoices("rotationDays", "rotation_days"),
+                                              description="annotate: the rotation policy in days, at least 1.")] = None,
+    tags: Annotated[list[str] | None, Field(description="annotate: tags.")] = None,
+) -> dict[str, Any]:
+    """Record a fact about a credential, the key page's other two acts (OBS-559), through the same functions:
+    `leak` appends the slot to the vault's leak register (`vault.py leak`; the answer is the vault's receipt, never
+    its exit code alone), `annotate` signs the credential through the one writer the CLI and the page use, signed by
+    `agent:mcp`. Both are drafts of a record, so they need no decision; both are journalled before they act. No value
+    is read, taken or returned: an argument shaped like a credential is refused and not echoed. Refusals are typed
+    `error` {code, message}: `invalid-argument`, `not-found`, `unconfirmed`, `failed`."""
+    import key_acts
+    return key_acts.credential_mark(action, project=project, env=env, name=name, where=where, id=id,
+                                    purpose=purpose, evidence=evidence, owner=owner, rotationDays=rotationDays,
+                                    tags=tags)
 
 
 @server.tool()

@@ -221,6 +221,10 @@ ALLOWLIST: dict[str, str] = {
         "the contract's secret-envelope vector, vendored byte for byte with its digest "
         "checked (fabric/node-vectors/README.md): its sealed `secret` is the placeholder "
         "'example-secret-value-not-real' and its keys are RFC 9180 A.3.1's published test keys",
+    "fabric/attribution-vectors/folder-attribution.json":
+        "the contract's folder-attribution vectors, vendored byte for byte with their digest checked "
+        "(fabric/attribution-vectors/SOURCE.json): the `sk-` and token-shaped values are the contract's "
+        "made-up fixtures for DEC-0151 and DEC-0177 (an all-letter alphabet, 40 hex digits), never a key",
     "fabric/node-vectors/peer/peer-share.json":
         "the contract's fabric-peer-share/1 vectors (DEC-0142), vendored byte for byte with their digest checked "
         "(fabric/node-vectors/README.md): their sealed `secret` is the placeholder "

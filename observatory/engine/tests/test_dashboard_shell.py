@@ -330,7 +330,7 @@ class MonitoringNavigation(unittest.TestCase):
                          ["monitoring", "work", "infrastructure", "access", "system"])
         groups = {k: names for k, _l, names in shell.NAV_GROUPS}
         self.assertEqual(groups["monitoring"], ("health", "security", "availability", "integrations"))
-        self.assertEqual(groups["work"], ("index", "projects", "agents", "findings"))
+        self.assertEqual(groups["work"], ("index", "projects", "agents", "findings", "assistant"))
         self.assertEqual(groups["system"], ("machine", "tools", "disk"))
         listed = [n for names in groups.values() for n in names if n not in shell.NAV_LINKS]
         self.assertEqual(sorted(listed), sorted(shell.NAMES), "every page is reachable, once")

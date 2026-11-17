@@ -183,7 +183,7 @@ def rules(descriptor: dict) -> list[dict]:
                                                   "as well-formed Unicode"))
         readings = _readings(dir_)
         if any(ops_digest.secret_value(r) for r in readings):
-            run_only = not any(ops_digest.JWT_SHAPE.search(r) or ops_digest.SECRET_VALUE.search(r) for r in readings)
+            run_only = not any(ops_digest.has_jwt(r) or ops_digest.SECRET_VALUE.search(r) for r in readings)
             findings.append(_finding(at + "/dir", LONG_RUN_DIR if run_only else
                                      "a dir is shaped like a credential; it names a folder, never a value"))
         elif any(ops_digest.has_home_path(r) for r in readings):

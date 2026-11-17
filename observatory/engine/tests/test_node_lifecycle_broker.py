@@ -100,6 +100,17 @@ class Clock:
         return self.now
 
 
+class ManualClock:
+    """Time that moves only when the test or a fake moves it (OBS-586): a deadline inside the broker cannot run out
+    because the runner is slow, only because the test said time passed."""
+
+    def __init__(self):
+        self.now = time.time()
+
+    def __call__(self):
+        return self.now
+
+
 class FileAdapter:
     """A start writes `<id>.ready` and appends the target to `effects.log`, fsynced: a durable record of every
     effect, which a crashed process cannot take back."""
@@ -1448,11 +1459,33 @@ class EngineTests(BrokerFixture, unittest.TestCase):
 # -- the always_on restart budget ---------------------------------------------------------------------------------
 
 class UnreadyAdapter(ProcessAdapter):
-    """`<id>.unready`: the process runs but never serves (an app stuck in its startup-failure dialog)."""
+    """`<id>.unready`: the process runs but never serves (an app stuck in its startup-failure dialog). Each such probe
+    moves `clock` past the target's timeout: the dialog outlasts any wait, so a start waiting for readiness reaches
+    its deadline on the broker's clock and never on the runner's. A launch moves it by LAUNCH_SECONDS, so two
+    supervisor starts never share a millisecond (their request id carries it) and a start is never a replay."""
+
+    LAUNCH_SECONDS = 0.01
+
+    identity_delay = 0.0
+
+    def __init__(self, root, clock=None):
+        super().__init__(root)
+        self.clock = clock
+
+    def identity_matches(self, target, *, deadline=None):
+        time.sleep(self.identity_delay)              # a slow runner: the check costs real time
+        return True
+
+    def start(self, target):
+        if self.clock is not None:
+            self.clock.now += self.LAUNCH_SECONDS
+        return super().start(target)
 
     def probe(self, target):
         observation = super().probe(target)
         if observation['state'] == 'ready' and self._f(target['targetId'], 'unready').exists():
+            if self.clock is not None:
+                self.clock.now += target['timeoutSeconds']
             return observation | {'state': 'capability_missing', 'capabilityReady': False, 'reason': 'not_serving'}
         return observation
 
@@ -1461,12 +1494,13 @@ class RestartBudgetTests(BrokerFixture, unittest.TestCase):
     def setUp(self):
         super().setUp()
         self.broker.close()
-        self.adapter = UnreadyAdapter(self.data)
+        # The broker's clock moves only when the test or the adapter moves it (OBS-586). On the real-time clock a
+        # one-second start deadline ran out on a loaded Windows runner before the effect (OBS-518, OBS-586), and a
+        # never-serving start then read `timeout` without a pid.
+        self.clock = ManualClock()
+        self.adapter = UnreadyAdapter(self.data, clock=self.clock)
         self.gave_up = []
         self.broker = self.make_broker(on_gave_up=self.gave_up.append)
-        # A start must reach ready within the timeout in real time; one second was not enough for a process
-        # start on a loaded Windows runner (OBS-518). Starts that never serve wait the whole timeout, so they
-        # take a short one through never_serves().
         self.policy['targets']['alpha.app'] = target(desired='always_on', timeout=5)
         self.save_policy()
 
@@ -1511,6 +1545,16 @@ class RestartBudgetTests(BrokerFixture, unittest.TestCase):
             self.clock.now -= 1200 - 300                   # keep the three starts inside one 30-minute window
         self.assertEqual(self.broker.supervise(), [])
         self.assertEqual(len(self.gave_up), 1)
+
+    def test_a_never_serving_start_reads_the_same_on_a_runner_slower_than_its_timeout(self):
+        # OBS-586: the deadline of a never-serving start is one second, and a loaded Windows runner spent it before
+        # the effect (here: a process check that takes 0.6 s, done twice before the start), so the receipt read
+        # `timeout` without a pid and the count above failed now and then. Runner speed must not change the answer.
+        self.never_serves()
+        self.adapter.identity_delay = 0.6
+        receipt = self.supervised_start()
+        self.assertEqual(receipt['state'], 'capability_missing')
+        self.assertTrue(receipt.get('pid'))
 
     def test_a_process_that_does_not_exit_is_never_relaunched(self):
         self.never_serves()

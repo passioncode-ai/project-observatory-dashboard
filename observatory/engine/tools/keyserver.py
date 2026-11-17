@@ -125,6 +125,11 @@ ACTION_SCOPES = {"mint": ("keys.mint", "charge"), "limit": ("keys.limit", "chang
 REFUSAL_STATUS = {"unauthenticated": 401, "token-expired": 401, "principal-unproven": 401,
                   "issuer-unavailable": 503, "unknown-state": 503}
 _IDENTITY: contextvars.ContextVar[dict | None] = contextvars.ContextVar("identity", default=None)
+#: THE OPERATOR'S WORDS AN AGENT RELAYED (OBS-559, contract DEC-0121). The MCP tools `observatory_key_act` and
+#: `observatory_credential_mark` call the acts below in process (`key_acts.py`); stdio proves no caller, so an act that
+#: spends or cannot be undone carries the operator's decision instead of a delegation token, and the journal row keeps
+#: it. Empty for the page and for an HTTP caller.
+_RELAYED: contextvars.ContextVar[dict | None] = contextvars.ContextVar("relayed", default=None)
 
 
 def caller_name(raw: str | None) -> str:
@@ -226,6 +231,9 @@ def audit(action: str, subject: str, detail: dict) -> None:
            # `detail` so no action can overwrite it, and a later reader never
            # mistakes the label for a verified identity.
            "caller_verified": False, "principal": "local-token-holder"}
+    relayed = _RELAYED.get()
+    if relayed:
+        row["decision"] = relayed
     proven = _IDENTITY.get()
     if proven:
         # A verified delegation token: the caller is who the hub's signed chain says (OBS-62).
@@ -398,10 +406,20 @@ def act_annotate(body: dict) -> dict:
         row = sign_credential.write(cred, {
             "purpose": body.get("purpose"), "evidence": body.get("evidence"),
             "owner": body.get("owner"), "rotation_days": body.get("rotation_days"),
-            "tags": body.get("tags") or []})
+            "tags": body.get("tags") or []}, by=_signer())
     except ValueError as exc:
         raise ValueError(str(exc)) from None
     return {"ok": True, "id": cred, "signed_on": row["signed_on"]}
+
+
+def _signer() -> str:
+    """Who signs an annotation: the agent a delegation token proves, or an agent or service that named itself (the
+    MCP tool, OBS-559), else the operator at the page. A self-named agent only ever lowers the claim from operator."""
+    proven = _IDENTITY.get()
+    if proven:
+        return proven["caller"]
+    caller = _CALLER.get()
+    return caller if re.fullmatch(r"(agent|service):[A-Za-z0-9][A-Za-z0-9._+-]{0,63}", caller) else "operator"
 
 
 def act_reveal(body: dict) -> dict:
@@ -622,11 +640,80 @@ def act_mcp_accept(body: dict) -> dict:
     return mcp_supply.accept_pending(server, tool)
 
 
+#: What the agent panel's status leaves out: a path, the steps written as command lines, where a key was read
+#: from, a provider's refusal text and the project list (the page asks about the whole estate).
+PANEL_STATUS_DROPPED = ("workspace", "next", "key_source", "provider_status", "projects")
+ASSISTANT_OPS = ("status", "ask", "job", "cancel", "conversation")
+
+
+def act_assistant(body: dict) -> dict:
+    """The Assistant page's chat (OBS-560, CP-19): the read-only assistant's own functions, the ones its MCP tools
+    call. `status` is `observatory_assistant_status` without a path or a command line; `ask` is
+    `observatory_assistant_ask` (a job and a conversation id; it spends inside the model budget); `job` and `cancel`
+    are `fabric.job.get` and `fabric.job.cancel` for the assistant's jobs only; `conversation` is
+    `observatory_assistant_conversation`. A refusal is the assistant's own code. An ask and a cancel are audited
+    before they act, with the conversation or job id only: the question never reaches this journal."""
+    from agent import assistant
+    import configuration
+    import jobs
+    op = body.get("op")
+    if op not in ASSISTANT_OPS:
+        raise ValueError("op is " + ", ".join(ASSISTANT_OPS[:-1]) + " or " + ASSISTANT_OPS[-1])
+    try:
+        if op == "status":
+            doc = assistant.status(include_projects=False)
+            return {k: v for k, v in doc.items() if k not in PANEL_STATUS_DROPPED}
+        if op == "ask":
+            args = {k: v for k, v in body.items() if k != "op"}
+            assistant.validate(args)                      # a malformed or key-shaped question is refused unaudited
+            audit("assistant", "ask", {"conversation": args.get("conversation_id") or "new"})
+            return assistant.ask(args)
+        ident = body.get("id")
+        if op == "conversation":
+            return assistant.get_conversation(ident)
+        if not isinstance(ident, str) or not ident:
+            raise ValueError("invalid-input")
+        found = jobs.get(ident)
+        if found is None or found.get("capability") != "agent.ask":
+            raise LookupError("unknown-job")
+        if op == "cancel":
+            audit("assistant", "cancel", {"job": ident})
+            found = jobs.cancel(ident) or found
+        view = jobs.view(found)
+        return {"job": {k: view[k] for k in ("id", "status", "updatedAt", "error") if k in view}}
+    except OSError as exc:
+        if exc.errno == 28:
+            raise ValueError("disk-full") from None
+        raise RuntimeError("workspace-write-failed") from None
+    except configuration.ConfigurationError:
+        raise ValueError("backend-configuration") from None
+
+
+def act_doctor(body: dict) -> dict:
+    """The Assistant page's Undo beside a doctor's fix (OBS-560): `observatory_doctor(action="undo")`, the same
+    function as `full doctor-daily --undo`. Audited with the journal id before it acts. A refusal is the doctor's
+    own code: `unknown-journal-id` is 404, the others (`already-undone`, `expired`, `busy`) are 400."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import daily_doctor
+    if body.get("op") != "undo":
+        raise ValueError("op is undo; an agent reads and runs the doctor with observatory_doctor")
+    jid = body.get("journalId")
+    if not isinstance(jid, str) or not daily_doctor.JOURNAL_ID.fullmatch(jid):
+        raise ValueError("invalid-journal-id")
+    audit("doctor", "undo", {"journal": jid})
+    out = daily_doctor.undo(paths.HOME, journal_id=jid)
+    if isinstance(out.get("error"), dict):
+        code = str(out["error"].get("code") or "refused")
+        raise (LookupError if code == "unknown-journal-id" else ValueError)(code)
+    return {"undone": out.get("undone") or [], "refused": out.get("refused") or [], "degraded": out.get("degraded") or []}
+
+
 ACTIONS = {"mint": act_mint, "limit": act_limit, "revoke": act_revoke,
            "leak": act_leak, "reveal": act_reveal, "annotate": act_annotate,
            "disable": act_disable, "enable": act_enable, "rotate-key": act_rotate_key,
            "configure": act_configure, "workflow-handoff": act_workflow_handoff,
-           "issues-banner": act_issues_banner, "mcp-accept": act_mcp_accept}
+           "issues-banner": act_issues_banner, "mcp-accept": act_mcp_accept,
+           "assistant": act_assistant, "doctor": act_doctor}
 
 #: Refused on purpose, with the reason the caller needs rather than a 404.
 REFUSED = {

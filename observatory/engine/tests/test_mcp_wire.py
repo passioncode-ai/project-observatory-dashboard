@@ -37,13 +37,14 @@ REQUIRED = ["observatory_status", "observatory_project", "observatory_timeline",
 #: Every tool name `mcp/server.py` publishes in `tools/list` (OSS-07: existing MCP tool
 #: names stay available). Changing this list is changing the published surface.
 GOLDEN_TOOLS = [
-    # observatory_* tools (40)
+    # observatory_* tools (43)
     "observatory_assistant_ask", "observatory_assistant_conversation", "observatory_assistant_status",
-    "observatory_checkpoint_latest", "observatory_checkpoint_write", "observatory_configure", "observatory_credentials",
+    "observatory_checkpoint_latest", "observatory_checkpoint_write", "observatory_configure",
+    "observatory_credential_mark", "observatory_credentials",
     "observatory_dependencies", "observatory_doctor",
     "observatory_explain", "observatory_findings", "observatory_handoff_accept", "observatory_health",
     "observatory_handoff_create", "observatory_handoff_get", "observatory_integrations", "observatory_issues",
-    "observatory_key_consumers", "observatory_key_sweep", "observatory_key_sweep_settle",
+    "observatory_key_act", "observatory_key_consumers", "observatory_key_sweep", "observatory_key_sweep_settle",
     "observatory_learn", "observatory_lesson",
     "observatory_machine", "observatory_mcp_accept", "observatory_mcp_supply", "observatory_org_accounts", "observatory_org_keys", "observatory_org_selection",
     "observatory_overview", "observatory_project", "observatory_propose", "observatory_recall",
@@ -176,6 +177,20 @@ async def run() -> None:
                                                       {"fingerprint": "hmac-sha256:" + "0" * 64, "why": "test"}))
             check("settling a sighting no sweep found is a typed refusal",
                   (refused.get("error") or {}).get("code") == "unknown-fingerprint", json.dumps(refused)[:200])
+            # OBS-559 part 2: a mint without the operator's words is refused before any door is reached, and a
+            # leak mark of a malformed slot is the vault's own refusal; neither echoes the pasted value.
+            fake = "sk-or-v1-" + "FAKE" * 16
+            mint = payload(await session.call_tool("observatory_key_act",
+                                                   {"action": "mint", "destination": "observatory", "limit": 1}))
+            check("a mint over MCP without a decision names the decision it needs",
+                  (mint.get("error") or {}).get("code") == "operator-decision-required"
+                  and (mint.get("error") or {}).get("action") == "keys.mint", json.dumps(mint)[:200])
+            pasted = payload(await session.call_tool("observatory_credential_mark",
+                                                     {"action": "leak", "project": "alpha-web", "env": "prod",
+                                                      "name": "API_KEY", "where": f"seen as {fake}"}))
+            check("a value pasted into a leak mark is refused and not echoed",
+                  (pasted.get("error") or {}).get("code") == "invalid-argument" and fake not in json.dumps(pasted),
+                  json.dumps(pasted)[:200])
             # OBS-553: the dependency inventory before any scan is an empty page that says why, never "none".
             deps = payload(await session.call_tool("observatory_dependencies", {"vulnerableOnly": True}))
             check("dependencies before a scan: no rows, and degraded names the missing inventory and watch",
