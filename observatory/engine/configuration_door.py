@@ -29,7 +29,6 @@ import datetime
 import hashlib
 import json
 import math
-import os
 import re
 import secrets
 from dataclasses import dataclass
@@ -707,13 +706,9 @@ def _journal_file(base: Path) -> Path:
 
 def _journal(base: Path, line: dict) -> list[dict]:
     """Append one line, owner-only. A line that could not be written is named, never hidden: the change stands."""
-    import osprivacy
-    file = _journal_file(base)
+    import journal_writer
     try:
-        file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        fd = osprivacy.open(file, os.O_WRONLY | os.O_CREAT | os.O_APPEND | osprivacy.NOFOLLOW, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as out:
-            out.write(json.dumps(line, ensure_ascii=False, sort_keys=True) + "\n")
+        journal_writer.append(_journal_file(base), [line], sort_keys=True)
         return []
     except OSError as exc:
         return [{"source": "store/logs/" + JOURNAL, "code": "journal-unwritten", "reason": type(exc).__name__}]

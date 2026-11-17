@@ -859,12 +859,8 @@ UNDO_IN_JOURNAL = ("branch-merged", "branch-pushed", "branch-unique", "worktree-
 
 
 def journal(rows: list[dict]) -> None:
-    log = paths.STATE / "logs" / "cleanup.jsonl"
-    log.parent.mkdir(parents=True, exist_ok=True)
-    with open(log, "a", encoding="utf-8") as f:
-        for r in rows:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
-    os.chmod(log, 0o600)
+    import journal_writer
+    journal_writer.append(paths.STATE / "logs" / "cleanup.jsonl", rows)
 
 
 def under_pressure(cfg: dict, level: str | None) -> dict:

@@ -189,13 +189,8 @@ def _save(doc: dict) -> None:
 def _journal(event: dict, out: dict) -> None:
     """A saved declaration reports a journal failure instead of lying about it."""
     try:
-        journal = journal_path()
-        journal.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        fd = osprivacy.open(journal, os.O_CREAT | os.O_WRONLY | os.O_APPEND | osprivacy.NOFOLLOW, 0o600)
-        try:
-            os.write(fd, (json.dumps(event, ensure_ascii=False, sort_keys=True) + "\n").encode("utf-8"))
-        finally:
-            os.close(fd)
+        import journal_writer
+        journal_writer.append(journal_path(), [event], sort_keys=True)
     except OSError as exc:
         out.setdefault("degraded", []).append(
             {"source": "tracked-journal", "reason": f"the change was saved but not journalled: {exc}"})

@@ -531,10 +531,9 @@ OUTPUT_TAIL_LINES, OUTPUT_LINE_CHARS = 40, 300
 
 
 def redact_line(line: str) -> str:
-    """One output line, bounded, with a password in a URL and every credential shape replaced."""
-    import credential_shape
-    text = re.sub(r"(https?://)[^\s/@]+@", r"\1***@", str(line or ""))
-    return credential_shape.redact(text, uuids=False)[:OUTPUT_LINE_CHARS]
+    """One output line through the one redactor (`memory_redact.redact`, OBS-602), bounded."""
+    import memory_redact
+    return memory_redact.redact(str(line or ""), uuids=False)[:OUTPUT_LINE_CHARS]
 
 
 def output_tail(text: str, lines: int = OUTPUT_TAIL_LINES) -> list[str]:

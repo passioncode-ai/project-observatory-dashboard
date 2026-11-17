@@ -33,8 +33,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
-import osprivacy
 import pathlib
 import secrets
 from datetime import datetime, timezone
@@ -151,12 +149,9 @@ def record(grant: Any, *, query: str, project_id: str | None, answer: dict,
            "resultBytes": len(json.dumps(answer.get("results", []), ensure_ascii=False)
                               .encode("utf-8")),
            "results": results}
-    target = journal_path()
+    import journal_writer
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        fd = osprivacy.open(target, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as f:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        journal_writer.append(journal_path(), [row])
     except OSError as exc:
         # The answer stands; what is lost is the ability to explain it, and that is said.
         return {"receiptId": None, "reason": f"the retrieval log could not be written "

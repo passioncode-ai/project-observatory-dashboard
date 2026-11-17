@@ -171,12 +171,13 @@ def now_z() -> str:
 
 
 def redact_tail(text: str, limit: int = 1200) -> str:
-    """The end of an installer's output, minus any credentials in index URLs.
+    """The end of an installer's output, through the one redactor (`memory_redact.redact`, OBS-602).
 
     pip echoes the index URL it uses, and a private index configured in pip.conf
-    carries its user and password inside that URL; the line would otherwise reach the report."""
-    text = re.sub(r"(https?://)[^\s/@]+@", r"\1***@", text or "")
-    return text[-limit:].strip()
+    carries its user and password inside that URL; the line would otherwise reach the report.
+    Redacted before it is cut, so a cut never leaves half a key behind its marker."""
+    import memory_redact
+    return memory_redact.redact(text or "", uuids=False)[-limit:].strip()
 
 
 def check_url(url: str) -> str:
@@ -1221,12 +1222,10 @@ def log(base: Path, event: str, **fields) -> None:
     if not (base / "workspace.json").is_file():
         return
     try:
+        import journal_writer
         file = base / LOG
         workspace.reject_symlinks(file)
-        file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        fd = osprivacy.open(file, os.O_WRONLY | os.O_APPEND | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as out:
-            out.write(json.dumps({"at": now_z(), "event": event, **fields}, ensure_ascii=False) + "\n")
+        journal_writer.append(file, [{"at": now_z(), "event": event, **fields}])
     except (OSError, config.ConfigurationError):
         pass
 

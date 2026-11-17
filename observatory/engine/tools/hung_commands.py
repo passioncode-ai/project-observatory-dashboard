@@ -360,10 +360,8 @@ def run(receipt_path: Path, journal: Path, apply: bool) -> dict:
     if apply:
         receipt["stopped"] = stop_leaves(receipt)
         if receipt["stopped"]:
-            journal.parent.mkdir(parents=True, exist_ok=True)
-            with journal.open("a", encoding="utf-8") as fh:
-                for row in receipt["stopped"]:
-                    fh.write(json.dumps({"at": receipt["at"], **row}, ensure_ascii=False) + "\n")
+            import journal_writer
+            journal_writer.append(journal, [{"at": receipt["at"], **row} for row in receipt["stopped"]])
     _write(receipt_path, receipt)
     return receipt
 

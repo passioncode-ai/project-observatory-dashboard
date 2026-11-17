@@ -167,6 +167,10 @@ BOUNDARY += ('provider_deadline',)
 BOUNDARY += ('credential_shape',)
 # OBS-595: every site that asks whether text is credential-shaped asks that rule.
 BOUNDARY += ('secret_shape_sites',)
+# OBS-602: every site that redacts text for a record calls one redactor.
+BOUNDARY += ('redact_sites',)
+# OBS-614: one append-only journal writer.
+BOUNDARY += ('journal_writer',)
 # PROJECT is the folder name; the registry id names the same folder.
 BOUNDARY += ('vault_project',)
 # The product lifecycle contract: bounded steps, idle server, rotated logs, the watch.
@@ -425,7 +429,7 @@ ROOT_FILES = (
     'mcp_supply.py',
     # The Installed tools page's view (OBS-552).
     'tooling_view.py',
-    'log_policy.py', 'code_freshness.py', 'session_reload.py', 'access_binding.py', 'embedding_policy.py',
+    'log_policy.py', 'journal_writer.py', 'code_freshness.py', 'session_reload.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',
     # The companion's request for a why: journal, measurement, reach (M-8).
     'why_asks.py',

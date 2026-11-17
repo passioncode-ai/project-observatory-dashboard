@@ -244,13 +244,11 @@ class ProfileError(RuntimeError):
 def _log(base: Path, event: str, **fields) -> None:
     """Profile events in store/logs/profile.jsonl: what left or changed, never a value."""
     try:
+        import journal_writer
         file = base / LOG
         workspace.reject_symlinks(file)
-        file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        fd = osprivacy.open(file, os.O_WRONLY | os.O_APPEND | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
         stamp = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        with os.fdopen(fd, "a", encoding="utf-8") as out:
-            out.write(json.dumps({"at": stamp, "event": event, **fields}, ensure_ascii=False) + "\n")
+        journal_writer.append(file, [{"at": stamp, "event": event, **fields}])
     except (OSError, config.ConfigurationError):
         pass
 
