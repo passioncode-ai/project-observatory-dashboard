@@ -147,9 +147,9 @@ class HerokuSource:
     def find(self, old: str) -> tuple[list[dict], list[dict], list[dict]]:
         tokens, skip, bad = self._tokens()
         if skip:
-            return [], [], [{"source": self.name, "reason": skip}]
+            return [], [], [{"source": self.name, "code": "not-in-use", "reason": skip}]
         if bad or not tokens:
-            return [], [{"source": self.name, "reason": bad or "no Heroku token"}], []
+            return [], [{"source": self.name, "code": "token-unreadable", "reason": bad or "no Heroku token"}], []
         found, degraded, apps = [], [], {}
         for tok in tokens:
             try:
@@ -157,16 +157,17 @@ class HerokuSource:
                     if isinstance(app, dict) and app.get("id") and app["id"] not in apps:
                         apps[app["id"]] = (app.get("name") or app["id"], tok)
             except RuntimeError as exc:
-                degraded.append({"source": self.name, "reason": f"the application list could not be read: {exc}"})
+                degraded.append({"source": self.name, "code": "app-list-unreadable",
+                                 "reason": f"the application list could not be read: {exc}"})
         for app_id, (app_name, tok) in sorted(apps.items(), key=lambda kv: kv[1][0]):
             try:
                 config = self.api.request("GET", f"/apps/{app_id}/config-vars", tok)
             except RuntimeError as exc:
-                degraded.append({"source": self.name, "app": app_name,
+                degraded.append({"source": self.name, "app": app_name, "code": "config-unreadable",
                                  "reason": f"config vars of {app_name} could not be read: {exc}"})
                 continue
             if not isinstance(config, dict):
-                degraded.append({"source": self.name, "app": app_name,
+                degraded.append({"source": self.name, "app": app_name, "code": "config-unshaped",
                                  "reason": f"config vars of {app_name} came back in no known shape"})
                 continue
             for var, value in sorted(config.items()):
@@ -234,20 +235,21 @@ class EnvFileSource:
     def find(self, old: str) -> tuple[list[dict], list[dict], list[dict]]:
         if not pathlib.Path(self.inventory).exists() and not pathlib.Path(self.projects).is_dir():
             # No projects folder on this machine, so no inventory to take: not in use, not unread.
-            return [], [], [{"source": self.name, "reason": "no projects folder on this machine, so no env file is "
-                                                            "inventoried"}]
+            return [], [], [{"source": self.name, "code": "not-in-use",
+                             "reason": "no projects folder on this machine, so no env file is inventoried"}]
         try:
             doc = json.loads(pathlib.Path(self.inventory).read_text(encoding="utf-8"))
             files, root = doc["files"], pathlib.Path(doc["root"])
             if not isinstance(files, list):
                 raise ValueError("files is not a list")
         except (OSError, ValueError, KeyError, TypeError) as exc:
-            return [], [{"source": self.name, "reason": f"the local env inventory could not be read "
-                                                        f"({type(exc).__name__}); run `project-observatory full env`"}], []
+            return [], [{"source": self.name, "code": "inventory-unreadable",
+                         "reason": f"the local env inventory could not be read ({type(exc).__name__}); run "
+                                   f"`project-observatory full env`"}], []
         found, degraded = [], []
         unread = [d for d in (doc.get("degraded") or []) if isinstance(d, dict)]
         if unread:
-            degraded.append({"source": self.name,
+            degraded.append({"source": self.name, "code": "inventory-incomplete",
                              "reason": f"the local env inventory could not read {len(unread)} file(s)"})
         for rec in files:
             if not isinstance(rec, dict) or not rec.get("path"):
@@ -260,7 +262,7 @@ class EnvFileSource:
             except FileNotFoundError:
                 continue                     # gone since the inventory: it holds nothing now
             except OSError as exc:
-                degraded.append({"source": self.name, "path": str(path),
+                degraded.append({"source": self.name, "path": str(path), "code": "file-unreadable",
                                  "reason": f"{path} could not be read ({type(exc).__name__})"})
                 continue
             pairs, _ = self.env.parse(text)
@@ -311,8 +313,8 @@ class LaunchdSource:
 
     def find(self, old: str) -> tuple[list[dict], list[dict], list[dict]]:
         if not self.slot:
-            return [], [], [{"source": self.name, "reason": "the key is not delivered to a vault slot, so no "
-                                                            "service started from one"}]
+            return [], [], [{"source": self.name, "code": "no-slot",
+                             "reason": "the key is not delivered to a vault slot, so no service started from one"}]
         try:
             fn = self._consumers
             if fn is None:
@@ -320,8 +322,8 @@ class LaunchdSource:
                 fn = use_secret.consumers
             rows = fn(*self.slot)
         except Exception as exc:                                                # noqa: BLE001  degraded, named
-            return [], [{"source": self.name, "reason": f"the services started with the slot could not be read "
-                                                        f"({type(exc).__name__})"}], []
+            return [], [{"source": self.name, "code": "services-unreadable",
+                         "reason": f"the services started with the slot could not be read ({type(exc).__name__})"}], []
         return [{"kind": "launchd", "label": r.get("consumer", "?"), "started": r.get("at")}
                 for r in rows if isinstance(r, dict)], [], []
 
@@ -330,6 +332,17 @@ class LaunchdSource:
 
 def default_sources(vault_slot: tuple[str, str, str] | None = None, exclude: tuple = ()) -> list:
     return [HerokuSource(), EnvFileSource(exclude=exclude), LaunchdSource(vault_slot)]
+
+
+def consumer_sources(slot: str | tuple | None = None, exclude=None) -> list:
+    """Where the copies of a door's value are looked for before a revoke or a roll: Heroku config vars, the local env
+    files the engine inventories, the services started from the vault slot. The one copy every door calls (OBS-601):
+    `slot` is the key's vault slot (`project/env/NAME` or a tuple, None when it is not delivered to one), `exclude`
+    the file it was delivered to, which holds it by design and is never counted as a copy. Tests replace it."""
+    if isinstance(slot, str):
+        parts = tuple(slot.split("/"))
+        slot = parts if len(parts) == 3 and all(parts) else None
+    return default_sources(tuple(slot) if slot else None, exclude=(str(exclude),) if exclude else ())
 
 
 def find(old: str | None, sources: list) -> dict:
@@ -458,6 +471,25 @@ def roll_guard(old: str | None, sources: list, why: str | None = None) -> tuple[
     restart = [f"{describe(c)}: reads the slot at start; restart it: launchctl kickstart -k gui/$(id -u)/{c['label']}"
                for c in found["consumers"] if c.get("kind") == "launchd"]
     return refuse, restart
+
+
+def guard_roll(slot: str | None = None, path=None) -> tuple[list[str], list[str]]:
+    """The roll guard of a door that rolls a value in place (OBS-601: Cloudflare names the token `path` it issued,
+    Heroku the vault `slot`): reads the old value in memory, then `roll_guard` over `consumer_sources`. A value that
+    could not be read refuses the roll, named by its exception's type, and no source is looked at."""
+    if (slot is None) == (path is None):
+        raise ValueError("guard_roll takes a vault slot or a token path, one of them")
+    try:
+        if path is not None:
+            import private_io
+            old = private_io.read(pathlib.Path(path)).strip() or None
+        else:
+            old = vault_value(*slot.split("/"))
+        why = None
+    except Exception as exc:                                                    # noqa: BLE001  named, never echoed
+        old, why = None, (f"the {'token file' if path is not None else 'slot'} could not be read "
+                          f"({type(exc).__name__})")
+    return roll_guard(old, consumer_sources(slot, exclude=path) if not why else [], why)
 
 
 # ─────────────────────────── DigitalOcean App Platform ──────────────────────
@@ -642,7 +674,8 @@ def revoke_guard(subject: str, key: dict, sources: list, value: str | None = Non
             else:
                 found, degraded, skipped = src.find(value)
         except Exception as exc:                                                # noqa: BLE001  degraded, named
-            found, degraded, skipped = [], [{"source": name, "reason": f"{type(exc).__name__} while reading"}], []
+            found, degraded, skipped = [], [{"source": name, "code": "source-failed",
+                                             "reason": f"{type(exc).__name__} while reading"}], []
         for d in degraded:
             d.setdefault("source", name)
             d.setdefault("code", "source-unreadable")

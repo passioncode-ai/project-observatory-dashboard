@@ -24,6 +24,7 @@ import json
 import os
 import pathlib
 import sys
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -213,7 +214,7 @@ def or_door(fake: FakeHeroku, inv: pathlib.Path | None = None, destination_value
     m._byok_after = lambda *a, **k: None
     m.destination_value = lambda to: (destination_value, None)
     sources = [heroku_source(fake)] + ([key_consumers.EnvFileSource(inventory=inv)] if inv else [])
-    m.consumer_sources = lambda to: sources
+    m._consumer_sources = lambda to: sources
     return m, state
 
 
@@ -354,13 +355,15 @@ def test_rolling_doors_refuse_while_a_copy_is_found() -> None:
     journal = []
     hk._journal = lambda event, secret, **d: journal.append({"event": event, **d})
     hk.save_ledger({"issued": {"alpha/prod/K": {"authorization_id": "auth-1", "preset": "read"}}})
-    hk._roll_guard = lambda slot: key_consumers.roll_guard(OLD, sources)
     hk.read_admin = lambda label: ("admin", "fake-admin")
     calls = []
     hk._request = lambda *a, **k: calls.append(a) or (_ for _ in ()).throw(RuntimeError("stop here"))
-    rc, out, err = run(hk.cmd_rotate, "alpha/prod/K", False, wait=0)
-    check("Heroku: held, nothing regenerated", rc == 1 and "HELD" in err and not calls, err)
-    rc, out, err = run(hk.cmd_rotate, "alpha/prod/K", False, wait=0, force=True)
+    # Both doors call the one roll guard (`key_consumers.guard_roll`, OBS-601) over the one `consumer_sources`.
+    with mock.patch.object(key_consumers, "vault_value", lambda *slot: OLD), \
+            mock.patch.object(key_consumers, "consumer_sources", lambda slot=None, exclude=None: sources):
+        rc, out, err = run(hk.cmd_rotate, "alpha/prod/K", False, wait=0)
+        check("Heroku: held, nothing regenerated", rc == 1 and "HELD" in err and not calls, err)
+        rc, out, err = run(hk.cmd_rotate, "alpha/prod/K", False, wait=0, force=True)
     check("Heroku: --force regenerates and journals the cut",
           calls and any(j["event"] == "rotation-forced" for j in journal), err)
 
@@ -373,13 +376,13 @@ def test_rolling_doors_refuse_while_a_copy_is_found() -> None:
     cf.issued = lambda: [token]
     cf.read_meta = lambda p: {"account_id": "acc", "preset": "analytics", "account_name": "Example"}
     cf._journal = lambda event, secret, **d: journal.append({"event": event, **d})
-    cf.consumer_sources = lambda path: sources
     cf.read_admin = lambda label: ("admin", "fake-admin")
     minted = []
     cf.mint_answered = lambda *a, **k: minted.append(a) or (_ for _ in ()).throw(RuntimeError("stop here"))
-    rc, out, err = run(cf.cmd_rotate, "example", False)
-    check("Cloudflare: held, nothing rolled", rc == 1 and "HELD" in err and not minted, err)
-    rc, out, err = run(cf.cmd_rotate, "example", False, True)
+    with mock.patch.object(key_consumers, "consumer_sources", lambda slot=None, exclude=None: sources):
+        rc, out, err = run(cf.cmd_rotate, "example", False)
+        check("Cloudflare: held, nothing rolled", rc == 1 and "HELD" in err and not minted, err)
+        rc, out, err = run(cf.cmd_rotate, "example", False, True)
     check("Cloudflare: --force rolls", minted, err)
     check("no value in either door's output or journal", clean(out + err + json.dumps(journal)), "")
 

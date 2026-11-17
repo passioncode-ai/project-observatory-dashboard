@@ -880,25 +880,6 @@ def leaked_slots(doc: dict) -> set[str]:
     return out
 
 
-def consumer_sources(project: str, env: str, name: str) -> list:
-    """Where the copies of a slot's value are looked for before a roll (OBS-561); tests replace it."""
-    import key_consumers
-    return key_consumers.default_sources((project, env, name))
-
-
-def _roll_guard(slot: str) -> tuple[list[str], list[str]]:
-    """(lines that refuse rolling this slot's authorization, services to restart after it). A regenerate kills the
-    old value at once, so a copy of it outside the vault would be cut; delivering to such copies is later work
-    (docs/design/control-plane/rotation.md)."""
-    import key_consumers
-    project, env, name = slot.split("/")
-    try:
-        old, why = key_consumers.vault_value(project, env, name), None
-    except Exception as exc:                                                    # noqa: BLE001  named, never echoed
-        old, why = None, f"the slot could not be read ({type(exc).__name__})"
-    return key_consumers.roll_guard(old, consumer_sources(project, env, name) if not why else [], why)
-
-
 @_locked
 def cmd_rotate(wanted: str | None, leaked: bool, wait: float = 2.0, force: bool = False) -> int:
     try:
@@ -919,7 +900,11 @@ def cmd_rotate(wanted: str | None, leaked: bool, wait: float = 2.0, force: bool 
     bad = 0
     for slot in slots:
         row = doc["issued"][slot]
-        refuse, restart = _roll_guard(slot)
+        # A regenerate kills the old value at once, so a copy of it outside the vault would be cut: the one roll
+        # guard every door calls (OBS-601). Delivering to such copies is later work (docs/design/control-plane/
+        # rotation.md).
+        import key_consumers
+        refuse, restart = key_consumers.guard_roll(slot=slot)
         if refuse and not force:
             print(f"  {slot}: HELD, not regenerated: a regenerate kills the old value at once, and a copy of it "
                   f"would be cut (`--force` regenerates anyway)", file=sys.stderr)

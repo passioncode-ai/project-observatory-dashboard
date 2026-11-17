@@ -3693,8 +3693,12 @@ async function call(action, body, ms = CALL_TIMEOUT_MS) {
   // The server refuses in English, which stays the refusal's identity
   // (`err.refusal`); the reader sees its translation where the catalog holds
   // one (L10N-04).
-  const said = (d && d.error) || ("HTTP " + r.status);
-  const refused = Kind => Object.assign(new Kind(KNOWN(said)), {refusal: said});
+  // A refusal is typed, `{error: {code, message}}` (OBS-601); its message is
+  // the sentence, its code what a caller branches on.
+  const e = d && d.error;
+  const said = (e && typeof e === "object" ? e.message : e) || ("HTTP " + r.status);
+  const code = e && typeof e === "object" ? e.code : undefined;
+  const refused = Kind => Object.assign(new Kind(KNOWN(said)), {refusal: said, code});
   // 502 is the provider's own refusal, relayed; any other 5xx is a fault that
   // may have struck after the action took effect.
   if (r.status >= 500 && r.status !== 502) throw refused(Uncertain);
@@ -5150,7 +5154,7 @@ if (PAGE === "agents" && typeof document !== "undefined" && document.addEventLis
     "invalid-question": T("Write a question first."),
     "unknown-job": T("That question is no longer followed."),
   };
-  const why = err => (err && err.refusal && REFUSED[err.refusal]) || (err instanceof Uncertain
+  const why = err => (err && REFUSED[err.code || err.refusal]) || (err instanceof Uncertain
     ? T("the outcome is unknown: {why}", {why: err.message}) : T("refused: {why}", {why: err ? err.message : ""}));
   // THE DOCTOR'S UNDO, beside each fix still applied.
   if (LIVE && document.querySelectorAll) {
@@ -5168,8 +5172,8 @@ if (PAGE === "agents" && typeof document !== "undefined" && document.addEventLis
         if (out) out.textContent = kept ? T("Put back: {n}; kept aside, a newer file is there: {kept}", {n: back, kept})
                                          : T("Put back: {n}", {n: back});
       } catch (err) {
-        if (out) out.textContent = err && err.refusal === "already-undone" ? T("Already undone.") : why(err);
-        btn.disabled = !(err instanceof Uncertain) && err && err.refusal === "already-undone";
+        if (out) out.textContent = err && (err.code || err.refusal) === "already-undone" ? T("Already undone.") : why(err);
+        btn.disabled = !(err instanceof Uncertain) && err && (err.code || err.refusal) === "already-undone";
       }
     });
   }

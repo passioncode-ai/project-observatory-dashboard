@@ -355,6 +355,9 @@ BOUNDARY += ('rotation_consumers',)
 # OBS-594 (CP-11): every revoke runs one consumer guard, refusing typed when a consumer holds the key or a source
 # cannot be read (the OpenRouter door, the key server, the MCP key act, tools/revoke_key.py, the DigitalOcean door).
 BOUNDARY += ('revoke_guard',)
+# OBS-601: the doors' consumer helpers in one place (key_consumers), a code on every degraded entry, and the key
+# server's typed refusals, with the MCP key acts taking the same codes.
+BOUNDARY += ('door_helpers',)
 # OBS-552 (CP-05): the Installed tools page, coding agents, skills, plugins and hooks with their findings.
 BOUNDARY += ('tools_page',)
 # OBS-555 (CP-09): the supply-chain watch over MCP servers: command-line rules, tool definition pins, the scanners switch.

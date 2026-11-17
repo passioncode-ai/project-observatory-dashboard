@@ -341,7 +341,7 @@ class Route(Workspace):
 
     def test_a_refused_ask_is_typed_and_starts_nothing(self):
         code, doc = self.post("assistant", {"op": "ask", "question": "What changed?", "request_id": "page-req-0001"})
-        self.assertEqual((code, doc), (400, {"error": "agent-disabled"}))
+        self.assertEqual((code, doc), (400, {"error": {"code": "agent-disabled", "message": "agent-disabled"}}))
         jobs_dir = self.a.jobs.jobs_dir()
         self.assertEqual(sorted(jobs_dir.glob("*.json")) if jobs_dir.exists() else [], [])
 
@@ -378,7 +378,7 @@ class Route(Workspace):
         doc, _ = self.a.jobs.start("fixture", {}, spawn=lambda argv, env: type("Proc", (), {"pid": 12345})())
         for op in ("job", "cancel"):
             code, said = self.post("assistant", {"op": op, "id": doc["id"]})
-            self.assertEqual((code, said), (404, {"error": "unknown-job"}))
+            self.assertEqual((code, said), (404, {"error": {"code": "unknown-job", "message": "unknown-job"}}))
         self.assertNotEqual(self.a.jobs.get(doc["id"])["status"], "cancelled")
         self.configure_model()
         with self.enabled():
@@ -399,7 +399,7 @@ class Route(Workspace):
         with self.enabled():
             code, said = self.post("assistant", {"op": "ask", "question": f"is {planted} valid?",
                                                  "request_id": "page-req-0005"})
-        self.assertEqual((code, said), (400, {"error": "credential-shaped-input"}))
+        self.assertEqual((code, said), (400, {"error": {"code": "credential-shaped-input", "message": "credential-shaped-input"}}))
         exposed = [str(p) for p in self.base.rglob("*") if p.is_file() and planted.encode() in p.read_bytes()]
         self.assertEqual(exposed, [], "the value reached a file")
 
@@ -416,9 +416,9 @@ class Route(Workspace):
         self.assertEqual(done["undone"], [{"id": fix["journal_id"], "files": ["left.tmp"]}])
         self.assertTrue((store / "left.tmp").exists())
         code, said = self.post("doctor", {"op": "undo", "journalId": fix["journal_id"]})
-        self.assertEqual((code, said), (400, {"error": "already-undone"}))
+        self.assertEqual((code, said), (400, {"error": {"code": "already-undone", "message": "already-undone"}}))
         code, said = self.post("doctor", {"op": "undo", "journalId": "doc_ffffffffffffffff"})
-        self.assertEqual((code, said), (404, {"error": "unknown-journal-id"}))
+        self.assertEqual((code, said), (404, {"error": {"code": "unknown-journal-id", "message": "unknown-journal-id"}}))
         for body in ({"op": "undo", "journalId": "../x"}, {"op": "undo"}, {"op": "run"}):
             code, said = self.post("doctor", body)
             self.assertEqual(code, 400, (body, said))
