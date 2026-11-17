@@ -1432,6 +1432,105 @@ def test_cf_accounts_names_every_account_its_tokens_and_their_slots() -> None:
     check("and no value is printed", "admin-token" not in o + e, o + e)
 
 
+SLOT_VALUE = "synthetic-slot-" + "q" * 28
+
+
+def _cf_slot_fake(m, log, *, delete_ok=True, still_listed=False, unread=False):
+    """One account holding a managed token for the slot, another token, and a fake vault."""
+    state = {"tokens": [{"id": "t-slot", "name": "observatory-d1-edit alpha/prod/CLOUDFLARE_API_TOKEN (managed)",
+                         "status": "active", "value": SLOT_VALUE},
+                        {"id": "t-other", "name": "observatory-d1-edit beta/prod/CLOUDFLARE_API_TOKEN (managed)",
+                         "status": "active"}]}
+
+    def fake(path, token, payload=None, method=None):
+        log.append((method or ("POST" if payload is not None else "GET"), path, token))
+        if path.startswith("/accounts/a1/tokens?"):
+            if unread:
+                raise RuntimeError("cloudflare answered HTTP 403; provider response withheld")
+            return {"result": list(state["tokens"]), "result_info": {"total_pages": 1}}
+        if path == "/accounts/a1/tokens/t-slot" and method == "DELETE":
+            if not delete_ok:
+                raise RuntimeError("cloudflare answered HTTP 500; provider response withheld")
+            if not still_listed:
+                state["tokens"] = [t for t in state["tokens"] if t["id"] != "t-slot"]
+            return {"result": {"id": "t-slot"}}
+        raise AssertionError(f"unexpected {method} {path}")
+    m._request = fake
+    removed, journal = [], []
+    m.remove_vault_slot = lambda p, e, n: removed.append((p, e, n)) or "removed"
+    m._journal = lambda event, secret, **detail: journal.append((event, secret, detail))
+    return state, removed, journal
+
+
+def test_cf_revoke_vault_deletes_the_managed_token_confirms_then_removes_the_slot() -> None:
+    """`revoke --vault PROJECT/ENV/NAME` (OBS-575): a vault-slot token, found at Cloudflare by the slot its managed
+    name records, deleted, read back as gone, and only then the slot removed and the revocation journaled."""
+    m = cf(); _cf_with_admin(m)
+    log = []
+    state, removed, journal = _cf_slot_fake(m, log)
+    rc, o, e = _cf_run(m.cmd_revoke_vault, "alpha/prod/CLOUDFLARE_API_TOKEN")
+    check("revoke --vault succeeds", rc == 0, o + e)
+    deletes = [p for meth, p, _t in log if meth == "DELETE"]
+    check("only the slot's own token is deleted", deletes == ["/accounts/a1/tokens/t-slot"], str(deletes))
+    after = [i for i, (meth, p, _t) in enumerate(log) if meth == "GET" and p.startswith("/accounts/a1/tokens?")]
+    check("the token list is read again after the delete", len(after) == 2 and after[1] > log.index(
+        next(x for x in log if x[0] == "DELETE")), str(log))
+    check("then the slot is removed", removed == [("alpha", "prod", "CLOUDFLARE_API_TOKEN")], str(removed))
+    check("and the revocation journaled by slot",
+          [(ev, sec) for ev, sec, _d in journal] == [("revoke", "alpha/prod/CLOUDFLARE_API_TOKEN")], str(journal))
+    check("no value in the output or the journal", SLOT_VALUE not in o + e + json.dumps(journal)
+          and "admin-token" not in o + e + json.dumps(journal), o + e)
+    check("the other slot's token stays", [t["id"] for t in state["tokens"]] == ["t-other"], str(state))
+
+
+def test_cf_revoke_vault_keeps_the_slot_when_cloudflare_did_not_confirm() -> None:
+    m = cf(); _cf_with_admin(m)
+    for kw, why in (({"delete_ok": False}, "a failed delete"), ({"still_listed": True}, "a token still listed"),
+                    ({"unread": True}, "an unreadable token list")):
+        log = []
+        _state, removed, journal = _cf_slot_fake(m, log, **kw)
+        rc, o, e = _cf_run(m.cmd_revoke_vault, "alpha/prod/CLOUDFLARE_API_TOKEN")
+        check(f"{why}: refused", rc == 1, o + e)
+        check(f"{why}: the slot is kept and nothing journaled", removed == [] and journal == [], str(removed))
+        check(f"{why}: says the slot is kept", "slot is kept" in e, e)
+        check(f"{why}: no value printed", SLOT_VALUE not in o + e and "admin-token" not in o + e, o + e)
+
+
+def test_cf_revoke_vault_without_a_managed_token_removes_nothing() -> None:
+    m = cf(); _cf_with_admin(m)
+    log = []
+    _state, removed, journal = _cf_slot_fake(m, log)
+    rc, o, e = _cf_run(m.cmd_revoke_vault, "gamma/prod/CLOUDFLARE_API_TOKEN")
+    check("no token names the slot: refused", rc == 1 and removed == [] and journal == [], o + e)
+    check("and nothing deleted", not any(meth == "DELETE" for meth, _p, _t in log), str(log))
+    check("it names the vault's own remove for a slot whose token is gone", "vault.py" in e, e)
+    rc, o, e = _cf_run(m.cmd_revoke_vault, "not-a-slot")
+    check("a malformed target is refused before any call", rc == 2 and "PROJECT/ENV/NAME" in e, e)
+
+
+def test_cf_revoke_command_line_takes_a_label_or_vault_never_both() -> None:
+    import contextlib, io
+    m = cf()
+    seen = {}
+    m.cmd_revoke = lambda label: seen.setdefault("label", label) and 0
+    m.cmd_revoke_vault = lambda target: seen.setdefault("vault", target) and 0
+    argv = sys.argv
+    codes = []
+    try:
+        for args in (["revoke", "plugin-label"], ["revoke", "--vault", "a/b/C"], ["revoke"],
+                     ["revoke", "x", "--vault", "a/b/C"]):
+            sys.argv = ["cloudflare.py", *args]
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                codes.append(m.main())
+    finally:
+        sys.argv = argv
+    check("a label reaches the plugin-folder revoke, --vault the slot revoke",
+          seen == {"label": "plugin-label", "vault": "a/b/C"}, str(seen))
+    check("neither or both is refused", codes[2:] == [2, 2], str(codes))
+    check("the usage names revoke --vault", 'revoke --vault PROJECT/ENV/NAME' in m.__doc__, "")
+
+
 def test_cf_members_and_member_writes_are_a_plan_until_apply() -> None:
     m = cf(); _cf_with_admin(m)
     m._journal = lambda *a, **k: None
@@ -3787,6 +3886,10 @@ if __name__ == "__main__":
                test_cf_dns_preset_is_scoped_to_one_zone_and_lands_in_the_vault,
                test_cf_dns_preset_rolls_refuses_and_never_misfiles,
                test_cf_dns_delivery_goes_through_the_vault_on_stdin,
+               test_cf_revoke_vault_deletes_the_managed_token_confirms_then_removes_the_slot,
+               test_cf_revoke_vault_keeps_the_slot_when_cloudflare_did_not_confirm,
+               test_cf_revoke_vault_without_a_managed_token_removes_nothing,
+               test_cf_revoke_command_line_takes_a_label_or_vault_never_both,
                test_cf_d1_preset_is_scoped_to_one_account_and_lands_in_the_vault,
                test_cf_d1_preset_rolls_refuses_and_never_misfiles,
                test_cf_sigv4_matches_the_published_aws_example,

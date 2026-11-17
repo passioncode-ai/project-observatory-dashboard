@@ -4335,10 +4335,14 @@ const mcpScope = scope => String(scope || "").startsWith("project:")
   ? T("project {path}", {path: String(scope).slice("project:".length)}) : String(scope || "");
 function renderMcp() {
   const out = document.getElementById("out");
+  // No command line on a row (CP-01, OBS-579): the not-scanned state and the probe line name the agent's tools,
+  // `observatory_configure` and `machine.mcp.refresh`, never a command with this workspace's path in it.
+  const tool = name => `<span class="mono">${E(name)}</span>`;
   if (!D.mcp) {
-    out.innerHTML = notScanned(T("MCP was not scanned. Point it at your home, switch it on and scan:"),
-      [fullCommand("configure sources mcp_config_root", RUNTIME.user_home ? shellArg(RUNTIME.user_home) : '"$HOME"'),
-       fullCommand("configure integrations mcp true"), fullCommand("scan-mcp")]);
+    out.innerHTML = `<div class="empty not-scanned"><p>${T("MCP was not scanned.")}</p><p>${
+      T("An agent points it at your home and switches it on with {configure} ({root}, {switch}), then scans with {refresh}.",
+        {configure: tool("observatory_configure"), root: tool("sources.mcp_config_root"),
+         switch: tool("integrations.mcp"), refresh: tool("machine.mcp.refresh")})}</p></div>`;
     return;
   }
   const q = document.getElementById("q").value.trim().toLowerCase();
@@ -4379,7 +4383,7 @@ function renderMcp() {
   const probeLine = probed && !pr.probed_at ? "" : `<p class="dmeta" id="mcp-probe">${
     pr.probed_at ? T("Liveness was last asked {date}; it is asked only on request, never on a schedule:", {date: E(String(pr.probed_at).slice(0, 16).replace("T", " "))})
                  : T("No server has been asked whether it answers yet. That is asked only on request, because it starts every declared server once:")} ` +
-    `<button class="chip-btn mono" type="button" data-copy="${E(fullCommand("scan-mcp"))}" title="${T("copy the command")}">${E(fullCommand("scan-mcp"))}</button></p>`;
+    `${T("an agent asks with {refresh}.", {refresh: tool("machine.mcp.refresh")})}</p>`;
   out.innerHTML = probeLine + filterLine(rows.length, ALL.length, "of@@{n} declarations") + `<div class="card"><table>
     <colgroup><col style="width:22%"><col style="width:16%"><col style="width:26%"><col style="width:14%"><col style="width:22%"></colgroup>
     <thead><tr>${sortTh(T("Server"), "name")}<th>${T("Transport")}</th><th>${T("Target")}</th><th>${T("Key")}</th><th>${T("Connection")}</th></tr></thead>

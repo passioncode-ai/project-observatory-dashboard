@@ -505,7 +505,9 @@ PUBLIC_HELP = """Project Observatory full engine (public profile).
   check-portable               the same explicit portable regression runner
   backup                       historical SQLite-only backup
   workspace-backup             full private snapshot (requires --writers-stopped);
-                               encrypted into the backups root once a passphrase is set
+                               encrypted into the backups root once a passphrase is set;
+                               --pause-writers stops the tick and server for the copy and
+                               starts them again, as the daily snapshot of `maintain` does
   backup-passphrase set|status|show  the passphrase that encrypts backups (stdin)
   backups status|migrate|decrypt     where backups go; move legacy copies; decrypt one
   machine-backup [now|status]  this machine's agent setup (Claude Code, Codex, SSH, Git, shell, CLI

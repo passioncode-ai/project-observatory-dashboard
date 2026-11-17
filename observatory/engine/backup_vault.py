@@ -74,6 +74,10 @@ SNAPSHOT_SUFFIX, DB_SUFFIX = ".obsnap", ".obsdb"
 #: The updater emits `before-update`; use this allowlist for local inventory,
 #: migration and encrypted discovery alike. Unknown kinds are not ours to migrate.
 SNAPSHOT_KINDS = ("snapshot", "before-upgrade", "before-update", "daily")
+#: The kinds that satisfy the daily rule (OBS-582): the maintenance job's own `daily`, an update's
+#: `before-upgrade` (maintenance.snapshot_due counts it) and a person's `snapshot`. `before-update`
+#: is the updater's and does not count. `status` names the newest of them as one field.
+DAILY_RULE_KINDS = ("daily", "before-upgrade", "snapshot")
 #: The machine's agent setup (machine_backup.py, OBS-157): a kind of its own in the same
 #: root, so its rotation and a workspace snapshot's never touch each other.
 MACHINE_KIND, MACHINE_SUFFIX = "machine", ".obmachine"
@@ -1522,6 +1526,20 @@ def secret_store(base: Path) -> tuple[dict, list[dict]]:
     return section, items
 
 
+def newest_counted_as_daily(root: Path) -> dict | None:
+    """The newest copy in `root` of any kind that satisfies the daily rule (`DAILY_RULE_KINDS`), with
+    its kind and its UTC time from the name, or None when there is none (OBS-582). A reader then
+    needs no list of kinds: a fresh before-upgrade copy is the answer, not a nine-day-old daily."""
+    kinds = {p: kind for kind in DAILY_RULE_KINDS for p in artifacts(root, kind, SNAPSHOT_SUFFIX)}
+    if not kinds:
+        return None
+    newest = order_artifacts(kinds)[-1]
+    kind = kinds[newest]
+    stamp = _artifact_stamp(newest.name)
+    at = (datetime.datetime.strptime(stamp, "%Y%m%dT%H%M%SZ").strftime("%Y-%m-%dT%H:%M:%SZ") if stamp else None)
+    return {"kind": kind, "at": at, "file": newest.name}
+
+
 def status(base: Path) -> dict:
     """For doctor: where, whether encrypted, what exists. Never a value.
 
@@ -1590,6 +1608,6 @@ def status(base: Path) -> dict:
         found = artifacts(root, kind, suffix)
         latest[kind] = {"count": len(found), "newest": found[-1].name if found else None}
     return answer(root=str(root), root_source=info["source"], inside_workspace=info["inside_workspace"],
-                  encrypted=configured,
+                  encrypted=configured, newest_counted_as_daily=newest_counted_as_daily(root),
                   passphrase="configured" if configured else "missing", keep_per_kind=KEEP,
                   artifacts=latest, local_unencrypted_snapshots=len(legacy))

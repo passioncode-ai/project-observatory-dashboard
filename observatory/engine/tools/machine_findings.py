@@ -116,6 +116,35 @@ def vm_findings(guard: dict | None) -> list[dict]:
     return out
 
 
+def tmp_findings(guard: dict | None) -> list[dict]:
+    """OBS-585: a name class of the user's temporary folder arriving faster than `tmp_growth` (on 2026-11-16 a test
+    suite's `mkdtemp` folders, 86 every 10 minutes, filled a disk). One finding a class, naming its rate and the
+    executables the guard saw writing there (names only, never a command line), so the owner of the leak gets a row."""
+    temp = (guard or {}).get("user_temp")
+    grown = temp.get("growing") if isinstance(temp, dict) else None
+    if not isinstance(grown, list):
+        return []
+    out = []
+    for g in grown:
+        if not isinstance(g, dict) or not isinstance(g.get("prefix"), str) or not g["prefix"]:
+            continue
+        writers = [w for w in g.get("writers") or [] if isinstance(w, str) and w][:5]
+        out.append({"type": "disk.tmp_growth", "subject": f"machine:tmp:{g['prefix']}", "severity": "warning",
+                    **titled("{prefix} entries of the temporary folder arrive at {rate} a day", prefix=g["prefix"],
+                             rate=g.get("entries_per_day") if isinstance(g.get("entries_per_day"), int) else 0),
+                    "detail": (f"Measured over the last {temp.get('window_hours')} hours by the disk guard: "
+                               f"{g.get('entries_per_day')} new entries and {g.get('gb_per_day')} GB a day named "
+                               f"{g['prefix']}; {g.get('entries')} of them ({g.get('gb')} GB) are there now. "
+                               + (f"Writing there: {', '.join(writers)}." if writers
+                                  else "When the guard looked, no program held a file open there.")
+                               + " The guard removes entries no process holds once they are older than "
+                                 "`user_temp_hours`, so a leak this fast can still fill the disk between passes."),
+                    "action": ("find the program or test that makes these entries and have it remove them when it "
+                               "ends (a temporary folder made with `mkdtemp` is never removed by itself)"),
+                    "evidence": ["store:raw/disk-guard.json"]})
+    return out
+
+
 def _age_hours(stamp: str | None, now: datetime) -> float | None:
     try:
         return (now - datetime.strptime(stamp or "", "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)).total_seconds() / 3600
@@ -141,6 +170,7 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
     auto = _auto_cleanup() if auto_cleanup is None else auto_cleanup
     out.extend(hung_findings(_load(scratch / "hung-commands.json")))
     out.extend(vm_findings(guard))
+    out.extend(tmp_findings(guard))
 
     # THE GUARD ITSELF. On 2026-10-11 the self-cleaning had not run for a day and nothing
     # said so: its steps were "not started" in a tick too long to reach them. A guard that
