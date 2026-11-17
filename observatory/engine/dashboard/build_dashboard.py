@@ -1852,7 +1852,7 @@ body[data-page="cloudflare"] #out, body[data-page="cloudflare"] #list-tools, bod
 .assistant-turn { border-top: 1px solid var(--border-strong); padding: var(--space-2) 0; }
 .assistant-turn .assistant-q { font-weight: 600; margin: 0 0 var(--space-1); }
 .assistant-turn .assistant-a { white-space: pre-wrap; margin: 0 0 var(--space-1); }
-.assistant-lead { font-size: 1.25rem; font-weight: 600; margin: var(--space-2) 0; }
+.assistant-lead { font-size: var(--t-section); font-weight: 600; margin: var(--space-2) 0; }
 .assistant-sub { margin-top: var(--space-3); }
 .assistant-h3 { font: 600 var(--t-label) var(--font-ui); text-transform: uppercase; letter-spacing: .06em;
   color: var(--muted); margin: var(--space-3) 0 var(--space-1); }
