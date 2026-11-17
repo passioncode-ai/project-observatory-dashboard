@@ -31,6 +31,7 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import atomic
+import credential_shape
 import osprivacy
 import paths
 
@@ -739,11 +740,11 @@ EMBED_KEY_FILES = ((pathlib.Path(os.environ["OBSERVATORY_EMBED_KEY_FILE"]),)
 #: sits unused in the secret store, shadowed by it. A prefix check turns that
 #: into a refusal with a name.
 KEY_SHAPES = {
-    "OPENROUTER_API_KEY": ("sk-or-v1-", "OpenRouter"),
+    "OPENROUTER_API_KEY": (credential_shape.OPENROUTER, "OpenRouter"),
     "OPENAI_API_KEY": ("sk-", "OpenAI"),
 }
 #: An OpenRouter key also starts with OpenAI's prefix, so OpenAI's check needs the negative too.
-KEY_ANTI_SHAPES = {"OPENAI_API_KEY": ("sk-or-",)}
+KEY_ANTI_SHAPES = {"OPENAI_API_KEY": (credential_shape.OPENROUTER_FAMILY,)}
 
 
 #: Which variables have already been reported as holding the wrong shape. The

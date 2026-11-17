@@ -38,6 +38,7 @@ from datetime import datetime, timezone
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import atomic  # noqa: E402
+import credential_shape  # noqa: E402  (the issuer's prefix)
 import paths  # noqa: E402
 
 API = "https://openrouter.ai/api/v1"
@@ -88,9 +89,10 @@ TAIL = 3
 def label_of(value: str) -> str:
     """What the provider will call this key, computed without sending it."""
     value = (value or "").strip()
-    if not value.startswith("sk-or-v1-") or len(value) < 16:
+    if not credential_shape.openrouter_key(value) or len(value) < 16:
         return ""
-    return "sk-or-v1-" + value[9:12] + "..." + value[-TAIL:]
+    at = len(credential_shape.OPENROUTER)
+    return credential_shape.OPENROUTER + value[at:at + 3] + "..." + value[-TAIL:]
 
 
 _ENV_LINE = re.compile(r"^\s*(?:export\s+)?OPENROUTER_API_KEY\s*=\s*(.*)$")

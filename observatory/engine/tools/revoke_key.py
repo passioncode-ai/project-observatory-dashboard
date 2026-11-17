@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse, json, os, pathlib, stat, sys, urllib.error, urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+import credential_shape
 import private_io
 import osprivacy
 import paths                                            
@@ -50,7 +51,7 @@ def load_or_store() -> str:
     piped = "" if osprivacy.is_terminal(sys.stdin) else sys.stdin.read().strip()
     if piped:                                                                      
         key = piped                                                                
-        if not key.startswith("sk-or-v1-"):
+        if not credential_shape.openrouter_key(key):
             die("stdin did not carry an OpenRouter key")
         private_io.write(private_io.legacy_path(SECRET), key)
         print(f"stored {SECRET} (600): length {len(key)}, value hidden")

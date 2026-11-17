@@ -86,10 +86,15 @@ ASSIGN = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=(.*)$")
 #: at the start too: `KEY=  # note` leaves the note flush left once stripped.
 COMMENT = re.compile(r"(^|\s)#.*$")
 
-#: A NAME that is itself secret-shaped. Rare, and the product of a malformed
-#: file rather than a convention — but this output is committed, so a name that
-#: looks like a value is redacted rather than published.
-SECRET_SHAPED = re.compile(r"(sk|pk|rk|ghp|gho|ghs|xoxb|xoxp|AKIA|AIza)[-_A-Za-z0-9]{16,}")
+def secret_shaped_name(name: str) -> bool:
+    """Whether a variable NAME is itself shaped like a credential.
+
+    Rare, and the product of a malformed file rather than a convention, but this
+    output is committed, so a name that looks like a value is redacted rather than
+    published. The one rule decides (OBS-595); the pattern it replaced read `sk`,
+    `pk` and `rk` inside a word (`task_runner_...` was redacted) and missed the
+    issuers it did not list and 32 hexadecimal characters."""
+    return credential_shape.shaped(name)
 
 SECRET_NAME = re.compile(
     r"(SECRET|TOKEN|PASSW|API_?KEY|ACCESS_?KEY|PRIVATE|CREDENTIAL|"
@@ -550,7 +555,7 @@ def _record(f: pathlib.Path, root: pathlib.Path, pepper: str, states: dict, degr
     variables = []
     for name, value in pairs:
         cls = classify(name, value)
-        shown = name if not SECRET_SHAPED.search(name) else "<redacted: the NAME is secret-shaped>"
+        shown = name if not secret_shaped_name(name) else "<redacted: the NAME is secret-shaped>"
         row = {"name": shown, "class": cls}
         if cls == "secret":
             # SECRETS ONLY. The first version fingerprinted `config` too, and
