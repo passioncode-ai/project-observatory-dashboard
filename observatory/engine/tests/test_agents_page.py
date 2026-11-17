@@ -309,12 +309,13 @@ def sessions_doc(**over) -> dict:
            "sessions": [
                {"agent": "codex", "project": "project:beta-api", "folder_name": "beta-api", "pid": 201,
                 "managed": False, "launch_id": None, "account_group": None,
-                "last_turn_at": "2026-10-26T17:10:00Z", "quiet": False, "state": "working"},
+                "last_turn_at": "2026-10-26T17:10:00Z", "quiet": False, "state": "working", "active": False},
                {"agent": "claude-code", "project": None, "folder_name": "scratch", "pid": 102, "managed": False,
-                "launch_id": None, "account_group": None, "last_turn_at": None, "quiet": True, "state": "quiet"},
+                "launch_id": None, "account_group": None, "last_turn_at": None, "quiet": True, "state": "quiet",
+                "active": False},
                {"agent": "claude-code", "project": "project:alpha-web", "folder_name": "alpha-web", "pid": 101,
                 "managed": True, "launch_id": "launch-1", "account_group": "team-a",
-                "last_turn_at": "2026-10-26T17:20:00Z", "quiet": False, "state": "working"}],
+                "last_turn_at": "2026-10-26T17:20:00Z", "quiet": False, "state": "working", "active": True}],
            "sources": {"processes": {"from": "manager", "at": "2026-10-26T17:24:00Z"},
                        "manager": {"state": "read", "at": "2026-10-26T17:24:00Z"},
                        "ledger": {"at": "2026-10-26T17:24:00Z"}},
@@ -364,6 +365,44 @@ class ControlPlaneAgents(unittest.TestCase):
         for word in ("scratch", "no", "quiet"):
             self.assertIn(word, quiet)
         self.assertIn('href="projects.html#project:beta-api"', rows[2][1])
+
+    def test_one_session_list_with_one_rule_for_working(self) -> None:
+        """OBS-599 (CP-02, OSS-24, OSS-119): one list, the running sessions; a row reads "working" only when it
+        runs and recorded a turn in the last hour (sessions_view's `active`), never by the manager's own quiet
+        flag. The working rows are the tile's count, and the ledger's turns are not a second list."""
+        import re
+        doc = sessions_doc()
+        doc["sessions"][0].update(quiet=True, state="quiet", active=True)     # quiet by the manager, a turn by the ledger
+        doc["sessions"][2].update(quiet=False, state="working", active=False)
+        doc["active_hour"] = 1
+        page = self.page(sessions=doc)
+        self.assertEqual(page.count("<table"), page[page.index('id="agents-sessions"'):].count("<table"),
+                         "every session table is in the one sessions section")
+        self.assertNotIn("Recorded turns", page)
+        section = page[page.index('id="agents-sessions"'):page.index('id="agents-needs"')]
+        rows = dict(re.findall(r'<tr data-session="(\d+)">(.*?)</tr>', section, re.S))
+        self.assertIn("working", plain(rows["201"]))
+        self.assertIn("quiet", plain(rows["101"]))
+        working = sum(1 for r in rows.values() if 'data-t="working"' in r)
+        self.assertEqual(working, doc["active_hour"], "the list and the tile count the same sessions")
+        self.assertIn("recorded a turn in the last hour", plain(section), "the rule is said on the page")
+        unread = sessions_doc()
+        for r in unread["sessions"]:
+            r["active"] = None
+        cells = dict(re.findall(r'<tr data-session="(\d+)">(.*?)</tr>', self.page(sessions=unread), re.S))
+        self.assertNotIn('data-t="working"', "".join(cells.values()), "an unread ledger shows no state")
+
+    def test_a_list_written_before_the_rule_is_joined_with_the_ledger_on_the_page(self) -> None:
+        import re
+        doc = sessions_doc()
+        for r in doc["sessions"]:
+            del r["active"]
+        view = dict(self.view, sessions=[{"projectId": "project:beta-api", "active": True},
+                                         {"projectId": "project:alpha-web", "active": False}])
+        page = self.page(view=view, sessions=doc)
+        rows = dict(re.findall(r'<tr data-session="(\d+)">(.*?)</tr>', page, re.S))
+        self.assertIn('data-t="working"', rows["201"])
+        self.assertNotIn('data-t="working"', rows["101"])
 
     def test_the_sessions_tile_puts_its_source_and_its_agents_on_separate_lines(self) -> None:
         """OBS-572: the source line is sentence case and the per-agent counts are a list, not an uppercase run-on."""

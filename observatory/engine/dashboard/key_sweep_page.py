@@ -10,10 +10,10 @@ in part says so; a reason's command is never shown (IS rules).
 """
 from __future__ import annotations
 
-import html
 import re
 
 from i18n import NO_VALUE, Translator
+from page_util import escape as _e, stamp
 
 HEADING = ' class="machine-h"'
 HINT = ' class="machine-hint"'
@@ -21,10 +21,6 @@ UNKNOWN = NO_VALUE
 #: Message ids passed through a variable (the catalogue test reads them here).
 DYNAMIC = ("Repository", "Project", "Open", "By rule", "History", "Working tree", "Read to the last commit", "Read in part", "Not read yet", "the key sweep has not run yet",
            "the key sweep is switched off")
-
-
-def _e(v) -> str:
-    return html.escape("" if v is None else str(v))
 
 
 def summary(doc) -> dict:
@@ -55,11 +51,6 @@ def summary(doc) -> dict:
 COMMAND = re.compile(r"\s*[;:(]?\s*`[^`]*`.*$")
 
 
-def _stamp(value) -> str:
-    m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})(?::\d{2}(?:\.\d+)?)?Z?", str(value or ""))
-    return f"{m.group(1)} {m.group(2)} UTC" if m else str(value or UNKNOWN)
-
-
 def _reason(text: str) -> str:
     return _e(COMMAND.sub("", text).strip())
 
@@ -72,7 +63,7 @@ def key_sweep_html(payload: dict, t: Translator) -> str:
     if v.get("state") != "ran":
         return f'<section id="key-sweep">{head}{t.mark("the key sweep has not run yet", tag="p", attrs=HINT)}</section>'
     lead = t.mark("Swept {at}: our own values and key-shaped text in working trees and Git history. Only places "
-                  "and keyed digests are kept, never a value.", tag="p", attrs=HINT, at=_stamp(v.get("at")))
+                  "and keyed digests are kept, never a value.", tag="p", attrs=HINT, at=stamp(v.get("at"), UNKNOWN))
     scanner = (t.mark("External scanner: {name}, with redaction.", tag="p", attrs=HINT, name=v["external"])
                if v.get("external") else
                t.mark("External scanner: not installed; our own values are still looked for.", tag="p", attrs=HINT))

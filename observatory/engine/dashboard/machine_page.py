@@ -9,12 +9,11 @@ dashboard's own table, card and narrow-screen rules; nothing here adds a style.
 """
 from __future__ import annotations
 
-import html
 import json
 import pathlib
-import re
 
 from i18n import NO_VALUE, Translator
+from page_util import escape as _e, stamp
 
 ROWS = 20
 #: Attributes built outside the f-strings: Python 3.11 allows no backslash and no
@@ -29,20 +28,6 @@ TOOLS_LINK = ' href="tools.html"'
 #: `full cleanup`, not `full machine` (audit A42).
 UNMEASURED = "Not measured yet: run project-observatory full machine"
 UNMEASURED_GIT = "Not measured yet: run project-observatory full cleanup"
-
-
-def _e(v) -> str:
-    return html.escape("" if v is None else str(v))
-
-
-def stamp(value) -> str:
-    """An ISO instant written the way the page header writes "Measured":
-    `2026-01-02 03:04:05 UTC`. A value in another shape is shown as it is."""
-    text = str(value or "")
-    m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.\d+)?(Z|[+-]00:?00)?", text)
-    if not m:
-        return text
-    return f"{m.group(1)} {m.group(2)}" + (" UTC" if m.group(3) else "")
 
 
 def _gb(mb):

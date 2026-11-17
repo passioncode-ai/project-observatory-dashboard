@@ -167,6 +167,39 @@ class Summary(unittest.TestCase):
         self.assertIsNone(by_pid[104]["project"])
         self.assertNotIn("/srv/example", json.dumps(doc), "a full folder path reached the summary")
 
+    def test_each_running_session_says_whether_it_is_active(self) -> None:
+        """OBS-599: one rule for "working", carried on each row. A running session is active when its project
+        holds a ledger turn of the last hour; with fewer turns than running sessions, the sessions written to
+        most recently take them. The count is the rows marked, so the tile and the list agree."""
+        ws = Workspace(SURVEY, ledger_projects=("project:alpha-web",))
+        self.addCleanup(ws.close)
+        rows = [row(101, "/srv/example/projects/alpha-web", last_write_at=STAMP - 600),
+                row(102, "/srv/example/projects/alpha-web/docs", last_write_at=STAMP - 60, quiet=True),
+                row(103, "/srv/example/projects/beta-api"),
+                row(104, "/srv/example/scratch/notes", agent="codex")]
+        doc = sessions_view.summary(ws.home, now=NOW, runner=Runner(manager_answer(rows)),
+                                    manager="/usr/local/bin/switchboard", attribute=attribute)
+        active = {s["pid"]: s["active"] for s in doc["sessions"]}
+        self.assertEqual(active, {101: False, 102: True, 103: False, 104: False})
+        self.assertEqual(doc["active_hour"], 1)
+        self.assertEqual(doc["active_hour"], sum(1 for s in doc["sessions"] if s["active"]))
+        bare = tempfile.TemporaryDirectory()
+        self.addCleanup(bare.cleanup)
+        unread = sessions_view.summary(pathlib.Path(bare.name), now=NOW, runner=Runner(manager_answer(rows)),
+                                       manager="/usr/local/bin/switchboard", attribute=attribute)
+        self.assertEqual({s["active"] for s in unread["sessions"]}, {None}, "an unread ledger is not 'no turn'")
+
+    def test_mark_active_is_the_one_join(self) -> None:
+        running = [{"pid": 1, "project": "project:a", "last_turn_at": "2026-11-14T17:00:00Z"},
+                   {"pid": 2, "project": "project:a", "last_turn_at": "2026-11-14T17:30:00Z"},
+                   {"pid": 3, "project": None, "last_turn_at": None},
+                   {"pid": 4, "project": "project:b", "last_turn_at": None}]
+        recent = [{"projectId": "project:a"}, {"projectId": None}, {"projectId": "project:gone"}]
+        marked = sessions_view.mark_active(running, recent)
+        self.assertEqual([(r["pid"], r["active"]) for r in marked], [(1, False), (2, True), (3, True), (4, False)])
+        self.assertNotIn("active", running[0], "the rows passed in are not changed")
+        self.assertEqual([r["active"] for r in sessions_view.mark_active(running, None)], [None] * 4)
+
     def test_manager_not_installed_is_none_never_zero(self) -> None:
         runner = Runner(manager_answer(SESSIONS))
         doc = self.run_summary(runner, manager=None)
@@ -415,7 +448,10 @@ class ByProjectTest(unittest.TestCase):
         out = sessions_view.by_project(self.DOC, self.LEDGER, self.FLOWS)
         self.assertEqual(sorted(out), ["project:alpha", "project:beta"])   # no project is invented
         a = out["project:alpha"]
-        self.assertEqual([r["agent"] for r in a["live"]], ["codex", "claude-code"])   # working first
+        # OBS-599: working is the one rule (`mark_active`), never the manager's `state`: alpha's one turn of the
+        # last hour goes to its session written to most recently, the one the manager calls quiet.
+        self.assertEqual([r["agent"] for r in a["live"]], ["claude-code", "codex"])   # working first
+        self.assertEqual([r["active"] for r in a["live"]], [True, False])
         self.assertEqual(a["counts"], {"live": 2, "working": 1, "recent": 2, "workflows": 1})
         self.assertEqual([r["sessionId"] for r in a["recent"]], ["s-new", "s-old"])
         self.assertEqual(a["recent"][0]["workflow"]["stepId"], "build")      # what it last did
@@ -425,6 +461,32 @@ class ByProjectTest(unittest.TestCase):
         self.assertIsNone(out["project:beta"]["recent"][0]["workflow"])
         self.assertNotIn("pid", a["live"][0])
         self.assertNotIn("leaseRef", json.dumps(out))                         # no lease handle leaves
+
+    def test_working_is_the_one_rule_and_never_the_managers_state(self):
+        """OBS-599: a project's `working` count and its live rows read `active`, the rule the Agents page and the
+        session count use; a row the manager calls working without a turn in the last hour is not working, and a
+        ledger that was not read leaves the state unknown, never quiet."""
+        doc = {"sessions": [dict(r, active=False) for r in self.DOC["sessions"]]}
+        doc["sessions"][0]["active"] = True                                  # quiet by the manager, a turn by the rule
+        a = sessions_view.by_project(doc, self.LEDGER, self.FLOWS)["project:alpha"]
+        self.assertEqual([(r["agent"], r["active"]) for r in a["live"]], [("claude-code", True), ("codex", False)])
+        self.assertEqual(a["counts"]["working"], 1)
+        unread = sessions_view.by_project(self.DOC, None, None)["project:alpha"]
+        self.assertEqual([r["active"] for r in unread["live"]], [None, None])
+        self.assertEqual(unread["counts"]["working"], 0)
+
+    def test_the_projects_page_reads_the_one_rule(self):
+        """OBS-599: the Projects page's "Running now" list colours a row by `active`, never by `state`."""
+        src = (ROOT / "dashboard/build_dashboard.py").read_text(encoding="utf-8")
+        live = src[src.index("const live = list(ps.live"):src.index("const recent = list(ps.recent")]
+        self.assertIn("s.active === true", live)
+        self.assertNotIn("s.state", live)
+
+    def test_the_tool_names_the_rule(self):
+        src = (ROOT / "mcp/server.py").read_text(encoding="utf-8")
+        doc = src[src.index("def observatory_sessions("):]
+        doc = doc[doc.index('"""'):doc.index('"""', doc.index('"""') + 3)]
+        self.assertIn("`active`", doc)
 
     def test_unknown_workflow_keeps_its_id_only(self):
         out = sessions_view.by_project({}, [{"sessionId": "s", "projectId": "project:a", "lastTurnAt": "x",

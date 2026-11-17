@@ -26,10 +26,10 @@ a file, asks a provider or runs a command.
 """
 from __future__ import annotations
 
-import html
 import re
 
 from i18n import Translator
+from page_util import escape as _e, stamp
 
 #: The tile keys, in the order the band shows them.
 TILES = ("sites", "apps", "disk", "keys", "agents", "cloud")
@@ -41,10 +41,6 @@ SEVERITY_CHIP = {"critical": "danger", "warning": "warn", "info": ""}
 NEEDS_LIMIT = 3
 #: Free-disk thresholds when the disk guard has not run (tools/disk_guard.py defaults).
 DISK_CRITICAL_GB, DISK_LOW_GB = 10, 25
-
-
-def _e(value: object) -> str:
-    return html.escape("" if value is None else str(value))
 
 
 def _shell_arg(value: str) -> str:
@@ -74,14 +70,6 @@ def _reason(degraded: object) -> str:
             if text:
                 return str(text)
     return ""
-
-
-def _stamp(value: object) -> str:
-    """An ISO time as the header writes it: `2026-01-02 03:04 UTC`; a date stays a date."""
-    s = "" if value is None else str(value)
-    if "T" in s:
-        return s[:16].replace("T", " ") + " UTC"
-    return s
 
 
 # --- the state band ---------------------------------------------------------
@@ -212,7 +200,7 @@ def disk_tile(payload: dict, t: Translator) -> dict:
               if used is not None else t.mark("memory not measured"))
     state = {"critical": "bad", "low": "warn"}.get(level, "ok")
     return _tile("disk", name, state, t.mark("{gb} GB free", gb=free), memory,
-                 t.mark("measured {date}", date=_stamp(m.get("measuredAt"))), "machine.html", t)
+                 t.mark("measured {date}", date=stamp(m.get("measuredAt"))), "machine.html", t)
 
 
 def keys_tile(payload: dict, t: Translator) -> dict:
@@ -251,7 +239,7 @@ def agents_tile(payload: dict, t: Translator) -> dict:
     # Workflows stalled are read from the store when the page is built, so without a sessions
     # reading the time is the header's "Measured", not a clock here (two builds a minute apart
     # would differ).
-    at = (t.mark("read {date}", date=_stamp(f["measuredAt"])) if f["measuredAt"]
+    at = (t.mark("read {date}", date=stamp(f["measuredAt"])) if f["measuredAt"]
           else t.mark("as of this page's measurement"))
     return _tile("agents", name, "warn" if stalled else "ok", value, sub, at, "agents.html", t)
 
@@ -265,7 +253,7 @@ def cloud_tile(payload: dict, t: Translator) -> dict:
         return _tile("cloud", name, "unmeasured", t.mark("not connected"),
                      t.mark("Not set up on this machine yet."), "", None, t)
     return _tile("cloud", name, "ok", t.mark("connected"), "",
-                 t.mark("checked {date}", date=_stamp(cloud.get("checkedAt"))) if cloud.get("checkedAt") else "",
+                 t.mark("checked {date}", date=stamp(cloud.get("checkedAt"))) if cloud.get("checkedAt") else "",
                  None, t)
 
 
@@ -352,7 +340,7 @@ def needs_html(payload: dict, t: Translator) -> str:
     items = f.get("items") or []
     total = (sum(int(counts.get(k) or 0) for k in ("critical", "warning", "info"))
              if counts else len(items))
-    when = _stamp(f.get("built_at"))
+    when = stamp(f.get("built_at"))
     groups = first_problems(f)
     if not total or not groups:
         body = (f'<p class="home-calm">{t.mark("Nothing needs you")}'

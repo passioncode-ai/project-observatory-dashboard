@@ -18,7 +18,8 @@ Every visible string is an English message id marked for the page script, like t
 from __future__ import annotations
 
 from i18n import Translator
-from machine_page import (EMPTY, GUARD_CLASSES, HEADING, NUM, ROWS, _e, _gigabytes, _table, _word, stamp)
+from machine_page import EMPTY, GUARD_CLASSES, HEADING, NUM, ROWS, _gigabytes, _table, _word
+from page_util import escape as _e, stamp
 
 HINT = ' class="machine-hint"'
 #: A value nobody measured (an en dash, as a table's empty cell).

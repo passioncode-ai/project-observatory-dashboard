@@ -3254,6 +3254,7 @@ function detail(id) {
     ${(() => {
       // Sessions per project: the account manager's live rows attributed here, the ledger's
       // sessions of the last day with the step their workflow last wrote, and the open workflows.
+      // A live row is "working" by `active` alone (OBS-599, sessions_view.session_rows), never by `state`.
       const PS = D.project_sessions || {};
       const ps = (PS.projects || {})[r.id];
       if (!ps) {
@@ -3265,7 +3266,7 @@ function detail(id) {
           (w.stalled ? ` ${chip(T("stalled"), "warn")}` : "") + (w.goal ? `<span class="none"> · ${E(w.goal)}</span>` : "")
         : (w && w.workflowId ? `<span class="mono">${E(w.workflowId)}</span>` : `<span class="none">${T("no workflow")}</span>`);
       const live = list(ps.live, T("no coding session runs in this project now"),
-        s => `<li>${E(s.agent || "?")} · ${s.state === "working" ? chip(T("working")) : chip(T("quiet"), "warn")}` +
+        s => `<li>${E(s.agent || "?")} · ${s.active === true ? chip(T("working")) : s.active === false ? chip(T("quiet"), "warn") : chip(T("not read"), "warn")}` +
              ` ${s.managed ? chip(T("managed")) : chip(T("not managed"), "warn")}` +
              `<span class="none">${s.folder_name ? " · " + E(s.folder_name) : ""}${s.account_group ? " · " + E(s.account_group) : ""}` +
              `${s.last_turn_at ? " · " + T("last turn") + " " + E(s.last_turn_at) : ""}</span></li>`);
