@@ -140,23 +140,19 @@ def _run(ks_action: str, body: dict, record: dict | None) -> dict:
     caller, relayed = ks._CALLER.set(CALLER), ks._RELAYED.set(record)
     try:
         return ks.ACTIONS[ks_action](body)
-    except ks.key_consumers.RevokeRefused as exc:
-        # The consumer guard's own code (OBS-594): consumer-in-use, consumer-source-unreadable, -unknown.
-        raise Refusal(exc.code, str(exc)[:500], consumers=exc.consumers, unread=exc.unread) from None
-    except ValueError as exc:
-        raise Refusal("invalid-argument", str(exc)[:500]) from None
-    except LookupError as exc:
-        text = str(exc)
-        code = ("held" if text.startswith("held:") else
-                "provider-refused" if text.startswith("the provider refused") else "not-found")
-        raise Refusal(code, text[:500]) from None
-    except urllib.error.HTTPError as exc:
-        raise Refusal("provider-refused", f"the provider refused: HTTP {exc.code}") from None
-    except RuntimeError as exc:
-        raise Refusal("unconfirmed", str(exc)[:500]) from None
-    except Exception as exc:                                       # noqa: BLE001  the route's 500, typed
-        raise Refusal("failed", f"the act failed ({type(exc).__name__}); inspect the local service "
-                                "configuration") from None
+    except Exception as exc:                                       # noqa: BLE001  typed by the route's own mapping
+        # The code is the key server's (`keyserver.refusal`, OBS-601), so the page's route and this tool name one
+        # refusal the same way: the consumer guard's own code (OBS-594), invalid-argument, held, provider-refused,
+        # not-found, unconfirmed, failed.
+        _status, code = ks.refusal(exc)
+        if isinstance(exc, ks.key_consumers.RevokeRefused):
+            raise Refusal(code, str(exc)[:500], consumers=exc.consumers, unread=exc.unread) from None
+        if isinstance(exc, urllib.error.HTTPError):
+            raise Refusal(code, f"the provider refused: HTTP {exc.code}") from None
+        if isinstance(exc, (ValueError, LookupError, RuntimeError)):
+            raise Refusal(code, str(exc)[:500]) from None
+        raise Refusal(code, f"the act failed ({type(exc).__name__}); inspect the local service "
+                            "configuration") from None
     finally:
         ks._RELAYED.reset(relayed)
         ks._CALLER.reset(caller)

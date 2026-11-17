@@ -132,6 +132,31 @@ _IDENTITY: contextvars.ContextVar[dict | None] = contextvars.ContextVar("identit
 #: spends or cannot be undone carries the operator's decision instead of a delegation token, and the journal row keeps
 #: it. Empty for the page and for an HTTP caller.
 _RELAYED: contextvars.ContextVar[dict | None] = contextvars.ContextVar("relayed", default=None)
+#: AN ACT'S EXCEPTION, BY TYPE (OBS-601). Every refusal this server answers is `{"error": {"code", "message"}}`, the
+#: shape the MCP tools answer; `refusal` names the code for an act's exception, and the MCP key acts (`key_acts.py`)
+#: take their codes from it too, so one refusal reads the same on the page's route and on the agent's tool. An act
+#: that raises a ValueError or a LookupError whose whole text is a code (`agent-disabled`, `unknown-job`) is answered
+#: with that code.
+BARE_CODE = re.compile(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)+")
+
+
+def refusal(exc: BaseException) -> tuple[int, str]:
+    """(HTTP status, code) for an act's exception."""
+    if isinstance(exc, key_consumers.RevokeRefused):
+        return 400, exc.code
+    if isinstance(exc, urllib.error.HTTPError):
+        return 502, "provider-refused"
+    text = str(exc)
+    if isinstance(exc, ValueError):
+        return 400, text if BARE_CODE.fullmatch(text) else "invalid-argument"
+    if isinstance(exc, LookupError):
+        if BARE_CODE.fullmatch(text):
+            return 404, text
+        return 404, ("held" if text.startswith("held:") else
+                     "provider-refused" if text.startswith("the provider refused") else "not-found")
+    if isinstance(exc, RuntimeError):
+        return 500, "unconfirmed"
+    return 500, "failed"
 
 
 def caller_name(raw: str | None) -> str:
@@ -793,6 +818,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # back in the answer. The shared shapes, the same ones the audit uses.
         if code >= 400 and isinstance(payload.get("error"), str):
             payload = {**payload, "error": credential_shape.redact(payload["error"])}
+        if code >= 400 and isinstance(payload.get("error"), dict) and isinstance(payload["error"].get("message"), str):
+            payload = {**payload, "error": {**payload["error"],
+                                            "message": credential_shape.redact(payload["error"]["message"])}}
         body = json.dumps(payload, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -802,6 +830,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header(name, value)
         self.end_headers()
         self.wfile.write(body)
+
+    def _fail(self, status: int, error_code: str, message: str, inside: dict | None = None, **beside) -> None:
+        """A typed refusal (OBS-601): `{"error": {code, message, ...inside}}`, as the MCP tools answer; `beside` keeps
+        the fields beside `error` that an earlier answer published."""
+        self._send(status, {"error": {"code": error_code, "message": message, **(inside or {})}, **beside})
 
     def _local_request(self) -> bool:
         """Validate the browser authority before serving HTML containing a token.
@@ -817,10 +850,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if port == 80:
             expected.update(("127.0.0.1", "localhost", "[::1]"))
         if len(hosts) != 1 or hosts[0].lower() not in expected:
-            self._send(403, {"error": "Host must name this loopback server and port"})
+            self._fail(403, "host-not-loopback", "Host must name this loopback server and port")
             return False
         if len(origins) > 1:
-            self._send(403, {"error": "one same-origin Origin is required"})
+            self._fail(403, "origin-not-same", "one same-origin Origin is required")
             return False
         if origins:
             origin = origins[0]
@@ -834,7 +867,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             except ValueError:
                 valid = False
             if not valid:
-                self._send(403, {"error": "Origin must match this loopback server and port"})
+                self._fail(403, "origin-not-same", "Origin must match this loopback server and port")
                 return False
         return True
 
@@ -844,7 +877,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         given = self.headers.get(HEADER) or ""
         if (len(self.headers.get_all(HEADER, [])) != 1
                 or not hmac.compare_digest(given.encode(), str(self.server.token).encode())):
-            self._send(401, {"error": "bad or missing token"})
+            self._fail(401, "unauthenticated", "bad or missing token")
             return False
         _CALLER.set(caller_name(self.headers.get(CALLER_HEADER)))
         return True
@@ -927,7 +960,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         page, ctype = self._page_for(route)
         if page is not None and ctype != "text/html":
             if not page.is_file():
-                self._send(404, {"error": "the pages have not been built — project-observatory full dashboard"})
+                self._fail(404, "not-built", "the pages have not been built: project-observatory full dashboard")
                 return
             body = page.read_bytes()
             self.send_response(200)
@@ -939,8 +972,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if page is not None:
             if not page.is_file():
-                self._send(404, {"error": "the dashboard has not been built — "
-                                          "project-observatory full dashboard"})
+                self._fail(404, "not-built", "the dashboard has not been built: project-observatory full dashboard")
                 return
             html = page.read_text(encoding="utf-8")
             # THE TOKEN IS GIVEN TO THE PAGE, not typed by a person. It is not a
@@ -967,7 +999,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send(200, json.loads(doc.read_text(encoding="utf-8"))
                        if doc.is_file() else {"credentials": [], "totals": {}})
             return
-        self._send(404, {"error": "no such path"})
+        self._fail(404, "no-such-path", "no such path")
 
     def _read_bounded(self) -> bytes | None:
         """The body when its framing is valid and within the limit, else None (the checks below answer).
@@ -992,30 +1024,30 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         early = self._read_bounded()
         if not self.path.startswith("/api/"):
-            self._send(404, {"error": "no such path"})
+            self._fail(404, "no-such-path", "no such path")
             return
         if not self._authorised():
             return
         what = self.path[len("/api/"):]
         if what in REFUSED:
-            self._send(403, {"error": REFUSED[what]})
+            self._fail(403, "stdin-only", REFUSED[what])
             return
         fn = ACTIONS.get(what)
         if not fn:
-            self._send(404, {"error": f"no action {credential_shape.echo(what)}"})
+            self._fail(404, "unknown-action", f"no action {credential_shape.echo(what)}")
             return
         if not self._delegated(what):
             return
         lengths = self.headers.get_all("Content-Length", [])
         if self.headers.get("Transfer-Encoding") or len(lengths) != 1:
-            self._send(400, {"error": "one Content-Length and no Transfer-Encoding are required"})
+            self._fail(400, "invalid-framing", "one Content-Length and no Transfer-Encoding are required")
             return
         try:
             if not re.fullmatch(r"[0-9]+", lengths[0]):
                 raise ValueError
             length = int(lengths[0])
             if length > BODY_LIMIT:
-                self._send(413, {"error": "request body is too large"})
+                self._fail(413, "body-too-large", "request body is too large")
                 return
             raw = early if early is not None else self.rfile.read(length)
             self._body_read = len(raw)
@@ -1025,30 +1057,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not isinstance(body, dict):
                 raise ValueError
         except (ValueError, UnicodeError):
-            self._send(400, {"error": "body must be a bounded JSON object with finite numbers"})
+            self._fail(400, "invalid-body", "body must be a bounded JSON object with finite numbers")
             return
         try:
             self._send(200, fn(body))
-        except key_consumers.RevokeRefused as exc:
-            # The consumer guard's typed refusal (OBS-594): its code and what it named, never a value.
-            self._send(400, {"error": str(exc), "code": exc.code, "consumers": exc.consumers,
-                             "unread": exc.unread})
-        except ValueError as exc:
-            self._send(400, {"error": str(exc)})
-        except LookupError as exc:
-            # A name the ledger or the provider does not know is the caller's
-            # mistake, not the server's — 404 with the door's sentence, never a
-            # 500 that reads as "the keyserver is broken".
-            self._send(404, {"error": str(exc)})
-        except urllib.error.HTTPError as exc:
-            self._send(502, {"error": f"the provider refused: HTTP {exc.code}"})
-        except RuntimeError as exc:
-            # An action that ran and could not confirm its effect (the vault
-            # without its receipt). Its sentence is written here, not by the
-            # caller, and is scrubbed like everything else this server says.
-            self._send(500, {"error": credential_shape.redact(str(exc))})
-        except Exception as exc:                                           
-            self._send(500, {"error": "action failed; inspect the local service configuration"})
+        except Exception as exc:                                           # noqa: BLE001  typed below, by `refusal`
+            status, code = refusal(exc)
+            if isinstance(exc, key_consumers.RevokeRefused):
+                # The consumer guard's typed refusal (OBS-594): its code and what it named, never a value. `code`,
+                # `consumers` and `unread` beside `error` are the fields its first answer published.
+                self._fail(status, code, str(exc), inside={"consumers": exc.consumers, "unread": exc.unread},
+                           code=exc.code, consumers=exc.consumers, unread=exc.unread)
+            elif isinstance(exc, urllib.error.HTTPError):
+                self._fail(status, code, f"the provider refused: HTTP {exc.code}")
+            elif isinstance(exc, (ValueError, LookupError, RuntimeError)):
+                # A name the ledger or the provider does not know is the caller's mistake, not the server's: 404
+                # with the door's sentence, never a 500 that reads as "the keyserver is broken". A RuntimeError is
+                # an action that ran and could not confirm its effect (the vault without its receipt). Every
+                # sentence is scrubbed on the way out, like everything else this server says.
+                self._fail(status, code, credential_shape.redact(str(exc)))
+            else:
+                self._fail(status, code, "action failed; inspect the local service configuration")
 
 
 class Server(socketserver.ThreadingMixIn, socketserver.TCPServer):

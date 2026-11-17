@@ -597,13 +597,12 @@ def destination_value(to: str) -> tuple[str | None, str | None]:
     return (text.strip() or None), None
 
 
-def consumer_sources(to: str) -> list:
-    """Where the copies of a destination's value are looked for: Heroku config vars, the local env files the
-    engine inventories, the services started from the slot. The destination itself is never one of them."""
+def _consumer_sources(to: str) -> list:
+    """Where the copies of a destination's value are looked for (`key_consumers.consumer_sources`, OBS-601): the
+    destination itself is never one of them."""
     sys.path.insert(0, str(ROOT / "tools"))
     import key_consumers
-    path = _destination_file(to)
-    return key_consumers.default_sources(_destination_slot(to), exclude=(str(path),) if path else ())
+    return key_consumers.consumer_sources(_destination_slot(to), exclude=_destination_file(to))
 
 
 def find_consumers(to: str) -> tuple[str | None, dict]:
@@ -612,9 +611,9 @@ def find_consumers(to: str) -> tuple[str | None, dict]:
     import key_consumers
     old, why = destination_value(to)
     if why:
-        return None, {"consumers": [], "degraded": [{"source": "destination", "reason": why}], "skipped": [],
-                      "_sources": {}}
-    return old, key_consumers.find(old, consumer_sources(to))
+        return None, {"consumers": [], "degraded": [{"source": "destination", "code": "destination-unreadable",
+                                                     "reason": why}], "skipped": [], "_sources": {}}
+    return old, key_consumers.find(old, _consumer_sources(to))
 
 
 def _deliver_to_consumers(found: dict, old: str | None, new: str, secret: str) -> list[dict]:
@@ -1655,13 +1654,14 @@ def _clear_hold(doc: dict, name: str, rec: dict, label: str, force: bool) -> Non
         old_value = key_consumers.retired_value(
             *slot, matches=lambda v: hashlib.sha256(v.encode("utf-8")).hexdigest() == predecessor)
     if old_value and new_value:
-        found = key_consumers.find(old_value, consumer_sources(dest))
+        found = key_consumers.find(old_value, _consumer_sources(dest))
     else:
         reason = why or ("the predecessor's value is not on this machine (no retired value of the slot has its "
                          "hash), so its copies cannot be looked for" if new_value else
                          "the slot holds no successor to deliver")
-        found = {"consumers": [], "degraded": [{"source": "predecessor", "reason": reason}], "skipped": [],
-                 "_sources": {}}
+        code = "destination-unreadable" if why else "predecessor-missing" if new_value else "no-successor"
+        found = {"consumers": [], "degraded": [{"source": "predecessor", "code": code, "reason": reason}],
+                 "skipped": [], "_sources": {}}
     early = key_consumers.blocks(found)
     outcomes = _deliver_to_consumers(found, old_value, new_value, secret) if new_value else []
     stuck = early + key_consumers.held(outcomes)
@@ -2377,12 +2377,12 @@ def byok_plan(issued: dict | None = None) -> dict:
             _label, admin = read_admin(acc)
             row = _request(f"/keys/{h}", admin).get("data") or {}
         except RuntimeError as exc:
-            degraded.append({"key": name, "reason": str(exc)[:160]})
+            degraded.append({"key": name, "code": "key-unreadable", "reason": str(exc)[:160]})
             unread.setdefault(acc, set()).add(h)
             continue
         ws = row.get("workspace_id")
         if not ws:
-            degraded.append({"key": name, "reason": "the provider names no workspace for it"})
+            degraded.append({"key": name, "code": "no-workspace", "reason": "the provider names no workspace for it"})
             unread.setdefault(acc, set()).add(h)
             continue
         space = spaces.setdefault(ws, {"workspace": ws, "account": acc, "accounts": set(), "want": {},
@@ -2395,7 +2395,8 @@ def byok_plan(issued: dict | None = None) -> dict:
         try:
             creds = _byok_credentials(admin, ws)
         except RuntimeError as exc:
-            degraded.append({"workspace": ws, "reason": f"credentials unreadable: {str(exc)[:120]}"})
+            degraded.append({"workspace": ws, "code": "credentials-unreadable",
+                             "reason": f"credentials unreadable: {str(exc)[:120]}"})
             continue
         keep_unread = set().union(*(unread.get(a, set()) for a in space["accounts"]))
         for cred in creds or [None]:
@@ -2409,7 +2410,8 @@ def byok_plan(issued: dict | None = None) -> dict:
                         "excluded": sorted(space["excluded"].values()),
                         "target": sorted(target)})
             if len(creds) > 1:
-                degraded.append({"workspace": ws, "reason": f"{len(creds)} openai credentials; each is synced"})
+                degraded.append({"workspace": ws, "code": "several-credentials",
+                                 "reason": f"{len(creds)} openai credentials; each is synced"})
     return {"workspaces": out, "degraded": degraded}
 
 

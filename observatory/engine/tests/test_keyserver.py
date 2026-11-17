@@ -176,7 +176,7 @@ def test_a_route_reaches_the_door_and_the_door_is_a_thing_that_exists():
         check("enable likewise", code == 200 and d.get("disabled") is False, f"{code} {d}")
         code, d = call(port, "/api/disable", token=token, body={"name": "ghost"}, caller="test")
         check("an unknown name is 404 with the door's sentence, never a 500",
-              code == 404 and "ghost" in d.get("error", ""), f"{code} {d}")
+              code == 404 and "ghost" in d["error"]["message"], f"{code} {d}")
         code, d = call(port, "/api/rotate-key", token=token, body={"name": "alpha"}, caller="test")
         check("rotate-key rotates through the door and returns no value",
               code == 200 and d.get("rotations") == 2 and "key" not in {k.lower() for k in d}, f"{code} {d}")
@@ -184,7 +184,7 @@ def test_a_route_reaches_the_door_and_the_door_is_a_thing_that_exists():
         check("`rotate` itself stays refused — that is the vault's stdin verb", code == 403, f"{code} {d}")
         code, d = call(port, "/api/limit", token=token, body={"label": "alpha", "limit": 5}, caller="test")
         check("a provider refusal on limit is 404 with the reason, not a NameError",
-              code == 404 and "provider says no" in d.get("error", ""), f"{code} {d}")
+              code == 404 and "provider says no" in d["error"]["message"], f"{code} {d}")
         code, d = call(port, "/api/disable", token=token, body={}, caller="test")
         check("no name is 400", code == 400, f"{code} {d}")
         rows = [json.loads(l) for l in keyserver.AUDIT.read_text(encoding="utf-8").splitlines() if l.strip()]

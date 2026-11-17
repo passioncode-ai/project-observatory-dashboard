@@ -1597,15 +1597,6 @@ def _rotate_locked(label: str, value: str, expires_on: str | None = None) -> int
     return 2
 
 
-def consumer_sources(rec: dict) -> list:
-    """Where the other copies of an installed token's value are looked for before it is revoked (OBS-594): Heroku
-    config vars, the local env files the engine inventories, the services started from its vault slot. Tests
-    replace it."""
-    import key_consumers
-    slot = tuple(rec["vault"].split("/")) if rec.get("vault") else None
-    return key_consumers.default_sources(slot)
-
-
 def cmd_revoke(label: str, forget: bool = False) -> int:
     with records_lock():
         return _revoke_locked(label, forget)
@@ -1634,7 +1625,7 @@ def _revoke_locked(label: str, forget: bool) -> int:
     # file, a service started from the slot) refuses, and so does a source that could not be read.
     import key_consumers
     try:
-        key_consumers.revoke_guard(label, {}, consumer_sources(rec), value=value)
+        key_consumers.revoke_guard(label, {}, key_consumers.consumer_sources(rec.get("vault")), value=value)
     except key_consumers.RevokeRefused as exc:
         raise DoorError(f"refused ({exc.code}): {exc}; nothing was revoked and the record is kept") from None
     if not revoke_and_prove(value):
