@@ -228,6 +228,8 @@ BOUNDARY += ('vault_copy',)
 BOUNDARY += ('access_binding',)
 # OBS-260: the secret prompt's server half: agent bindings, the node's request queue, the job, no value anywhere.
 BOUNDARY += ('secret_prompt',)
+# OBS-590: a cancel asks the runner first and stops it by force only after a bounded wait, on every OS.
+BOUNDARY += ('jobs_cancel',)
 # OBS-264, OBS-276: a key shared with another person's estate (contract DEC-0142): the protocol over the contract's
 # vectors, both nodes' stores against an in-process mailbox, and `full share` between two workspaces.
 BOUNDARY += ('node_peer_share', 'shares', 'share_cli')
@@ -356,6 +358,8 @@ BOUNDARY += ('mcp_supply',)
 BOUNDARY += ('key_source',)
 # OBS-559 part 2 (CP-18): the key page's acts as MCP tools, through the key server's own functions and a stubbed door.
 BOUNDARY += ('key_acts',)
+# OBS-559, the operations verbs (backup, disk, update, maintenance) as one MCP tool, through the CLI's own functions.
+BOUNDARY += ('ops_acts',)
 SUITES = LEGACY + BOUNDARY
 #: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
 #: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.
@@ -405,6 +409,8 @@ ROOT_FILES = (
     'configuration_door.py',
     # The key page's acts for an agent (OBS-559 part 2).
     'key_acts.py',
+    # The operations verbs for an agent (OBS-559, backup, disk, update, maintenance).
+    'ops_acts.py',
     # The supply-chain watch over MCP servers (OBS-555).
     'mcp_supply.py',
     # The Installed tools page's view (OBS-552).

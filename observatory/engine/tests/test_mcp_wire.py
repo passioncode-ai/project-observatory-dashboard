@@ -37,7 +37,7 @@ REQUIRED = ["observatory_status", "observatory_project", "observatory_timeline",
 #: Every tool name `mcp/server.py` publishes in `tools/list` (OSS-07: existing MCP tool
 #: names stay available). Changing this list is changing the published surface.
 GOLDEN_TOOLS = [
-    # observatory_* tools (43)
+    # observatory_* tools (44)
     "observatory_assistant_ask", "observatory_assistant_conversation", "observatory_assistant_status",
     "observatory_checkpoint_latest", "observatory_checkpoint_write", "observatory_configure",
     "observatory_credential_mark", "observatory_credentials",
@@ -46,7 +46,8 @@ GOLDEN_TOOLS = [
     "observatory_handoff_create", "observatory_handoff_get", "observatory_integrations", "observatory_issues",
     "observatory_key_act", "observatory_key_consumers", "observatory_key_sweep", "observatory_key_sweep_settle",
     "observatory_learn", "observatory_lesson",
-    "observatory_machine", "observatory_mcp_accept", "observatory_mcp_supply", "observatory_org_accounts", "observatory_org_keys", "observatory_org_selection",
+    "observatory_machine", "observatory_mcp_accept", "observatory_mcp_supply", "observatory_ops",
+    "observatory_org_accounts", "observatory_org_keys", "observatory_org_selection",
     "observatory_overview", "observatory_project", "observatory_propose", "observatory_recall",
     "observatory_record", "observatory_resolve", "observatory_search", "observatory_secret_request",
     "observatory_sessions", "observatory_ssh_keys",
@@ -191,6 +192,19 @@ async def run() -> None:
             check("a value pasted into a leak mark is refused and not echoed",
                   (pasted.get("error") or {}).get("code") == "invalid-argument" and fake not in json.dumps(pasted),
                   json.dumps(pasted)[:200])
+            # OBS-559, the operations verbs: an update without the operator's words is refused before any job
+            # starts, and a decrypted backup may not be written outside the workspace.
+            update = payload(await session.call_tool("observatory_ops", {"action": "update"}))
+            check("an update over MCP without a decision names the decision it needs",
+                  (update.get("error") or {}).get("code") == "operator-decision-required"
+                  and (update.get("error") or {}).get("action") == "engine.update"
+                  and (update.get("error") or {}).get("target") == "latest", json.dumps(update)[:200])
+            outside = payload(await session.call_tool("observatory_ops", {"action": "backups-decrypt",
+                                                                          "file": "a.obsnap",
+                                                                          "output": "../outside"}))
+            check("a decrypted backup is never written outside the workspace",
+                  (outside.get("error") or {}).get("code") == "invalid-argument" and outside.get("degraded") == [],
+                  json.dumps(outside)[:200])
             # OBS-553: the dependency inventory before any scan is an empty page that says why, never "none".
             deps = payload(await session.call_tool("observatory_dependencies", {"vulnerableOnly": True}))
             check("dependencies before a scan: no rows, and degraded names the missing inventory and watch",

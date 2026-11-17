@@ -47,11 +47,11 @@ first proves the unmodified list passes.
 
 | status | count |
 |---|---|
-| covered | 26 |
+| covered | 39 |
 | gate | 8 |
-| missing | 85 |
+| missing | 72 |
 
-119 actions: 15 dashboard (the reveal a gate, the other fourteen covered: the key page's eight acts, the Disk page's `configure`, the Agents page's `workflow-handoff`, the MCP page's `mcp-accept`, the issues notice's `issues-banner` and the Assistant page's `assistant` and `doctor`) and 104 CLI verbs (12 covered, 7 gates, 85 missing).
+119 actions: 15 dashboard (the reveal a gate, the other fourteen covered: the key page's eight acts, the Disk page's `configure`, the Agents page's `workflow-handoff`, the MCP page's `mcp-accept`, the issues notice's `issues-banner` and the Assistant page's `assistant` and `doctor`) and 104 CLI verbs (25 covered, 7 gates, 72 missing).
 79 top-level commands are excluded by name and the `test*` and `scan-*` families by prefix.
 
 Covered today: `workflow handoff` (`observatory_handoff_create`, `observatory_handoff_accept`), `workflow
@@ -65,7 +65,11 @@ close` (`observatory_checkpoint_write` with `close`), `org select` (`observatory
 issues notice's `issues-banner` action (`observatory_issues`, OBS-557), the Assistant page's `assistant` action (the
 assistant's tools and `fabric.job.get`/`fabric.job.cancel`) and `doctor` action (`observatory_doctor`), OBS-560, and the key
 page's eight acts (OBS-559 part 2, [`key-tools.md`](key-tools.md)): `mint`, `limit`, `disable`, `enable`, `rotate-key` and
-`revoke` (`observatory_key_act`), `leak` and `annotate` (`observatory_credential_mark`).
+`revoke` (`observatory_key_act`), `leak` and `annotate` (`observatory_credential_mark`). The operations verbs (OBS-559,
+next wave, [`ops-tools.md`](ops-tools.md)) through `observatory_ops`, each a job: `workspace-backup` (with
+`--pause-writers`), `machine-backup now`, `backups migrate` and `backups decrypt`, `cleanup --apply`, `disk-guard
+--apply`, `update --apply`, `maintain run`, `ensure`, `uninstall` and `app`, and `auto-update on` and `off`; the five
+that delete or are hard to undo take the operator's words.
 
 Gates: the reveal of a value to a person, `backup-passphrase set` and `assistant secret` (typed secrets),
 `backup-passphrase show` (a value shown to a person), `assistant ceremony` and `share confirm`/`differ`
