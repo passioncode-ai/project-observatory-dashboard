@@ -910,6 +910,16 @@ def observatory_machine(
         out["guard"]["largeFiles"] = (coverage.get("files") or [])[:MACHINE_TOP]
         out["guard"]["largeFilesCoverage"] = {k: coverage.get(k) for k in
                                                 ("measured_at", "complete", "errors", "budget_exhausted", "scope")}
+        # The manual tier's unused Docker volumes per VM (OBS-584): listed for their owner, never removed.
+        volumes = g.get("vmVolumes") or {}
+        out["guard"]["vmVolumes"] = ({"at": volumes.get("at"), "volumes": (volumes.get("volumes") or [])[:MACHINE_TOP],
+                                      "unread": volumes.get("unread") or []} if volumes else None)
+        # The user's temporary folder (OBS-585): size, its busiest classes, the classes growing past the threshold
+        # with the executables writing there, and the last removal. `null` when the guard has not sampled it.
+        temp = g.get("userTemp") or {}
+        out["guard"]["userTemp"] = ({**{k: temp.get(k) for k in ("at", "hours", "entries", "gb", "complete",
+                                                                  "window_hours", "growing", "last_removed")},
+                                     "classes": (temp.get("classes") or [])[:MACHINE_TOP]} if temp else None)
         memory = g.get("memory") or {}
         out["guard"]["memory"] = {k: memory.get(k) for k in ("measured_at", "swap_gb", "swap_reason")}
     return out

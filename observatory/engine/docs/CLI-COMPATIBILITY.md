@@ -91,7 +91,10 @@ It is not repurposed. `workspace-backup` creates a full private workspace snapsh
 `upgrade` previews by default; `restore SNAPSHOT` restores into a new empty
 workspace. Mutating backup/upgrade operations require the documented
 `--writers-stopped` declaration because older and external writers do not obey
-new locks. No command activates a scheduler while restoring.
+new locks. `workspace-backup --pause-writers` (OBS-583) is the other way: the engine
+stops and restarts its own tick and server around the copy, as the daily snapshot of
+`maintain` does, and refuses while a tick, an update or a maintenance pass runs.
+No command activates a scheduler while restoring.
 Since 0.4.1 `restore` also accepts an encrypted `.obsnap` file, and the default
 `workspace-backup` output is exported encrypted to the backups root when a
 passphrase is configured; an explicit `--output DIR` keeps its plaintext meaning

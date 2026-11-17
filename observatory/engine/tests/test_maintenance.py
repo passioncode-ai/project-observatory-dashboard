@@ -1476,6 +1476,110 @@ class Pass(Base):
         self.assertNotIn(SECRET_MARK, text)
 
 
+class PauseWriters(Base):
+    """`full workspace-backup --pause-writers` (OBS-583): the daily snapshot's own path, on demand."""
+
+    def setUp(self):
+        super().setUp()
+        self.services = FakeServices()
+        launchd = patch.object(M, "_services", return_value=self.services)
+        launchd.start()
+        self.addCleanup(launchd.stop)
+        # The command line passes no store: the OS credential store is this fake, never the machine's.
+        keychain = patch.object(vault, "SecretStore", return_value=self.store)
+        keychain.start()
+        self.addCleanup(keychain.stop)
+
+    def test_it_stops_the_jobs_snapshots_and_starts_them_again(self):
+        result = M.backup_pausing_writers(self.home, at=AT, store=self.store, sleep=lambda s: None)
+        self.assertEqual(result["result"], "taken", result)
+        self.assertTrue(result["encrypted"], "a generated passphrase encrypts the copy")
+        self.assertEqual(self.services.calls, [("stop", "tick"), ("stop", "server"),
+                                               ("start", "tick"), ("start", "server")])
+        files = list(vault.root_info(self.home)["path"].glob("daily-*.obsnap"))
+        self.assertEqual(len(files), 1)
+        self.assertEqual(files[0].read_bytes()[:7], b"OBSENC1")
+        state = M.read_state(self.home)
+        self.assertEqual((state["snapshot"]["result"], state["snapshot"]["at"]), ("taken", M.iso(AT)))
+        self.assertEqual(state["snapshot"]["file"], files[0].name)
+        self.assertNotIn("stopped_services", state)
+        self.assertNotIn(SECRET_MARK, json.dumps(result) + json.dumps(state))
+
+    def test_the_daily_step_and_the_command_share_one_path(self):
+        seen = []
+        real = M.snapshot_pausing_writers
+
+        def spy(*args, **kwargs):
+            seen.append(args[0])
+            return real(*args, **kwargs)
+        with patch.object(M, "snapshot_pausing_writers", spy):
+            self.assertEqual(M.step_snapshot(self.home, {}, AT, self.services, sleep=lambda s: None)["result"],
+                             "taken")
+            self.assertEqual(M.backup_pausing_writers(self.home, at=AT + datetime.timedelta(minutes=5),
+                                                      store=self.store, sleep=lambda s: None)["result"], "taken")
+        self.assertEqual(seen, [self.home, self.home])
+
+    def test_an_update_running_refuses_and_stops_nothing(self):
+        import engine_update
+        with engine_update.update_lock(self.home):
+            with self.assertRaises(M.PauseWritersRefused) as caught:
+                M.backup_pausing_writers(self.home, at=AT, store=self.store, sleep=lambda s: None)
+        self.assertEqual(caught.exception.code, "update-running")
+        self.assertEqual(self.services.calls, [])
+        self.assertNotIn("snapshot", M.read_state(self.home))
+
+    def test_a_running_tick_refuses_and_stops_nothing(self):
+        with workspace_upgrade.operation_lock(self.home):
+            with self.assertRaises(M.PauseWritersRefused) as caught:
+                M.backup_pausing_writers(self.home, at=AT, store=self.store, sleep=lambda s: None)
+        self.assertEqual(caught.exception.code, "tick-running")
+        self.assertEqual(self.services.calls, [])
+
+    def test_a_maintenance_pass_running_refuses(self):
+        with M.pass_lock(self.home) as held:
+            self.assertTrue(held)
+            with self.assertRaises(M.PauseWritersRefused) as caught:
+                M.backup_pausing_writers(self.home, at=AT, store=self.store, sleep=lambda s: None)
+        self.assertEqual(caught.exception.code, "maintenance-running")
+        self.assertEqual(self.services.calls, [])
+
+    def test_a_failed_snapshot_still_starts_the_jobs_and_is_recorded(self):
+        with patch.object(workspace_upgrade, "snapshot", side_effect=OSError("synthetic disk error")):
+            result = M.backup_pausing_writers(self.home, at=AT, store=self.store, sleep=lambda s: None)
+        self.assertEqual(result["result"], "failed")
+        self.assertEqual([c for c in self.services.calls if c[0] == "start"], [("start", "tick"), ("start", "server")])
+        state = M.read_state(self.home)
+        self.assertIn("synthetic disk error", state["snapshot_failure"]["detail"])
+        self.assertNotIn("stopped_services", state)
+
+    def test_without_a_scheduler_it_snapshots_with_nothing_to_stop(self):
+        with patch.object(M, "_services", return_value=None):
+            result = M.backup_pausing_writers(self.home, at=AT, store=self.store, sleep=lambda s: None)
+        self.assertEqual(result["result"], "taken")
+        self.assertEqual(result["stopped"], [])
+
+    def test_the_command_line(self):
+        code, doc, err = self.cli("workspace-backup", "--pause-writers")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(doc["result"], "taken")
+        self.assertEqual(doc["stopped"], ["tick", "server"])
+        code, doc, err = self.cli("workspace-backup", "--pause-writers", "--output", str(self.base / "copy"))
+        self.assertEqual(code, 2)
+        self.assertIn("--pause-writers", err)
+        self.assertFalse((self.base / "copy").exists())
+        with M.pass_lock(self.home):
+            code, doc, err = self.cli("workspace-backup", "--pause-writers", "--json")
+        self.assertEqual(code, 2)
+        self.assertEqual(doc["error"]["code"], "maintenance-running")
+
+    def test_a_failed_snapshot_exits_one(self):
+        with patch.object(workspace_upgrade, "snapshot", side_effect=OSError("synthetic disk error")):
+            code, doc, err = self.cli("workspace-backup", "--pause-writers", "--json")
+        self.assertEqual(code, 1)
+        self.assertEqual(doc["error"]["code"], "snapshot-failed")
+        self.assertIn(("start", "server"), self.services.calls)
+
+
 class Guard(Base):
     """The disk guard runs first in every pass, only with features.auto_cleanup on."""
 

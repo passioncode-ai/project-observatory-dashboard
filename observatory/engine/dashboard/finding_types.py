@@ -142,6 +142,7 @@ LABELS: dict[str, str] = {
     "machine.disk_low": "Machine disk low",
     "machine.vm_disk_at_risk": "Virtual machine at risk on a full disk",
     "vm.disk_errors": "Virtual machine disk file system errors",
+    "disk.tmp_growth": "Temporary folder growing fast",
     "machine.guard_stopping": "Disk guard Git cleanup keeps stopping",
     "machine.guard_degraded": "Disk guard measurement incomplete",
     "machine.guard_idle": "Disk guard not running",
