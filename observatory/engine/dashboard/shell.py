@@ -526,7 +526,7 @@ def page_html(template: str, page: str, payload: dict, locale: str = "en") -> st
     # (a comment in the script, a placeholder another builder fills) are left as they are.
     fills = {
         "PAGE": lambda: page,
-        "TITLE": lambda: html.escape(f"{t(title)} — {TITLE_SUFFIX}"),
+        "TITLE": lambda: html.escape(f"{t(title)} · {TITLE_SUFFIX}"),
         "PAGE_TITLE": lambda: html.escape(title),
         "H1": lambda: t.mark(title, tag="h1"),
         "SUB": lambda: t.mark(QUESTIONS[page]) if page in QUESTIONS else "",

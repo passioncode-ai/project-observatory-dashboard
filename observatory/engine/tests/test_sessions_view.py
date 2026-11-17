@@ -72,7 +72,8 @@ def attribute(folder: str) -> str | None:
 
 
 class Workspace:
-    def __init__(self, survey: dict | None = None, ledger_sessions: int = 0) -> None:
+    def __init__(self, survey: dict | None = None, ledger_sessions: int = 0,
+                 ledger_projects: tuple[str | None, ...] = ()) -> None:
         self.dir = tempfile.TemporaryDirectory(prefix="observatory-sessions-")
         self.home = pathlib.Path(self.dir.name)
         raw = self.home / "store" / "raw"  # paths-check: allow: a workspace home the caller names, not this engine's
@@ -85,6 +86,9 @@ class Workspace:
         for i in range(ledger_sessions):
             L.append(conn, owner="agent:claude-code", kind="session", statement="turn",
                      project_id="project:alpha-web", session_id=f"0f8fad5b-d9cb-469f-a165-7086772895{i:02d}")
+        for i, project in enumerate(ledger_projects):
+            L.append(conn, owner="agent:claude-code", kind="session", statement="turn",
+                     project_id=project, session_id=f"7c9e6679-7425-40de-944b-e07fc1f904{i:02d}")
         conn.commit()
         conn.close()
 
@@ -122,6 +126,34 @@ class Summary(unittest.TestCase):
         self.assertTrue(doc["sources"]["ledger"]["at"])
         self.assertEqual(doc["degraded"], [])
 
+    def test_active_in_the_last_hour_is_a_subset_of_running(self) -> None:
+        """OBS-597: a ledger turn of a session whose process has ended does not count. A running session
+        counts when its project holds a session with a turn in the last hour; a project's count is at most
+        its running sessions and at most its recent ledger sessions."""
+        ws = Workspace(SURVEY, ledger_sessions=3,
+                       ledger_projects=("project:beta-api", "project:gamma-ended", "project:gamma-ended", None))
+        self.addCleanup(ws.close)
+        doc = sessions_view.summary(ws.home, now=NOW, runner=Runner(manager_answer(SESSIONS)),
+                                    manager="/usr/local/bin/switchboard", attribute=attribute)
+        # alpha-web: 2 running, 3 ledger -> 2; beta-api: 1 running, 1 ledger -> 1; gamma-ended: no process -> 0;
+        # no project: 1 running (codex scratch), 1 ledger -> 1.
+        self.assertEqual(doc["active_hour"], 4)
+        self.assertEqual(doc["ledger_hour"], 7)
+        self.assertLessEqual(doc["active_hour"], sum(doc["processes"].values()))
+        self.assertEqual(doc["degraded"], [])
+        f = sessions_view.facets(doc)
+        self.assertEqual((f["running"], f["activeHour"], f["ledgerHour"]), (4, 4, 7))
+
+    def test_an_ended_session_alone_counts_nothing(self) -> None:
+        ws = Workspace(SURVEY, ledger_projects=("project:gamma-ended",))
+        self.addCleanup(ws.close)
+        doc = sessions_view.summary(ws.home, now=NOW, runner=Runner(manager_answer(SESSIONS)),
+                                    manager="/usr/local/bin/switchboard", attribute=attribute)
+        self.assertEqual((doc["active_hour"], doc["ledger_hour"]), (0, 1))
+        empty = sessions_view.summary(ws.home, now=NOW, runner=Runner(manager_answer([])),
+                                      manager="/usr/local/bin/switchboard", attribute=attribute)
+        self.assertEqual((empty["active_hour"], empty["ledger_hour"]), (0, 1))
+
     def test_each_session_carries_its_project_and_never_a_path(self) -> None:
         doc = self.run_summary(Runner(manager_answer(SESSIONS)))
         by_pid = {s["pid"]: s for s in doc["sessions"]}
@@ -141,13 +173,16 @@ class Summary(unittest.TestCase):
         self.assertEqual(runner.calls, [], "nothing is run when no manager is installed")
         self.assertIsNone(doc["managed"])
         self.assertEqual(doc["sources"]["manager"]["state"], "not-installed")
-        self.assertEqual([d["code"] for d in doc["degraded"]], ["not-installed"])
         # The process survey stands in for the count of what runs.
         self.assertEqual(doc["processes"], {"claude-code": 3, "codex": 1})
         self.assertEqual(doc["sources"]["processes"]["from"], "machine-survey")
         self.assertEqual(doc["sources"]["processes"]["at"], "2026-11-14T17:25:00Z")
         self.assertEqual(doc["sessions"], [])
-        self.assertEqual(doc["active_hour"], 2)
+        # OBS-597: without the manager's rows no running session can be joined to a ledger turn, so the
+        # facet is not read; the ledger's own count stays beside it under its own name.
+        self.assertIsNone(doc["active_hour"])
+        self.assertEqual(doc["ledger_hour"], 2)
+        self.assertEqual([d["code"] for d in doc["degraded"]], ["not-installed", "needs-session-list"])
 
     def test_malformed_answer_is_named_and_falls_back(self) -> None:
         for out in ("not json", json.dumps({"ok": True}), json.dumps({"data": {"sessions": "x"}}), "[]"):
@@ -191,6 +226,7 @@ class Summary(unittest.TestCase):
                                     attribute=attribute)
         self.assertIsNone(doc["managed"])
         self.assertIsNone(doc["active_hour"])
+        self.assertIsNone(doc["ledger_hour"])
         self.assertEqual(doc["processes"], {})
         self.assertIsNone(doc["sources"]["processes"]["from"])
         codes = [d["code"] for d in doc["degraded"]]
@@ -248,7 +284,8 @@ class OneCount(unittest.TestCase):
         self.assertEqual((f["running"], f["managed"], f["activeHour"]), (4, 1, 2))
         self.assertEqual(f["processesFrom"], "manager")
         empty = sessions_view.facets(None)
-        self.assertEqual((empty["running"], empty["managed"], empty["activeHour"]), (None, None, None))
+        self.assertEqual((empty["running"], empty["managed"], empty["activeHour"], empty["ledgerHour"]),
+                         (None, None, None, None))
 
     def test_home_and_agents_show_the_same_numbers(self) -> None:
         import agents_page
@@ -278,6 +315,11 @@ class OneCount(unittest.TestCase):
         page = _plain(agents_page.agents_html(payload, t))
         self.assertNotRegex(page, r"Managed\s*0\b")
         self.assertIn("the account manager is not installed", page)
+        # OBS-597: the ledger's count is named as what it is, never shown as the running sessions' activity.
+        self.assertNotIn("2 active in the last hour", _plain(tile["sub"]))
+        self.assertIn("activity not read", _plain(tile["sub"]))
+        self.assertNotRegex(page, r"Active in the last hour\s*2\b")
+        self.assertIn("2 sessions recorded a turn; which of them still run needs the account manager", page)
 
 
 class Finding(unittest.TestCase):

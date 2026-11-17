@@ -14,7 +14,7 @@ import json
 import pathlib
 import re
 
-from i18n import Translator
+from i18n import NO_VALUE, Translator
 
 ROWS = 20
 #: Attributes built outside the f-strings: Python 3.11 allows no backslash and no
@@ -27,8 +27,8 @@ TOOLS_LINK = ' href="tools.html"'
 #: clean" over checkouts nobody looked at is a claim, not an empty state — and
 #: each survey names the command that runs it: the git tables are refreshed by
 #: `full cleanup`, not `full machine` (audit A42).
-UNMEASURED = "Not measured yet — run project-observatory full machine"
-UNMEASURED_GIT = "Not measured yet — run project-observatory full cleanup"
+UNMEASURED = "Not measured yet: run project-observatory full machine"
+UNMEASURED_GIT = "Not measured yet: run project-observatory full cleanup"
 
 
 def _e(v) -> str:
@@ -55,7 +55,7 @@ def _gigabytes(gb, t: Translator) -> str:
     decimal separator follow the reader's language (a Russian build that mixed
     the English and the Russian unit on one screen was the audit's A42)."""
     if gb is None or isinstance(gb, bool) or not isinstance(gb, (int, float)):
-        return "—"
+        return NO_VALUE
     return t.mark("{size} GB", size=gb)
 
 
@@ -128,13 +128,13 @@ def summary_html(m: dict, t: Translator) -> str:
     tiles = [
         (t.mark("Memory in use"),
          t.mark("{used} / {total} GB", used=_gb(used), total=_gb(mem.get("total_mb")))
-         if used is not None and mem.get("total_mb") is not None else "—",
-         t.mark("swap {size} GB", size=swap) if swap is not None else t.mark("swap {size}", size="—")),
+         if used is not None and mem.get("total_mb") is not None else NO_VALUE,
+         t.mark("swap {size} GB", size=swap) if swap is not None else t.mark("swap {size}", size=NO_VALUE)),
         (t.mark("Free disk"), _gigabytes(disk.get("free_gb"), t),
-         t.mark("{percent}% of {total} GB", percent=disk.get("free_percent", "—"), total=total_gb)
-         if isinstance(total_gb, (int, float)) else t.mark("{percent}% of {total}", percent=disk.get("free_percent", "—"),
-                                                          total="—")),
-        (t.mark("Processes"), _e(procs.get("count") if procs.get("count") is not None else "—"),
+         t.mark("{percent}% of {total} GB", percent=disk.get("free_percent", NO_VALUE), total=total_gb)
+         if isinstance(total_gb, (int, float)) else t.mark("{percent}% of {total}", percent=disk.get("free_percent", NO_VALUE),
+                                                          total=NO_VALUE)),
+        (t.mark("Processes"), _e(procs.get("count") if procs.get("count") is not None else NO_VALUE),
          t.mark("{n} origins", n=len(procs.get("groups") or []))),
         (t.mark("Cleaned in 7 days"), _e(len(done)),
          auto + (" · " + _gigabytes(round(freed, 1), t) if freed else "")),
@@ -192,8 +192,8 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
     names = {r.get("id"): r.get("name") for r in payload.get("rows") or [] if isinstance(r, dict) and r.get("id")}
     parts.append(_table(t, "Memory by origin",
                         [("Origin", False), ("Processes", True), ("Sessions", True), ("Memory", True), ("CPU %", True)],
-                        [[_e(g["origin"]), _e(g["processes"]), _e(g.get("sessions") if g.get("sessions") is not None else "—"), _size(g.get("rss_mb"), t),
-                          t.number(g["cpu"]) if g.get("cpu") is not None else "—"]
+                        [[_e(g["origin"]), _e(g["processes"]), _e(g.get("sessions") if g.get("sessions") is not None else NO_VALUE), _size(g.get("rss_mb"), t),
+                          t.number(g["cpu"]) if g.get("cpu") is not None else NO_VALUE]
                          for g in (procs.get("groups") or [])[:ROWS]],
                         "No process survey yet."))
     parts.append(_table(t, "Largest processes",
@@ -256,12 +256,12 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
             if d.get("code") == "not-surveyed":
                 # Each survey names the command that runs it (machine_view._load).
                 if "full cleanup" in str(d.get("reason") or ""):
-                    return t.mark("not surveyed yet — enable features.machine_watch, or run project-observatory full cleanup")
-                return t.mark("not surveyed yet — enable features.machine_watch, or run project-observatory full machine")
+                    return t.mark("not surveyed yet: enable features.machine_watch, or run project-observatory full cleanup")
+                return t.mark("not surveyed yet: enable features.machine_watch, or run project-observatory full machine")
             if d.get("code") == "unreadable":
                 return t.mark("unreadable: {error}", error=d.get("error", ""))
             return t.known(d.get("reason"))
-        items = "".join(f'<li><span class="mono">{_e(d.get("source"))}</span> — {reason(d)}</li>' for d in degraded)
+        items = "".join(f'<li><span class="mono">{_e(d.get("source"))}</span>: {reason(d)}</li>' for d in degraded)
         parts.append(f'<section class="card panel">{t.mark("Not measured", tag="h2", attrs=HEADING)}<ul>{items}</ul></section>')
     parts.append("</section>")
     return "".join(parts)

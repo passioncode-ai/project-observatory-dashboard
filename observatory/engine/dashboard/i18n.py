@@ -49,6 +49,9 @@ LOCALE_DIR = Path(__file__).with_name("locales")
 #: Attributes whose value is reader-facing text and is therefore translated.
 TRANSLATED_ATTRIBUTES = ("aria-label", "placeholder", "title")
 _PLACEHOLDER = re.compile(r"\{([a-z_][a-z0-9_]*)\}")
+#: What a cell with no value shows on every page: an en dash, never a guess and never an em dash
+#: (OBS-596). `tools_page.UNKNOWN`, `key_sweep_page.UNKNOWN` and `mcp_page.NONE` are this value.
+NO_VALUE = "\u2013"
 
 
 class LocaleError(ValueError):

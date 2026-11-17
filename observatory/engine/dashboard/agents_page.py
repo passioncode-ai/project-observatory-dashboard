@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import html
 
-from i18n import Translator
+from i18n import NO_VALUE, Translator
 
 HEADING = ' class="machine-h"'
 NUM = ' class="num"'
@@ -39,21 +39,21 @@ def _e(v) -> str:
 def _project(pid, names: dict | None) -> str:
     """A project as its registry name, linked to its panel on the Projects page."""
     if not pid:
-        return "—"
+        return NO_VALUE
     name = (names or {}).get(pid) or pid
     return f'<a href="projects.html#{_e(pid)}">{_e(name)}</a>'
 
 
 def _stamp(value) -> str:
     text = str(value or "")
-    return text.replace("T", " ").replace("Z", " UTC") if text else "—"
+    return text.replace("T", " ").replace("Z", " UTC") if text else NO_VALUE
 
 
 def _age(t: Translator, seconds) -> str:
     """A duration as a marked element, so the page's language switch translates
     its unit too: a value passed as an argument would keep the build's language."""
     if seconds is None:
-        return "—"
+        return NO_VALUE
     if seconds < 120:
         return t.mark("{n} s", n=seconds)
     if seconds < 7200:
@@ -68,7 +68,7 @@ def _who(executor: dict | None) -> str:
     placed into markup, passed raw where `t.mark` escapes it."""
     executor = executor or {}
     parts = [executor.get("provider"), executor.get("model"), executor.get("accountRef")]
-    return " · ".join(str(p) for p in parts if p) or "—"
+    return " · ".join(str(p) for p in parts if p) or NO_VALUE
 
 
 #: A checkpoint dot's tooltip, one sentence per step status so each language
@@ -105,7 +105,7 @@ NEED_WORDS = {"stalled": "need@@stalled", "handoff-lapsed": "need@@handoff lapse
 
 
 #: What a facet that was not read shows in place of its number: never 0 (CP-03).
-NOT_READ = "\u2013"
+NOT_READ = NO_VALUE
 
 
 def _session_tiles(f: dict, t: Translator) -> list[tuple[str, object, str]]:
@@ -131,7 +131,12 @@ def _session_tiles(f: dict, t: Translator) -> list[tuple[str, object, str]]:
                else t.mark("the account manager is not installed", tag="span", attrs=sub) if state == "not-installed"
                else t.mark("not read yet", tag="span", attrs=sub) if state is None
                else t.mark("the account manager did not answer", tag="span", attrs=sub))
-    active = (t.mark("a turn recorded in the ledger", tag="span", attrs=sub) if f.get("activeHour") is not None
+    # OBS-597: active is the running sessions with a ledger turn; without the manager's list the ledger's own
+    # count is named as what it is, never shown as the running sessions' activity.
+    active = (t.mark("running, with a turn recorded in the ledger", tag="span", attrs=sub)
+              if f.get("activeHour") is not None
+              else t.mark("{n} sessions recorded a turn; which of them still run needs the account manager",
+                          tag="span", attrs=sub, n=f["ledgerHour"]) if f.get("ledgerHour") is not None
               else t.mark("the ledger could not be read", tag="span", attrs=sub))
     return [("Sessions running", f.get("running"), running), ("Managed", f.get("managed"), managed),
             ("Active in the last hour", f.get("activeHour"), active)]
@@ -217,7 +222,7 @@ def _what(n: dict, t: Translator) -> str:
         what = t.mark("key {name} ({env}) could not be checked: the vault could not be read",
                       name=n.get("name"), env=n.get("env"))
     else:
-        what = t.mark("key {name} ({env}) is only in a .env — move it to the vault",
+        what = t.mark("key {name} ({env}) is only in a .env: move it to the vault",
                       name=n.get("name"), env=n.get("env"))
     return what
 
@@ -284,9 +289,9 @@ def _lanes(w: dict, t: Translator) -> str:
     for i, s in enumerate(w.get("segments") or []):
         arrived = s.get("arrivedBy") or {}
         if i > 0 or arrived:
-            reason = arrived.get("reason") or "—"
+            reason = arrived.get("reason") or NO_VALUE
             segs.append(f'<span class="agents-arrow" aria-hidden="true">→ '
-                        f'{_m(t, "handoff", reason) if reason != "—" else "—"}</span>')
+                        f'{_m(t, "handoff", reason) if reason != NO_VALUE else NO_VALUE}</span>')
         dots = "".join(
             f'<span class="agents-dot st-{_e(c.get("status") or "unknown")}"'
             f'{t.attr("title", DOT_TITLES.get(c.get("status"), DOT_TITLE), step=c["stepId"], at=_stamp(c["at"]))}>'
@@ -321,7 +326,7 @@ def _events(w: dict, t: Translator) -> str:
     for o in w.get("offers") or []:
         state = t.mark("offered") if o["state"] == "offered" else _m(t, "lease-end", o["state"])
         items.append(f'<li>{t.date(_stamp(o.get("at")))}: {t.mark("handoff to")} {_e(_who(o.get("to")))} '
-                     f'({_m(t, "handoff", o.get("reason"))}) — {state}</li>')
+                     f'({_m(t, "handoff", o.get("reason"))}): {state}</li>')
     return f'<ol class="agents-events visually-hidden-list">{"".join(items)}</ol>'
 
 
@@ -343,7 +348,7 @@ def _workflow(w: dict, t: Translator, names: dict | None = None) -> str:
     head = (f'<summary><span class="mono">{_e(w["workflowId"])}</span> '
             f'{_chip(t, "workflow@@" + state, tone)} <b>{_e(w.get("goal"))}</b>'
             f'<span class="agents-meta">{_e((names or {}).get(w.get("projectId")) or w.get("projectId"))} · '
-            f'{t.mark("step {step}", step=step.get("stepId") or "—")} {_m(t, "step", step.get("status"))} · '
+            f'{t.mark("step {step}", step=step.get("stepId") or NO_VALUE)} {_m(t, "step", step.get("status"))} · '
             f'{t.mark("last checkpoint")} {_age(t, w.get("silentSeconds"))} {t.mark("ago")} · '
             f'{_e(_who(lease.get("executor")))} · {t.mark("{n} handoff(s)", n=w.get("handoffs", 0))}</span></summary>')
     body = [_lanes(w, t), _events(w, t)]
@@ -376,7 +381,7 @@ def _sessions(sessions: list[dict], t: Translator, names: dict | None = None) ->
             f'<td{t.attr("data-label", "Project")}>{_project(s.get("projectId"), names)}</td>'
             f'<td{t.attr("data-label", "Last turn")}>{t.date(_stamp(s.get("lastTurnAt")))}</td>'
             f'<td{t.attr("data-label", "Turns")} class="num">{t.number(s.get("turns"))}</td>'
-            f'<td{t.attr("data-label", "Workflow")}><span class="mono">{_e(s.get("workflowId") or "—")}</span></td>'
+            f'<td{t.attr("data-label", "Workflow")}><span class="mono">{_e(s.get("workflowId") or NO_VALUE)}</span></td>'
             "</tr>")
     return (f'<section class="card panel">{t.mark("Recorded turns", tag="h2", attrs=HEADING)}'
             f'<table><thead><tr>{th}</tr></thead><tbody>{"".join(rows)}</tbody></table></section>')
@@ -432,9 +437,9 @@ def agents_html(payload: dict, t: Translator | None = None, live: bool = False) 
     if workflows:
         by_project: dict[str, list[dict]] = {}
         for w in workflows:
-            by_project.setdefault(w.get("projectId") or "—", []).append(w)
+            by_project.setdefault(w.get("projectId") or NO_VALUE, []).append(w)
         for pid, rows in sorted(by_project.items()):
-            parts.append(f'<h3 class="agents-project">{_project(pid, names) if pid != "—" else "—"}</h3>')
+            parts.append(f'<h3 class="agents-project">{_project(pid, names) if pid != NO_VALUE else NO_VALUE}</h3>')
             parts += [_workflow(w, t, names) for w in rows]
     elif not any(d.get("code") in ("no-store", "unreadable", "before-agent-memory")
                  for d in a.get("degraded") or []):
@@ -453,7 +458,7 @@ def agents_html(payload: dict, t: Translator | None = None, live: bool = False) 
             if code == "unreadable":
                 return t.mark("unreadable: {error}", error=d.get("reason", ""))
             return t.known(d.get("reason"))
-        items = "".join(f'<li><span class="mono">{_e(d.get("source"))}</span> — {reason(d)}</li>'
+        items = "".join(f'<li><span class="mono">{_e(d.get("source"))}</span>: {reason(d)}</li>'
                         for d in degraded)
         parts.append(f'<section class="card panel">{t.mark("Not read", tag="h2", attrs=HEADING)}<ul>{items}</ul></section>')
     parts.append(t.mark("Served by the local control server, a problem's button acts through it; opened as a file "

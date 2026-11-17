@@ -129,6 +129,30 @@ class AgentsPage(unittest.TestCase):
         page = agents_page.agents_html({"agents": self.view}, Translator("en"))
         self.assertNotIn(">project-observatory full workflow show", page)
 
+    def test_an_empty_value_shows_the_shared_mark_and_no_em_dash(self) -> None:
+        """OBS-596: every value the page has none for (no project, no handoff reason, no step, no age,
+        no executor) shows `i18n.NO_VALUE`, and no sentence joins its parts with an em dash."""
+        import copy
+        from i18n import NO_VALUE
+        view = copy.deepcopy(self.view)
+        wf = view["workflows"][0]
+        wf["projectId"] = None
+        wf["step"] = {}
+        for s in wf["segments"]:
+            s["arrivedBy"] = {"reason": None}
+            s["executor"] = {}
+        wf["offers"] = [{"state": "offered", "reason": "limit", "to": {}, "at": None, "expiresAt": None},
+                        {"state": "lapsed", "reason": None, "to": {"provider": "openai"}, "at": None}]
+        view["needsYou"] = view["needsYou"] + [
+            {"kind": "credential-env", "workflowId": wf["workflowId"], "name": "ALPHA_KEY", "env": "prod"},
+            {"kind": "stalled", "workflowId": wf["workflowId"], "seconds": None}]
+        view["degraded"] = [{"source": "ledger", "reason": "a reason written by a collector"}]
+        for locale in ("en", "ru"):
+            page = agents_page.agents_html({"agents": view}, Translator(locale))
+            self.assertNotIn("\u2014", page, locale)
+            self.assertIn(NO_VALUE, page, locale)
+        self.assertIn("is only in a .env: move it to the vault", agents_page.agents_html({"agents": view}, Translator("en")))
+
     def test_the_lanes_follow_the_workflow_across_accounts(self) -> None:
         wf = next(w for w in self.view["workflows"] if w["workflowId"] == self.a)
         segs = wf["segments"]

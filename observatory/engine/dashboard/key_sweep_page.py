@@ -13,11 +13,11 @@ from __future__ import annotations
 import html
 import re
 
-from i18n import Translator
+from i18n import NO_VALUE, Translator
 
 HEADING = ' class="machine-h"'
 HINT = ' class="machine-hint"'
-UNKNOWN = "–"
+UNKNOWN = NO_VALUE
 #: Message ids passed through a variable (the catalogue test reads them here).
 DYNAMIC = ("Repository", "Project", "Open", "By rule", "History", "Working tree", "Read to the last commit", "Read in part", "Not read yet", "the key sweep has not run yet",
            "the key sweep is switched off")

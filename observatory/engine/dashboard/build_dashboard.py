@@ -1997,7 +1997,7 @@ __NAV__
     <button class="chip-btn" data-f="owned" aria-pressed="false" data-t>mine only</button>
   </div>
   <!-- D-21: a VIEW switch, not a filter. "rules" changes what each
-       row shows, never which rows show — so it sits outside the filter group,
+       row shows, never which rows show, so it sits outside the filter group,
        and `narrowing()`, which reads chips inside `.seg` only, does not count
        it among the filters. -->
   <div class="view" id="view-projects" role="group" aria-label="Table view">
@@ -2063,13 +2063,13 @@ __BODY_SLOTS__
     <p data-t>The rule under a repository is why it is linked to the project: the folder name,
     a mention in a note, the organization, or a link checked by hand. A repository
     superseded by another, or an empty one, is dimmed and struck through and names its
-    successor — it is not the equal of what replaced it.</p>
+    successor: it is not the equal of what replaced it.</p>
   </section>
   <section id="observer">
     <h3 data-t>Observer state</h3>
     <p data-t>What the observatory knows about itself: when it last looked, how much
     it has collected and how many of the agents' records are still unconfirmed. Empty here
-    means there is no local store — the registry still reads as before.</p>
+    means there is no local store, and the registry still reads as before.</p>
     <div id="health" class="health"></div>
   </section>
   <section id="queue-s">
@@ -2227,7 +2227,7 @@ function localizeStatic(root) {
 }
 if (LOCALE !== BUILD_LOCALE) {
   localizeStatic(document);
-  if (PAGE_TITLE) document.title = T(PAGE_TITLE) + " — Project Observatory";
+  if (PAGE_TITLE) document.title = T(PAGE_TITLE) + " · Project Observatory";
 }
 // THE SWITCH: System / English / Russian. The choice is the reader's and
 // lives in the browser, so it survives a rebuild and an update; "System"

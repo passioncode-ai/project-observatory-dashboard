@@ -12,14 +12,14 @@ from __future__ import annotations
 import html
 import re
 
-from i18n import Translator
+from i18n import NO_VALUE, Translator
 
 HEADING = ' class="machine-h"'
 SUB = ' class="tools-h"'
 EMPTY = ' class="empty"'
 HINT = ' class="machine-hint"'
 #: What an unknown cell shows: never a guess, never an em dash.
-UNKNOWN = "–"
+UNKNOWN = NO_VALUE
 #: Severity to chip tone, as Home draws it.
 TONE = {"critical": "danger", "warning": "warn", "info": ""}
 #: The source tier the security scan weighs a skill by (docs/design/HARNESS.md H6).
