@@ -1261,6 +1261,14 @@ def build():
     except Exception as exc:  # noqa: BLE001 (a page, not a crash)
         PAYLOAD["integrations"] = {"keys": [], "drift": [], "untracked": [], "issues": {}, "degraded": [
             {"source": "integrations", "reason": f"{type(exc).__name__}: {exc}"[:200]}]}
+    # THE DAILY DOCTOR'S LAST RUN (OBS-558), for the Assistant page's notices (OBS-560): what `observatory_doctor`
+    # answers, with the fixes an undo can still reverse. Rendered at build time; no page's data carries it.
+    try:
+        sys.path.insert(0, str(ROOT / "tools"))
+        import daily_doctor
+        PAYLOAD["doctor"] = daily_doctor.agent_view(paths.HOME)
+    except Exception as exc:  # noqa: BLE001 (a page, not a crash)
+        PAYLOAD["doctor"] = {"at": None, "degraded": [{"source": "doctor", "reason": f"{type(exc).__name__}"}]}
     # THE AGENTS: workflows, handoffs and sessions, read-only from the store;
     # only the Agents page carries it (shell.slice_for), and the overview card
     # reads its counters.
@@ -1830,8 +1838,25 @@ body[data-page="index"] #panel, body[data-page="findings"] #panel, body[data-pag
 body[data-page="machine"] #panel, body[data-page="agents"] #panel,
 body[data-page="disk"] #out, body[data-page="disk"] #list-tools, body[data-page="disk"] #panel,
 body[data-page="integrations"] #out, body[data-page="integrations"] #list-tools, body[data-page="integrations"] #panel,
+body[data-page="assistant"] #out, body[data-page="assistant"] #list-tools, body[data-page="assistant"] #panel,
 body[data-page="digitalocean"] #out, body[data-page="digitalocean"] #list-tools, body[data-page="digitalocean"] #panel,
 body[data-page="cloudflare"] #out, body[data-page="cloudflare"] #list-tools, body[data-page="cloudflare"] #panel { display: none; }
+/* The Assistant page (dashboard/agent_panel.py, OBS-560): the chat, the doctor's and the security watch's cards. */
+.assistant-form label, .assistant-convs label { display: block; font-size: var(--t-label); color: var(--muted);
+  margin: var(--space-2) 0 var(--space-1); }
+.assistant-convs select { max-width: 100%; }
+.assistant-form textarea { box-sizing: border-box; width: 100%; font: inherit; padding: var(--space-2);
+  border: 1px solid var(--border-strong); border-radius: var(--r-card); background: var(--panel); color: var(--ink); }
+.assistant-actions { display: flex; gap: var(--space-2); margin: var(--space-2) 0; }
+.assistant-transcript { max-height: 28rem; overflow-y: auto; }
+.assistant-turn { border-top: 1px solid var(--border-strong); padding: var(--space-2) 0; }
+.assistant-turn .assistant-q { font-weight: 600; margin: 0 0 var(--space-1); }
+.assistant-turn .assistant-a { white-space: pre-wrap; margin: 0 0 var(--space-1); }
+.assistant-lead { font-size: 1.25rem; font-weight: 600; margin: var(--space-2) 0; }
+.assistant-sub { margin-top: var(--space-3); }
+.assistant-h3 { font: 600 var(--t-label) var(--font-ui); text-transform: uppercase; letter-spacing: .06em;
+  color: var(--muted); margin: var(--space-3) 0 var(--space-1); }
+#assistant-said.bad, .assistant-turn .bad { color: var(--danger); }
 /* The Agents page: server-rendered cards (dashboard/agents_page.py). */
 .agents-wf { margin-top: var(--space-2); }
 .agents-wf > summary { cursor: pointer; display: flex; flex-wrap: wrap; align-items: center;
@@ -5093,6 +5118,175 @@ if (PAGE === "agents" && typeof document !== "undefined" && document.addEventLis
       btn.disabled = false;
     }
   });
+})();
+// THE ASSISTANT PAGE (OBS-560, CP-19): the read-only assistant's chat and the doctor's undo. Built disabled; served by
+// the local control server with its token (LIVE), the page asks the key server's `assistant` action (status, ask,
+// job, cancel, conversation: the functions the assistant's MCP tools call) and its `doctor` action (the undo of
+// observatory_doctor). Conversations are private to the workspace: they are read live, never built into a page.
+// Answers are written as text, never as markup. A refusal is shown by its code's sentence.
+(function agentPanel() {
+  if (PAGE !== "assistant" || typeof document === "undefined" || !document.getElementById) return;
+  const $ = id => document.getElementById(id);
+  const quiet = el => { for (const a of ["title", "data-t-title", "data-t-title-args"]) el.removeAttribute(a); };
+  const said = $("assistant-said");
+  const say = (text, bad) => { if (said) { said.textContent = text; said.className = bad ? "bad" : ""; } };
+  // The assistant's refusal codes, as the reader reads them (agent/assistant.py).
+  const REFUSED = {
+    "agent-disabled": T("The assistant is switched off in the settings."),
+    "provider-unconfigured": T("No model provider key is installed for this workspace."),
+    "model-unconfigured": T("No model is chosen for the assistant yet."),
+    "budget-unset": T("The model budget has no ceiling yet, so nothing may be spent."),
+    "budget-reached": T("Today's model budget is spent; the assistant answers again when it resets."),
+    "assistant-busy": T("The assistant is answering another question; ask again when it finishes."),
+    "credential-shaped-input": T("The question looks like it holds a key; remove it and ask again."),
+    "disk-full": T("The disk is full; free some space before asking."),
+    "conversation-full": T("This conversation is full; start a new one."),
+    "history-full": T("There are too many conversations kept; remove one first."),
+    "provider-failed": T("The model did not answer; nothing was charged for a failed call."),
+    "invalid-question": T("Write a question first."),
+    "unknown-job": T("That question is no longer followed."),
+  };
+  const why = err => (err && err.refusal && REFUSED[err.refusal]) || (err instanceof Uncertain
+    ? T("the outcome is unknown: {why}", {why: err.message}) : T("refused: {why}", {why: err ? err.message : ""}));
+  // THE DOCTOR'S UNDO, beside each fix still applied.
+  if (LIVE && document.querySelectorAll) {
+    for (const el of document.querySelectorAll("[data-doctor-undo]")) { el.disabled = false; quiet(el); }
+    document.addEventListener("click", async ev => {
+      const btn = ev.target && ev.target.closest && ev.target.closest("[data-doctor-undo]");
+      if (!btn || btn.disabled) return;
+      const jid = btn.dataset.doctorUndo;
+      const out = document.querySelector(`[data-doctor-said="${jid}"]`);
+      btn.disabled = true;
+      try {
+        const d = await call("doctor", {op: "undo", journalId: jid});
+        const back = (d.undone || []).reduce((n, u) => n + (u.files || []).length, 0);
+        const kept = (d.refused || []).reduce((n, u) => n + (u.files || []).length, 0);
+        if (out) out.textContent = kept ? T("Put back: {n}; kept aside, a newer file is there: {kept}", {n: back, kept})
+                                         : T("Put back: {n}", {n: back});
+      } catch (err) {
+        if (out) out.textContent = err && err.refusal === "already-undone" ? T("Already undone.") : why(err);
+        btn.disabled = !(err instanceof Uncertain) && err && err.refusal === "already-undone";
+      }
+    });
+  }
+  const form = $("assistant-form"), box = $("assistant-transcript"), q = $("assistant-q"), send = $("assistant-send"),
+        stop = $("assistant-stop"), pick = $("assistant-conv"), fresh = $("assistant-new"), live = $("assistant-live"),
+        cost = $("assistant-cost");
+  if (!form || !box || !LIVE) return;
+  for (const el of [q, pick, fresh]) if (el) { el.disabled = false; quiet(el); }
+  if (live) { live.removeAttribute("data-t"); live.textContent = T("Checking whether the assistant can answer…"); }
+  let selected = "", draft = null, polling = null, ready = false, blocked = "";
+  const requestId = () => draft || (draft = "page-" + Date.now().toString(36) + "-"
+    + Math.random().toString(36).slice(2, 12));
+  const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls;
+                                   if (text !== undefined) n.textContent = text; return n; };
+  function gate(working) {
+    send.disabled = working || !ready;
+    quiet(send);
+    if (!ready) send.title = REFUSED[blocked] || T("The assistant cannot answer now.");
+    stop.hidden = !working;
+  }
+  function render(conv) {
+    box.replaceChildren();
+    let open = null;
+    for (const turn of conv.turns || []) {
+      const div = el("div", "assistant-turn");
+      div.append(el("p", "assistant-q", turn.question || ""));
+      if (turn.status === "completed" && turn.answer) {
+        div.append(el("p", "assistant-a", turn.answer.answer || ""));
+        if ((turn.answer.next_steps || []).length) {
+          const ul = el("ul", "assistant-steps");
+          for (const s of turn.answer.next_steps) ul.append(el("li", "", s));
+          div.append(ul);
+        }
+        if ((turn.answer.evidence || []).length) {
+          const d = el("details");
+          d.append(el("summary", "", T("Evidence: {n}", {n: turn.answer.evidence.length})));
+          for (const e of turn.answer.evidence) d.append(el("p", "machine-hint",
+            [e.title, e.source, e.measured_at].filter(Boolean).join(" · ")));
+          div.append(d);
+        }
+        if (typeof turn.answer.cost === "number")
+          div.append(el("p", "machine-hint", T("Cost of this answer: {cost}", {cost: turn.answer.cost})));
+      } else if (turn.status === "pending" || turn.status === "working") {
+        div.append(el("p", "machine-hint", T("Working…"))); open = turn;
+      } else {
+        div.append(el("p", "bad", turn.status === "cancelled" ? T("Stopped.")
+          : (REFUSED[turn.error] || T("This question got no answer ({code}).", {code: turn.error || turn.status || "?"}))));
+      }
+      box.append(div);
+    }
+    gate(!!open);
+    if (open && !polling) follow(open.job_id);
+  }
+  async function load(id) {
+    selected = id || "";
+    if (!selected) { box.replaceChildren(); gate(false); return; }
+    try { render(await call("assistant", {op: "conversation", id: selected})); }
+    catch (err) { say(why(err), true); }
+  }
+  function follow(jobId) {
+    polling = setInterval(async () => {
+      try {
+        const d = await call("assistant", {op: "job", id: jobId});
+        if (["completed", "failed", "cancelled"].includes(d.job.status)) {
+          clearInterval(polling); polling = null; await load(selected); await status();
+        }
+      } catch (err) { clearInterval(polling); polling = null; say(why(err), true); gate(false); }
+    }, 1500);
+  }
+  function list(conversations) {
+    const keep = selected;
+    while (pick.options.length > 1) pick.remove(1);
+    for (const c of conversations || []) {
+      const o = el("option", "", c.title || c.id);
+      o.value = c.id;
+      pick.append(o);
+    }
+    pick.value = keep;
+  }
+  async function status() {
+    try {
+      const s = await call("assistant", {op: "status"});
+      ready = !!s.ready; blocked = s.blocked_by || "";
+      list(s.conversations);
+      const spend = s.spend || {};
+      if (live) live.textContent = ready ? T("The assistant is ready.") : (REFUSED[blocked] || T("The assistant cannot answer now."));
+      if (cost && typeof spend.today === "number" && typeof spend.daily_ceiling === "number") {
+        cost.removeAttribute("data-t");
+        cost.textContent = T("Each question is paid from the engine's model budget: {today} of {ceiling} {unit} spent today.",
+                             {today: spend.today, ceiling: spend.daily_ceiling,
+                              unit: spend.denomination || ""});
+      }
+      gate(!!polling);
+    } catch (err) { ready = false; if (live) live.textContent = why(err); gate(false); }
+  }
+  pick.addEventListener("change", () => { draft = null; say(""); load(pick.value); });
+  fresh.addEventListener("click", () => { draft = null; pick.value = ""; say(""); load(""); q.focus(); });
+  stop.addEventListener("click", async () => {
+    try {
+      const conv = await call("assistant", {op: "conversation", id: selected});
+      const open = (conv.turns || []).find(t => t.status === "pending" || t.status === "working");
+      if (open) await call("assistant", {op: "cancel", id: open.job_id});
+    } catch (err) { say(why(err), true); }
+  });
+  form.addEventListener("submit", async ev => {
+    ev.preventDefault();
+    const question = q.value.trim();
+    if (!question) { say(REFUSED["invalid-question"], true); return; }
+    say(""); gate(true);
+    const body = {op: "ask", question, request_id: requestId()};
+    if (selected) body.conversation_id = selected;
+    try {
+      const d = await call("assistant", body);
+      draft = null; q.value = "";                    // accepted: the next question gets a new request id
+      selected = d.conversation_id;
+      await status();
+      pick.value = selected;
+      await load(selected);
+    } catch (err) { say(why(err), true); gate(false); }   // the question stays in the box
+  });
+  status();
 })();
 // THE AGENTS PAGE STAYS CURRENT between ticks when the local server serves it:
 // the server renders the same section again from the store (`/agents`, the same

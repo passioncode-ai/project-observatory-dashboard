@@ -40,6 +40,8 @@ PAGE_TABLE: tuple[Page, ...] = (
     Page("projects", "Projects", "table", "Projects, their state, resources and latest changes.", "work", 1),
     Page("agents", "Agents", "agents", "Which agents are working, on what, and where their work moved.",
          "work", 2),
+    Page("assistant", "Assistant", "assistant",
+         "Ask about the estate, and read what the daily doctor and the security watch report.", "work", 4),
     Page("domains", "Domains", "table", "Domains, reachability, expiry and linked projects.",
          "infrastructure", 3),
     Page("heroku", "Heroku", "table", "Apps, state, deployments and cost.", "infrastructure", 0),
@@ -90,6 +92,8 @@ BODIES: dict[str, tuple[str, str, str, bool]] = {
     "disk": ("DISK", "disk_page", "disk_html", False),
     "integrations": ("INTEGRATIONS", "integrations_page", "integrations_html", False),
     "agents": ("AGENTS", "agents_page", "agents_html", False),
+    # The built-in agent panel (OBS-560): the assistant's chat, the doctor's and the security watch's notices.
+    "assistant": ("ASSISTANT", "agent_panel", "agent_panel_html", False),
     "infra": ("INFRA", "infra_page", "infra_html", True),
     # The Findings page's build-time section above its list: keys found in repositories (OBS-554).
     "findings": ("FINDINGS", "key_sweep_page", "key_sweep_html", False),

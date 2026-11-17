@@ -218,6 +218,8 @@ BOUNDARY += ('integrations', 'issue_filer', 'integrations_page')
 BOUNDARY += ('key_sweep',)
 # OBS-558: the daily doctor's catalogue, its safe fixes and their undo, `doctor.*` findings, `observatory_doctor`.
 BOUNDARY += ('doctor',)
+# OBS-560: the built-in agent panel: the assistant's chat and the doctor's and the security watch's notices.
+BOUNDARY += ('agent_panel',)
 # Vault slots across the operator's machines by keyed digests (OBS-194, step 1).
 BOUNDARY += ('vault_digests',)
 # OBS-476: one slot copied into another store on this machine; the value stays in one process.

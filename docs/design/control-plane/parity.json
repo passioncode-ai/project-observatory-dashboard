@@ -134,6 +134,32 @@
       "note": "the MCP page's Accept buttons make the definitions a probe found the pinned ones: the same function (mcp_supply.accept_pending), by server and tool or for every changed tool"
     },
     {
+      "action": "assistant",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_assistant",
+      "tool": [
+        "observatory_assistant_status",
+        "observatory_assistant_ask",
+        "observatory_assistant_conversation",
+        "fabric.job.get",
+        "fabric.job.cancel"
+      ],
+      "gate": null,
+      "status": "covered",
+      "row": "OBS-560",
+      "note": "the Assistant page's chat: status, ask, the assistant's job and its cancel, and a conversation, through the assistant's own functions (agent/assistant.py); the page's status leaves out the path and the steps written as command lines"
+    },
+    {
+      "action": "doctor",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_doctor",
+      "tool": "observatory_doctor",
+      "gate": null,
+      "status": "covered",
+      "row": "OBS-560",
+      "note": "the Assistant page's Undo beside a doctor's fix: the same function (daily_doctor.undo) as observatory_doctor with action undo"
+    },
+    {
       "action": "init",
       "kind": "cli",
       "where": "workspace.py: init",
