@@ -60,12 +60,24 @@ from pathlib import Path
 import re
 from typing import Callable
 
+import credential_shape
+
 #: The extension key (fabric-agent-contract `CONNECTIONS_EXTENSION_KEY`, DEC-0096).
 KEY = "https://fabric.passioncode.ai/agent-contract/extensions/connections/0.1"
 SCHEMA = "service-connections-extension.schema.json"
-#: What could be read as a credential in a string member: a URL, an address, a token prefix, a JWT, a long mixed
-#: run. Stricter than the contract's detector on purpose: every string declared here is this module's own.
-_CREDENTIALISH = re.compile(r"://|@|\b(?:sk-|gh[pousr]_|xox[abposr]-|AKIA|glpat-|eyJ)|[A-Za-z0-9+/=_-]{40,}")
+#: What could be read as a credential in a string member: a URL or an address here, and the credential-shape rule
+#: in its STRICT reading (OBS-595): everything the contract's detector refuses, plus any token prefix or `eyJ` at a
+#: word start and any 40+ run. Stricter than the contract on purpose: every string declared here is this module's
+#: own. The pattern this replaced missed two shapes the contract refuses, a value starting `Bearer ` and a key after
+#: `_`.
+_ADDRESS = re.compile(r"://|@")
+
+
+def credentialish(text: str) -> bool:
+    """Whether a declared string could be read as a credential."""
+    return bool(_ADDRESS.search(text)) or credential_shape.shaped(text, reading=credential_shape.STRICT)
+
+
 _STRINGS = ("id", "target", "capability", "label", "purpose", "reason")
 
 #: How often the tick runs (`tools/install_launchd.py --interval`, default 1800 seconds), in hours.
@@ -319,7 +331,7 @@ def check(value: dict) -> list[str]:
         seen.add(connection["id"])
         for member in _STRINGS:
             text = connection.get(member)
-            if isinstance(text, str) and _CREDENTIALISH.search(text):
+            if isinstance(text, str) and credentialish(text):
                 problems.append(f"/connections/{index}/{member} reads like a credential")
         if "lastAt" in connection and _stamp(connection["lastAt"]) != connection["lastAt"]:
             problems.append(f"/connections/{index}/lastAt is not a UTC date-time")

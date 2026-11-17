@@ -14,7 +14,8 @@ at the same minute. The count now has three facets, each with its source and tim
 |---|---|---|
 | `processes` per agent (what runs) | the account manager's process scan; the machine survey's `agent:<name>` groups (`store/raw/machine.json`) when the manager was not read | `{}` and `sources.processes.from: null` |
 | `managed` (of them, run by the manager) | `switchboard sessions --machine --json`, one call, 10 s | `null`, with `not-installed`, `timeout`, `failed` or `malformed` in `degraded` |
-| `active_hour` (of them, with a turn in the last hour) | `agents_view.recent_sessions`, the query the Agents page always used | `null`, with `no-store` or `unreadable` |
+| `active_hour` (of them, with a turn in the last hour) | the manager's rows joined to `agents_view.recent_sessions` per project (OBS-597): a project counts at most its running sessions and at most its sessions with a turn in the last hour, so a turn of a session whose process ended counts nothing | `null`, with `no-store` or `unreadable`; `null` with `needs-session-list` when the manager was not read (the survey lists no session to join) |
+| `ledger_hour` (not a facet: every session with a ledger turn in the last hour, running or not) | `agents_view.recent_sessions` | `null`, with `no-store` or `unreadable` |
 
 ## Data
 
@@ -60,7 +61,12 @@ A manager that is installed but failed raises nothing: that is a gap in the read
 - Attribution that raises: the session is kept without a project; `degraded` names the attribution.
 - The file missing or unreadable: `load` answers the empty shape with `not-collected` or `unreadable`.
 - The ledger list is `agents_view.MAX_SESSIONS` (60) sessions of the last day, newest first: past 60 sessions with
-  a turn in one hour, `active_hour` reads 60.
+  a turn in one hour, `ledger_hour` reads 60 and `active_hour` at most 60.
+- A ledger row names a project, never a process, so `active_hour` pairs running sessions and recent turns within a
+  project: a running session that is silent beside an ended one with a recent turn in the same project is counted
+  for it. The count stays a subset of the running sessions and of the recent turns. Without the manager's rows the
+  Agents page shows the ledger's own count under its own words ("N sessions recorded a turn; which of them still
+  run needs the account manager"), never as the running sessions' activity.
 
 ## Tests
 

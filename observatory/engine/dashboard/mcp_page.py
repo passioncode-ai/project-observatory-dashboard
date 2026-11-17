@@ -11,11 +11,11 @@ Every visible string is an English message id marked for the page script (L10N-0
 """
 from __future__ import annotations
 
-from i18n import Translator
+from i18n import NO_VALUE, Translator
 from machine_page import EMPTY, HEADING, NUM, _e, _table
 
 HINT = ' class="machine-hint"'
-NONE = "–"
+NONE = NO_VALUE
 #: The tool an agent accepts a changed tool with; named in each disabled button's tooltip.
 TOOL = "observatory_mcp_accept"
 DISABLED = ("This page only shows the changes: it was opened as a file or without the local control server. "

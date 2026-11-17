@@ -11,6 +11,14 @@ Three sources say three different things, and each is kept as what it is:
 * the LEDGER says what did work: sessions with a recorded turn in the last hour
   (`agents_view.recent_sessions`, the rows the Stop hook writes).
 
+ACTIVE IS A SUBSET OF RUNNING (OBS-597). `active_hour` counts the running sessions (the manager's
+rows) that also have a ledger turn in the last hour; a turn of a session whose process has ended
+no longer counts. A ledger row names a project, never a process, so the join is per project: a
+project counts at most its running sessions and at most its sessions with a recent turn. Without
+the manager's rows (the survey counts processes, it lists none) nothing can be joined, and
+`active_hour` is None with `needs-session-list` in `degraded`. `ledger_hour` keeps the ledger's own
+count, every session with a turn in the last hour, under its own name.
+
 The page used to show only the third, under the name of the first. A source that could not
 be read is `None` with its reason in `degraded`, never 0: "the manager manages nothing" and
 "the manager was not asked" must not look alike. An answer that lists fewer sessions than
@@ -177,7 +185,8 @@ def _survey(scratch: pathlib.Path, degraded: list[dict]) -> tuple[dict | None, s
     return counts, doc.get("measured_at") if isinstance(doc, dict) else None
 
 
-def _ledger(db: pathlib.Path, now: datetime, degraded: list[dict]) -> int | None:
+def _ledger(db: pathlib.Path, now: datetime, degraded: list[dict]) -> list[dict] | None:
+    """The ledger's sessions with a turn in the last hour, or None when the store was not read."""
     if not db.is_file():
         degraded.append(_gap("ledger", "no-store", "the store does not exist yet"))
         return None
@@ -186,12 +195,26 @@ def _ledger(db: pathlib.Path, now: datetime, degraded: list[dict]) -> int | None
         conn = sqlite3.connect(paths.sqlite_uri(db), uri=True, timeout=10)
         conn.row_factory = sqlite3.Row
         try:
-            return sum(1 for s in agents_view.recent_sessions(conn, now) if s["active"])
+            return [s for s in agents_view.recent_sessions(conn, now) if s["active"]]
         finally:
             conn.close()
     except sqlite3.Error as exc:
         degraded.append(_gap("ledger", "unreadable", f"the ledger is unreadable: {type(exc).__name__}"))
         return None
+
+
+def _active_running(sessions: list[dict], recent: list[dict]) -> int:
+    """The running sessions that also have a ledger turn in the last hour (OBS-597): per project,
+    the smaller of its running sessions and its sessions with a recent turn. A session in no
+    project pairs with a turn recorded in no project, the same way."""
+    running: dict[str | None, int] = {}
+    turned: dict[str | None, int] = {}
+    for s in sessions:
+        running[s.get("project")] = running.get(s.get("project"), 0) + 1
+    for s in recent:
+        pid = s.get("projectId") if isinstance(s.get("projectId"), str) and s.get("projectId") else None
+        turned[pid] = turned.get(pid, 0) + 1
+    return sum(min(n, turned.get(pid, 0)) for pid, n in running.items())
 
 
 def _row(raw, attribute, degraded_attribution: list[str]) -> dict | None:
@@ -277,16 +300,24 @@ def summary(home: pathlib.Path | None = None, *, now: datetime | None = None,
         processes = dict(sorted((survey or {}).items()))
         processes_source = {"at": survey_at, "from": "machine-survey" if survey is not None else None}
 
-    active = _ledger(db, now, degraded)
+    recent = _ledger(db, now, degraded)
+    active = None
+    if recent is not None and data is not None:
+        active = _active_running(sessions, recent)
+    elif recent is not None:
+        degraded.append(_gap("active_hour", "needs-session-list",
+                             "which running sessions recorded a turn in the last hour needs the account manager's "
+                             "session list: the process survey counts sessions and lists none"))
     return {
         "schema": SCHEMA, "measuredAt": _iso(now),
         "processes": processes,
         "managed": sum(1 for s in sessions if s["managed"]) if data is not None else None,
         "quiet": sum(1 for s in sessions if s["quiet"]) if data is not None else None,
         "active_hour": active,
+        "ledger_hour": len(recent) if recent is not None else None,
         "sessions": sessions,
         "sources": {"processes": processes_source, "manager": manager_source,
-                    "ledger": {"at": _iso(now) if active is not None else None}},
+                    "ledger": {"at": _iso(now) if recent is not None else None}},
         "degraded": degraded,
     }
 
@@ -300,7 +331,7 @@ def write(doc: dict, out: pathlib.Path | None = None) -> pathlib.Path:
 
 def _empty(code: str, reason: str) -> dict:
     return {"schema": SCHEMA, "measuredAt": None, "processes": {}, "managed": None, "quiet": None,
-            "active_hour": None, "sessions": [],
+            "active_hour": None, "ledger_hour": None, "sessions": [],
             "sources": {"processes": {"at": None, "from": None}, "manager": {"at": None, "state": None},
                         "ledger": {"at": None}},
             "degraded": [_gap("sessions", code, reason)]}
@@ -333,6 +364,7 @@ def facets(doc: dict | None) -> dict:
             "byAgent": dict(sorted(processes.items())),
             "managed": count(doc.get("managed")),
             "activeHour": count(doc.get("active_hour")),
+            "ledgerHour": count(doc.get("ledger_hour")),
             "processesFrom": processes_from,
             "processesAt": (sources.get("processes") or {}).get("at"),
             "managerState": (sources.get("manager") or {}).get("state"),

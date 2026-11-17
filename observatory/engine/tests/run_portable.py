@@ -165,6 +165,8 @@ BOUNDARY += ('review_policy',)
 BOUNDARY += ('provider_deadline',)
 # One credential-shape heuristic for every door that judges typed text.
 BOUNDARY += ('credential_shape',)
+# OBS-595: every site that asks whether text is credential-shaped asks that rule.
+BOUNDARY += ('secret_shape_sites',)
 # PROJECT is the folder name; the registry id names the same folder.
 BOUNDARY += ('vault_project',)
 # The product lifecycle contract: bounded steps, idle server, rotated logs, the watch.
@@ -350,6 +352,9 @@ BOUNDARY += ('space_daemons',)
 # OBS-561 (CP-11): a rotation finds the other copies of a key's value (fake Heroku, env files, services), delivers and
 # reads them back before it revokes, and holds the old key when one is out of reach.
 BOUNDARY += ('rotation_consumers',)
+# OBS-594 (CP-11): every revoke runs one consumer guard, refusing typed when a consumer holds the key or a source
+# cannot be read (the OpenRouter door, the key server, the MCP key act, tools/revoke_key.py, the DigitalOcean door).
+BOUNDARY += ('revoke_guard',)
 # OBS-552 (CP-05): the Installed tools page, coding agents, skills, plugins and hooks with their findings.
 BOUNDARY += ('tools_page',)
 # OBS-555 (CP-09): the supply-chain watch over MCP servers: command-line rules, tool definition pins, the scanners switch.
@@ -360,6 +365,8 @@ BOUNDARY += ('key_source',)
 BOUNDARY += ('key_acts',)
 # OBS-559, the operations verbs (backup, disk, update, maintenance) as one MCP tool, through the CLI's own functions.
 BOUNDARY += ('ops_acts',)
+# The Prowl key door (tools/prowl.py): issue straight into a vault slot, revoke, list, against a fake Prowl API.
+BOUNDARY += ('prowl_door',)
 SUITES = LEGACY + BOUNDARY
 #: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
 #: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.

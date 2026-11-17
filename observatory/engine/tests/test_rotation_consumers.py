@@ -253,7 +253,14 @@ def test_a_failed_delivery_keeps_the_old_key_alive() -> None:
               and row["predecessor_hash"] == "h-old" and "alpha-web" in " ".join(row["held_consumers"]), str(row))
         check(f"{mode}: the hold is journaled", any(j["event"] == "rotation-held" for j in state["journal"]), "")
         check(f"{mode}: no value anywhere", clean(out + err + json.dumps(state["journal"]) + json.dumps(row)), "")
-    rc, out, err = run(m.cmd_revoke, "alpha")
+    # A clean OpenRouter scan, so the consumer guard (OBS-594) passes and the hold itself is what refuses.
+    scratch, was = pathlib.Path(tmpdir.mkdtemp()).resolve(), m.paths.SCRATCH
+    (scratch / "openrouter.json").write_text(json.dumps({"keys": []}), encoding="utf-8")
+    m.paths.SCRATCH = scratch
+    try:
+        rc, out, err = run(m.cmd_revoke, "alpha")
+    finally:
+        m.paths.SCRATCH = was
     check("a held row cannot be revoked out from under its live predecessor", rc == 1 and "held" in err, err)
 
 

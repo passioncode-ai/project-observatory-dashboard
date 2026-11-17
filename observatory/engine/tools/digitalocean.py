@@ -291,24 +291,16 @@ def url_place(url: str) -> str:
     return f"{host}{parts.path or ''}"
 
 
+def apps_source():
+    """The App Platform finder, which lives in `tools/key_consumers.py` beside every other consumer source (OBS-594),
+    reading through this door's `doctl` and its own readings of a variable."""
+    import key_consumers
+    return key_consumers.DigitalOceanAppsSource(lambda: doctl("apps", "list"), credential_literal, literal_form)
+
+
 def consumers(c: dict) -> list[dict]:
     """Apps whose spec binds the cluster, and literal DB-ish keys they hold themselves."""
-    out = []
-    for app in doctl("apps", "list") or []:
-        spec = app.get("spec") or {}
-        bound = [d for d in spec.get("databases") or [] if d.get("cluster_name") == c["name"]]
-        if not bound:
-            continue
-        literals = []
-        for scope in [spec, *[x for k in ("services", "workers", "jobs") for x in spec.get(k) or []]]:
-            for e in scope.get("envs") or []:
-                v = str(e.get("value", ""))
-                if "${" not in v and credential_literal(e["key"], v):
-                    literals.append(f"{scope.get('name', 'app')}:{e['key']} ({literal_form(e['key'], v)})")
-        out.append({"app": app["id"], "name": spec.get("name"),
-                    "binds": [(d.get("name"), d.get("db_user") or "default") for d in bound],
-                    "literals": literals})
-    return out
+    return apps_source().apps(c["name"])
 
 
 def cmd_consumers(ref: str) -> int:
@@ -1605,6 +1597,15 @@ def _rotate_locked(label: str, value: str, expires_on: str | None = None) -> int
     return 2
 
 
+def consumer_sources(rec: dict) -> list:
+    """Where the other copies of an installed token's value are looked for before it is revoked (OBS-594): Heroku
+    config vars, the local env files the engine inventories, the services started from its vault slot. Tests
+    replace it."""
+    import key_consumers
+    slot = tuple(rec["vault"].split("/")) if rec.get("vault") else None
+    return key_consumers.default_sources(slot)
+
+
 def cmd_revoke(label: str, forget: bool = False) -> int:
     with records_lock():
         return _revoke_locked(label, forget)
@@ -1629,6 +1630,13 @@ def _revoke_locked(label: str, forget: bool) -> int:
         raise DoorError(f"{label}: the stored value is malformed and was never sent, so it could not be checked; "
                         f"nothing was removed here. Delete the token in the control panel ({PANEL_TOKENS}), "
                         f"then `digitalocean.py revoke {label} --forget`")
+    # The one consumer guard every revoke runs (OBS-594): another copy of the value (a Heroku config var, an env
+    # file, a service started from the slot) refuses, and so does a source that could not be read.
+    import key_consumers
+    try:
+        key_consumers.revoke_guard(label, {}, consumer_sources(rec), value=value)
+    except key_consumers.RevokeRefused as exc:
+        raise DoorError(f"refused ({exc.code}): {exc}; nothing was revoked and the record is kept") from None
     if not revoke_and_prove(value):
         raise DoorError(f"DigitalOcean still accepts {label}; nothing was removed here. Delete the token in "
                         f"the control panel ({PANEL_TOKENS}), then run revoke again")

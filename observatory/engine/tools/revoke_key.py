@@ -14,12 +14,23 @@ and in the process list. It is stored in the secret store as
 `openrouter-provisioning` with mode 600, and a file readable by group or world is
 REFUSED rather than used. No key value is ever printed, only its length, its
 last four characters, and the label the provider reports.
+
+A KEY SOMETHING READS IS NOT REVOKED. Before the DELETE the tool runs the one
+consumer guard every revoke runs (`key_consumers.revoke_guard`, OBS-594): a
+key the OpenRouter scan finds at a destination or serving a consumer is
+refused (`consumer-in-use`), and so is a revoke whose scan is missing or
+unreadable (`consumer-source-unreadable`); `project-observatory full
+openrouter` takes the scan. A key the door issued is revoked by the door
+(`openrouter.py revoke NAME`), which runs the same guard; this tool stays for
+a key minted elsewhere that only a provisioning key reaches.
 """
    
 from __future__ import annotations
 import argparse, json, os, pathlib, stat, sys, urllib.error, urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import credential_shape
 import private_io
 import osprivacy
 import paths                                            
@@ -50,7 +61,7 @@ def load_or_store() -> str:
     piped = "" if osprivacy.is_terminal(sys.stdin) else sys.stdin.read().strip()
     if piped:                                                                      
         key = piped                                                                
-        if not key.startswith("sk-or-v1-"):
+        if not credential_shape.openrouter_key(key):
             die("stdin did not carry an OpenRouter key")
         private_io.write(private_io.legacy_path(SECRET), key)
         print(f"stored {SECRET} (600): length {len(key)}, value hidden")
@@ -98,6 +109,17 @@ def main() -> int:
         die(f"{len(hits)} keys end in {a.tail!r}; use a longer tail")
 
     target = hits[0]
+    # The one consumer guard every revoke runs (OBS-594), before the DELETE: a key a destination or a service still
+    # reads is refused, and so is a revoke whose OpenRouter scan cannot be read. Matched by the key's hash (the
+    # provider's fingerprint), its label and its name; never by a value.
+    import key_consumers
+    try:
+        key_consumers.revoke_guard(str(target.get("label") or a.tail),
+                                   {"hash": target.get("hash"), "labels": {target.get("label")} - {None},
+                                    "names": {target.get("name")} - {None}},
+                                   [key_consumers.OpenRouterScanSource()])
+    except key_consumers.RevokeRefused as exc:
+        die(f"refused ({exc.code}): {exc}")
     code, body = call("DELETE", f"{API}/{target['hash']}", key)
     if code not in (200, 204):
         die(f"delete failed: HTTP {code}")

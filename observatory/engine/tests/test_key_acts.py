@@ -161,6 +161,8 @@ class KeyActs(unittest.TestCase):
                                            ("set_limit", "alpha-web-key", 20.0, "daily")])
 
     def test_rotate_and_revoke_need_the_words_and_run_the_same_acts(self):
+        # A clean OpenRouter scan: the consumer guard (OBS-594) refuses a revoke whose scan is missing.
+        (self.scratch / "openrouter.json").write_text(json.dumps({"keys": []}), encoding="utf-8")
         for action, door_call in (("rotate", "rotate_one"), ("revoke", "revoke_key")):
             refused = self.acts.key_act(action, name="alpha-web-key")
             self.assertEqual(self.code(refused), "operator-decision-required")
@@ -182,7 +184,8 @@ class KeyActs(unittest.TestCase):
         (self.scratch / "openrouter.json").write_text(json.dumps(
             {"keys": [{"label": "alpha-web-key", "serves": "alpha-web"}]}), encoding="utf-8")
         out = self.acts.key_act("revoke", name="alpha-web-key", decision=words("keys.revoke", "alpha-web-key"))
-        self.assertEqual(self.code(out), "invalid-argument")
+        self.assertEqual(self.code(out), "consumer-in-use")
+        self.assertIn("alpha-web", " ".join(out["error"]["consumers"]))
         self.assertNotIn(("revoke_key", "alpha-web-key"), self.door.calls)
 
     # --- reversible acts ----------------------------------------------------------------------------------------

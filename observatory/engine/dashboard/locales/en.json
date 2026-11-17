@@ -768,5 +768,9 @@
  "{n} vault metadata files cannot be read": {
   "one": "{n} vault metadata file cannot be read",
   "other": "{n} vault metadata files cannot be read"
+ },
+ "{n} sessions recorded a turn; which of them still run needs the account manager": {
+  "one": "{n} session recorded a turn; which of them still run needs the account manager",
+  "other": "{n} sessions recorded a turn; which of them still run needs the account manager"
  }
 }
