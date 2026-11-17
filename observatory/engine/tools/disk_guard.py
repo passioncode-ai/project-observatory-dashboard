@@ -1021,13 +1021,13 @@ def vm_warnings(level: str, vms: list[dict]) -> list[dict]:
              "allocated_gb": round(sum(v["allocated_gb"] for v in writing), 1)}]
 
 
-def vm_rows(argv: list[str], timeout: float, env: dict | None = None) -> list[dict] | None:
+def vm_rows(argv: list[str], timeout: float, env: dict | None = None, run=None) -> list[dict] | None:
     """The rows a VM tool lists (`colima list --json`, `limactl list --json`: one JSON object per line, or
     one array). None when the list cannot be read. Listing starts nothing."""
     if timeout <= 0:
         return None
     try:
-        p = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL, env=env)
+        p = (run or subprocess.run)(argv, capture_output=True, text=True, timeout=timeout, stdin=subprocess.DEVNULL, env=env)
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
     if p.returncode:
@@ -1066,10 +1066,10 @@ def vm_trimmable(row: dict) -> bool:
     return status == "Broken" and _pid_alive(row.get("driverPID"))
 
 
-def running_vms(argv: list[str], timeout: float, env: dict | None = None) -> list[str] | None:
+def running_vms(argv: list[str], timeout: float, env: dict | None = None, run=None) -> list[str] | None:
     """The virtual machines a VM tool lists as running, by name (`vm_trimmable`; a name that is not a plain
     identifier is never passed on). None when the list cannot be read."""
-    rows = vm_rows(argv, timeout, env)
+    rows = vm_rows(argv, timeout, env, run)
     if rows is None:
         return None
     names: list[str] = []
@@ -1161,6 +1161,120 @@ def engine_prune(sock: str, name: str, deadline: float) -> list[dict]:
                            exit_code=p.returncode))
             continue
         out.append(row(args, result="removed", freed_mb=round((free_bytes() - before) / 1048576)))
+    return out
+
+
+#: The only Docker commands the volume listing runs: both read. The guard NEVER removes a volume (OBS-584): a volume
+#: is data (a database, an upload store), and an unused one is its owner's to delete.
+VOLUME_READS = (["volume", "ls", "-f", "dangling=true", "--format", "{{json .}}"],
+                ["system", "df", "-v", "--format", "{{json .}}"])
+#: The labels that name who a volume belongs to, the first one present wins.
+VOLUME_OWNER_LABELS = ("com.docker.compose.project", "com.docker.stack.namespace")
+VOLUME_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,254}")
+VOLUME_SIZE = re.compile(r"([0-9]+(?:\.[0-9]+)?)\s*([kKMGTP]?i?B)")
+_SIZE_UNITS = {"B": 1, "kB": 1e3, "KB": 1e3, "MB": 1e6, "GB": 1e9, "TB": 1e12, "PB": 1e15,
+               "KiB": 1024, "kiB": 1024, "MiB": 1024 ** 2, "GiB": 1024 ** 3, "TiB": 1024 ** 4, "PiB": 1024 ** 5}
+
+
+def volume_bytes(text) -> int | None:
+    """A size as `docker system df -v` prints it (`1.2GB`, `0B`, `512kB`), in bytes; None when it says none."""
+    m = VOLUME_SIZE.fullmatch(str(text or "").strip())
+    if not m or m.group(2) not in _SIZE_UNITS:
+        return None
+    return int(float(m.group(1)) * _SIZE_UNITS[m.group(2)])
+
+
+def volume_labels(value) -> dict:
+    """The labels `docker volume ls --format` gives as `key=value,key=value` (or a mapping), as a mapping."""
+    if isinstance(value, dict):
+        return {str(k): str(v) for k, v in value.items()}
+    out = {}
+    for part in str(value or "").split(","):
+        key, sep, val = part.partition("=")
+        if sep and key.strip():
+            out[key.strip()] = val.strip()
+    return out
+
+
+def _json_lines(text: str) -> list[dict] | None:
+    try:
+        rows = [json.loads(line) for line in (text or "").splitlines() if line.strip()]
+    except ValueError:
+        return None
+    return rows if all(isinstance(r, dict) for r in rows) else None
+
+
+def vm_unused_volumes(seconds: float, run=None) -> dict:
+    """The Docker volumes no container uses (`dangling`) inside each running Lima or Colima VM, read through that
+    VM's own engine socket (never the context or `DOCKER_HOST`), with the space each takes and the owner its labels
+    name (OBS-584). For the Disk page's manual tier: a person deletes them; the guard lists, never removes. A VM
+    whose engine does not answer is named in `unread`, never shown as having none. `run` is the process runner."""
+    run = run or subprocess.run
+    out: dict = {"at": now(), "volumes": [], "unread": []}
+    deadline = time.monotonic() + max(0.0, seconds)
+    limactl = find_tool("limactl")
+    homes = lima_homes()
+    if not limactl or not homes:
+        return out
+    if seconds <= 0:
+        out["unread"].append({"instance": None, "reason_code": "timeout"})
+        return out
+    docker = find_tool("docker")
+    env = {k: v for k, v in os.environ.items() if k not in ("DOCKER_HOST", "DOCKER_CONTEXT")}
+    for home in homes:
+        names = running_vms([limactl, "list", "--json"], min(10.0, deadline - time.monotonic()),
+                            {**os.environ, "LIMA_HOME": home}, run=run)
+        if names is None:
+            out["unread"].append({"instance": None, "reason_code": "vm-list-unknown"})
+            continue
+        for name in names:
+            sock = engine_socket(home, name)
+            if not sock:
+                continue
+            if not docker:
+                out["unread"].append({"instance": name, "reason_code": "no-docker-cli"})
+                continue
+            answers = []
+            for args in VOLUME_READS:
+                left = min(20.0, deadline - time.monotonic())
+                if left <= 0:
+                    break
+                try:
+                    p = run([docker, "--host", "unix://" + sock, *args], capture_output=True, text=True,
+                            timeout=left, stdin=subprocess.DEVNULL, env=env)
+                except (OSError, ValueError, subprocess.SubprocessError):
+                    break
+                if p.returncode:
+                    break
+                answers.append(p.stdout or "")
+                if args is VOLUME_READS[0] and not (p.stdout or "").strip():
+                    answers.append("")   # nothing dangling: the sizes are not asked
+                    break
+            if len(answers) < 2:
+                out["unread"].append({"instance": name, "reason_code": "timeout" if deadline <= time.monotonic()
+                                      else "docker-unanswered"})
+                continue
+            dangling = _json_lines(answers[0])
+            if dangling is None:
+                out["unread"].append({"instance": name, "reason_code": "docker-unanswered"})
+                continue
+            sizes = {}
+            try:
+                df = json.loads(answers[1]) if answers[1].strip() else {}
+            except ValueError:
+                df = {}
+            for row in (df.get("Volumes") if isinstance(df, dict) else None) or []:
+                if isinstance(row, dict) and isinstance(row.get("Name"), str):
+                    sizes[row["Name"]] = volume_bytes(row.get("Size"))
+            for row in dangling:
+                vol = row.get("Name")
+                if not isinstance(vol, str) or not VOLUME_NAME.fullmatch(vol):
+                    continue
+                labels = volume_labels(row.get("Labels"))
+                owner = next((labels[k] for k in VOLUME_OWNER_LABELS if labels.get(k)), None)
+                out["volumes"].append({"instance": name, "name": vol, "bytes": sizes.get(vol),
+                                       "owner": owner[:120] if owner else None})
+    out["volumes"].sort(key=lambda v: -(v["bytes"] or 0))
     return out
 
 
@@ -2118,6 +2232,13 @@ def run(argv: list[str]) -> dict:
                 except Exception as exc:  # noqa: BLE001 - the kernel logs could not be read: named, never fatal
                     doc["degraded"].append({"source": "vm-logs",
                                             "reason": f"VM kernel logs could not be read ({type(exc).__name__})"})
+            if acting or "--refresh" in argv:
+                # The manual tier's unused Docker volumes (OBS-584): listed for their owner, never removed.
+                try:
+                    doc["vm_volumes"] = vm_unused_volumes(min(60.0, max(0.0, left())))
+                except Exception as exc:  # noqa: BLE001 - a listing that fails is named, never fatal
+                    doc["degraded"].append({"source": "vm-volumes",
+                                            "reason": f"VM volumes could not be listed ({type(exc).__name__})"})
             if acting:
                 journal([{"at": doc["at"], "kind": "summary", "mode": "guard", "level": level, **results,
                           "freed_mb": round((free1 - free0) / 1048576), "seconds": doc["seconds"],

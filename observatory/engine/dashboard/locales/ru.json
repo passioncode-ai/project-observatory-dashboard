@@ -2885,5 +2885,17 @@
  "tool {tool} of MCP server {server} changed since it was pinned": "инструмент {tool} MCP-сервера {server} изменился с момента закрепления",
  "MCP server {server} added the tool {tool} since it was pinned": "MCP-сервер {server} добавил инструмент {tool} с момента закрепления",
  "MCP server {server} dropped the tool {tool} since it was pinned": "MCP-сервер {server} убрал инструмент {tool} с момента закрепления",
- "What changed": "Что изменилось"
+ "What changed": "Что изменилось",
+ "Unused Docker volumes": "Неиспользуемые тома Docker",
+ "Docker volumes no container uses, inside this machine's Lima or Colima virtual machines. A volume holds data, so the guard never removes a volume: their owner deletes the ones not needed.": "Тома Docker, которые не использует ни один контейнер, внутри виртуальных машин Lima или Colima на этом компьютере. В томе лежат данные, поэтому контроль диска никогда не удаляет том: ненужные удаляет их владелец.",
+ "Not listed yet. The guard lists them when it acts.": "Ещё не перечислены. Контроль диска перечисляет их, когда работает.",
+ "Listed {at}": "Перечислено {at}",
+ "Virtual machine": "Виртуальная машина",
+ "no owner label": "нет метки владельца",
+ "No unused Docker volume.": "Неиспользуемых томов Docker нет.",
+ "Not listed": "Не перечислено",
+ "its Docker engine did not answer": "её движок Docker не ответил",
+ "no docker command is installed here": "команда docker здесь не установлена",
+ "the virtual machines could not be listed": "не удалось перечислить виртуальные машины",
+ "the guard's time ran out": "время контроля диска закончилось"
 }
