@@ -81,3 +81,14 @@ here, so they are not judged.
 added, removed, put back, accept one and all, only digests stored, a probe that cannot ask, `fetch-execute` not started,
 the tick starting nothing, the switch, the page in both languages, the key server action, the MCP tools, no planted secret in
 any file) and `tests/test_mcp_supply_board.py` (the findings through the real builder).
+
+## No command line in the not-scanned state (OBS-579)
+
+The MCP page was the last page with command text in a row (CP-01): its not-scanned state printed three
+`project-observatory full ...` copy buttons with the workspace path, and the probe line a fourth. Both now name the
+agent's tools instead: "An agent points it at your home and switches it on with `observatory_configure`
+(`sources.mcp_config_root`, `integrations.mcp`), then scans with `machine.mcp.refresh`", and the probe line "an agent
+asks with `machine.mcp.refresh`". No button: the key server has no scan action, and the configuration door's page
+action is limited to the Disk page's keys; `parity.json` already holds `scan-mcp` as covered by
+`machine.mcp.refresh`. Tests: `observatory/engine/tests/test_dashboard_render.py` (the MCP page's `#out` carries no
+`project-observatory full`, in the not-scanned state and with servers not probed).

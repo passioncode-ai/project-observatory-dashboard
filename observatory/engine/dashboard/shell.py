@@ -323,6 +323,14 @@ def _integrations_line(payload: dict, t: Translator) -> str:
             + t.mark("{n} answers changed", n=len(v.get("drift") or [])))
 
 
+def _assistant_line(payload: dict, t: Translator) -> str:
+    """The overview's Assistant card: the doctor's fixes still undoable, or that it has not run (OBS-560)."""
+    doctor = payload.get("doctor") or {}
+    if not doctor.get("at"):
+        return t.mark("Ask about the estate") + " · " + t.mark("the doctor has not run")
+    return t.mark("Ask about the estate") + " · " + t.mark("doctor fixes to review: {n}", n=len(doctor.get("undoable") or []))
+
+
 def cards_html(payload: dict, counts: dict, t: Translator | None = None, skip: tuple[str, ...] = ()) -> str:
     """The index page's module cards: one sentence each, the number, the link. Home passes `skip`
     (HOME_COVERED), the pages a tile or a Home group already speaks for (CP-01)."""
@@ -352,6 +360,7 @@ def cards_html(payload: dict, counts: dict, t: Translator | None = None, skip: t
         "disk": _disk_line(payload, t),
         "integrations": _integrations_line(payload, t),
         "agents": _agents_line(payload, t),
+        "assistant": _assistant_line(payload, t),
         # The observer's state alone: the agents' unconfirmed records ask nothing of a
         # person (operator, 2026-10-06), so they are no reason to open the page.
         "health": _observer(health, t),
@@ -409,6 +418,7 @@ def slice_for(page: str, payload: dict) -> dict:
     if page != "integrations":
         out["integrations"] = None                  # the Integrations page renders it at build time (OBS-557)
     out["key_sweep"] = None                         # rendered into findings.html at build time (OBS-554)
+    out["doctor"] = None                            # rendered into assistant.html at build time (OBS-560)
     if page == "disk":
         out["machine"] = payload.get("machine")     # the Disk page reads the machine survey too (OBS-562)
     if page != "domains":

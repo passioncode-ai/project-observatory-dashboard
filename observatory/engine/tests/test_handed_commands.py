@@ -75,6 +75,8 @@ SAMPLES = {
     "WORKFLOW_ID": "wf_0123456789abcdef", "{kept}": "wf_0123456789abcdef",
     "PROVIDER": "anthropic", "REASON": "limit", "WHY": "abandoned",
     "{wid}": "wf_0123456789abcdef",
+    # A daily doctor fix's journal id (tools/daily_doctor.py, OBS-558).
+    "{fix['journal_id']}": "doc_0123456789abcdef", "{journal_id}": "doc_0123456789abcdef",
     "PROJECT": "project:alpha", "TEXT": "texts of alpha are sent to OpenAI",
     "MEMORY_ID": "mem:0123456789abcdef",
     # A key sweep sighting's keyed digest (OBS-554).

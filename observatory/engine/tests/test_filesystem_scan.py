@@ -281,6 +281,69 @@ def test_a_scan_with_time_carries_nothing() -> None:
     check("no deadline degradation", not [x for x in doc["degraded"] if x["source"] == "scan:deadline"])
 
 
+#: The contract's own fake token (DEC-0177's vectors): 40 hex, no real credential.
+FAKE_TOKEN = "0123456789abcdef" * 2 + "01234567"
+
+
+def test_a_stored_origin_whose_user_is_a_token_is_rewritten() -> None:
+    """OBS-576, fabric-agent-contract DEC-0177: a remote whose user name is a token is stored as the origin the
+    contract records (an https remote without its user) or withheld (an ssh or scp remote), and a row carried
+    from an earlier scan is rewritten the same way on the first tick, counted, and not again."""
+    d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-fstoken-"))
+    (d / "raw").mkdir()
+    dest = d / "raw" / "local.json"
+    fixture = d / "fs-inputs"
+    fixture.mkdir()
+    data = git_estate(fixture)
+    checkout = data / "fixture-local"
+    tail = "example.com/example-org/alpha-web.git"
+    subprocess.run(["git", "-C", str(checkout), "remote", "add", "origin", "ssh://" + FAKE_TOKEN + "@" + tail],
+                   env=git_env(), check=True, capture_output=True)
+    subprocess.run(["git", "-C", str(checkout), "remote", "add", "mirror", "https://" + FAKE_TOKEN + "@" + tail],
+                   env=git_env(), check=True, capture_output=True)
+    p = scan(dest, data=data)
+    check("the scan succeeds", p.returncode == 0, (p.stdout + p.stderr)[-300:])
+    text = dest.read_text(encoding="utf-8")
+    check("the stored scan holds no token", FAKE_TOKEN not in text and FAKE_TOKEN not in p.stdout + p.stderr)
+    row = {r["folder"]: r for r in json.loads(text)["folders"]}["fixture-local"]
+    check("an ssh remote whose user is a token is withheld", row.get("remote") == "" and
+          row.get("remote_withheld") is True and not row.get("no_origin"), row)
+    check("an https one keeps its identity without its user",
+          any(line.startswith("mirror\thttps://" + tail) for line in row.get("remotes_all") or []), row)
+    menv = dict(os.environ, OBSERVATORY_SCRATCH=str(d / "raw"), PATH=f"{offline_bin(d)}:{os.environ.get('PATH', '')}")
+    m = subprocess.run([PY, "collectors/merge.py", str(d / "raw")], cwd=ROOT, env=menv,
+                       capture_output=True, text=True, timeout=120)
+    check("the merge runs", m.returncode == 0, m.stderr[-300:])
+    if m.returncode == 0:
+        model = json.loads((d / "raw/model.json").read_text(encoding="utf-8"))
+        lo = (model["projects"].get("local-fixture-local") or {}).get("local_only") or {}
+        check("a withheld remote is still a remote: the checkout is not called unpublished",
+              lo.get("unpublished") is False, str(lo)[:200])
+        check("and the model holds no token", FAKE_TOKEN not in json.dumps(model))
+
+    # A row carried from a scan taken before the upgrade: rewritten, counted, and only once.
+    dest.write_text(json.dumps({"scanned_at": "2026-01-02T03:04:05Z", "folders": [
+        {"folder": "fixture-local", "is_git": True, "remote": FAKE_TOKEN + "@example.com:example-org/alpha-web.git",
+         "remotes_all": ["origin\thttps://" + FAKE_TOKEN + "@" + tail + " (fetch)"]}],
+        "skipped": [], "degraded": []}), encoding="utf-8")
+    env = dict(os.environ, OBSERVATORY_DATA=str(data), OBSERVATORY_STEP_DEADLINE=f"{time.time() - 1:.0f}")
+    first = subprocess.run([PY, "collectors/scan_filesystem.py", str(dest)], cwd=ROOT, env=env,
+                           capture_output=True, text=True, timeout=900)
+    doc = json.loads(dest.read_text(encoding="utf-8"))
+    row = {r["folder"]: r for r in doc["folders"]}["fixture-local"]
+    check("the carried row holds no token", FAKE_TOKEN not in dest.read_text(encoding="utf-8"), row)
+    check("its scp remote is withheld", row.get("remote") == "" and row.get("remote_withheld") is True, row)
+    check("its https line keeps the identity", row.get("remotes_all") == ["origin\thttps://" + tail + " (fetch)"], row)
+    check("the rewrite is counted", doc.get("origins_rewritten") == 1 and "rewrote 1 stored origin" in first.stdout,
+          (doc.get("origins_rewritten"), first.stdout[-200:]))
+    subprocess.run([PY, "collectors/scan_filesystem.py", str(dest)], cwd=ROOT, env=env,
+                   capture_output=True, text=True, timeout=900)
+    again = json.loads(dest.read_text(encoding="utf-8"))
+    row2 = {r["folder"]: r for r in again["folders"]}["fixture-local"]
+    check("a second tick rewrites nothing", again.get("origins_rewritten") == 0 and row2.get("remote") == ""
+          and row2.get("remote_withheld") is True, (again.get("origins_rewritten"), row2))
+
+
 def test_a_refused_scan_leaves_the_previous_file_intact() -> None:
     d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-fskeep-"))
     dest = d / "local.json"
@@ -639,6 +702,7 @@ if __name__ == "__main__":
                test_a_carried_row_keeps_the_date_it_was_measured,
                test_out_of_time_with_no_earlier_scan_leaves_a_new_folder_out,
                test_a_scan_with_time_carries_nothing,
+               test_a_stored_origin_whose_user_is_a_token_is_rewritten,
                test_an_unconfigured_projects_source_is_a_typed_refusal,
                test_the_emitter_refuses_a_wholesale_swing,
                test_a_small_estate_grows_without_an_override,

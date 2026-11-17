@@ -541,8 +541,17 @@ def local_request(host: str, origin: str | None, fetch_site: str | None, port: i
     return True
 
 
+#: A POST refused before its body was read drops at most this much of it, for at most this long, before the close
+#: (OBS-589, Handler._discard_unread_body): the largest body /mcp accepts, and peer_check's wait.
+UNREAD_BODY_BYTES = lifecycle.MAX_BODY_BYTES
+UNREAD_BODY_SECONDS = peer_check.DRAIN_SECONDS
+
+
 class Handler(http.server.BaseHTTPRequestHandler):
     server_version = f"observatory-serverd/{VERSION}"
+
+    #: Whether this request's body was read (OBS-589): a POST that was not drains it before the close.
+    _body_read = False
 
     # region client-disconnect — docs: docs/runs/2026-10-01-client-disconnect/README.md
     def handle(self):
@@ -789,6 +798,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                    "/fabric/v1/events", "/fabric/v1/usage", "POST /mcp"]}, 404)
 
     def do_POST(self):                                    # noqa: N802
+        self._body_read = False
+        try:
+            self._post()
+        finally:
+            self._discard_unread_body()
+
+    def _post(self) -> None:
         if self.path.split("?", 1)[0] != lifecycle.MCP_PATH:
             self._json({"error": "GET only, except POST /mcp (node.lifecycle and secret requests); nothing else "
                                  "here changes anything"},
@@ -800,6 +816,43 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._json({"error": "only local browser origins are accepted"}, 403)
             return
         self._mcp()
+
+    def _read_body(self, length: int) -> bytes:
+        self._body_read = True
+        return self.rfile.read(length)
+
+    def _discard_unread_body(self) -> None:
+        """OBS-589: a POST refused before its body was read (the bearer, the origin, the route, the size) is
+        answered, the sending side ended, and then up to UNREAD_BODY_BYTES of the body are read and dropped for at
+        most UNREAD_BODY_SECONDS, never parsed. Closing with the body unread, or still on its way (http.client
+        writes the head and the body separately), resets the connection, and on Windows a reset discards the
+        answer the client has received but not read yet: the caller saw a dropped connection instead of its 401.
+        The keyserver's own fix for this class (OBS-309) and peer_check.refuse do the same. A peer that left ends
+        it quietly."""
+        if self._body_read:
+            return
+        try:
+            declared = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            declared = 0
+        chunked = bool(self.headers.get("Transfer-Encoding"))
+        left = UNREAD_BODY_BYTES if chunked else min(max(declared, 0), UNREAD_BODY_BYTES)
+        if left <= 0:
+            return
+        try:
+            self.connection.shutdown(socket.SHUT_WR)
+            deadline = time.monotonic() + UNREAD_BODY_SECONDS
+            while left > 0:
+                wait = deadline - time.monotonic()
+                if wait <= 0:
+                    break
+                self.connection.settimeout(wait)
+                chunk = self.rfile.read1(left)
+                if not chunk:
+                    break
+                left -= len(chunk)
+        except (OSError, ValueError):
+            pass
 
     def _refuse(self, code: int, doc: dict, headers: dict | None = None) -> None:
         body = json.dumps(doc).encode("utf-8")
@@ -863,7 +916,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                                                   f"{lifecycle.MAX_BODY_BYTES} bytes"})
             return
         try:
-            message = json.loads(self.rfile.read(length))
+            message = json.loads(self._read_body(length))
             params = message.get("params", {}) if isinstance(message, dict) else None
             if not isinstance(params, dict) or not isinstance(params.get("_meta", {}), dict) \
                     or not isinstance(params.get("arguments", {}), dict):
@@ -892,7 +945,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                                                   f"{lifecycle.MAX_BODY_BYTES} bytes"})
             return None
         try:
-            message = json.loads(self.rfile.read(length))
+            message = json.loads(self._read_body(length))
             params = message.get("params", {}) if isinstance(message, dict) else None
             if not isinstance(params, dict) or not isinstance(params.get("arguments", {}), dict):
                 raise ValueError

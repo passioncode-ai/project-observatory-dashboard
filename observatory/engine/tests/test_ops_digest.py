@@ -132,13 +132,59 @@ class TheDetectors(unittest.TestCase):
 
     def test_credentials(self) -> None:
         provider = "s" + "k-" + "proj-" + "Ab12Cd34Ef56Gh78"
-        for refused in (provider, "ops.risk-assessment-completed", "queue.task-assigned-to-worker",
-                        "e" + "yJabc.def.ghi", "Bearer x", "BEARER x", "A" * 20 + "b" * 19 + "1",
+        for refused in (provider, "e" + "yJabc.def.ghi", "Bearer x", "BEARER x", "A" * 20 + "b" * 19 + "1",
                         "AK" + "IA" + "ABCDEFGHIJKLMNOP"):
             self.assertTrue(OD.secret_value(refused), refused)
+        # DEC-0151: the examples the specification gives for FAC-SEM-167 pass (`sk-` after a letter is no key).
         for passed in ("work.session-end-task-back", "board.tick", "a" * 64, "Bearer", "bearer \n",
-                       "abcdef0123456789" * 3):
+                       "abcdef0123456789" * 3, "ops.risk-assessment-completed", "queue.task-assigned-to-worker"):
             self.assertFalse(OD.secret_value(passed), passed)
+
+    def test_dec_0151_canonical_case_boundary_and_strength(self) -> None:
+        """A provider key's prefix in its canonical case only, after a boundary (the start, a character that is no
+        ASCII letter or digit, or an escape), and an `sk-` key only with a digit and an upper-case letter in 16 or
+        more characters, or a digit in 32 or more (`src/secret-shape.ts` at the contract's DEC-0151)."""
+        key = "s" + "k-" + "Test0Example1Key2Value3"
+        for refused in (key, "x." + key, "x%22" + key, "x\\n" + key, "x\\u0022" + key, "\x1b[31m" + key,
+                        "s" + "k-" + "a1" * 16, "x." + "gh" + "p_" + "a1" * 10, "x:" + "glp" + "at-" + "a1" * 10):
+            self.assertTrue(OD.secret_value(refused), refused)
+        for passed in ("S" + "K-Test0Example1Key2Value3", "x" + key, "s" + "k-learn-experiments-2026",
+                       "s" + "k-" + "a1" * 15, "project:helpdesk-customer-support", "GH" + "P_" + "A1" * 18,
+                       "task-proj-" + "Ab12Cd34Ef56Gh78Ij90"):
+            self.assertFalse(OD.secret_value(passed), passed)
+
+    def test_an_operation_dec_0151_frees_is_a_lawful_name_and_one_it_reads_is_refused(self) -> None:
+        self.assertIsNone(OD.name_refusal("s" + "k-learn-experiments-2026"))
+        self.assertIsNone(OD.name_refusal("task-proj-" + "Ab12Cd34Ef56Gh78Ij90"))
+        self.assertEqual(OD.name_refusal("x.s" + "k-proj-" + "Ab12Cd34Ef56Gh78Ij90"), "is refused by FAC-SEM-167")
+
+    def test_a_jwt_is_read_in_one_pass(self) -> None:
+        self.assertTrue(OD.has_jwt("x e" + "yJab.cd.ef"))
+        self.assertTrue(OD.has_jwt("e" + "yJe" + "yJab.cd."))
+        for passed in ("e" + "yJa.cd.ef", "e" + "yJab.c.ef", "e" + "yJab.cd", "e" + "yJ" * 2000):
+            self.assertFalse(OD.has_jwt(passed), passed[:20])
+        self.assertFalse(OD.secret_value("e" + "yJ" * 2000))
+
+    def test_it_agrees_with_the_folder_attribution_port_over_the_contracts_vectors(self) -> None:
+        """The engine's other port of `secretValue` (DEC-0151): the two answer the same over every string of the
+        contract's folder-attribution vectors."""
+        import folder_attribution
+
+        def strings(value):
+            if isinstance(value, str):
+                yield value
+            elif isinstance(value, dict):
+                for key, item in value.items():
+                    yield key
+                    yield from strings(item)
+            elif isinstance(value, list):
+                for item in value:
+                    yield from strings(item)
+        vectors = json.loads((ROOT / "fabric/attribution-vectors/folder-attribution.json").read_text(encoding="utf-8"))
+        every = sorted(set(strings(vectors)))
+        self.assertGreater(len(every), 100)
+        for value in every:
+            self.assertEqual(OD.secret_value(value), folder_attribution.secret_value(value), value)
 
     def test_case_folding_stays_ascii(self) -> None:
         """Python's IGNORECASE folds U+017F onto `s` and U+212A onto `k`; JavaScript without the `u` flag does not."""
@@ -148,7 +194,13 @@ class TheDetectors(unittest.TestCase):
     def test_a_source_label(self) -> None:
         self.assertIsNone(OD.source_refused("app"))
         self.assertIsNone(OD.source_refused("fabric-board"))
-        self.assertIn("credential", OD.source_refused("mask-" + "abcdefghijklmnop"))
+        # DEC-0151: a lower-case label holds no `sk-` key (it needs an upper-case letter, or 32 characters after
+        # `sk-`, past the label's 32), but it can hold a Slack or a GitLab key's shape after a boundary.
+        self.assertIsNone(OD.source_refused("mask-" + "abcdefghijklmnop"))
+        self.assertIsNone(OD.source_refused("s" + "k-" + "abcdefghijklmnop1"))
+        self.assertIn("credential", OD.source_refused("xo" + "xb-" + "abcdefghij"))
+        self.assertIn("credential", OD.source_refused("ab-" + "glp" + "at-" + "abcdefghijklmnopqrst"))
+        self.assertIsNone(OD.source_refused("axo" + "xb-" + "abcdefghij"))
         for bad in ("App", "", "a" * 33, "1app", "app\n", None):
             self.assertIsNotNone(OD.source_refused(bad), bad)
 

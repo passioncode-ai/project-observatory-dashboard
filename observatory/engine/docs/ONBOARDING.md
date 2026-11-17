@@ -497,7 +497,11 @@ counters), `dns-edit`, `email-routing`, `email-routing-setup`, `email-sending-do
 `--account`). `r2-bucket` is one bucket (`--account --bucket NAME`) and delivers an S3 pair to three
 slots under `--vault PROJECT/ENV/PREFIX`: `PREFIX_ACCESS_KEY_ID`, `PREFIX_SECRET_ACCESS_KEY`,
 `PREFIX_ENDPOINT`. Each is verified with its own value before delivery; the handling-secrets skill says
-what each grants.
+what each grants. A token delivered to a slot is revoked with `tools/cloudflare.py revoke --vault
+PROJECT/ENV/NAME` (OBS-575): the door finds it by the slot its managed name records, deletes it at
+Cloudflare, reads the account's tokens again to confirm it is gone, then removes the slot and journals
+the revocation; anything it could not confirm keeps the slot. `revoke <label>` stays the verb for a
+token filed in the plugin folder. An R2 pair is not named after its slot and is not found this way.
 
 **The Cloudflare page** (OBS-271). `tools/cloudflare.py issue --preset inventory-read --account
 <slug>` mints one read-only token per account (Workers Scripts, Pages, R2 Storage and D1 Read on the
@@ -2673,6 +2677,17 @@ missing) before changing anything; a failure while working exits 1. The original
 older database-only meaning; `workspace-backup` snapshots the whole managed
 workspace. Keep the snapshot and matching previous application release.
 
+On a workspace whose tick and server always run (the maintain schedule is live),
+`workspace-backup --pause-writers` takes the same snapshot the daily step of
+`maintain` takes, now: it holds the update lock, stops this workspace's tick and
+server, writes and verifies the encrypted snapshot, starts them again even when the
+snapshot fails, and records the outcome as `snapshot` in `<home>/store/maintenance.json`.
+It refuses before stopping anything while a tick, an update or a maintenance pass
+runs (exit 2; with `--json` the code is `tick-running`, `update-running` or
+`maintenance-running`), and a failed snapshot exits 1 with `snapshot-failed`. It
+takes no `--output`. A scheduled job that needs a snapshot younger than an hour
+calls it.
+
 To restore, select a new empty home with global `--home` and pass the private
 snapshot directory to `full restore`. Never point old code at newer data to
 simulate a downgrade. [COMPATIBILITY.md](COMPATIBILITY.md) specifies supported
@@ -2689,6 +2704,11 @@ project-observatory full backup-passphrase set     # stdin; a terminal prompts t
 project-observatory full backups status            # root, which rule chose it, what exists
 project-observatory full backups migrate           # move the newest legacy copies there, encrypted
 ```
+
+`backups status` also names `newest_counted_as_daily`: the newest copy of any kind that satisfies the
+daily rule (`daily`, `before-upgrade` or a `snapshot` you took), with its `kind`, its UTC time `at`
+and its `file`, or `null` when there is none. Read the backup's age there, not from the newest
+`daily` alone: a fresh `before-upgrade` copy counts for the day.
 
 The root is chosen in this order:
 1. `OBSERVATORY_BACKUPS`;

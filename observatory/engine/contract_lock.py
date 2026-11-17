@@ -140,6 +140,9 @@ PIN_CHECK_EXCLUDES: dict[str, str] = {
     "fabric/ops-digest": "vendored at the contract's release tag v0.1.0+2026-11-06.1 (DEC-0153, OBS-330): the "
                          "operations digests' schemas, vectors and fixtures, which the pin predates; moving the pin "
                          "re-vendors every other folder and is its own review",
+    "fabric/agent-health": "vendored at the contract's commit db0d8f15 (DEC-0179, OBS-577): the agent-health/1 "
+                           "schema, vectors and fixtures, which the pin predates; moving the pin re-vendors every "
+                           "other folder and is its own review",
 }
 
 
@@ -237,6 +240,8 @@ VENDORED_AT_OTHER_COMMITS: dict[str, dict[str, str]] = {
             "both schemas differ at the pin, and `mcp/memory_wire.py` validates every memory call against them."},
     "fabric/ops-digest": {
         "eac1a594aa131851f079da8bb7b2149e1951f35f": PIN_CHECK_EXCLUDES["fabric/ops-digest"]},
+    "fabric/agent-health": {
+        "db0d8f15994822724356d0a7e7ccc98dbcca604d": PIN_CHECK_EXCLUDES["fabric/agent-health"]},
 }
 
 

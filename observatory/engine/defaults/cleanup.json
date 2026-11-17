@@ -26,6 +26,8 @@
   "build_idle_days": {"normal": 14, "low": 3, "critical": 1},
   "trash_days": {"normal": 30, "low": 30, "critical": 3},
   "clone_min_age_hours": 1,
+  "user_temp_hours": 12,
+  "tmp_growth": {"entries_per_day": 1000, "gb_per_day": 1},
   "temp_roots": [
    {"path": "{tmpdir}", "depth": 1},
    {"path": "/private/tmp", "depth": 1},

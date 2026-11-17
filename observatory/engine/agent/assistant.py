@@ -351,6 +351,19 @@ def status(include_projects=True):
     out['model_configured']=ready['model_configured'];out['model_status']=ready['model_status']
     out['key_status']=ready['key_status'];out['key_source']=ready['key_source'];out['next']=ready['next']
     if not out['provider_configured']:out['provider_status']=provider_status()
+    # WHAT A QUESTION COSTS AND WHETHER ONE CAN BE ASKED NOW (OBS-560): the agent panel's ask button and an agent
+    # read the same two fields. `blocked_by` is the code `ask` (or its runner) would refuse with, checked in the
+    # order `ask` checks; the spend is this project's own journal against its ceilings, never the provider's.
+    spend,gaps=providers.local_spend()
+    out['spend']=spend;out['degraded']+=gaps
+    today,ceiling=spend.get('today'),spend.get('daily_ceiling')
+    month,monthly=spend.get('month'),spend.get('monthly_ceiling')
+    reached=(isinstance(today,(int,float)) and isinstance(ceiling,(int,float)) and ceiling>0 and today>=ceiling) or \
+            (isinstance(month,(int,float)) and isinstance(monthly,(int,float)) and monthly>0 and month>=monthly)
+    blocked=('agent-disabled' if not out['agent_enabled'] else 'provider-unconfigured' if not out['provider_configured']
+             else 'model-unconfigured' if out['model_status']=='no-model' else 'budget-unset' if out['model_status']=='no-budget'
+             else 'budget-reached' if reached else None)
+    out['ready']=blocked is None;out['blocked_by']=blocked
     if include_projects:out['projects']=choices
     return out
 

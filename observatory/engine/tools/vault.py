@@ -46,7 +46,8 @@ THE CONTRACT WITH AGENTS — the four rules the observatory skill makes mandator
 METADATA IS NOT SECRET. `meta.json` beside each value (created, rotated, envs,
 `header_for`, the server a slot is bound to, `expires_at` with its
 `expiry_reason`, which a minting door records through `record_expiry`, OBS-191,
-and `provenance`, the request a value was issued for, `record_provenance`)
+and `provenance`, the request a value was issued for, `record_provenance`,
+and `source`, who handed a received value over, `put --from LABEL`, OBS-556)
 and `leaks.jsonl` hold names,
 dates and places — never values — so the register can be read, listed and
 rendered without touching a single secret byte.
@@ -374,8 +375,10 @@ def _stdin_value() -> str:
     return v
 
 
-def _write_put(slot: pathlib.Path, meta: dict, value: str, label: str, **journal_detail) -> None:
-    """The write half of `put`: the value, then its metadata, then one journal line naming the slot."""
+def _write_put(slot: pathlib.Path, meta: dict, value: str, label: str, *, source: dict | None = None,
+               **journal_detail) -> None:
+    """The write half of `put`: the value, then its metadata, then one journal line naming the slot. `source` is
+    who handed the value over (`put --from`, OBS-556); without it the slot's earlier source is forgotten."""
     _atomic_write(slot, value)
     meta.setdefault("created", now())
     meta["updated"] = now()
@@ -384,6 +387,11 @@ def _write_put(slot: pathlib.Path, meta: dict, value: str, label: str, **journal
     key_expiry.clear(meta)
     # Nor its provenance: the request a value answered names that value only (OBS-191).
     meta.pop("provenance", None)
+    # Nor who handed the old one over (OBS-556): a new value's sender is the one this put names, or nobody.
+    meta.pop("source", None)
+    if source:
+        meta["source"] = source
+        journal_detail["received_from"] = source.get("from")
     _atomic_write(_meta_path(slot), json.dumps(meta, indent=1), 0o600)
     journal("put", label, **journal_detail)
 
@@ -400,6 +408,7 @@ def _write_rotate(slot: pathlib.Path, meta: dict, value: str, label: str, **jour
     meta["rotations"] += 1
     key_expiry.clear(meta)
     meta.pop("provenance", None)
+    meta.pop("source", None)
     _atomic_write(_meta_path(slot), json.dumps(meta, indent=1), 0o600)
     journal("rotate", label, archived=archive.name, scope="local_slot", **journal_detail)
     return archive
@@ -440,9 +449,21 @@ def cmd_put(a) -> int:
     if slot.is_file() and not a.force:
         die(f"{a.project}/{a.env}/{a.name} already holds a value. `rotate` replaces "
             f"it keeping history; `put --force` overwrites losing it.")
+    sender = getattr(a, "sender", None)
+    if sender is not None:
+        import key_source
+        problem = key_source.label_problem(sender)
+        if problem:
+            raise VaultBoundaryError(f"--from refused: {problem}")
     meta = _read_meta(slot)
     value = _stdin_value()
-    _write_put(slot, meta, value, f"{a.project}/{a.env}/{a.name}")
+    if sender is not None and (sender == value or value in sender):
+        raise VaultBoundaryError("--from refused: the label names the value; name the sender, never the key")
+    source = None
+    if sender is not None:
+        import key_source
+        source = key_source.received(sender, now())
+    _write_put(slot, meta, value, f"{a.project}/{a.env}/{a.name}", source=source)
     print(f"stored {a.project}/{a.env}/{a.name}: length {len(value)}, "
           f"mode 600; value hidden")
     return 0
@@ -852,7 +873,7 @@ def cmd_movements(a) -> int:
 COPY_SCHEMA = "vault-copy/1"
 #: The fields of a slot's metadata that describe its VALUE, carried with it: when it expires, who issued it. Its
 #: header binding, its rotation history and its marks describe how THIS store's account uses it, and stay.
-COPY_META = ("expires_at", "expiry_reason", "expiry_recorded", "expiry_by", "provenance")
+COPY_META = ("expires_at", "expiry_reason", "expiry_recorded", "expiry_by", "provenance", "source")
 #: The names a vault folder holds at its top; a `--to-store` that holds one is a vault folder, not a store.
 VAULT_MARKERS = ("movements.jsonl", "leaks.jsonl", ".vault.lock")
 
@@ -1214,6 +1235,7 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
                     meta["updated"] = now()
                     key_expiry.clear(meta)
                     meta.pop("provenance", None)
+                    meta.pop("source", None)
                     carried = [k for k in COPY_META if k in source_meta]
                     meta.update({k: source_meta[k] for k in carried})
                     meta["copied_from"] = {"store": source_store, "slot": src_label, "at": now()}
@@ -1618,6 +1640,9 @@ def main(argv: list[str]) -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("put");    _slot_args(p); p.add_argument("--force", action="store_true")
+    p.add_argument("--from", dest="sender", metavar="LABEL",
+                   help="who handed this value over (a person, an organization, an agent), as a short label kept "
+                        "beside the slot's metadata, never the value; absent, the source is left to measurement")
     p = sub.add_parser("rotate"); _slot_args(p)
     p = sub.add_parser("leak");   _slot_args(p); p.add_argument("--where", required=True)
     p = sub.add_parser("settle"); _slot_args(p); p.add_argument("--how", required=True)

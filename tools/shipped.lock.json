@@ -68,6 +68,24 @@
       ],
       "required": []
     },
+    "observatory_credential_mark": {
+      "input": [
+        "action",
+        "env",
+        "evidence",
+        "id",
+        "name",
+        "owner",
+        "project",
+        "purpose",
+        "rotationDays",
+        "tags",
+        "where"
+      ],
+      "required": [
+        "action"
+      ]
+    },
     "observatory_credentials": {
       "input": [
         "projectId"
@@ -82,6 +100,13 @@
         "limit",
         "projectId",
         "vulnerableOnly"
+      ],
+      "required": []
+    },
+    "observatory_doctor": {
+      "input": [
+        "action",
+        "journalId"
       ],
       "required": []
     },
@@ -144,6 +169,10 @@
         "handoffId"
       ]
     },
+    "observatory_health": {
+      "input": [],
+      "required": []
+    },
     "observatory_integrations": {
       "input": [
         "state"
@@ -156,6 +185,21 @@
         "state"
       ],
       "required": []
+    },
+    "observatory_key_act": {
+      "input": [
+        "account",
+        "action",
+        "decision",
+        "destination",
+        "limit",
+        "limitReset",
+        "name",
+        "project"
+      ],
+      "required": [
+        "action"
+      ]
     },
     "observatory_key_consumers": {
       "input": [
@@ -241,6 +285,22 @@
     "observatory_mcp_supply": {
       "input": [],
       "required": []
+    },
+    "observatory_ops": {
+      "input": [
+        "action",
+        "decision",
+        "file",
+        "include",
+        "largeFiles",
+        "level",
+        "output",
+        "reinstall",
+        "version"
+      ],
+      "required": [
+        "action"
+      ]
     },
     "observatory_org_accounts": {
       "input": [],

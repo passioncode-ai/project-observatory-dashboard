@@ -1536,17 +1536,6 @@
         "<exit>"
       ]
     },
-    "secret_prompt": {
-      "expect": "FAIL",
-      "row": "OBS-278",
-      "reason": "AssertionError: 'waiting' != 'cancelled'",
-      "statuses": [
-        "FAIL"
-      ],
-      "failing": [
-        "TheAgentsSide.test_cancelling_the_job_withdraws_the_request"
-      ]
-    },
     "secrets": {
       "expect": "FAIL",
       "row": "OBS-279",

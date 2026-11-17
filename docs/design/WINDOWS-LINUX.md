@@ -165,7 +165,10 @@ else is the finding to report, with its output.
 ## Known differences on Windows
 
 - **No graceful stop.** A process without a console receives no SIGTERM, so `osproc.stop_group`
-  stops the tree at once there; `grace` applies on POSIX only.
+  stops the tree at once there; `grace` applies on POSIX only. A job runner that must clean up
+  before it ends (the secret prompt withdraws its request) therefore listens for its cancel:
+  `jobs.cancel` marks the record first, waits for a listening runner's own exit, and only then
+  stops the tree (OBS-590; docs/design/control-plane/job-cancel.md).
 - **The tree is followed by parent links.** `taskkill /T` reaches the descendants whose parent is
   still alive; a grandchild whose parent already exited is not reached. A Job Object with
   kill-on-close would close that gap and is the next step if a step's orphan is ever measured.

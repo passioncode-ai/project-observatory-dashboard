@@ -45,6 +45,10 @@ import secret_prompt as SP                             # noqa: E402
 PROJECT, ENV = "alpha-web", "prod"
 #: A fixture value composed rather than written out, so no key-shaped literal sits in the source.
 VALUE = "-".join(("fixture", "secret", "value", "q" * 12))
+#: How long a test waits for a thread or a runner process before it calls it hung. A bound on a hang, never the
+#: answer: a test reads a request only after the code that answers it said it was done, so a slow runner changes
+#: how long a test takes and never what it reads (OBS-588).
+HANG_GUARD_SECONDS = 300
 
 
 class FakePrompter:
@@ -601,14 +605,22 @@ class TheAgentsSide(Base):
         self.assertIn(caught.exception.code, (401, 403))
         self.assertEqual(self.prompter.opened, [])
 
-    def wait_job(self, job_id: str, seconds: float = 60) -> dict:
-        end = time.monotonic() + seconds
+    def wait_for(self, done, what: str):
+        """Poll `done` until it answers something true, which is returned. The condition is the runner's own signal;
+        the clock only bounds a hang (OBS-588)."""
+        end = time.monotonic() + HANG_GUARD_SECONDS
         while time.monotonic() < end:
+            answer = done()
+            if answer:
+                return answer
+            time.sleep(0.1)
+        self.fail(f"{what} never happened")
+
+    def wait_job(self, job_id: str) -> dict:
+        def finished():
             doc = jobs.get(job_id)
-            if doc and doc["status"] in jobs.TERMINAL:
-                return doc
-            time.sleep(0.5)
-        self.fail(f"job {job_id} did not finish")
+            return doc if doc and doc["status"] in jobs.TERMINAL else None
+        return self.wait_for(finished, f"job {job_id} finishing")
 
     def test_the_job_follows_the_request_to_stored_and_never_carries_the_value(self):
         spawned: list[tuple[list, dict]] = []
@@ -641,22 +653,28 @@ class TheAgentsSide(Base):
     def test_cancelling_the_job_withdraws_the_request(self):
         out = SC.request({"project": PROJECT, "env": ENV, "slot": "WITHDRAWN_KEY", "why": "deploy"}, self.span())
         self.assertIn("job", out, out)
-        time.sleep(1.5)                     # the runner is polling
-        jobs.cancel(out["job"]["id"])
-        end = time.monotonic() + 30
-        state = None
-        while time.monotonic() < end:
-            state = call("alpha", "secret.get", {"requestId": out["requestId"]})["request"]["state"]
-            if state != "waiting":
-                break
-            time.sleep(0.5)
+        job_id = out["job"]["id"]
+        # The runner says it is polling only after it listens for the cancel; a cancel sent earlier than that, on a
+        # runner slower than the old fixed 1.5 s, stopped it before it could withdraw the request (OBS-588).
+        polling = self.wait_for(lambda: (jobs.get(job_id) or {}).get("statusMessage", "").startswith("waiting for"),
+                                "the runner polling")
+        self.assertTrue(polling)
+        pid = jobs.get(job_id)["pid"]
+        jobs.cancel(job_id)
+        # The runner withdraws the request before it exits, so its exit is the signal to read the request once.
+        self.wait_for(lambda: not jobs._alive(pid), "the cancelled runner exiting")
+        state = call("alpha", "secret.get", {"requestId": out["requestId"]})["request"]["state"]
         self.assertEqual(state, "cancelled")
 
 
 class FakeBroker:
-    def __init__(self, states=("ready",), refuse=None) -> None:
+    """`gate`, when given, holds every read of the operation until the test sets it: a broker as slow as the test
+    wants, with no wall clock in the test (OBS-588)."""
+
+    def __init__(self, states=("ready",), refuse=None, gate: threading.Event | None = None) -> None:
         self.states = list(states)
         self.refuse = refuse
+        self.gate = gate
         self.opened: list[tuple[str, str]] = []
 
     def open_for_prompt(self, target_id: str, key: str) -> dict:
@@ -666,6 +684,8 @@ class FakeBroker:
         return {"operationId": "op-1", "state": self.states[0]}
 
     def prompt_operation(self, operation_id: str) -> dict:
+        if self.gate is not None:
+            self.gate.wait()
         if len(self.states) > 1:
             self.states.pop(0)
         return {"operationId": operation_id, "state": self.states[0]}
@@ -741,17 +761,75 @@ class TheBrokerOpensTheWindow(Base):
         self.assertEqual(self.broker.opened, [("observatory.app", rid)])
         self.assertEqual(out["request"]["state"], "waiting")
 
+    def watched(self, prompter: SP.BrokerPrompter) -> tuple[threading.Event, list]:
+        """The watch's own end, as an event, and what it raised (OBS-588). The test waits on the watch, never on the
+        wall clock: a runner of any speed reads the request after the watch is done with it, and a watch that died
+        on an error is caught here instead of reading as a request that is still waiting."""
+        done, raised = threading.Event(), []
+        real = prompter._watch
+
+        def watch(*args):
+            try:
+                real(*args)
+            except BaseException as exc:  # noqa: BLE001 - recorded for the test, then raised as before
+                raised.append(exc)
+                raise
+            finally:
+                done.set()
+        prompter._watch = watch
+        return done, raised
+
     def test_a_start_that_fails_closes_the_request_no_client(self):
         prompter = self.broker_prompter(broker=FakeBroker(states=("running", "failed")))
         prompter.WATCH_SECONDS = 0.01
+        done, raised = self.watched(prompter)
         with mock.patch.object(SP, "PROMPTER", prompter):
             rid = ask("alpha", "FAILED_START_KEY")["request"]["requestId"]
-            end = time.monotonic() + 10
-            while time.monotonic() < end and call("alpha", "secret.get", {"requestId": rid})["request"]["state"] == "waiting":
-                time.sleep(0.02)
+            self.assertTrue(done.wait(HANG_GUARD_SECONDS), "the watch never ended")
+        self.assertEqual(raised, [])
         out = call("alpha", "secret.get", {"requestId": rid})["request"]
         self.assertEqual((out["outcome"], out["reason"]), ("no-client", "app-not-started"))
         self.assertIn("vault.py", out["step"])
+
+    def test_a_start_slower_than_any_deadline_still_closes_the_request(self):
+        # OBS-588: the broker answers only when the test lets it, however long the runner took to get here; until then
+        # the request waits, and after it the watch closes it. No wall clock decides the answer.
+        gate = threading.Event()
+        prompter = self.broker_prompter(broker=FakeBroker(states=("running", "failed"), gate=gate))
+        prompter.WATCH_SECONDS = 0.01
+        done, raised = self.watched(prompter)
+        with mock.patch.object(SP, "PROMPTER", prompter):
+            rid = ask("alpha", "SLOW_START_KEY")["request"]["requestId"]
+            self.assertEqual(call("alpha", "secret.get", {"requestId": rid})["request"]["state"], "waiting")
+            self.assertFalse(done.is_set())
+            gate.set()
+            self.assertTrue(done.wait(HANG_GUARD_SECONDS), "the watch never ended")
+        self.assertEqual(raised, [])
+        out = call("alpha", "secret.get", {"requestId": rid})["request"]
+        self.assertEqual((out["outcome"], out["reason"]), ("no-client", "app-not-started"))
+
+    def test_a_queue_file_held_for_a_moment_does_not_lose_the_close(self):
+        # OBS-588, the Windows run of PR #568: right after the request was written, another handle on queue.json (a
+        # scanner) made the watch's `os.replace` fail with PermissionError; the watch died and the request read
+        # `waiting` for its whole ten minutes. A replace refused for a moment is tried again.
+        real_replace, refused = os.replace, []
+
+        def busy_once(src, dst, *args, **kwargs):
+            if str(dst).endswith("queue.json") and Path(dst).exists() and not refused and done.is_set() is False \
+                    and self.broker.opened:
+                refused.append(dst)
+                raise PermissionError(13, "Access is denied")
+            return real_replace(src, dst, *args, **kwargs)
+        prompter = self.broker_prompter(broker=FakeBroker(states=("running", "failed")))
+        prompter.WATCH_SECONDS = 0.01
+        done, raised = self.watched(prompter)
+        with mock.patch.object(SP, "PROMPTER", prompter), mock.patch.object(os, "replace", busy_once):
+            rid = ask("alpha", "BUSY_QUEUE_KEY")["request"]["requestId"]
+            self.assertTrue(done.wait(HANG_GUARD_SECONDS), "the watch never ended")
+        self.assertEqual(len(refused), 1, "the busy file was met")
+        self.assertEqual(raised, [])
+        out = call("alpha", "secret.get", {"requestId": rid})["request"]
+        self.assertEqual((out["outcome"], out["reason"]), ("no-client", "app-not-started"))
 
     def test_a_refused_start_answers_no_client_at_once(self):
         with mock.patch.object(SP, "PROMPTER", self.broker_prompter(broker=FakeBroker(refuse="held_off"))):

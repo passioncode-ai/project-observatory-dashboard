@@ -3,14 +3,91 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.41.0 (2026-11-17)
+
+The control plane's fourth wave: every vault key says where it came from, a daily doctor puts right what it safely can
+and keeps an undo, the dashboard gains an Assistant page, agents get the key page's acts as tools, and the disk guard
+reaches the user's temporary folder and the Docker volumes inside a VM. The MCP server serves 43 tools. The
+observatory-log plugin moves to 0.41.0 with the release.
 
 ### Added
 
-- **Sessions per project**: the project panel gains "Who works on it now" (the coding sessions running in the project,
-  what each session of the last day last did through its workflow's latest step, and the project's open workflows),
-  and `observatory_sessions` takes `projectId` and answers the same block as `project`, within the caller's memory
-  binding. Design: `docs/design/control-plane/sessions-per-project.md`.
+- **Keys by source** (OBS-556, #563): every vault slot is classed `issued` (a door's ledger or record names it),
+  `received` (`vault.py put --from LABEL`), `shared` (another vault folder holds the same value, compared by digest) or
+  `unknown`, with its context and the services started from it, on the Keys page and in `observatory_credentials`.
+- **Daily doctor** (OBS-558, #565): eight checks once a day from the maintenance job; safe fixes move files aside into
+  a quarantine with an undo journal (`full doctor-daily --undo ID`), the rest become findings (`doctor.backup_stale`,
+  `doctor.step_failing`, `doctor.vault_meta_unreadable`, `doctor.fix_failed`); a model summary only when the day's
+  result changed, inside the engine's budget. MCP `observatory_doctor`.
+- **Snapshot with writers paused** (OBS-583, #566): `full workspace-backup --pause-writers` takes the daily snapshot of
+  `maintain` on demand (update lock, managed jobs stopped and started again, every database copy verified).
+- **Unused Docker volumes** (OBS-584, #566): the guard lists volumes no container uses inside each Lima or Colima VM,
+  with size and the compose project that owns them, on the Disk page and in `observatory_machine`; it still never
+  removes a volume.
+- **The user's temporary folder** (OBS-585, #567): an auto-tier guard class removes top-level entries older than
+  `guard.user_temp_hours` (12) that no process holds, with fixed exclusions, and removes nothing when open files cannot
+  be listed; `disk.tmp_growth` names a name class growing faster than 1000 entries or 1 GB a day and the program
+  writing it.
+- **Cloudflare `revoke --vault PROJECT/ENV/NAME`** (OBS-575, #566): finds a vault-slot token by its managed name,
+  deletes it, confirms it is gone, then removes the slot.
+- **The Assistant page** (OBS-560, #573): chat with the read-only assistant, the daily doctor's last run with undo, and
+  the open security findings by area. `observatory_assistant_status` gains `ready`, `blocked_by` and `spend`.
+- **Key acts for agents** (OBS-559 part 2, #573): `observatory_key_act` (`mint`, `limit`, `disable`, `enable`,
+  `rotate`, `revoke`) and `observatory_credential_mark` (`leak`, `annotate`) call the key page's own functions; mint,
+  rotate, revoke and a raised limit take the operator's words as `decision`.
+- **`backups status` names `newest_counted_as_daily`** (OBS-582, #573).
+
+### Changed
+
+- **Folder attribution follows DEC-0177 and DEC-0151** (OBS-576, OBS-587, #573): a URL whose user name is a token is
+  refused, no origin is recorded for a remote whose user is a token, stored origins are rewritten once; the estate
+  record and the operations digest use the same secret-value rules; a backup's remote drops a token user in the scp
+  form.
+- **A failed automatic update says why** (OBS-581, #571): the reason, the failing step, whether the release API was
+  read with a token, and the command's last lines go into `update.jsonl` and the maintenance record; `maintain status`
+  names a system daemon's log paths.
+
+### Fixed
+
+- **The MCP page names the agent's tools** instead of printing commands when nothing was scanned (OBS-579, #566).
+- **A key annotation from an agent is signed as the agent**, not as the operator (#573).
+- **A Windows timing race in the lifecycle broker test** no longer holds a release (OBS-586, #573).
+- **A refused request's answer reaches a Windows client** (OBS-589, #573): the local server drains the unread body of a
+  POST it refused before closing, so a 401, 403 or 405 is no longer lost to a connection reset.
+- **A private file write on Windows retries a refused replace** (OBS-588, #573): the secret prompt's request no longer
+  stays waiting for ten minutes when another handle held `queue.json` for a moment.
+
+## 0.40.0 (2026-11-17)
+
+The estate control plane's third wave: a key sweep over every repository of the estate, a supply-chain watch over MCP
+servers, integration health with issues filed in a project's own repository, the engine's health as one
+`agent-health/1` document, and the coding sessions of each project on its panel. The MCP server serves 40 tools. The
+observatory-log plugin moves to 0.40.0 with the release.
+
+### Added
+
+- **Key sweep** (OBS-554, #555): the working trees and Git history of the estate's repositories are compared, on a
+  resumable daily budget, with the values this machine holds, and scanned by gitleaks or Betterleaks when installed
+  (always redacted). Only the rule, place, commit and a keyed digest are kept; `secret.in_repository` closes when the
+  value is gone and the slot rotated. Findings page section; MCP `observatory_key_sweep` and
+  `observatory_key_sweep_settle`; `full key-sweep [--full]`. Design: `docs/design/control-plane/key-sweep.md`.
+- **Supply-chain watch over MCP servers** (OBS-555, #559): each server's command line is judged by rule
+  (`mcp.risky_command`: unpinned package runners, fetch and execute), each tool's full definition is pinned by digest
+  when probed and a change is `mcp.tool_changed` until the person accepts it; remote scanners stay off until turned on
+  (`features.mcp_remote_scanners`). MCP page; MCP `observatory_mcp_supply` and `observatory_mcp_accept`. Design:
+  `docs/design/control-plane/supply-chain.md`.
+- **Integration health and issues** (OBS-557, #560): each held key is checked with its door at most once a UTC day
+  (`integration.key_invalid`), the provider answers collectors rely on are checked for missing fields
+  (`integration.drift`), and integrations a project uses with no door are listed (`integration.untracked`). The tick's
+  new `issues` step files allowed finding classes as GitHub issues in the project's own repository, on by default for
+  dependency and integration findings, never for keys in a public repository, deduplicated by fingerprint, with a
+  notice shown once. Integrations page under Monitoring; MCP `observatory_integrations` and `observatory_issues`;
+  `full integration-health`, `full issues [--dry-run]`. Design: `docs/design/control-plane/integration-health.md`.
+- **Engine health as `agent-health/1`** (OBS-577, #561): `observatory_health` and `full health --json` answer one
+  document of environment, update, security and connection checks (fabric-agent-contract DEC-0179), counts and codes
+  only, `unknown` where a source was not read. Design: `docs/design/control-plane/agent-health.md`.
+- **Sessions per project** (#558): the project panel gains "Who works on it now", and `observatory_sessions` takes
+  `projectId`. Design: `docs/design/control-plane/sessions-per-project.md`.
 
 ## 0.39.1 (2026-11-16)
 

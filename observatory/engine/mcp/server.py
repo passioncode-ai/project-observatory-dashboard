@@ -117,23 +117,24 @@ server = InteropServer(
     # a host keeps about 2,048 and drops the rest, and the earlier text was cut
     # exactly at the WRITE rule (tests/test_mcp_wire.py checks the length).
     instructions=(
-        "SPENDS: `observatory_assistant_ask` (configured model; private dialogue/job — "
+        "SPENDS: `observatory_assistant_ask` (configured model; private dialogue/job: "
         "`fabric.job.get`/`.cancel`). `observatory_search` stays local "
         "(embedding-policy/1, lexical); `degraded` says so.\n"
         "WRITE: `observatory_record`, `_lesson` and `_propose` append PROPOSALS below "
         "confidence 1; only the operator or independent corroboration promotes one; "
-        "`_org_selection` and gated `_configure` changes need the operator's `decision`.\n"
+        "`_org_selection`, gated `_configure`/`_key_act`/`_ops` need the operator's `decision`; "
+        "`_ops` is a job.\n"
         "SECRETS: `observatory_credentials` names keys and CANNOT return a value; run its command, "
         "open no file. Missing key: `observatory_secret_request`, no chat.\n"
-        "DEGRADED: every read carries `degraded` (empty: full coverage; else it "
-        "names gaps); treat a read without one as a bug (writes/job handles have none). "
+        "DEGRADED: every read carries `degraded` (empty: full coverage, else the "
+        "gaps); treat a read without one as a bug (writes/job handles have none). "
         "Refusals are typed `error`s; isError: malformed input, unknown tool "
         "or invalid output.\n"
         "WORKFLOW: `observatory_checkpoint_write` after each step (keep `leaseId`); "
         "`observatory_handoff_create`/`_accept` moves it; `observatory_workflow_list` finds it.\n"
-        "START with `observatory_overview` (counts, findings, disk). Folders outside Git go to `config/tracked.json`; "
-        "no grants or registry writes.\n"
-        "READ, paged with `limit` and `cursor` → `nextCursor`, totals over the "
+        "START with `observatory_overview` (counts, findings, disk). Folders outside Git: `config/tracked.json`; "
+        "no grant/registry writes.\n"
+        "READ, paged with `limit`/`cursor` → `nextCursor`, totals per "
         "scope: `observatory_status` (pass `limit`, `detail: summary`; unpaged is "
         "huge); `observatory_findings` takes `projectId`; "
         "`observatory_recall`. `limit` only: `observatory_project`, `observatory_timeline`. "
@@ -514,6 +515,12 @@ def observatory_credentials(
     `expiryReason`, or `expiry: not recorded` for a value put by hand. A value
     issued on a credential request carries `issuedOnRequest` (the request id, its
     context, agent, door and account; `credential_requests.py show ID` has the rest).
+
+    Each vault row says where its value came from (OBS-556): `source` is `issued` (a door's ledger or record, or a
+    credential request, with `sourceContext` naming the door and account), `received` (`vault.py put --from LABEL`:
+    the sender as a person typed it), `shared` (the same keyed digest under another project's folder) or `unknown`
+    (put by hand; never read as issued). `sharedWith` names the other slots holding the value, `consumers` the
+    services started from the slot, and `consumersTool` the tool that finds every other copy by the value.
     """
     bad = _project_id_refusal(projectId, bare=True)
     if bad:
@@ -544,6 +551,151 @@ def observatory_key_consumers(
     except vault.VaultBoundaryError as exc:
         return {"error": {"code": "invalid-slot", "message": str(exc)}, "degraded": []}
     return key_consumers.vault_answer(project, env, name)
+
+
+@server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False))
+def observatory_key_act(
+    action: Annotated[Literal["mint", "limit", "disable", "enable", "rotate", "revoke"],
+                      Field(description="The key page's act on an OpenRouter key. mint, rotate, revoke and a limit "
+                                        "above the recorded ceiling need the operator's `decision`.")],
+    name: Annotated[str | None, Field(description="The key's name in the door's ledger, or its provider label. "
+                                                  "mint: the new key's name (default observatory-<destination>).")] = None,
+    destination: Annotated[str | None, Field(description="mint: where the door writes the value, `observatory`, "
+                                                         "`claude-mem` or a vault slot `vault:<project>/<env>/<NAME>`; "
+                                                         "also the decision's target.")] = None,
+    limit: Annotated[float | None, Field(description="mint and limit: the ceiling in USD, above 0.")] = None,
+    limitReset: Annotated[str | None, Field(validation_alias=AliasChoices("limitReset", "limit_reset"),
+                                            description="mint and limit: daily, weekly or monthly; a limit without "
+                                                        "it keeps the key's period.")] = None,
+    account: Annotated[str | None, Field(description="mint: the door's account label to mint from.")] = None,
+    project: Annotated[str | None, Field(description="mint: the project the key is for.")] = None,
+    decision: Annotated[dict[str, Any] | None, Field(
+        description="mint, rotate, revoke and a raised limit: the operator's words in contract DEC-0121's shape: {by: "
+                    "operator, via: relayed-instruction, action: keys.mint|keys.limit|keys.rotate|keys.revoke, target: "
+                    "the destination (mint) or the key's name, instruction: their words verbatim, at: when, source?}. "
+                    "Also read from _meta.decision.")] = None,
+    ctx: "Context | None" = None,
+) -> dict[str, Any]:
+    """The key page's acts on an OpenRouter key for an agent (OBS-559): the SAME functions the local control server
+    runs for the person at the page (`keyserver.ACTIONS`), with its checks, its journal and its door. `mint` issues
+    a key with a ceiling and the door writes the value straight to `destination`; `limit` moves the ceiling; `disable`
+    and `enable` stop and resume spending at the provider; `rotate` delivers a successor to the key's own destination
+    and every copy of the old value before it revokes the old key (a copy out of reach answers `held`); `revoke`
+    deletes the key, refused while a consumer reads it.
+
+    No value is ever returned, taken or journalled: an argument shaped like a credential is refused and not echoed.
+    mint, rotate, revoke and a limit above the ceiling the ledger records (or one it cannot compare) spend money or
+    cannot be undone, so they need the operator's words as `decision`; the journal row keeps them beside the caller
+    `agent:mcp`. Answers the door's result with `action` (and `recordedAs` for a decided act). Refusals are typed
+    `error` {code, message}: `invalid-argument`, `operator-decision-required` (with the action and target to ask
+    for), `decision-invalid`, `not-found`, `held`, `provider-refused`, `unconfirmed`, `failed`."""
+    import key_acts
+    words = decision if decision is not None else _meta_decision(ctx)
+    return key_acts.key_act(action, name=name, destination=destination, limit=limit, limitReset=limitReset,
+                            account=account, project=project, decision=words)
+
+
+@server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=False, idempotent_hint=False))
+def observatory_credential_mark(
+    action: Annotated[Literal["leak", "annotate"],
+                      Field(description="leak: mark a vault slot's value seen somewhere it should not be; annotate: "
+                                        "sign a credential with its purpose and evidence.")],
+    project: Annotated[str | None, Field(description="leak: the slot's vault folder.")] = None,
+    env: Annotated[str | None, Field(description="leak: local, stage or prod.")] = None,
+    name: Annotated[str | None, Field(description="leak: the slot's NAME, UPPER_SNAKE_CASE.")] = None,
+    where: Annotated[str | None, Field(description="leak: where the value was seen, in words (never the value).")] = None,
+    id: Annotated[str | None, Field(description="annotate: the credential id as registry/credentials.json prints "
+                                                "it.")] = None,
+    purpose: Annotated[str | None, Field(description="annotate: what the credential is for.")] = None,
+    evidence: Annotated[str | None, Field(description="annotate: where that can be checked (a file and line, a "
+                                                      "page).")] = None,
+    owner: Annotated[str | None, Field(description="annotate: who owns it.")] = None,
+    rotationDays: Annotated[int | None, Field(validation_alias=AliasChoices("rotationDays", "rotation_days"),
+                                              description="annotate: the rotation policy in days, at least 1.")] = None,
+    tags: Annotated[list[str] | None, Field(description="annotate: tags.")] = None,
+) -> dict[str, Any]:
+    """Record a fact about a credential, the key page's other two acts (OBS-559), through the same functions:
+    `leak` appends the slot to the vault's leak register (`vault.py leak`; the answer is the vault's receipt, never
+    its exit code alone), `annotate` signs the credential through the one writer the CLI and the page use, signed by
+    `agent:mcp`. Both are drafts of a record, so they need no decision; both are journalled before they act. No value
+    is read, taken or returned: an argument shaped like a credential is refused and not echoed. Refusals are typed
+    `error` {code, message}: `invalid-argument`, `not-found`, `unconfirmed`, `failed`."""
+    import key_acts
+    return key_acts.credential_mark(action, project=project, env=env, name=name, where=where, id=id,
+                                    purpose=purpose, evidence=evidence, owner=owner, rotationDays=rotationDays,
+                                    tags=tags)
+
+
+def _meta_trace(ctx: "Context | None") -> dict[str, Any]:
+    """The `_meta.traceparent`/`tracestate` a call carries, as `interop.span_for` reads them, or {}."""
+    try:
+        meta = ctx.request_context.meta if ctx is not None else None
+    except (ValueError, AttributeError):
+        return {}
+    if meta is None:
+        return {}
+    if isinstance(meta, dict):
+        return meta
+    extra = getattr(meta, "model_extra", None) or {}
+    return {k: extra.get(k, getattr(meta, k, None)) for k in ("traceparent", "tracestate")}
+
+
+@server.tool(annotations=ToolAnnotations(read_only_hint=False, destructive_hint=True, idempotent_hint=False))
+def observatory_ops(
+    action: Annotated[Literal["workspace-backup", "machine-backup", "backups-migrate", "backups-decrypt",
+                              "cleanup-plan", "cleanup", "disk-guard-plan", "disk-guard", "update", "maintain-run",
+                              "maintain-ensure", "maintain-uninstall", "maintain-app", "auto-update-on",
+                              "auto-update-off"],
+                      Field(description="The CLI verb: workspace-backup (--pause-writers), machine-backup (now), "
+                                        "backups-migrate, backups-decrypt, cleanup-plan, cleanup (--apply), "
+                                        "disk-guard-plan, disk-guard (--apply), update (--apply), maintain-run, "
+                                        "-ensure, -uninstall, -app, auto-update-on, -off. backups-migrate, "
+                                        "backups-decrypt, cleanup, disk-guard and update need the operator's "
+                                        "`decision`.")],
+    file: Annotated[str | None, Field(description="backups-decrypt: the backup's name in the backups root (as "
+                                                  "`backups status` names it), or its path.")] = None,
+    output: Annotated[str | None, Field(description="backups-decrypt: a NEW path inside the workspace, relative to "
+                                                    "its home, whose folder exists; also the decision's target.")] = None,
+    include: Annotated[Literal["manual"] | None, Field(description="cleanup: also archive and remove the manual "
+                                                                   "tier (the decision's target is then manual, "
+                                                                   "else auto).")] = None,
+    level: Annotated[Literal["normal", "low", "critical"] | None, Field(
+        description="cleanup, cleanup-plan, disk-guard, disk-guard-plan: act or plan as at this disk pressure "
+                    "(disk-guard's decision target; current without it).")] = None,
+    largeFiles: Annotated[bool | None, Field(validation_alias=AliasChoices("largeFiles", "large_files"),
+                                             description="disk-guard, disk-guard-plan: re-walk the home for large "
+                                                         "files now.")] = None,
+    version: Annotated[str | None, Field(description="update: the release X.Y.Z (the decision's target; latest "
+                                                     "without it).")] = None,
+    reinstall: Annotated[bool | None, Field(description="update: allow the version already running.")] = None,
+    decision: Annotated[dict[str, Any] | None, Field(
+        description="backups-migrate, backups-decrypt, cleanup, disk-guard and update: the operator's words in "
+                    "contract DEC-0121's shape: {by: operator, via: relayed-instruction, action: backups.migrate|"
+                    "backups.decrypt|disk.cleanup|disk.guard|engine.update, target, instruction: their words "
+                    "verbatim, at: when, source?}. Also read from _meta.decision.")] = None,
+    ctx: "Context | None" = None,
+) -> dict[str, Any]:
+    """The operations verbs for an agent (OBS-559): backups, the disk, the engine update and the maintenance job,
+    each the SAME function its CLI verb runs, in a detached job: the answer is a job
+    handle {action, job: {id, status}}; follow it with fabric.job.get (its result's output carries the command's
+    `exit`, its JSON `result` and the last lines it `said`, scrubbed) and stop it with fabric.job.cancel (an update
+    runs in a process of its own and is never stopped half-way: a cancel stops following it).
+
+    workspace-backup takes the managed encrypted snapshot with the tick and server paused (no plaintext --output);
+    machine-backup bundles the agent setup; backups-migrate moves legacy copies into the backups root and removes
+    the older ones; backups-decrypt writes a backup's plaintext to a new path inside the workspace (never in an
+    answer); cleanup and disk-guard remove what their plan names (the -plan actions only write the plan, read with
+    observatory_machine); update installs a release unattended, rolling back on failure; maintain-run runs one
+    maintenance pass, -ensure schedules it, -uninstall unschedules it, -app swaps a verified app bundle;
+    auto-update-on/-off flip the switch. The five that delete or are hard to undo need the operator's words as
+    `decision`, kept with the caller agent:mcp in store/logs/ops-acts.jsonl. Refusals are typed `error` {code,
+    message}: invalid-argument, operator-decision-required (with the action and target to ask for),
+    decision-invalid, system-setup-off, busy, failed. Design: docs/design/control-plane/ops-tools.md."""
+    import ops_acts
+    words = decision if decision is not None else _meta_decision(ctx)
+    return ops_acts.act(action, file=file, output=output, include=include, level=level, largeFiles=largeFiles,
+                        version=version, reinstall=reinstall, decision=words,
+                        span_record=interop.span_for(_meta_trace(ctx)).record())
 
 
 @server.tool()
@@ -904,6 +1056,16 @@ def observatory_machine(
         out["guard"]["largeFiles"] = (coverage.get("files") or [])[:MACHINE_TOP]
         out["guard"]["largeFilesCoverage"] = {k: coverage.get(k) for k in
                                                 ("measured_at", "complete", "errors", "budget_exhausted", "scope")}
+        # The manual tier's unused Docker volumes per VM (OBS-584): listed for their owner, never removed.
+        volumes = g.get("vmVolumes") or {}
+        out["guard"]["vmVolumes"] = ({"at": volumes.get("at"), "volumes": (volumes.get("volumes") or [])[:MACHINE_TOP],
+                                      "unread": volumes.get("unread") or []} if volumes else None)
+        # The user's temporary folder (OBS-585): size, its busiest classes, the classes growing past the threshold
+        # with the executables writing there, and the last removal. `null` when the guard has not sampled it.
+        temp = g.get("userTemp") or {}
+        out["guard"]["userTemp"] = ({**{k: temp.get(k) for k in ("at", "hours", "entries", "gb", "complete",
+                                                                  "window_hours", "growing", "last_removed")},
+                                     "classes": (temp.get("classes") or [])[:MACHINE_TOP]} if temp else None)
         memory = g.get("memory") or {}
         out["guard"]["memory"] = {k: memory.get(k) for k in ("measured_at", "swap_gb", "swap_reason")}
     return out
@@ -1009,6 +1171,19 @@ def _key_sweep_doc():
         return json.loads((paths.SCRATCH / "key-sweep.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+
+
+@server.tool()
+def observatory_health() -> dict[str, Any]:
+    """One `agent-health/1` reading of this engine (OBS-577, DEC-0179): `{schema, product, version, at, state,
+    checks:[{id, area, state, count, fix}]}`, the worst state of its checks (ok < unknown < warn < fail) and, for
+    each check, a count and the MCP tool that shows or clears it. Counts and codes only: no path, name or id.
+
+    Read-only, from the findings the engine last built. A source not read is `unknown`, never `ok`. The same
+    document as `project-observatory full health --json`. It carries no `degraded` field because the contract's
+    schema is closed: what could not be read is a check with state `unknown`."""
+    import machine_health
+    return machine_health.report()
 
 
 @server.tool()
@@ -1140,6 +1315,41 @@ def observatory_issues(
     if dismissBanner:
         issue_filer.dismiss_banner(issue_filer.default_path())
     return issue_filer.agent_view(state=state)
+
+
+@server.tool()
+def observatory_doctor(
+    action: Annotated[str, Field(description="`read` (the default): the last daily doctor run. `undo`: reverse the "
+                                             "one fix `journalId` names (the same act as `full doctor-daily --undo`). "
+                                             "`run`: run the catalogue now (`full doctor-daily`).")] = "read",
+    journalId: Annotated[str | None, Field(validation_alias=AliasChoices("journalId", "journal_id"),
+                                           description="With `undo`: the fix's journal id, `doc_` and 16 hex digits, "
+                                                       "from `fixes` or `undoable`.")] = None,
+) -> dict[str, Any]:
+    """The daily doctor (OBS-558): a fixed catalogue of checks the maintenance job runs once a day. Each check's
+    `state` is `ok`, `fixed` (a safe fix ran: a file the engine can no longer use was moved aside into
+    `store/state/doctor-quarantine/`, never deleted), `finding` (its own `doctor.*` finding type, or `covered_by`
+    the existing rule that already raises it), `fix-failed` or `unknown` (its source could not be read; named in
+    `degraded`). `fixes` and `undoable` carry the journal ids an `undo` takes; an undo never overwrites a newer file
+    and names what it kept (`refused`). `summary` is the model's paragraph, written only when the result changed and
+    inside the engine's model budget, or why not. Refusals are typed `error` answers. Design:
+    docs/design/control-plane/daily-doctor.md.
+    """
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
+    import daily_doctor
+    if action == "undo":
+        if not journalId:
+            return {"error": {"code": "invalid-argument", "message": "undo needs journalId"}, "degraded": []}
+        return daily_doctor.undo(paths.HOME, journal_id=journalId)
+    if action == "run":
+        doc = daily_doctor.run(paths.HOME)
+        if doc.get("status") != "ran":
+            return {"error": {"code": "busy", "message": "another doctor run or undo holds the lock"},
+                    "degraded": doc.get("degraded") or []}
+        return daily_doctor.agent_view(paths.HOME)
+    if action != "read":
+        return {"error": {"code": "invalid-argument", "message": "action is read, run or undo"}, "degraded": []}
+    return daily_doctor.agent_view(paths.HOME)
 
 
 MACHINE_TOP = 10

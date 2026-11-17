@@ -16,6 +16,8 @@ import math
 import re
 from typing import Any, Dict, List, Optional, Sequence
 
+import folder_attribution  # the engine's port of `src/secret-shape.ts` (DEC-0151)
+
 from . import ed25519, jcs, p256, webauthn
 from .identifiers import normal_identifier
 from .relay import CLOCK_SKEW_SECONDS, strict_time
@@ -680,12 +682,6 @@ def _placements(value: dict, flag) -> None:
                 flag(f'{at}/publisherKid', 'the publisher key is not in publisherKeys')
 
 
-_JWT_SHAPE = re.compile(r'eyJ[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]*')
-_SECRET_VALUE = re.compile(r'(^bearer\s.+|sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[abposr]-[A-Za-z0-9-]{10,}'
-                           r'|AKIA[0-9A-Z]{16}|glpat-[A-Za-z0-9_-]{20,})', re.I)
-_LONG_RUN = re.compile(r'[A-Za-z0-9+/=_-]{40,}')
-
-
 def _partner_scopes(value: dict, flag) -> None:
     """FAC-SEM-122 on one record (DEC-0090): a partner's publisher key is scoped once, to a key the record pins, and a
     placement under it is in one of the organization contexts its scope names, never `personal` or another."""
@@ -708,11 +704,11 @@ def _partner_scopes(value: dict, flag) -> None:
 
 
 def secret_value(value: str) -> bool:
-    """The contract's credential detector (`src/secret-shape.ts` `secretValue`): a JWT anywhere, a provider key or
-    `Bearer …`, or a run of 40+ base64 characters mixing upper case, lower case and digits."""
-    long_secret = any(re.search('[a-z]', run) and re.search('[A-Z]', run) and re.search('[0-9]', run)
-                      for run in _LONG_RUN.findall(value))
-    return bool(_JWT_SHAPE.search(value) or _SECRET_VALUE.search(value) or long_secret)
+    """The contract's credential detector (`src/secret-shape.ts` `secretValue`): a JWT anywhere, a provider key in its
+    canonical case after a boundary or `Bearer …`, or a run of 40+ base64 characters mixing upper case, lower case and
+    digits. One port for the engine (OBS-587): the contract re-syncs this estate-record port together with the
+    folder-attribution port (DEC-0151), so this is that port's `secret_value`, never a second copy of the pattern."""
+    return folder_attribution.secret_value(value)
 
 
 def _secret_references(value: dict, flag) -> None:

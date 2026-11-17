@@ -18,6 +18,13 @@ at once, and the caller follows it with `fabric.job.get {id}` and may stop it wi
 - **Terminal is terminal.** `completed`, `failed` and `cancelled` are never left:
   every change is a read-check-write under an exclusive lock on the job, so a
   runner finishing just after a cancel cannot overwrite `cancelled`.
+- **A cancel asks before it stops** (OBS-590). `cancel` marks the record `cancelled`
+  first. A runner that listens (`listen`, then `pause` between its polls) sees it,
+  runs its own cleanup (a secret request is withdrawn) and exits; the cancel waits
+  for that exit up to COOPERATIVE_SECONDS, and only then stops the process group by
+  force. On Windows the forced stop is `taskkill /T /F`, which runs no handler at
+  all, so a runner that must clean up has to listen. A runner that never listened
+  (a model call, an MCP scan) is stopped at once, as before.
 - **One at a time per capability.** A second start while a job of the same
   capability still runs JOINS it — the answer is the running job's handle — since
   two refreshes of one inventory race for one file and prove nothing more. A
@@ -39,6 +46,7 @@ import re
 import signal
 import subprocess
 import sys
+import time
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -57,6 +65,11 @@ POLL_INTERVAL_MS = 2000
 #: Finished jobs are kept this long, then removed by the next start.
 RETENTION = timedelta(days=7)
 ROOT = Path(__file__).resolve().parent
+#: How long a cancel waits for a listening runner to finish its own cleanup before the
+#: forced stop: the secret runner's withdrawal call is bounded at 3 s, its pause step below.
+COOPERATIVE_SECONDS = 10.0
+#: How often a listening runner looks at its record while it pauses.
+LISTEN_STEP = 0.2
 
 
 def jobs_dir() -> Path:
@@ -302,8 +315,47 @@ def _spawn(argv: list[str], env: dict) -> subprocess.Popen:
         out.close()
 
 
-def cancel(job_id: str) -> dict | None:
-    """Stop a running job. A finished one is returned unchanged."""
+class Cancelled(SystemExit):
+    """Raised in a listening runner once its record says `cancelled`. A SystemExit, the
+    exception the SIGTERM handler of `tools/run_job.py` raises, so every cleanup written
+    for the signal runs for this too."""
+
+
+def listen(job_id: str, **fields: Any) -> dict | None:
+    """The runner's word that it checks for a cancel (with `pause`): from now on `cancel`
+    lets it finish its own cleanup before any forced stop. `fields` go in the same write."""
+    return update(job_id, cancel="cooperative", **fields)
+
+
+def cancel_requested(job_id: str) -> bool:
+    """Whether the job was cancelled; read under the lock, since replacing a file another
+    process holds open fails on Windows."""
+    with _locked(job_id):
+        doc = _read(job_id)
+    return doc is not None and doc.get("status") == "cancelled"
+
+
+def pause(job_id: str, seconds: float, *, clock: Callable[[], float] = time.monotonic,
+          sleep: Callable[[float], None] = time.sleep) -> None:
+    """A listening runner's sleep between polls: returns after `seconds`, or raises
+    `Cancelled` as soon as the record says the job was cancelled."""
+    end = clock() + seconds
+    while True:
+        if cancel_requested(job_id):
+            raise Cancelled(0)
+        left = end - clock()
+        if left <= 0:
+            return
+        sleep(min(LISTEN_STEP, left))
+
+
+def cancel(job_id: str, *, wait: float | None = None, clock: Callable[[], float] = time.monotonic,
+           sleep: Callable[[float], None] = time.sleep) -> dict | None:
+    """Stop a running job. A finished one is returned unchanged.
+
+    The record says `cancelled` first. A runner that listens is given up to `wait`
+    seconds (COOPERATIVE_SECONDS) to finish its own cleanup and exit; whatever is still
+    running then, or a runner that never listened, is stopped by force."""
     if not JOB_ID.match(job_id or "") or not _file(job_id).exists():
         return None
     with _locked(job_id):
@@ -313,11 +365,19 @@ def cancel(job_id: str) -> dict | None:
         if doc.get("status") in TERMINAL:
             return doc
         pid = doc.get("pid")
-        if isinstance(pid, int) and pid > 0 and _alive(pid):
-            osproc.signal_group(pid, signal.SIGTERM)
+        listening = doc.get("cancel") == "cooperative"
         doc.update(status="cancelled", statusMessage="cancelled by the caller")
         _write(doc)
+    # The lock is released: the runner reads its record to see the cancel.
+    if not (isinstance(pid, int) and pid > 0):
         return doc
+    if listening:
+        end = clock() + (COOPERATIVE_SECONDS if wait is None else wait)
+        while _alive(pid) and clock() < end:
+            sleep(LISTEN_STEP)
+    if _alive(pid):
+        osproc.signal_group(pid, signal.SIGTERM)
+    return doc
 
 
 def update(job_id: str, **fields: Any) -> dict | None:

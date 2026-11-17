@@ -546,6 +546,32 @@ def wallet_state() -> dict:
     return state
 
 
+def local_spend() -> tuple[dict, list[dict]]:
+    """(spend, degraded): this project's own spend today and this month beside its ceilings, read from its journal
+    and the workspace's model configuration only, never the provider (OBS-560: the assistant's status and the agent
+    panel's cost note). An unreadable journal or configuration is `None` and named, never read as nothing spent."""
+    out = {"denomination": "credits", "today": None, "month": None, "daily_ceiling": None, "monthly_ceiling": None}
+    degraded: list[dict] = []
+    try:
+        wallet = config().get("wallet") or {}
+        out["daily_ceiling"], out["monthly_ceiling"] = wallet.get("daily_ceiling"), wallet.get("monthly_ceiling")
+    except FileNotFoundError:
+        pass                              # no model configuration yet: no ceiling, which `blocked_by` already says
+    except (OSError, ValueError, AttributeError) as exc:
+        degraded.append({"source": "models.json", "reason": f"the model configuration is unreadable ({type(exc).__name__})"})
+    try:
+        w = json.loads(WALLET.read_text(encoding="utf-8")) if WALLET.exists() else {}
+        if not isinstance(w, dict):
+            raise ValueError("not an object")
+        day, month = now().strftime("%Y-%m-%d"), now().strftime("%Y-%m")
+        out["denomination"] = w.get("denomination", "credits")
+        out["today"] = round(float((w.get("days") or {}).get(day, 0.0)), 6)
+        out["month"] = round(float((w.get("months") or {}).get(month, 0.0)), 6)
+    except (OSError, ValueError, TypeError, AttributeError) as exc:
+        degraded.append({"source": "wallet", "reason": f"the spend journal is unreadable ({type(exc).__name__})"})
+    return out, degraded
+
+
 def check_budget(provider: str = "openrouter") -> str | None:
     """None when spending is permitted, else the guardrail that says stop.
 

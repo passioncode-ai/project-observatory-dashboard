@@ -760,5 +760,13 @@
  "{n} turns": {
   "one": "{n} turn",
   "other": "{n} turns"
+ },
+ "The maintenance step {step} failed on its last {n} passes": {
+  "one": "The maintenance step {step} failed on its last {n} pass",
+  "other": "The maintenance step {step} failed on its last {n} passes"
+ },
+ "{n} vault metadata files cannot be read": {
+  "one": "{n} vault metadata file cannot be read",
+  "other": "{n} vault metadata files cannot be read"
  }
 }

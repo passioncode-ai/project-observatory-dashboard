@@ -1242,6 +1242,61 @@ class UpdateTest(unittest.TestCase):
             self.assertNotIn(word, text)
         self.assertEqual(oct((self.home / "store/logs/update.jsonl").stat().st_mode & 0o777), "0o600")
 
+    # --- OBS-581: a failed apply names the step it failed at, in its report and in update.jsonl ---
+
+    def journal(self) -> list[dict]:
+        return [json.loads(line) for line in (self.home / "store/logs/update.jsonl").read_text().splitlines()]
+
+    def test_an_undetermined_apply_names_its_step_and_is_journalled(self):
+        # 2026-11-16: an automatic apply ended `undetermined: exit 3` and update.jsonl said nothing.
+        self.gh.publish(NEWER)
+        self.gh.rate_limited = True
+        code, doc = self.run_cli("--apply", "--unattended")
+        self.assertEqual((code, doc["status"], doc["failed_step"]), (self.mod.EXIT_UNDETERMINED, "degraded",
+                                                                      "resolve-release"), doc)
+        last = self.journal()[-1]
+        self.assertEqual((last["event"], last["failed_step"], last["exit"]),
+                         ("undetermined", "resolve-release", self.mod.EXIT_UNDETERMINED))
+        self.assertIn("rate limit", last["degraded"][0])
+        # How the API was read: a scheduled job may reach no token where a person's shell does.
+        self.assertEqual((doc["api_reads"], last["api_reads"]), (["anonymous"], ["anonymous"]))
+
+    def test_an_undetermined_download_names_the_download(self):
+        self.gh.publish(NEWER)
+        with patch.object(self.mod.Fetcher, "fetch_file", side_effect=self.mod.Undetermined("synthetic reset")):
+            code, doc = self.run_cli("--apply", "--unattended")
+        self.assertEqual((code, doc["failed_step"]), (self.mod.EXIT_UNDETERMINED, "download"), doc)
+        self.assertEqual(self.journal()[-1]["failed_step"], "download")
+        self.assertEqual(self.installer.calls, [], "nothing installed")
+
+    def test_a_refusal_and_a_rollback_name_their_steps(self):
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply", free_space=lambda path: 0)
+        self.assertEqual((code, doc["failed_step"]), (self.mod.EXIT_NO_SPACE, "preflight"), doc)
+        self.assertEqual((self.journal()[-1]["event"], self.journal()[-1]["failed_step"]), ("refused", "preflight"))
+        self.installer.fail_on = {NEWER}
+        code, doc = self.run_cli("--apply")
+        self.assertEqual((code, doc["failed_step"]), (self.mod.EXIT_FAILED, "install"), doc)
+
+    def test_a_successful_apply_names_no_failed_step(self):
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply")
+        self.assertEqual(code, 0, doc)
+        self.assertNotIn("failed_step", doc)
+
+    def test_jobs_in_the_system_domain_are_said_not_silently_left_running(self):
+        # OBS-581: launchctl's gui/<uid> cannot see a system daemon of this account (space_daemons.py),
+        # so the update neither stopped nor restarted it, and said nothing.
+        self.gh.publish(NEWER)
+        self.services.state = {"tick": False, "server": False}
+        self.services.system_daemon = lambda label: True
+        code, doc = self.run_cli("--apply")
+        self.assertEqual(code, 0, doc)
+        self.assertEqual(doc["services_system_domain"], ["tick", "server"])
+        self.assertTrue(any("system daemon" in d for d in doc["degraded"]), doc["degraded"])
+        self.assertTrue(any("kickstart -k system/org.example.server" in s for s in doc["human_steps"]), doc)
+        self.assertFalse([c for c in self.services.calls if c[0] in ("stop", "start")])
+
     def test_no_workspace_installs_only(self):
         other = self.base / "empty-home"
         self.gh.publish(NEWER)

@@ -444,12 +444,16 @@ def test_the_mcp_page_says_how_to_probe_and_names_a_command_once() -> None:
                        capture_output=True, text=True)
     check("the MCP page builds", p.returncode == 0, p.stderr[-300:])
     page = page_with_its_script(pathlib.Path(env["OBSERVATORY_DASHBOARD_DIR"]), "mcp", d)
-    got = {w: render(page, count=w) for w in ("full scan-mcp", "npx -y alpha-mcp", "mcp-probe", "not on disk")}
+    got = {w: render(page, count=w) for w in ("machine.mcp.refresh", "npx -y alpha-mcp", "mcp-probe", "not on disk",
+                                               "project-observatory full")}
     if any(v is None for v in got.values()):
         print("  SKIP  node is not on this machine")
         return
     n = {k: sum((v.get("counts") or {}).values()) for k, v in got.items()}
-    check("a page of 'not probed' hands over the probe", n["full scan-mcp"] >= 1 and n["mcp-probe"] >= 1, str(n))
+    check("a page of 'not probed' hands over the probe", n["machine.mcp.refresh"] >= 1 and n["mcp-probe"] >= 1, str(n))
+    # The page's own content (`#out`); the Health panel every page carries is its own page's business.
+    check("no command line on the MCP page (OBS-579)",
+          (got["project-observatory full"].get("counts") or {}).get("out", 0) == 0, str(n))
     check("a stdio command is shown once", n["npx -y alpha-mcp"] == 1, str(n))
     check("a missing binary is said on its own line", n["not on disk"] >= 1, str(n))
 
@@ -596,7 +600,7 @@ def test_a_stub_document_is_not_scanned_and_says_how_to_scan() -> None:
     pages = pathlib.Path(env["OBSERVATORY_DASHBOARD_DIR"])
     expect = {"creds": ("Credentials were not scanned", "vault.py"),
               "env": ("Environment files were not scanned", "full env"),
-              "mcp": ("MCP was not scanned", "configure integrations mcp true"),
+              "mcp": ("MCP was not scanned", "machine.mcp.refresh"),
               "traffic": ("Analytics was not scanned", "configure integrations google true"),
               "heroku": ("Heroku was not scanned", "configure integrations heroku true")}
     for name, (says, command) in expect.items():
@@ -609,6 +613,10 @@ def test_a_stub_document_is_not_scanned_and_says_how_to_scan() -> None:
         check(f"{name}: says it was not scanned", n[says] >= 1, str(n))
         check(f"{name}: hands over the command that scans it", n[command] >= 1, str(n))
         check(f"{name}: never 'the registry holds no row'", n["registry holds no row"] == 0, str(n))
+        if name == "mcp":
+            plain = render(page, count="project-observatory full")
+            check("mcp: no command line in its not-scanned state (OBS-579)",
+                  (plain.get("counts") or {}).get("out", 0) == 0, str(plain.get("counts")))
 
 
 def test_a_heroku_scan_that_read_nothing_is_not_zero_apps() -> None:

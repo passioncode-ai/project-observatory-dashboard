@@ -241,5 +241,53 @@ class PublisherKeyPick(unittest.TestCase):
         self.assertNotIn('/publisherKeys/1/kid', twice, 'a null kid and a missing one are two kids')
 
 
+ATTRIBUTION_VECTORS = ROOT / 'fabric' / 'attribution-vectors' / 'folder-attribution.json'
+
+
+def _strings(value):
+    """Every string of a JSON document, keys and leaves."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            yield key
+            yield from _strings(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from _strings(item)
+
+
+class SecretValueDec0151(unittest.TestCase):
+    """FAC-SEM-075's detector is the contract's `secretValue` under DEC-0151 (OBS-587): the estate-record port re-syncs
+    with the folder-attribution port, so the two answer the same."""
+
+    def test_a_key_is_read_by_its_canonical_case_boundary_and_strength(self):
+        for value in ('sk-Test0Example1Key2Value3', 'x%22sk-Test0Example1Key2Value3', 'sk-' + 'a1B2' * 6,
+                      'AKIA' + 'EXAMPLE0SLOT0NAME0NOT0A0KEY0000', 'Bearer abc', 'ghp_' + 'a1' * 10):
+            self.assertTrue(estate.secret_value(value), value)
+        for value in ('SK-Test0Example1Key2Value3', 'xsk-aB3cD4eF5gH6jK7m', 'sk-learn-experiments-2026',
+                      'project:helpdesk-customer-support', 'GHP_' + 'A1' * 18, 'OPENAI_API_KEY'):
+            self.assertFalse(estate.secret_value(value), value)
+
+    def test_it_agrees_with_the_folder_attribution_port_over_the_contracts_vectors(self):
+        import folder_attribution
+        strings = sorted(set(_strings(json.loads(ATTRIBUTION_VECTORS.read_text(encoding='utf-8')))))
+        self.assertGreater(len(strings), 100)
+        for value in strings:
+            self.assertEqual(estate.secret_value(value), folder_attribution.secret_value(value), value)
+
+    def test_fac_sem_075_reads_a_slot_by_dec_0151(self):
+        """A slot written like a key in its canonical case is refused; the same letters in another case, or a slot
+        whose `sk-` lacks the strength, is a name."""
+        def slot_findings(slot):
+            record = copy.deepcopy(vectors('estate-record')['cases'][0]['record'])
+            record['machines'][0]['secrets'][0]['slot'] = slot
+            return [f for f in estate.record_findings(record) if f['code'] == 'FAC-SEM-075'
+                    and f['instancePath'].endswith('/slot') and 'never a value' in f['message']]
+        self.assertTrue(slot_findings('sk-Test0Example1Key2Value3'))
+        self.assertFalse(slot_findings('SK-Test0Example1Key2Value3'))
+        self.assertFalse(slot_findings('sk-learn-experiments-2026'))
+
+
 if __name__ == '__main__':
     unittest.main()

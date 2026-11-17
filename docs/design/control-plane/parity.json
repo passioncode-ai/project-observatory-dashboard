@@ -8,81 +8,81 @@
       "action": "mint",
       "kind": "dashboard",
       "where": "tools/keyserver.py: act_mint",
-      "tool": null,
+      "tool": "observatory_key_act",
       "gate": null,
-      "status": "missing",
+      "status": "covered",
       "row": "OBS-559",
-      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+      "note": "action mint; the operator's words as `decision` (keys.mint, target the destination); the same keyserver.act_mint (OBS-559 part 2, docs/design/control-plane/key-tools.md)"
     },
     {
       "action": "limit",
       "kind": "dashboard",
       "where": "tools/keyserver.py: act_limit",
-      "tool": null,
+      "tool": "observatory_key_act",
       "gate": null,
-      "status": "missing",
+      "status": "covered",
       "row": "OBS-559",
-      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+      "note": "action limit; a ceiling above the ledger's, or one it cannot compare, needs the operator's words (keys.limit); the same keyserver.act_limit (OBS-559 part 2, docs/design/control-plane/key-tools.md)"
     },
     {
       "action": "disable",
       "kind": "dashboard",
       "where": "tools/keyserver.py: act_disable",
-      "tool": null,
+      "tool": "observatory_key_act",
       "gate": null,
-      "status": "missing",
+      "status": "covered",
       "row": "OBS-559",
-      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+      "note": "action disable; reversible at the provider, no decision; the same keyserver.act_disable (OBS-559 part 2, docs/design/control-plane/key-tools.md)"
     },
     {
       "action": "enable",
       "kind": "dashboard",
       "where": "tools/keyserver.py: act_enable",
-      "tool": null,
+      "tool": "observatory_key_act",
       "gate": null,
-      "status": "missing",
+      "status": "covered",
       "row": "OBS-559",
-      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+      "note": "action enable; reversible at the provider, no decision; the same keyserver.act_enable (OBS-559 part 2, docs/design/control-plane/key-tools.md)"
     },
     {
       "action": "rotate-key",
       "kind": "dashboard",
       "where": "tools/keyserver.py: act_rotate_key",
-      "tool": null,
+      "tool": "observatory_key_act",
       "gate": null,
-      "status": "missing",
+      "status": "covered",
       "row": "OBS-559",
-      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+      "note": "action rotate; mints a successor and revokes the old key, so it needs the operator's words (keys.rotate); the same keyserver.act_rotate_key (OBS-559 part 2, docs/design/control-plane/key-tools.md)"
     },
     {
       "action": "revoke",
       "kind": "dashboard",
       "where": "tools/keyserver.py: act_revoke",
-      "tool": null,
+      "tool": "observatory_key_act",
       "gate": null,
-      "status": "missing",
+      "status": "covered",
       "row": "OBS-559",
-      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+      "note": "action revoke; cannot be undone, so it needs the operator's words (keys.revoke); the same keyserver.act_revoke (OBS-559 part 2, docs/design/control-plane/key-tools.md)"
     },
     {
       "action": "leak",
       "kind": "dashboard",
       "where": "tools/keyserver.py: act_leak",
-      "tool": null,
+      "tool": "observatory_credential_mark",
       "gate": null,
-      "status": "missing",
+      "status": "covered",
       "row": "OBS-559",
-      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+      "note": "action leak; a draft record, no decision; the same keyserver.act_leak and its vault receipt (OBS-559 part 2, docs/design/control-plane/key-tools.md)"
     },
     {
       "action": "annotate",
       "kind": "dashboard",
       "where": "tools/keyserver.py: act_annotate",
-      "tool": null,
+      "tool": "observatory_credential_mark",
       "gate": null,
-      "status": "missing",
+      "status": "covered",
       "row": "OBS-559",
-      "note": "the keyserver already serves it to an agent over HTTP with a Fabric delegation token (ACTION_SCOPES), but there is no MCP tool"
+      "note": "action annotate; a draft record, no decision, signed by the agent; the same keyserver.act_annotate (OBS-559 part 2, docs/design/control-plane/key-tools.md)"
     },
     {
       "action": "reveal",
@@ -134,6 +134,32 @@
       "note": "the MCP page's Accept buttons make the definitions a probe found the pinned ones: the same function (mcp_supply.accept_pending), by server and tool or for every changed tool"
     },
     {
+      "action": "assistant",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_assistant",
+      "tool": [
+        "observatory_assistant_status",
+        "observatory_assistant_ask",
+        "observatory_assistant_conversation",
+        "fabric.job.get",
+        "fabric.job.cancel"
+      ],
+      "gate": null,
+      "status": "covered",
+      "row": "OBS-560",
+      "note": "the Assistant page's chat: status, ask, the assistant's job and its cancel, and a conversation, through the assistant's own functions (agent/assistant.py); the page's status leaves out the path and the steps written as command lines"
+    },
+    {
+      "action": "doctor",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_doctor",
+      "tool": "observatory_doctor",
+      "gate": null,
+      "status": "covered",
+      "row": "OBS-560",
+      "note": "the Assistant page's Undo beside a doctor's fix: the same function (daily_doctor.undo) as observatory_doctor with action undo"
+    },
+    {
       "action": "init",
       "kind": "cli",
       "where": "workspace.py: init",
@@ -155,6 +181,30 @@
       "kind": "cli",
       "where": "tools/key_sweep.py: settle",
       "tool": "observatory_key_sweep_settle",
+      "gate": null,
+      "status": "covered"
+    },
+    {
+      "action": "doctor-daily",
+      "kind": "cli",
+      "where": "tools/daily_doctor.py: run",
+      "tool": "observatory_doctor",
+      "gate": null,
+      "status": "covered"
+    },
+    {
+      "action": "doctor-daily --undo",
+      "kind": "cli",
+      "where": "tools/daily_doctor.py: undo",
+      "tool": "observatory_doctor",
+      "gate": null,
+      "status": "covered"
+    },
+    {
+      "action": "doctor-daily --undo-last",
+      "kind": "cli",
+      "where": "tools/daily_doctor.py: undo",
+      "tool": "observatory_doctor",
       "gate": null,
       "status": "covered"
     },
@@ -199,10 +249,11 @@
       "action": "workspace-backup",
       "kind": "cli",
       "where": "workspace.py: workspace-backup",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action workspace-backup: the managed encrypted snapshot with the tick and server paused (`--pause-writers`, OBS-583), a job; `--output`/`--plaintext` (a plaintext copy of the vault's secrets) and `--writers-stopped` (a person's claim) are not offered; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "upgrade --apply",
@@ -226,19 +277,21 @@
       "action": "backups migrate",
       "kind": "cli",
       "where": "workspace.py: backups",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action backups-migrate: removes the older legacy copies, so it needs the operator's words (backups.migrate, target legacy-copies); a job; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "backups decrypt",
       "kind": "cli",
       "where": "workspace.py: backups",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action backups-decrypt: writes a backup's plaintext only to a new path inside the workspace, never into an answer, with the operator's words (backups.decrypt, target the path from the home); a job; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "backup-passphrase set",
@@ -264,28 +317,31 @@
       "action": "cleanup --apply",
       "kind": "cli",
       "where": "workspace.py: cleanup",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action cleanup (and cleanup-plan): removes the plan's tier, so it needs the operator's words (disk.cleanup, target auto or manual); a job; the same workspace.machine_command with its JSON summary (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "disk-guard --apply",
       "kind": "cli",
       "where": "workspace.py: disk-guard",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action disk-guard (and disk-guard-plan): removes temporary files, the Trash, caches and build output, so it needs the operator's words (disk.guard, target the level or current); a job; the same workspace.machine_command with its JSON summary (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "machine-backup now",
       "kind": "cli",
       "where": "workspace.py: machine-backup",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action machine-backup: one encrypted .obmachine bundle, a job; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "machine-restore --apply",
@@ -354,10 +410,11 @@
       "action": "update --apply",
       "kind": "cli",
       "where": "workspace.py: update",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action update: replaces the running engine, so it needs the operator's words (engine.update, target the version or latest); unattended, in a process group of its own so a cancel never stops it half-way; `--no-rollback` is not offered; a job (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "profile import",
@@ -372,55 +429,61 @@
       "action": "maintain run",
       "kind": "cli",
       "where": "workspace.py: maintain",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action maintain-run: one maintenance pass with OBSERVATORY_SYSTEM_SETUP=1 as the scheduler runs it, a job; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "maintain ensure",
       "kind": "cli",
       "where": "workspace.py: maintain",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action maintain-ensure: schedules the pass (undone by maintain-uninstall), a job; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "maintain uninstall",
       "kind": "cli",
       "where": "workspace.py: maintain",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action maintain-uninstall: unschedules the pass (undone by maintain-ensure), a job; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "maintain app",
       "kind": "cli",
       "where": "workspace.py: maintain",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action maintain-app: swaps a verified app bundle that waited for a quit, a job; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "auto-update on",
       "kind": "cli",
       "where": "workspace.py: auto-update",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action auto-update-on: the switch, reversible, a job; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "auto-update off",
       "kind": "cli",
       "where": "workspace.py: auto-update",
-      "tool": null,
+      "tool": "observatory_ops",
       "gate": null,
-      "status": "missing",
-      "row": "OBS-559"
+      "status": "covered",
+      "row": "OBS-559",
+      "note": "action auto-update-off: the switch, reversible, a job; the same workspace.main (OBS-559, docs/design/control-plane/ops-tools.md)"
     },
     {
       "action": "analytics on",
@@ -1079,6 +1142,7 @@
         "version",
         "onboard",
         "machine",
+        "health",
         "tracked",
         "copies",
         "digest",
