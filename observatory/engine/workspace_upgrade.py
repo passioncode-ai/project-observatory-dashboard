@@ -259,14 +259,58 @@ ANALYTICS_RECEIPTS = frozenset({'store/analytics/queue.jsonl', 'store/analytics/
                                 'store/analytics/.counters.lock', 'store/analytics/notice.json'})
 
 
+#: What the local server writes about itself (`tools/serverd.py`, RECEIPT): its pid, port and
+#: heartbeat, rewritten whenever a server of this workspace runs and again by the next one at its
+#: start. An update and the daily snapshot boot the server out, but its launchd job can be loaded
+#: again meanwhile by a process the update does not control: on 2026-11-17 a 0.40.0 server started
+#: while the 0.39.1 to 0.40.0 upgrade was staged, rewrote this receipt and rolled the update back
+#: (OBS-591). Copied, never required to hold still, but only while it is this workspace's own
+#: server receipt (`foreign_runtime_receipts`): anything else written there still refuses.
+#: `test_the_runtime_receipts_are_the_files_the_server_writes` keeps it equal to serverd's RECEIPT.
+RUNTIME_RECEIPTS = frozenset({'store/raw/serverd.json'})
+
+
+def _runtime_receipt(name: str) -> bool:
+    """A runtime receipt, or the atomic writer's temporary file for one (`.<name>.<random>.tmp`)."""
+    if name in RUNTIME_RECEIPTS:
+        return True
+    path = PurePosixPath(name)
+    return path.suffix == '.tmp' and any(
+        path.parent == PurePosixPath(receipt).parent and path.name.startswith(f'.{PurePosixPath(receipt).name}.')
+        for receipt in RUNTIME_RECEIPTS)
+
+
+def foreign_runtime_receipts(base: Path) -> set[str]:
+    """The runtime receipts present in BASE that are not its own server's: a file that is no JSON
+    object, or one whose `workspace` is not BASE. Those keep the stillness check: a server of this
+    workspace writes `workspace` as its own home, whatever port it listens on (one workspace has
+    one server, behind its instance lock), so a receipt naming another home was written by
+    something else."""
+    foreign = set()
+    for name in RUNTIME_RECEIPTS:
+        file = base / name
+        if not file.is_file():
+            continue
+        try:
+            doc = json.loads(file.read_text(encoding='utf-8'))
+            home = doc.get('workspace') if isinstance(doc, dict) else None
+            ours = isinstance(home, str) and bool(home) and os.path.realpath(home) == os.path.realpath(base)
+        except (OSError, ValueError):
+            ours = False
+        if not ours:
+            foreign.add(name)
+    return foreign
+
+
 def volatile(name: str, databases: set[str]) -> bool:
     """A path the snapshot copies without requiring it to hold still: a database and its
     WAL companions, an append-only log (with its rotated generations) under store/logs,
-    a receipt the session hooks write (SESSION_RECEIPTS), the check job's (JOB_RECEIPTS) or the
-    usage analytics' (ANALYTICS_RECEIPTS)."""
+    a receipt the session hooks write (SESSION_RECEIPTS), the check job's (JOB_RECEIPTS), the
+    usage analytics' (ANALYTICS_RECEIPTS) or the local server's (RUNTIME_RECEIPTS, which the
+    stillness checks hold still again when `foreign_runtime_receipts` names it)."""
     if name in databases or (name.endswith(('-wal', '-journal', '-shm')) and name.rsplit('-', 1)[0] in databases):
         return True
-    if name in SESSION_RECEIPTS or name in JOB_RECEIPTS or name in ANALYTICS_RECEIPTS:
+    if name in SESSION_RECEIPTS or name in JOB_RECEIPTS or name in ANALYTICS_RECEIPTS or _runtime_receipt(name):
         return True
     path = PurePosixPath(name)
     if path.parts[:2] != ('store', 'logs'):
@@ -315,7 +359,8 @@ def _snapshot(base: Path, output: Path, *, carry_stores: bool = False,
         # are stopped; a database is copied through the backup API and verified, and a log
         # copied mid-line loses at most that line (audit A11). A settings, registry or vault
         # file that changed during the copy still refuses the snapshot.
-        steady = lambda inv: {k: v for k, v in inv.items() if not volatile(k, databases)}  # noqa: E731
+        foreign = foreign_runtime_receipts(base)
+        steady = lambda inv: {k: v for k, v in inv.items() if not volatile(k, databases) or k in foreign}  # noqa: E731
         after, after_dirs = steady(inventory(base)), directories(base)
         if steady(before) != after or before_dirs != after_dirs:
             # Name what moved (paths only, never contents), so the next failure says which writer.
@@ -1389,7 +1434,6 @@ def upgrade(base: Path, *, apply: bool = False, writers_stopped: bool = False) -
         # way back.
         databases = {name for name in before if not name.endswith(('-wal', '-journal', '-shm'))
                      and sqlite_file(base / name)}
-        steady = lambda inv: {k: v for k, v in inv.items() if not volatile(k, databases)}  # noqa: E731
         receipt = _snapshot(base,base / 'backups' / ('before-upgrade-' + uuid.uuid4().hex),
                             not_carried='update-snapshot')
         stage = Path(tempfile.mkdtemp(prefix='.upgrade-',dir=base.parent))  # paths-check: allow — removed by the finally below on every path
@@ -1399,6 +1443,9 @@ def upgrade(base: Path, *, apply: bool = False, writers_stopped: bool = False) -
         try:
             workspace.copy_private(Path(receipt['snapshot']) / 'data',stage)
             changed = [name for name in prepare_upgrade(stage) if name not in databases]
+            # Read once, after staging: the server receipt as it is now decides whether its move counts.
+            foreign = foreign_runtime_receipts(base)
+            steady = lambda inv: {k: v for k, v in inv.items() if not volatile(k, databases) or k in foreign}  # noqa: E731
             held, now = steady(before), steady(inventory(base))
             if held != now:
                 # Name what moved (workspace-relative paths, never contents): without them the
