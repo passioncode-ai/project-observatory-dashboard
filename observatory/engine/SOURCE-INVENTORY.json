@@ -468,8 +468,8 @@
       "path": "collectors/scan_lifecycle.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "87fc68bbf55bd378b6069d25a847e3c5fec45da5a66270047fa750c215c8885c",
-      "bytes": 15236
+      "export_sha256": "68e29e7a17f814ef16c31343e018dcb408c84b2f89740fc790d3b117844e6f8f",
+      "bytes": 15626
     },
     {
       "path": "collectors/scan_machine.py",
@@ -1081,8 +1081,8 @@
       "path": "engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c3ba01b2749ac1c2b863efa8830b4e09ec1a0a003691eb0c7380d957ad10e67c",
-      "bytes": 100346
+      "export_sha256": "2c594f2916d403649595503f7b4e2d32fe7ab374c996f7613a364c247adebc04",
+      "bytes": 100452
     },
     {
       "path": "estate.py",
@@ -3524,8 +3524,8 @@
       "path": "maintenance.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "92dd56cfc3c4fc9f2bd9b564d2c2e43665e7afd7fead99573fcb32654d949108",
-      "bytes": 156899
+      "export_sha256": "29fbcd385698aab80bc923fed15b472c506365a5f89bba86710db717218a4085",
+      "bytes": 156830
     },
     {
       "path": "mcp/capability_tools.py",
@@ -3590,8 +3590,8 @@
       "path": "memory_redact.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e2038580d26541f54e87070e2ae1234156f443610d6d1d4f8cade5277570079f",
-      "bytes": 9642
+      "export_sha256": "e874c4173e50e25fc9357f26af678085f915e8131b887edf48a30ab16dabc286",
+      "bytes": 11783
     },
     {
       "path": "memory_snapshot.py",
@@ -3880,8 +3880,8 @@
       "path": "ops_acts.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "61c2e91f53fe7f71906dfc54092c1378a727329b4551098d57d148c8fcca68c6",
-      "bytes": 20097
+      "export_sha256": "2010f4b5c43aba47399d2480f167bf9e36d930e40b6e53d55391086d8d2c8253",
+      "bytes": 19983
     },
     {
       "path": "ops_digest.py",
@@ -4731,8 +4731,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "f8f090819b9922f8f84069e32c9499c6c0a5f810c887dc88a0534a4090f2c888",
-      "bytes": 59891,
+      "export_sha256": "cbc39a4fe5814d262f8cb0c9538dfbbf85c65a65a2588b403bd1517ef5e3bc7f",
+      "bytes": 59994,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,

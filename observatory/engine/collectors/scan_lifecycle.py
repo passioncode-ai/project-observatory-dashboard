@@ -51,6 +51,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import paths  # noqa: E402
 import osprivacy  # noqa: E402
+import memory_redact  # noqa: E402
 
 #: Command-line words that name secrets; a script after one is not kept.
 SECRETISH = re.compile(r"(?i)(token|secret|password|passwd|api[-_]?key|auth|bearer|cookie|session)")
@@ -74,7 +75,14 @@ def redact(args: str) -> tuple[str, str]:
 
     The script is the first argument that looks like a path to a script; any
     secret-looking word before it drops the script too, because what follows
-    such a word is the value."""
+    such a word is the value. The two words kept go through the one redactor
+    (`memory_redact.redact`, OBS-602): a path can carry a token too. UUIDs stay,
+    because a simulator's device folder is named by one."""
+    exe, script = _select(args)
+    return memory_redact.redact(exe, uuids=False), memory_redact.redact(script, uuids=False)
+
+
+def _select(args: str) -> tuple[str, str]:
     words = args.split()
     if not words:
         return "", ""

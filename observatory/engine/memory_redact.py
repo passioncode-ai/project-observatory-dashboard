@@ -23,6 +23,15 @@ When the known values cannot be read, shapes still run and the report says
 
 A full commit id is 40 hexadecimal characters and is redacted as a shape: cite
 a commit by its short form (12 characters), as the handoff's git snapshot does.
+
+THE ONE REDACTOR (OBS-602). `redact` is the shape filter every writer of a
+record, a journal line or an answer calls: the maintenance pass's output lines,
+the updater's installer tails, the ops acts' journal and results, the process
+document of the lifecycle collector, and the memory filter above. It keeps the
+references in `KEEP`, replaces the user of an http(s) URL (a token often travels
+there, as git's form for one does) and then every `credential_shape` run with
+one marker. `scrub` walks a JSON value with it. A site bounds or selects its
+text (a line's length, the end of a tail); it never keeps a pattern of its own.
 """
 from __future__ import annotations
 
@@ -67,6 +76,49 @@ KEEP = re.compile(r"session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9
                   # this reference, and none of it is set aside from the shape filter.
                   r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![0-9A-Za-z_-])"
                   r"|commit:[0-9a-f]{7,12}\b")
+
+#: The user part of an http(s) URL, with or without its password. Brackets are no userinfo
+#: characters (RFC 3986), so a marker already in place is never matched again.
+_URL_USER = re.compile(r"(https?://)[^\s/@\[\]]+@")
+
+
+def _shapes(text: str, uuids: bool, marker: str) -> str:
+    """`text` with the user of a URL and every credential shape replaced by `marker`."""
+    return credential_shape.redact(_URL_USER.sub(lambda m: m.group(1) + marker + "@", text),
+                                   uuids=uuids, marker=marker)
+
+
+def redact(text: str, *, uuids: bool = True, marker: str = MARKER) -> str:
+    """The one redactor: `text` with every credential shape replaced by `marker`, the references
+    in `KEEP` whole. `uuids=False` keeps UUIDs, for process output where they name devices and
+    files. Idempotent: what it writes, it leaves alone."""
+    if not isinstance(text, str) or not text:
+        return text
+    return _keeping(text, lambda held: _shapes(held, uuids, marker))
+
+
+def scrub(value: Any, *, uuids: bool = True, marker: str = MARKER) -> Any:
+    """`value` with every string inside it (dict values, list items) through `redact`."""
+    if isinstance(value, str):
+        return redact(value, uuids=uuids, marker=marker)
+    if isinstance(value, dict):
+        return {k: scrub(v, uuids=uuids, marker=marker) for k, v in value.items()}
+    if isinstance(value, list):
+        return [scrub(v, uuids=uuids, marker=marker) for v in value]
+    return value
+
+
+def _keeping(text: str, filter_: Callable[[str], str]) -> str:
+    """`filter_` over `text` with the `KEEP` references set aside and put back. `\x00` never
+    occurs in a value an agent sends as JSON text, and no shape matches it."""
+    kept: list[str] = []
+
+    def hold(m: re.Match) -> str:
+        kept.append(m.group(0))
+        return f"\x00{len(kept) - 1}\x00"
+
+    cleaned = filter_(KEEP.sub(hold, text))
+    return re.sub("\x00(\\d+)\x00", lambda m: kept[int(m.group(1))], cleaned)
 
 
 @dataclass
@@ -180,20 +232,10 @@ class Redactor:
                     report.known += s.count(needle)
                     report.known_names.add(name)
                     s = s.replace(needle, f"[redacted:{name}]")
-            # Kept references are set aside while the shape filter runs, then
-            # put back: `\x00` never occurs in a value an agent sends as JSON
-            # text, and no shape matches it.
-            kept: list[str] = []
-
-            def hold(m: re.Match) -> str:
-                kept.append(m.group(0))
-                return f"\x00{len(kept) - 1}\x00"
-
-            held = KEEP.sub(hold, s)
-            cleaned = credential_shape.redact(held, marker=MARKER)
-            if cleaned != held:
-                report.shapes += cleaned.count(MARKER) - held.count(MARKER)
-            cleaned = re.sub("\x00(\\d+)\x00", lambda m: kept[int(m.group(1))], cleaned)
+            # The one redactor's shape filter, counted by the markers it added.
+            before = s.count(MARKER)
+            cleaned = redact(s)
+            report.shapes += cleaned.count(MARKER) - before
             if cleaned != original:
                 report.fields.add(where or "(value)")
             return cleaned

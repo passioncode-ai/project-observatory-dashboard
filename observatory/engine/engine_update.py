@@ -171,12 +171,13 @@ def now_z() -> str:
 
 
 def redact_tail(text: str, limit: int = 1200) -> str:
-    """The end of an installer's output, minus any credentials in index URLs.
+    """The end of an installer's output, through the one redactor (`memory_redact.redact`, OBS-602).
 
     pip echoes the index URL it uses, and a private index configured in pip.conf
-    carries its user and password inside that URL; the line would otherwise reach the report."""
-    text = re.sub(r"(https?://)[^\s/@]+@", r"\1***@", text or "")
-    return text[-limit:].strip()
+    carries its user and password inside that URL; the line would otherwise reach the report.
+    Redacted before it is cut, so a cut never leaves half a key behind its marker."""
+    import memory_redact
+    return memory_redact.redact(text or "", uuids=False)[-limit:].strip()
 
 
 def check_url(url: str) -> str:

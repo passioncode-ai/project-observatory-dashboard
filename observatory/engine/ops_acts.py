@@ -19,7 +19,7 @@ unless this server was started with `=0`. Not offered: `workspace-backup --outpu
 secrets outside the managed root) and `update --no-rollback`.
 
 No secret crosses: an argument shaped like a credential is refused and never echoed, and every string of a job's
-answer is scrubbed with `credential_shape.redact`. Design: docs/design/control-plane/ops-tools.md.
+answer is scrubbed with the one redactor, `memory_redact.redact` (OBS-602). Design: docs/design/control-plane/ops-tools.md.
 """
 from __future__ import annotations
 
@@ -37,7 +37,7 @@ from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
-import credential_shape  # noqa: E402
+import memory_redact  # noqa: E402
 import key_acts  # noqa: E402
 import osprivacy  # noqa: E402
 
@@ -102,13 +102,8 @@ def _now() -> str:
 
 
 def _scrub(value: Any) -> Any:
-    if isinstance(value, str):
-        return credential_shape.redact(value)
-    if isinstance(value, dict):
-        return {k: _scrub(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_scrub(v) for v in value]
-    return value
+    """Every string of a journal row or a result through the one redactor (OBS-602)."""
+    return memory_redact.scrub(value)
 
 
 def _inside(output: Any) -> tuple[str, str]:
@@ -272,7 +267,7 @@ def _inprocess(argv: list[str]) -> tuple[int, str, str]:
             else:
                 code = workspace.main(argv)
         except Exception as exc:                                    # noqa: BLE001  said, by its kind
-            print(f"Observatory: {type(exc).__name__}: {credential_shape.redact(str(exc))[:LINE_CHARS]}",
+            print(f"Observatory: {type(exc).__name__}: {memory_redact.redact(str(exc))[:LINE_CHARS]}",
                   file=sys.stderr)
             code = 1
     return int(code or 0), out.getvalue(), err.getvalue()
@@ -358,7 +353,7 @@ def run(job: dict, *, inprocess=None, process=None) -> dict:
                 os.environ.pop(SETUP_ENV, None)
             else:
                 os.environ[SETUP_ENV] = before
-    said = [credential_shape.redact(line)[:LINE_CHARS] for line in err.strip().splitlines()[-STDERR_LINES:]]
+    said = [memory_redact.redact(line)[:LINE_CHARS] for line in err.strip().splitlines()[-STDERR_LINES:]]
     result = _scrub(_last_json(out))
     if result is None and code != 0:
         raise RuntimeError(f"`{' '.join(argv[:2])}` exited {code}: {said[-1] if said else 'no message'}")

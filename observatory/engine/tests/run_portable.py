@@ -167,6 +167,8 @@ BOUNDARY += ('provider_deadline',)
 BOUNDARY += ('credential_shape',)
 # OBS-595: every site that asks whether text is credential-shaped asks that rule.
 BOUNDARY += ('secret_shape_sites',)
+# OBS-602: every site that redacts text for a record calls one redactor.
+BOUNDARY += ('redact_sites',)
 # PROJECT is the folder name; the registry id names the same folder.
 BOUNDARY += ('vault_project',)
 # The product lifecycle contract: bounded steps, idle server, rotated logs, the watch.
