@@ -80,8 +80,8 @@
       "path": "backup_vault.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ab791cf46af46c6dc2669f3ebc233f3fc71737654e9b474bb38d03993d466326",
-      "bytes": 77637
+      "export_sha256": "1193744aa75b59f8bee65237b13f39853cccd6c0dff4bb33ce7b8b20b95e146d",
+      "bytes": 78808
     },
     {
       "path": "cache_coverage.py",
@@ -1038,15 +1038,15 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "b3f8346579ca435bf7760bea244be47ff8adb6d8cae90f48ae25de3ecc524dc3",
-      "bytes": 334856,
+      "export_sha256": "4406ef79ab36cd76bb5e89fcee96d949710abe80048bc94fdee7732794cde8ca",
+      "bytes": 335219,
       "upstream_modified": true
     },
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "e20eea5f542aba725474782ec3b4f224a061550bbfec31445a901284bfaa4ef6",
-      "bytes": 269725,
+      "export_sha256": "c3bb3e101111cbce89905b74f1a7f78bcb174c46e37b23b7abc99a485b4ba5af",
+      "bytes": 270419,
       "upstream_modified": true
     },
     {
@@ -4915,8 +4915,8 @@
       "path": "tests/test_backup_vault.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a9cab0fd48e78860ec3737160380c883aa4710ca5aec989440c5afc77eb4909e",
-      "bytes": 65332
+      "export_sha256": "343fb291a08a36fc4e070733ade14ece049850476659cd74e5310d9c2f0bb655",
+      "bytes": 67608
     },
     {
       "path": "tests/test_blank_page.py",
@@ -6114,8 +6114,8 @@
       "path": "tests/test_node_lifecycle_broker.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "50eaf13f8efcf0cd4cc78c246c64ff82d88ab8f556e844f4149e99b9be11927f",
-      "bytes": 81319
+      "export_sha256": "b8fa79303ae9deff2ae7ab17dc80437be7da70ec39f7f78130cc2201dbaf7433",
+      "bytes": 83303
     },
     {
       "path": "tests/test_node_lifecycle_helper.py",

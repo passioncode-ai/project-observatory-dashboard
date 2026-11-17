@@ -1168,5 +1168,47 @@ class ThisMachineOnly(Base):
                 __import__('shutil').rmtree(self.base / 'opened', True)
 
 
+class NewestCountedAsDaily(Base):
+    """OBS-582: `backups status` names the newest copy that satisfies the daily rule, whatever its
+    kind, so a reader never weighs a nine-day-old daily beside a fresh before-upgrade copy."""
+
+    def place(self, name: str) -> None:
+        self.target().mkdir(parents=True, exist_ok=True)
+        (self.target() / name).write_bytes(b'not a real backup')
+
+    def test_a_fresh_before_upgrade_copy_is_the_newest_counted_as_daily(self):
+        self.place('daily-20261108T010000Z-aaaa1111.obsnap')
+        self.place('before-upgrade-20261117T080000Z-bbbb2222.obsnap')
+        self.place('snapshot-20261110T120000Z-cccc3333.obsnap')
+        newest = vault.status(self.home)['newest_counted_as_daily']
+        self.assertEqual(newest, {'kind': 'before-upgrade', 'at': '2026-11-17T08:00:00Z',
+                                  'file': 'before-upgrade-20261117T080000Z-bbbb2222.obsnap'})
+
+    def test_a_manual_snapshot_counts_and_kinds_outside_the_rule_do_not(self):
+        self.place('daily-20261108T010000Z-aaaa1111.obsnap')
+        self.place('snapshot-20261112T120000Z-cccc3333.obsnap')
+        # An updater's before-update copy, the database copy and the machine bundle are newer, and
+        # none of them satisfies the daily rule.
+        self.place('before-update-20261116T000000Z-dddd4444.obsnap')
+        self.place('observatory-db-20261116T000000Z.obsdb')
+        self.place('machine-20261116T000000Z-eeee5555.obmachine')
+        newest = vault.status(self.home)['newest_counted_as_daily']
+        self.assertEqual(newest['kind'], 'snapshot')
+        self.assertEqual(newest['at'], '2026-11-12T12:00:00Z')
+
+    def test_none_when_no_copy_counts(self):
+        status = vault.status(self.home)
+        self.assertIsNone(status['newest_counted_as_daily'])
+        self.assertIn('artifacts', status)
+        self.assertEqual(vault.DAILY_RULE_KINDS, ('daily', 'before-upgrade', 'snapshot'))
+
+    def test_the_cli_prints_it(self):
+        self.place('daily-20261108T010000Z-aaaa1111.obsnap')
+        out = io.StringIO()
+        with patch.object(sys, 'stdout', out):
+            self.assertEqual(workspace.main(['backups', 'status']), 0)
+        self.assertEqual(json.loads(out.getvalue())['newest_counted_as_daily']['kind'], 'daily')
+
+
 if __name__ == '__main__':
     unittest.main()
