@@ -18,7 +18,8 @@ Every visible string is an English message id marked for the page script (L10N-0
 from __future__ import annotations
 
 from i18n import Translator
-from machine_page import EMPTY, HEADING, _e, _table
+from machine_page import EMPTY, HEADING, _table
+from page_util import escape as _e
 
 HINT = ' class="machine-hint"'
 #: The tool an agent reads this with; named in the disabled control's tooltip.

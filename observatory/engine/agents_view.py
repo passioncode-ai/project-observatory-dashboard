@@ -25,11 +25,15 @@ import json
 import pathlib
 import sqlite3
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Callable
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import paths                                                                       # noqa: E402
+# The clock and the stored form of an instant are the pages' own (OBS-598); appended, so no
+# dashboard module shadows a name this module imports.
+sys.path.append(str(pathlib.Path(__file__).resolve().parent / "dashboard"))
+from page_util import iso as _iso, now as _now                                    # noqa: E402
 from store import workflow as W                                                    # noqa: E402
 
 #: A session counts as working now when its last recorded turn is this recent.
@@ -40,14 +44,6 @@ CLOSED_DAYS = 7
 MAX_WORKFLOWS = 100
 MAX_CHECKPOINTS = 40
 MAX_SESSIONS = 60
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc).replace(microsecond=0)
-
-
-def _iso(at: datetime) -> str:
-    return at.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _open(db: pathlib.Path) -> sqlite3.Connection:

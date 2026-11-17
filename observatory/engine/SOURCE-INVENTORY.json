@@ -56,8 +56,8 @@
       "path": "agents_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0103136a466e3f1210de020ee17a8a4aa3f1e07f00e2883ccfd819f321713eac",
-      "bytes": 12395
+      "export_sha256": "5b4418cd6315d4112c9dd19c446e9ea9e54c7cc2f254896940ee718d0e5cce89",
+      "bytes": 12538
     },
     {
       "path": "app_update.py",
@@ -604,15 +604,15 @@
       "path": "dashboard/agent_panel.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4bbcf91f03c1e1eab51d278f363d76c420a2c3d17c5533d7a7000aaab19af955",
-      "bytes": 11577
+      "export_sha256": "09560f047f87934bc8467eceab91b8d88b733f4ac43bd390537fb8324a413724",
+      "bytes": 11608
     },
     {
       "path": "dashboard/agents_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d6799dc30e3dc19da5e482d8a5f25b583316895dbdc720e691888d5137bf833e",
-      "bytes": 29181
+      "export_sha256": "42db0954d8d1de3c82207776dd253172aba212f1df819dacdf457d7cd80ab6c7",
+      "bytes": 29105
     },
     {
       "path": "dashboard/audit_pack.py",
@@ -666,8 +666,8 @@
       "path": "dashboard/disk_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a8ddebe0365cc48f646ee41dc13646888e13e1c314f45507a1189203765a1022",
-      "bytes": 27872
+      "export_sha256": "24225e0e93242a1946585418545a68dec90fa34c90fa4972b7fd2a8447ca97fb",
+      "bytes": 27901
     },
     {
       "path": "dashboard/finding_types.py",
@@ -680,8 +680,8 @@
       "path": "dashboard/home_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "de2ee32121b92ff9f1ee6950d5316e3f747c94dcd785edbf79ac6637ec8fa7f7",
-      "bytes": 26660
+      "export_sha256": "b58d90b854f30c18a1ae16d7b18218549d7d45eb4000c681e8662cece3b5b9aa",
+      "bytes": 26343
     },
     {
       "path": "dashboard/i18n.py",
@@ -694,22 +694,22 @@
       "path": "dashboard/infra_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b4c68b4c75eed4aa5412c11f2dba5865fb986eb819bcaeff106824e35df54a12",
-      "bytes": 16604
+      "export_sha256": "1171bbbf9dadf3fb0843051f5b06d9c2939fb6b9de651bbf730fe176dbfcddcb",
+      "bytes": 16555
     },
     {
       "path": "dashboard/integrations_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "02871b9d7feeb1a14bf3fc1bcb99cc658cee888b0160cdada982334eab7ea942",
-      "bytes": 10432
+      "export_sha256": "a0b6c2f6c34dee48edad8b7436bd1882785cd99b000c99ebffb1cfc2cdd44221",
+      "bytes": 10463
     },
     {
       "path": "dashboard/key_sweep_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c68a22fe91ead4d179b4ddcf4c4f156ec0abe56ee79f66695a381179d8d9aef4",
-      "bytes": 5605
+      "export_sha256": "a7e18577c888b5f30544d5942601da4903f782b98fa632259339b4fb199943b9",
+      "bytes": 5367
     },
     {
       "path": "dashboard/locales/en.json",
@@ -729,15 +729,15 @@
       "path": "dashboard/machine_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "dab69749c68b47dfe1e39ef97a476a0e66b64eec740e128eaa2068c8856f3bb6",
-      "bytes": 17915
+      "export_sha256": "7feea8a1436ff0e161a44b39b27ba744e5f1fed87e33e75df72eec041aaca618",
+      "bytes": 17454
     },
     {
       "path": "dashboard/mcp_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b7b15817b0253467637b47028c8f51582f1f9dc4fb2115431216f94ea5de566e",
-      "bytes": 7230
+      "export_sha256": "8ff4b8672a2c32edec68b15437790a8abb491a4dbd3780802f966dd299c5dc14",
+      "bytes": 7261
     },
     {
       "path": "dashboard/page_table.py",
@@ -745,6 +745,13 @@
       "upstream_modified": true,
       "export_sha256": "2bae60f6866aea97867719e10145e14077cd5cf671a2271c5f5232305fc75dbb",
       "bytes": 7721
+    },
+    {
+      "path": "dashboard/page_util.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "fadfd68895dd4b15b7c1a907d0de0aec1ffd9281a7ef5487107678d8334af02e",
+      "bytes": 1863
     },
     {
       "path": "dashboard/shell.py",
@@ -784,8 +791,8 @@
       "path": "dashboard/tools_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "32c34f0b0fd0b7ec1bd48fdeb1ffd38966d02cf31a98d8c9f0a425bf60dc401f",
-      "bytes": 12523
+      "export_sha256": "b5faa10be959e927799730680b3a5cfc6ff44e279ea474891e787114876f3359",
+      "bytes": 12286
     },
     {
       "path": "dashboard/workspace.css",
@@ -4281,8 +4288,8 @@
       "path": "sessions_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c8cc2f1c21ad8443cb8723f6ef5cb9b4a98a1da0228dbfc9bcffd64be1ab10f1",
-      "bytes": 26226
+      "export_sha256": "5fa0ef4a54e18a5a986dbf3254f02f79278e8bcfbe84bc1ef26718b1b5441d53",
+      "bytes": 26379
     },
     {
       "path": "skill/.claude-plugin/marketplace.json",
@@ -5193,8 +5200,8 @@
       "path": "tests/test_dashboard_shell.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "04997906d7c651f1dd14588e786167a1e60200f38382f1c07abe784b6e7a4b89",
-      "bytes": 26416
+      "export_sha256": "890402667efbc9f09c82fbc7c93e40185a552c7eb17f2a6a572517973f7c2046",
+      "bytes": 29351
     },
     {
       "path": "tests/test_dashboard_stop.py",
@@ -5612,8 +5619,8 @@
       "path": "tests/test_home_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "cc99411ccf9f181cfe565785cc476c99b8918ad01e1f15cc92594ee85a1f8297",
-      "bytes": 25538
+      "export_sha256": "34406402a79a485d29a6d1781ade817386c9e62ef6129d883de399120350d0ba",
+      "bytes": 25547
     },
     {
       "path": "tests/test_honest_absence.py",
@@ -8443,7 +8450,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 1142,
+  "file_count": 1143,
   "excluded": [
     "git-history",
     "operator-registries",

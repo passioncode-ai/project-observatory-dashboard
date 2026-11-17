@@ -21,9 +21,9 @@ Every visible string is an English message id marked for the page script (L10N-0
 """
 from __future__ import annotations
 
-import html
 
 from i18n import Translator
+from page_util import escape as _e
 
 NUM = ' class="num"'
 EMPTY = ' class="empty"'
@@ -68,10 +68,6 @@ REASONS = ("the provider names no repository it deploys from",
            "no project's site is on this zone",
            "the provider's listing states no price for this resource",
            "the plan states no monthly USD price")
-
-
-def _e(v) -> str:
-    return html.escape("" if v is None else str(v))
 
 
 def _command(text: str, t: Translator) -> str:

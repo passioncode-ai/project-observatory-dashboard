@@ -22,18 +22,14 @@ listed in order underneath for a screen reader. Colour always comes with a word.
 """
 from __future__ import annotations
 
-import html
 
 from i18n import NO_VALUE, Translator
+from page_util import escape as _e, stamp
 
 HEADING = ' class="machine-h"'
 NUM = ' class="num"'
 EMPTY = ' class="empty"'
 HINT = ' class="machine-hint"'
-
-
-def _e(v) -> str:
-    return html.escape("" if v is None else str(v))
 
 
 def _project(pid, names: dict | None) -> str:
@@ -42,11 +38,6 @@ def _project(pid, names: dict | None) -> str:
         return NO_VALUE
     name = (names or {}).get(pid) or pid
     return f'<a href="projects.html#{_e(pid)}">{_e(name)}</a>'
-
-
-def _stamp(value) -> str:
-    text = str(value or "")
-    return text.replace("T", " ").replace("Z", " UTC") if text else NO_VALUE
 
 
 def _age(t: Translator, seconds) -> str:
@@ -118,16 +109,16 @@ def _session_tiles(f: dict, t: Translator) -> list[tuple[str, object, str]]:
     sub = ' class="tile-sub"'            # the source on its own line, in sentence case (OBS-572)
     if f.get("processesFrom") == "manager":
         running = t.mark("processes the account manager lists, read {at}", tag="span", attrs=sub,
-                         at=_stamp(f.get("processesAt")))
+                         at=stamp(f.get("processesAt"), NO_VALUE))
     elif f.get("processesFrom") == "machine-survey":
         running = t.mark("processes the machine survey counted, read {at}", tag="span", attrs=sub,
-                         at=_stamp(f.get("processesAt")))
+                         at=stamp(f.get("processesAt"), NO_VALUE))
     else:
         running = t.mark("not read yet", tag="span", attrs=sub)
     if by:
         running += f'<ul class="tile-list">{by}</ul>'
     state = f.get("managerState")
-    managed = (t.mark("by the account manager, read {at}", tag="span", attrs=sub, at=_stamp(f.get("managerAt"))) if state == "read"
+    managed = (t.mark("by the account manager, read {at}", tag="span", attrs=sub, at=stamp(f.get("managerAt"), NO_VALUE)) if state == "read"
                else t.mark("the account manager is not installed", tag="span", attrs=sub) if state == "not-installed"
                else t.mark("not read yet", tag="span", attrs=sub) if state is None
                else t.mark("the account manager did not answer", tag="span", attrs=sub))
@@ -199,7 +190,7 @@ def _machine_sessions(sessions: dict | None, t: Translator, names: dict | None =
                      f'<span class="mono">{_e(r.get("folder_name") or NOT_READ)}</span>',
                      _yes(t, r.get("managed") is True),
                      f'<span class="mono">{_e(r.get("account_group"))}</span>' if r.get("account_group") else NOT_READ,
-                     t.date(_stamp(r.get("last_turn_at"))) if r.get("last_turn_at") else NOT_READ,
+                     t.date(stamp(r.get("last_turn_at"), NO_VALUE)) if r.get("last_turn_at") else NOT_READ,
                      state)
             tds = "".join(f'<td{t.attr("data-label", h)}>{c}</td>' for h, c in zip(heads, cells))
             body.append(f'<tr data-session="{_e(r.get("pid"))}">{tds}</tr>')
@@ -294,7 +285,7 @@ def _lanes(w: dict, t: Translator) -> str:
                         f'{_m(t, "handoff", reason) if reason != NO_VALUE else NO_VALUE}</span>')
         dots = "".join(
             f'<span class="agents-dot st-{_e(c.get("status") or "unknown")}"'
-            f'{t.attr("title", DOT_TITLES.get(c.get("status"), DOT_TITLE), step=c["stepId"], at=_stamp(c["at"]))}>'
+            f'{t.attr("title", DOT_TITLES.get(c.get("status"), DOT_TITLE), step=c["stepId"], at=stamp(c["at"], NO_VALUE))}>'
             f'{_e(c["stepId"])}</span>' for c in s.get("checkpoints") or [])
         ended = ""
         if s.get("state") == "ended" and s.get("endedReason"):
@@ -306,7 +297,7 @@ def _lanes(w: dict, t: Translator) -> str:
         cls = "agents-seg offered" if o["state"] == "offered" else "agents-seg lapsed"
         segs.append(f'<span class="agents-arrow" aria-hidden="true">⇢ {_m(t, "handoff", o.get("reason"))}</span>'
                     f'<span class="{cls}">{_e(_who(o.get("to")))} '
-                    f'{t.mark("offered until {at}", at=_stamp(o.get("expiresAt"))) if o["state"] == "offered" else _m(t, "lease-end", o["state"])}'
+                    f'{t.mark("offered until {at}", at=stamp(o.get("expiresAt"), NO_VALUE)) if o["state"] == "offered" else _m(t, "lease-end", o["state"])}'
                     f'</span>')
     return f'<div class="agents-lane" aria-hidden="true">{"".join(segs)}</div>'
 
@@ -317,15 +308,15 @@ def _events(w: dict, t: Translator) -> str:
     items = []
     for s in w.get("segments") or []:
         arrived = (s.get("arrivedBy") or {}).get("reason")
-        items.append(f'<li>{t.date(_stamp(s.get("from")))}: {_e(_who(s.get("executor")))} '
+        items.append(f'<li>{t.date(stamp(s.get("from"), NO_VALUE))}: {_e(_who(s.get("executor")))} '
                      f'{t.mark("took the workflow")} '
                      f'({_m(t, "handoff", arrived) if arrived else t.mark("started it")})</li>')
         for c in s.get("checkpoints") or []:
-            items.append(f'<li>{t.date(_stamp(c["at"]))}: {t.mark("step {step}", step=c["stepId"])} '
+            items.append(f'<li>{t.date(stamp(c["at"], NO_VALUE))}: {t.mark("step {step}", step=c["stepId"])} '
                          f'{_m(t, "step", c.get("status"))}</li>')
     for o in w.get("offers") or []:
         state = t.mark("offered") if o["state"] == "offered" else _m(t, "lease-end", o["state"])
-        items.append(f'<li>{t.date(_stamp(o.get("at")))}: {t.mark("handoff to")} {_e(_who(o.get("to")))} '
+        items.append(f'<li>{t.date(stamp(o.get("at"), NO_VALUE))}: {t.mark("handoff to")} {_e(_who(o.get("to")))} '
                      f'({_m(t, "handoff", o.get("reason"))}): {state}</li>')
     return f'<ol class="agents-events visually-hidden-list">{"".join(items)}</ol>'
 
@@ -379,7 +370,7 @@ def _sessions(sessions: list[dict], t: Translator, names: dict | None = None) ->
             "<tr>"
             f'<td{t.attr("data-label", "Session")}><span class="mono">{_e((s.get("sessionId") or "")[:8])}</span> {live}</td>'
             f'<td{t.attr("data-label", "Project")}>{_project(s.get("projectId"), names)}</td>'
-            f'<td{t.attr("data-label", "Last turn")}>{t.date(_stamp(s.get("lastTurnAt")))}</td>'
+            f'<td{t.attr("data-label", "Last turn")}>{t.date(stamp(s.get("lastTurnAt"), NO_VALUE))}</td>'
             f'<td{t.attr("data-label", "Turns")} class="num">{t.number(s.get("turns"))}</td>'
             f'<td{t.attr("data-label", "Workflow")}><span class="mono">{_e(s.get("workflowId") or NO_VALUE)}</span></td>'
             "</tr>")
@@ -421,7 +412,7 @@ def agents_html(payload: dict, t: Translator | None = None, live: bool = False) 
     parts = [f'<section id="agents" class="agents" data-measured="{_e(a.get("measuredAt"))}"'
              f' data-signature="{signature(a, payload.get("sessions"))}"{" data-live" if live else ""}>']
     parts.append(t.mark("Read {at}", tag="p", attrs=' class="machine-at" id="agents-at"',
-                        at=_stamp(a.get("measuredAt"))))
+                        at=stamp(a.get("measuredAt"), NO_VALUE)))
     parts.append(f'<p class="machine-hint" id="agents-live" role="status" aria-live="polite"></p>')
     parts.append(_machine_sessions(payload.get("sessions"), t, names))
     needs = a.get("needsYou") or []

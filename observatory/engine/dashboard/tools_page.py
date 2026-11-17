@@ -9,10 +9,10 @@ or read in part, is named with its reason; a reason's command is cut, since a pe
 """
 from __future__ import annotations
 
-import html
 import re
 
 from i18n import NO_VALUE, Translator
+from page_util import escape as _e, stamp
 
 HEADING = ' class="machine-h"'
 SUB = ' class="tools-h"'
@@ -26,15 +26,6 @@ TONE = {"critical": "danger", "warning": "warn", "info": ""}
 TIERS = {1: "own code", 2: "pinned marketplace", 3: "third party"}
 #: The agents whose plugins, skills and hooks the scan reads (tooling_view.READ_AGENTS).
 READ_AGENTS = ("claude-code", "codex")
-
-
-def _e(v) -> str:
-    return html.escape("" if v is None else str(v))
-
-
-def _stamp(value) -> str:
-    m = re.fullmatch(r"(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})(?:\.\d+)?Z?", str(value or ""))
-    return f"{m.group(1)} {m.group(2)} UTC" if m else str(value or "")
 
 
 def _anchor(fid) -> str:
@@ -201,7 +192,7 @@ def tools_html(payload: dict, t: Translator | None = None) -> str:
     v = payload.get("tooling") or {}
     parts = ['<section id="tools" class="tools">']
     if v.get("measuredAt"):
-        parts.append(t.mark("Harness scanned {at}", tag="p", attrs=' class="machine-at"', at=_stamp(v["measuredAt"])))
+        parts.append(t.mark("Harness scanned {at}", tag="p", attrs=' class="machine-at"', at=stamp(v["measuredAt"])))
     agents = v.get("agents") or []
     degraded = [d for d in v.get("degraded") or [] if isinstance(d, dict)]
     if agents:
