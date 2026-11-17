@@ -393,6 +393,13 @@ class KeyserverBoundaryTests(unittest.TestCase):
             code, _, raw = self.request(path="/api/reveal", body=json.dumps(body).encode())
             self.assertEqual(code, 400)
             self.assertNotIn(planted.encode(), raw)
+        # No OpenRouter scan: the consumer guard (OBS-594) refuses, typed, and still quotes nothing back.
+        code, _, raw = self.request(path="/api/revoke", body=json.dumps({"label": planted}).encode())
+        self.assertEqual(code, 400)
+        self.assertIn(b"consumer-source-unreadable", raw)
+        self.assertNotIn(planted.encode(), raw)
+        # A clean OpenRouter scan, so the consumer guard passes and the door's own sentence is answered.
+        (keyserver.paths.SCRATCH / "openrouter.json").write_text(json.dumps({"keys": []}))
         with patch.object(keyserver, "_door") as door:
             door.return_value.revoke_key.side_effect = LookupError(f"no issued key called {planted!r}")
             code, _, raw = self.request(path="/api/revoke", body=json.dumps({"label": planted}).encode())

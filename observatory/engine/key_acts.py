@@ -140,6 +140,9 @@ def _run(ks_action: str, body: dict, record: dict | None) -> dict:
     caller, relayed = ks._CALLER.set(CALLER), ks._RELAYED.set(record)
     try:
         return ks.ACTIONS[ks_action](body)
+    except ks.key_consumers.RevokeRefused as exc:
+        # The consumer guard's own code (OBS-594): consumer-in-use, consumer-source-unreadable, -unknown.
+        raise Refusal(exc.code, str(exc)[:500], consumers=exc.consumers, unread=exc.unread) from None
     except ValueError as exc:
         raise Refusal("invalid-argument", str(exc)[:500]) from None
     except LookupError as exc:
