@@ -6170,8 +6170,8 @@
       "path": "tests/test_node_lifecycle_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ff89ae5a82ffcfa695c88399d068ae88463938e165eeb5a4edd0bd7fba187f4e",
-      "bytes": 56580
+      "export_sha256": "972846010e676ccafa6273e36e1efcfe03f99bc1169012bf277b47a04ae218f3",
+      "bytes": 59554
     },
     {
       "path": "tests/test_node_lifecycle_supervisor.py",
@@ -8088,8 +8088,8 @@
     {
       "path": "tools/serverd.py",
       "source_sha256": "7b7dfc2976658a895b9a9df19cc5a0a8f60828d0b58e922c40d941dfa0cbe266",
-      "export_sha256": "1b7cbafc6589a72f096640e743463f9ad45714db6e6309450626d358c7c064f6",
-      "bytes": 64271,
+      "export_sha256": "f6050a3ca8d31623afb2f8098c7a3bef21d49aa9eda51315bc9bef03164f37ad",
+      "bytes": 66597,
       "python_comments_removed": 21,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
