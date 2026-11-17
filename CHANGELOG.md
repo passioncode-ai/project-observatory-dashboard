@@ -3,6 +3,60 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.41.0 (2026-11-17)
+
+The control plane's fourth wave: every vault key says where it came from, a daily doctor puts right what it safely can
+and keeps an undo, the dashboard gains an Assistant page, agents get the key page's acts as tools, and the disk guard
+reaches the user's temporary folder and the Docker volumes inside a VM. The MCP server serves 43 tools. The
+observatory-log plugin moves to 0.41.0 with the release.
+
+### Added
+
+- **Keys by source** (OBS-556, #563): every vault slot is classed `issued` (a door's ledger or record names it),
+  `received` (`vault.py put --from LABEL`), `shared` (another vault folder holds the same value, compared by digest) or
+  `unknown`, with its context and the services started from it, on the Keys page and in `observatory_credentials`.
+- **Daily doctor** (OBS-558, #565): eight checks once a day from the maintenance job; safe fixes move files aside into
+  a quarantine with an undo journal (`full doctor-daily --undo ID`), the rest become findings (`doctor.backup_stale`,
+  `doctor.step_failing`, `doctor.vault_meta_unreadable`, `doctor.fix_failed`); a model summary only when the day's
+  result changed, inside the engine's budget. MCP `observatory_doctor`.
+- **Snapshot with writers paused** (OBS-583, #566): `full workspace-backup --pause-writers` takes the daily snapshot of
+  `maintain` on demand (update lock, managed jobs stopped and started again, every database copy verified).
+- **Unused Docker volumes** (OBS-584, #566): the guard lists volumes no container uses inside each Lima or Colima VM,
+  with size and the compose project that owns them, on the Disk page and in `observatory_machine`; it still never
+  removes a volume.
+- **The user's temporary folder** (OBS-585, #567): an auto-tier guard class removes top-level entries older than
+  `guard.user_temp_hours` (12) that no process holds, with fixed exclusions, and removes nothing when open files cannot
+  be listed; `disk.tmp_growth` names a name class growing faster than 1000 entries or 1 GB a day and the program
+  writing it.
+- **Cloudflare `revoke --vault PROJECT/ENV/NAME`** (OBS-575, #566): finds a vault-slot token by its managed name,
+  deletes it, confirms it is gone, then removes the slot.
+- **The Assistant page** (OBS-560, #573): chat with the read-only assistant, the daily doctor's last run with undo, and
+  the open security findings by area. `observatory_assistant_status` gains `ready`, `blocked_by` and `spend`.
+- **Key acts for agents** (OBS-559 part 2, #573): `observatory_key_act` (`mint`, `limit`, `disable`, `enable`,
+  `rotate`, `revoke`) and `observatory_credential_mark` (`leak`, `annotate`) call the key page's own functions; mint,
+  rotate, revoke and a raised limit take the operator's words as `decision`.
+- **`backups status` names `newest_counted_as_daily`** (OBS-582, #573).
+
+### Changed
+
+- **Folder attribution follows DEC-0177 and DEC-0151** (OBS-576, OBS-587, #573): a URL whose user name is a token is
+  refused, no origin is recorded for a remote whose user is a token, stored origins are rewritten once; the estate
+  record and the operations digest use the same secret-value rules; a backup's remote drops a token user in the scp
+  form.
+- **A failed automatic update says why** (OBS-581, #571): the reason, the failing step, whether the release API was
+  read with a token, and the command's last lines go into `update.jsonl` and the maintenance record; `maintain status`
+  names a system daemon's log paths.
+
+### Fixed
+
+- **The MCP page names the agent's tools** instead of printing commands when nothing was scanned (OBS-579, #566).
+- **A key annotation from an agent is signed as the agent**, not as the operator (#573).
+- **A Windows timing race in the lifecycle broker test** no longer holds a release (OBS-586, #573).
+- **A refused request's answer reaches a Windows client** (OBS-589, #573): the local server drains the unread body of a
+  POST it refused before closing, so a 401, 403 or 405 is no longer lost to a connection reset.
+- **A private file write on Windows retries a refused replace** (OBS-588, #573): the secret prompt's request no longer
+  stays waiting for ten minutes when another handle held `queue.json` for a moment.
+
 ## 0.40.0 (2026-11-17)
 
 The estate control plane's third wave: a key sweep over every repository of the estate, a supply-chain watch over MCP
