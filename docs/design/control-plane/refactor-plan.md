@@ -2,8 +2,7 @@
 
 Status: plan, 2026-11-17. Measured against `main` at `aa074af2` (0.41.0 plus wave 5, #575) by three read-only audits,
 one per requirement band of [CONTROL-PLANE.md](../CONTROL-PLANE.md). Each row below names the requirement, what is
-true now with its evidence, and the board row that closes the gap. The CP-15 to CP-20 band and the update path are
-added when their audit lands (section "Still to measure").
+true now with its evidence, and the board row that closes the gap.
 
 ## The target, in one paragraph
 
@@ -33,6 +32,32 @@ owner), CP-08 (key sweep), CP-14 (issues for findings, stricter than its text). 
 | CP-13 Untracked | `TRACKED` is hand-kept apart from the doors (`sentry` counts as tracked with no door) | `tools/integration_health.py:154` | OBS-605 |
 | CP-14 Issues | Text turns key findings off only in public repositories; code keeps them off everywhere | `configuration.py:155` | OBS-608 |
 
+## Where it stands (CP-15 to CP-20, the update path, the MCP surface)
+
+All suites pass (doctor, configure, agent_panel, disk_page, dashboard_shell, mcp_wire, jobs_cancel, ops_acts,
+engine_update, workspace_upgrade, maintenance, the parity test). Done: CP-15 (daily doctor), CP-16 (disk section),
+CP-17 (monitoring first in the navigation).
+
+| Req | Gap that matters | Evidence | Row |
+|---|---|---|---|
+| Update path | Wrong by design: the files allowed to change while an update stages are a hand-kept list, so each newly found live writer rolls an update back (the analytics queue, the update-check job, and the server's receipt, OBS-591) | `workspace_upgrade.py:262`, stillness checks at `:318` and `:1392` | OBS-610 |
+| CP-18 Parity | 72 CLI verbs still without a tool; the test enforces the list, not coverage, and sees only the key server's actions | `parity.json`, `tools/keyserver.py:711` | OBS-615 |
+| CP-19 Agent panel | One page, not a panel on the live pages; the notifier is not wired in | `dashboard/agent_panel.py`, `agent-panel.md:5` | OBS-616 |
+| CP-20 Config door | Settings outside the door: the auto-update switch file, analytics, and `meter.json`, `retention.json`, `machine.json`, `review-policy.json`, `machine-backup.json`, `relay.json`, `tracked.json`, `organizations.json` | `configuration_door.py:47`, `maintenance.py:49` | OBS-612 |
+| CP-17 Navigation | Integrations is its own entry instead of inside Availability | `dashboard/page_table.py` `NAV_GROUPS` | OBS-619 |
+| MCP surface | The server instructions sit 5 characters under their limit; the WRITE line misses `credential_mark`, `key_sweep_settle`, `mcp_accept`, `doctor`; refusal codes are spelled two ways (`operator_decision_required` and `operator-decision-required`); a dozen docstrings never mention `degraded` | `tests/test_mcp_wire.py:156`, `mcp/server.py` | OBS-613 |
+
+Cross-cutting, from this band:
+
+- **One operator-decision check** (OBS-611): five wrappers around `node/actions.action_decision`
+  (`configuration_door.py:573`, `key_acts.py:94`, `org_selection.py:328`, `secret_prompt.py:845`, `own_share.py:77`)
+  differ on the code's spelling, on a decision that names no target, and on `person:page`; one `decided()` in
+  `node/actions` with one refusal vocabulary.
+- **One journal writer** (OBS-614): about 25 modules keep their own append helper; one append-only writer with one
+  rotation and privacy rule.
+- **Split `maintenance.py`** (OBS-617, 2,927 lines, 13 steps) into one module per step behind a step registry, and
+  **`build_findings.collect`** (OBS-618, 3,138 lines) into one function per finding family.
+
 ## Cross-cutting refactors
 
 - **One secret-shape detector** (OBS-595): `credential_shape.py` is the rule; four more detectors and three hard-coded
@@ -59,19 +84,13 @@ when the root `unittest discover -s tests` and every touched suite pass, then re
 
 1. **R1, correctness and safety**: OBS-594 (every revoke through one consumer guard, refusing when it cannot read),
    OBS-595 (one detector), OBS-596, OBS-597.
-2. **R2, one truth**: OBS-598, OBS-599, OBS-600, OBS-601, OBS-602.
-3. **R3, the missing halves**: OBS-603, OBS-604, OBS-605, OBS-606, OBS-607 (delivery to consumers for Cloudflare and
+2. **R2, one truth**: OBS-598, OBS-599, OBS-600, OBS-601, OBS-602, OBS-614 (one journal writer).
+3. **R3, the update path and the gates**: OBS-610 (writers declare their receipts; the stillness check reads the
+   declarations), OBS-611 (one decision check), OBS-612 (every setting through the one door), OBS-613 (the MCP
+   surface), OBS-593 (who reloads the server during an update).
+4. **R4, the missing halves**: OBS-603, OBS-604, OBS-605, OBS-606, OBS-607 (delivery to consumers for Cloudflare and
    Heroku).
-4. **R4, the documents tell the truth**: OBS-608 (CP-01 tests, CP-07, D2, CP-14, the M1 artefact name, `rotation.md`,
-   OSS-24).
-5. **R5, the CP-15 to CP-20 band and the update path**: rows filed when that audit lands; OBS-593 (who reloads the
-   server during an update) belongs here.
-6. **R6, long functions**: OBS-609.
+5. **R5, the documents tell the truth**: OBS-608.
+6. **R6, structure**: OBS-609, OBS-617, OBS-618.
+7. **R7, parity and the panel**: OBS-615 (about six family tools of the `observatory_ops` kind), OBS-616, OBS-619.
 
-Incoming board requests are taken between waves, or folded into the running wave when they touch its files.
-
-## Still to measure
-
-CP-15 (daily doctor), CP-16 (disk), CP-17 (navigation), CP-18 (parity: 72 CLI verbs without a tool, grouped into
-families), CP-19 (agent panel), CP-20 (configuration door), the update and install path, and the MCP surface (tool
-docstrings, the decision check implemented in several places, the instructions length).
