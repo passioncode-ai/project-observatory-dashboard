@@ -51,6 +51,8 @@ import shell  # noqa: E402
 import relocalize  # noqa: E402
 
 CYRILLIC = re.compile(r"[Ѐ-ӿ]")
+#: The em dash, written as its code point so this file carries none (OBS-596).
+EM_DASH = "\u2014"
 PLACEHOLDER = re.compile(r"\{([a-z_][a-z0-9_]*)\}")
 PLURAL_FORMS = {"ru": {"one", "few", "many", "other"}, "en": {"one", "other"}}
 #: Ids the code builds at run time rather than naming as a literal: search
@@ -742,9 +744,21 @@ class BuiltPages(unittest.TestCase):
             text = self.page("en", name).replace('lang="ru" aria-pressed="false">Русский<', "")
             self.assertIsNone(CYRILLIC.search(text), f"{name}.html: {CYRILLIC.search(text) and text[CYRILLIC.search(text).start()-60:][:120]!r}")
 
+    def test_no_page_shows_an_em_dash(self):
+        """A page a person reads carries no em dash (U+2014) in any language (OBS-596): an empty value
+        shows `i18n.NO_VALUE`, a clause break a full stop, a comma or a colon. Every page of the page
+        table, built in each locale from the synthetic estate, is read whole."""
+        for locale in i18n.LOCALES:
+            for name, _title, _kind in shell.PAGES:
+                with self.subTest(page=name, locale=locale):
+                    text = self.page(locale, name)
+                    hits = [m.start() for m in re.finditer(EM_DASH, text)]
+                    self.assertEqual(hits, [], f"{name}.html ({locale}), {len(hits)} em dash(es): "
+                                     + " | ".join(repr(text[max(0, at - 70):at + 30]) for at in hits))
+
     def test_russian_pages_are_russian(self):
         text = self.page("ru")
-        for words in ("<title>Главная — Project Observatory</title>", ">Главная</h1>", ">Находки<", "Часть набора инструментов PassionCode"):
+        for words in ("<title>Главная · Project Observatory</title>", ">Главная</h1>", ">Находки<", "Часть набора инструментов PassionCode"):
             self.assertIn(words, text)
 
     def test_a_page_built_in_one_language_reads_in_the_other(self):

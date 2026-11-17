@@ -21,7 +21,7 @@ def _load(name: str, command: str) -> tuple[dict | None, dict | None]:
         # cleanup files are refreshed by `full cleanup`, not `full machine`
         # (audit A42 — one hint used to name `full machine` for all three).
         return None, {"source": name, "code": "not-surveyed",
-                      "reason": f"not surveyed yet — enable features.machine_watch, "
+                      "reason": f"not surveyed yet: enable features.machine_watch, "
                                 f"or run `project-observatory full {command}`"}
     except (OSError, ValueError) as exc:
         return None, {"source": name, "code": "unreadable", "error": type(exc).__name__,

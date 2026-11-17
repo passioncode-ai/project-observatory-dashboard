@@ -669,7 +669,7 @@ def document(creds: list[dict], scan: dict, obs_date: str) -> dict:
         "schema_version": 1,
         "updated_on": obs_date,
         "note": ("Every credential this estate tracks, as facts. NO VALUE IS EVER "
-                 "RECORDED HERE — a `label` is what the provider itself calls a key "
+                 "RECORDED HERE: a `label` is what the provider itself calls a key "
                  "(`sk-or-v1-…`), never the key. Values live in "
                  "tools/vault.py's store and in the four OpenRouter destinations; "
                  "this document answers what exists, who may use it, and what has "

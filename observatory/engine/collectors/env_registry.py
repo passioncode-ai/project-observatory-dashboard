@@ -145,7 +145,7 @@ def document(scan: dict, obs_date: str) -> dict:
         "note": ("Every `.env` under the estate, measured by collectors/scan_env.py "
                  "as NAMES and never as values. `class` is decided from the value "
                  "and the value is then dropped: secret, config, placeholder or "
-                 "empty. `shared_with` is measured, not declared — two variables "
+                 "empty. `shared_with` is measured, not declared: two variables "
                  "carry it when a salted fingerprint says their values are equal, "
                  "and the salt is machine-local and gitignored so the fingerprint "
                  "itself never reaches this file. `available_in` answers the "
