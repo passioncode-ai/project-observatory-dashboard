@@ -227,7 +227,7 @@ def check_scan_fresh(store: pathlib.Path, at: datetime.datetime) -> dict:
     if not db.is_file():
         return {"state": "unknown", "count": 0, "degraded": {"source": "store", "reason": "store/observatory.db is absent"}}
     try:
-        con = sqlite3.connect(f"{db.resolve().as_uri()}?mode=ro", uri=True)
+        con = sqlite3.connect(db.resolve().as_uri() + "?mode=ro", uri=True)
         try:
             row = con.execute("SELECT max(started_at) FROM scans").fetchone()
         finally:
