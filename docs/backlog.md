@@ -1,6 +1,6 @@
 # Local backlog
 
-**Next free ID:** `OBS-623`
+**Next free ID:** `OBS-625`
 
 **Vacant ids:** `OBS-91` (skipped when the OBS register began reserving: #277 wrote OBS-92 and OBS-93, and no row was ever written under 91); `OBS-422` (reserved on 2026-11-08 for the provider-account organization rules, which became OBS-412 part 1 when the organization onboarding rows OBS-411 to OBS-420 were written)
 
@@ -644,4 +644,6 @@ still open and needs nothing, and a reservation older than that with no row must
 | OBS-620 | The disk section lists the Colima VM's disk files as their own location, with their growth over a day, so a container log that grows inside the VM is seen before the host disk runs out | open | Fabric board thread `f905c4ae`: on 2026-11-17 a log of 10.7 GB inside the VM filled the host disk twice and stopped the board's database for 30 minutes |
 | OBS-621 | The cleanup plan proposes what the operator cleaned by hand on 2026-11-17: repositories with no commit, reflog or agent session in 90 days whose work is all on a remote (with a restore list), dependency and build folders unchanged for 14 days outside running services' projects, and merged idle checkouts | open | Operator, 2026-11-17; scripts and record in ssheleg/project-observatory `docs/runs/2026-11-17-disk-cleanup/` |
 | OBS-622 | `node_lifecycle_broker`'s `test_stop_and_start_cycles_by_a_caller_never_open_the_circuit` failed once on the Windows runner of #582 and passed on #562's: four start and stop cycles each wait on the broker, so a slow runner can cross a deadline. Make the wait read the broker's own state, not the wall clock, as OBS-586 did for its neighbour | open | #582 Windows run of 2026-11-17 |
+| OBS-623 | A clone whose remote names an `~/.ssh/config` Host alias (a deploy key per repository, `git@gh-<repo>:owner/name.git`) is classified by the alias's real host: the registry resolves the alias through `ssh -G` before deciding the remote is not inventoried, so the repository gets its `repositories.json` row and its service its project | open | Fabric board request `45349135` from company-assessment-agent (CA-668), 2026-11-17 |
+| OBS-624 | A workspace whose jobs are only `maintain` and `check` builds its registry: `maintain` runs the registry pass when `registry/projects.json` is empty or older than a day, and `doctor` names a registry that was never built | open | Fabric board request `45349135` from company-assessment-agent (CA-668), 2026-11-17 |
 | OBS-592 | A Prowl key door (`tools/prowl.py`), on the pattern of `tools/openrouter.py issue`: `issue NAME --user EMAIL --daily-usd N --slot PROJECT/ENV/NAME` mints a key on the operator's Prowl account and writes it straight into a vault slot through stdin, answering only its id, prefix and slot; `revoke ID` and `list`. So no key value passes through a chat or a tool answer | done — merged (#562) | Fabric board request `eb39fe97` (a separate key for an organization copy, STU-49) |
