@@ -5780,8 +5780,8 @@
       "path": "tests/test_journal_writer.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5a7698e91c49de11cd15da8d4fbca7dc3569ac18257ec5c8c990533b226bf245",
-      "bytes": 5886
+      "export_sha256": "0f243fb1684d25171de10b3ded1ff3dea5d0ee466b0972e237ec047a65be7081",
+      "bytes": 5965
     },
     {
       "path": "tests/test_key.py",

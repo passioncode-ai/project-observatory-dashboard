@@ -12,7 +12,6 @@ import pathlib
 import re
 import stat
 import sys
-import tempfile
 import unittest
 from unittest import mock
 
@@ -20,6 +19,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 for where in (ROOT, ROOT / "collectors", ROOT / "tools", ROOT / "store", ROOT / "node"):
     sys.path.insert(0, str(where))
 
+sys.path.insert(0, str(ROOT / "tests"))
+import tmp as tmpdir  # noqa: E402  sandboxes HOME first
 import journal_writer  # noqa: E402
 import log_policy  # noqa: E402
 
@@ -28,7 +29,7 @@ POSIX = os.name == "posix"
 
 class Writer(unittest.TestCase):
     def setUp(self):
-        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.tmp = pathlib.Path(tmpdir.mkdtemp())
         self.file = self.tmp / "logs" / "j.jsonl"
 
     def tearDown(self):
