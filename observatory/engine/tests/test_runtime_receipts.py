@@ -165,6 +165,8 @@ class Declarations(unittest.TestCase):
         self.assertEqual(upgrade.RUNTIME_RECEIPTS, rr.by_writer(rr.SERVER))
 
 
+@unittest.skipIf(os.name == "nt", "snapshots and upgrades stop at a bad file descriptor on Windows, as the "
+                 "workspace_upgrade suite does (tools/windows-known.json, OBS-278); the declarations above still run")
 class LiveWriters(unittest.TestCase):
     """The real writers, run against a real workspace: everything they change is declared, and
     the three historical rollbacks no longer happen."""

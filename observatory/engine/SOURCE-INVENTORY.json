@@ -6714,8 +6714,8 @@
       "path": "tests/test_runtime_receipts.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "18673eed53f4bf3936349a58e400ca2b7e6ca1360ce19f39accb02fa724ad88b",
-      "bytes": 15806
+      "export_sha256": "d74d053da756483acb80c5622aebc934d0dab64d95f05c9d4e28fbe020d6b2b8",
+      "bytes": 16034
     },
     {
       "path": "tests/test_scan_agents.py",
