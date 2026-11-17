@@ -1,0 +1,8 @@
+{
+  "schema": "agent-health/1",
+  "product": "passioncode",
+  "version": "1.4.0",
+  "at": 1794830000,
+  "state": "unknown",
+  "checks": []
+}

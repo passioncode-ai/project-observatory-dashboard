@@ -1,0 +1,15 @@
+{
+  "description": "A report with no checks that says ok: FAC-SEM-181 (DEC-0179 HL-2).",
+  "kind": "agent-health",
+  "expect": [
+    "FAC-SEM-181"
+  ],
+  "input": {
+    "schema": "agent-health/1",
+    "product": "switchboard",
+    "version": "0.7.102",
+    "at": 1794830000,
+    "state": "ok",
+    "checks": []
+  }
+}

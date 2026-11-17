@@ -1,0 +1,291 @@
+{
+  "about": "Vectors for agent-health/1 (DEC-0179), written by tools/vectors/agent-health.ts, never by hand. worst: worstState(input), the worst of a list of states in the order ok < unknown < warn < fail, unknown for an empty list or for a value that is no state (HL-2). read: readHealth(input), what a reader counts from one answer, input null standing for no answer: {state} of a report valid by schemas/agent-health.schema.json and FAC-SEM-181, otherwise {state: unknown, reason: no-answer | schema | FAC-SEM-181} (HL-5). episodes: episodeKey(product, checkId, at), the key <product>:<check id>@<YYYY-MM-DD> with the UTC day of the reading that opened the episode, at in Unix seconds (HL-6).",
+  "worst": [
+    {
+      "name": "no checks: unknown, never ok",
+      "input": [],
+      "expected": "unknown"
+    },
+    {
+      "name": "one ok",
+      "input": [
+        "ok"
+      ],
+      "expected": "ok"
+    },
+    {
+      "name": "ok and unknown: unknown, an unmeasured check is not healthy",
+      "input": [
+        "ok",
+        "unknown"
+      ],
+      "expected": "unknown"
+    },
+    {
+      "name": "unknown and warn: warn",
+      "input": [
+        "unknown",
+        "warn"
+      ],
+      "expected": "warn"
+    },
+    {
+      "name": "warn and fail: fail",
+      "input": [
+        "warn",
+        "fail"
+      ],
+      "expected": "fail"
+    },
+    {
+      "name": "fail first, then ok: fail, order does not matter",
+      "input": [
+        "fail",
+        "ok"
+      ],
+      "expected": "fail"
+    },
+    {
+      "name": "every state: fail",
+      "input": [
+        "ok",
+        "unknown",
+        "warn",
+        "fail"
+      ],
+      "expected": "fail"
+    },
+    {
+      "name": "a value that is no state: unknown",
+      "input": [
+        "ok",
+        "healthy"
+      ],
+      "expected": "unknown"
+    }
+  ],
+  "read": [
+    {
+      "name": "a valid report: its state",
+      "input": {
+        "schema": "agent-health/1",
+        "product": "switchboard",
+        "version": "0.7.102",
+        "at": 1794830000,
+        "state": "fail",
+        "checks": [
+          {
+            "id": "owner",
+            "area": "lifecycle",
+            "state": "ok",
+            "count": 0,
+            "fix": null
+          },
+          {
+            "id": "sessions_stuck",
+            "area": "sessions",
+            "state": "fail",
+            "count": 2,
+            "fix": {
+              "capability": "incident.fix"
+            }
+          }
+        ]
+      },
+      "expected": {
+        "state": "fail"
+      }
+    },
+    {
+      "name": "a valid ok report",
+      "input": {
+        "schema": "agent-health/1",
+        "product": "switchboard",
+        "version": "0.7.102",
+        "at": 1794830000,
+        "state": "ok",
+        "checks": [
+          {
+            "id": "owner",
+            "area": "lifecycle",
+            "state": "ok",
+            "count": 0
+          }
+        ]
+      },
+      "expected": {
+        "state": "ok"
+      }
+    },
+    {
+      "name": "a valid report with no checks: unknown",
+      "input": {
+        "schema": "agent-health/1",
+        "product": "switchboard",
+        "version": "0.7.102",
+        "at": 1794830000,
+        "state": "unknown",
+        "checks": []
+      },
+      "expected": {
+        "state": "unknown"
+      }
+    },
+    {
+      "name": "no answer (a timeout, a refused call): unknown",
+      "input": null,
+      "expected": {
+        "state": "unknown",
+        "reason": "no-answer"
+      }
+    },
+    {
+      "name": "a report with a field the schema does not name: unknown",
+      "input": {
+        "schema": "agent-health/1",
+        "product": "switchboard",
+        "version": "0.7.102",
+        "at": 1794830000,
+        "state": "ok",
+        "checks": [
+          {
+            "id": "owner",
+            "area": "lifecycle",
+            "state": "ok",
+            "count": 0
+          }
+        ],
+        "note": "all good"
+      },
+      "expected": {
+        "state": "unknown",
+        "reason": "schema"
+      }
+    },
+    {
+      "name": "another revision: unknown",
+      "input": {
+        "schema": "agent-health/2",
+        "product": "switchboard",
+        "version": "0.7.102",
+        "at": 1794830000,
+        "state": "ok",
+        "checks": [
+          {
+            "id": "owner",
+            "area": "lifecycle",
+            "state": "ok",
+            "count": 0
+          }
+        ]
+      },
+      "expected": {
+        "state": "unknown",
+        "reason": "schema"
+      }
+    },
+    {
+      "name": "a report that says ok while a check fails: unknown",
+      "input": {
+        "schema": "agent-health/1",
+        "product": "switchboard",
+        "version": "0.7.102",
+        "at": 1794830000,
+        "state": "ok",
+        "checks": [
+          {
+            "id": "owner",
+            "area": "lifecycle",
+            "state": "fail",
+            "count": 1
+          }
+        ]
+      },
+      "expected": {
+        "state": "unknown",
+        "reason": "FAC-SEM-181"
+      }
+    },
+    {
+      "name": "a report that says ok with no checks: unknown",
+      "input": {
+        "schema": "agent-health/1",
+        "product": "switchboard",
+        "version": "0.7.102",
+        "at": 1794830000,
+        "state": "ok",
+        "checks": []
+      },
+      "expected": {
+        "state": "unknown",
+        "reason": "FAC-SEM-181"
+      }
+    },
+    {
+      "name": "a report that names one check twice: unknown",
+      "input": {
+        "schema": "agent-health/1",
+        "product": "switchboard",
+        "version": "0.7.102",
+        "at": 1794830000,
+        "state": "ok",
+        "checks": [
+          {
+            "id": "owner",
+            "area": "lifecycle",
+            "state": "ok",
+            "count": 0
+          },
+          {
+            "id": "owner",
+            "area": "lifecycle",
+            "state": "ok",
+            "count": 0
+          }
+        ]
+      },
+      "expected": {
+        "state": "unknown",
+        "reason": "FAC-SEM-181"
+      }
+    }
+  ],
+  "episodes": [
+    {
+      "name": "the UTC day of the opening reading",
+      "input": [
+        "switchboard",
+        "sessions_stuck",
+        1794830000
+      ],
+      "expected": "switchboard:sessions_stuck@2026-11-16"
+    },
+    {
+      "name": "the last second of a UTC day",
+      "input": [
+        "passioncode",
+        "disk_free",
+        1794873599
+      ],
+      "expected": "passioncode:disk_free@2026-11-16"
+    },
+    {
+      "name": "the first second of the next UTC day",
+      "input": [
+        "passioncode",
+        "disk_free",
+        1794873600
+      ],
+      "expected": "passioncode:disk_free@2026-11-17"
+    },
+    {
+      "name": "the epoch",
+      "input": [
+        "observatory",
+        "leaked_keys",
+        0
+      ],
+      "expected": "observatory:leaked_keys@1970-01-01"
+    }
+  ]
+}
