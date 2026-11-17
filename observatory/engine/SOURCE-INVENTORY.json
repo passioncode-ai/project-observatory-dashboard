@@ -611,8 +611,8 @@
       "path": "dashboard/agents_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3c5b802f3e238441c2d2e0cc77adf97622603e66d7190ab98f321596dd229105",
-      "bytes": 28748
+      "export_sha256": "d6799dc30e3dc19da5e482d8a5f25b583316895dbdc720e691888d5137bf833e",
+      "bytes": 29181
     },
     {
       "path": "dashboard/audit_pack.py",
@@ -715,15 +715,15 @@
       "path": "dashboard/locales/en.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "49192301a34a05865c227a43b12bf633b6d0640ee7afa5f2480aca2849715ab1",
-      "bytes": 29909
+      "export_sha256": "3041aa7af5a7ba89f14a59798c300a717dda4432a69ded34d9c4fddc5c91a54f",
+      "bytes": 30183
     },
     {
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "78a6e3356155be9c69826273b1a37e9bb44b5f6e05db7a2c99a048fe8b5f4f50",
-      "bytes": 254264
+      "export_sha256": "bef6ecd037f06962adc58724b5c68c41cf83308f84a223e1f3c62b5541554c13",
+      "bytes": 255040
     },
     {
       "path": "dashboard/machine_page.py",
@@ -4281,8 +4281,8 @@
       "path": "sessions_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "27af5c16a711ae7cf0844bc509ae799da9f4858f172062a0648deb5df3eed598",
-      "bytes": 24149
+      "export_sha256": "c8cc2f1c21ad8443cb8723f6ef5cb9b4a98a1da0228dbfc9bcffd64be1ab10f1",
+      "bytes": 26226
     },
     {
       "path": "skill/.claude-plugin/marketplace.json",
@@ -6829,8 +6829,8 @@
       "path": "tests/test_sessions_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8a67a96e086249f326f78d9bdbe52cbda04df00645ab0ab535cecd1166406c9c",
-      "bytes": 22773
+      "export_sha256": "aa19935ce740a8fd0f300ed5321aa254bf48fb2ff21392a6f1f2ca24d0384ff2",
+      "bytes": 25836
     },
     {
       "path": "tests/test_share_cli.py",

@@ -2491,7 +2491,7 @@
  "by the account manager, read {at}": "по данным менеджера аккаунтов, прочитано {at}",
  "the account manager is not installed": "менеджер аккаунтов не установлен",
  "the account manager did not answer": "менеджер аккаунтов не ответил",
- "a turn recorded in the ledger": "ход записан в памяти",
+ "running, with a turn recorded in the ledger": "работают и записали ход в памяти",
  "the ledger could not be read": "записи памяти не прочитаны",
  "sessions not counted": "сессии не подсчитаны",
  "managed: not read": "под управлением: не прочитано",
@@ -3023,5 +3023,11 @@
  "Temporary folder growth worth a finding, new entries a day": "Рост временной папки для находки, новых объектов в день",
  "Temporary folder growth worth a finding, GB a day": "Рост временной папки для находки, ГБ в день",
  "Temporary folder growing fast": "Временная папка быстро растёт",
- "{prefix} entries of the temporary folder arrive at {rate} a day": "объекты {prefix} во временной папке прибывают со скоростью {rate} в день"
+ "{prefix} entries of the temporary folder arrive at {rate} a day": "объекты {prefix} во временной папке прибывают со скоростью {rate} в день",
+ "{n} sessions recorded a turn; which of them still run needs the account manager": {
+  "one": "{n} сессия записала ход; какие из них ещё работают, знает только менеджер аккаунтов",
+  "few": "{n} сессии записали ход; какие из них ещё работают, знает только менеджер аккаунтов",
+  "many": "{n} сессий записали ход; какие из них ещё работают, знает только менеджер аккаунтов",
+  "other": "{n} сессии записали ход; какие из них ещё работают, знает только менеджер аккаунтов"
+ }
 }

@@ -131,7 +131,12 @@ def _session_tiles(f: dict, t: Translator) -> list[tuple[str, object, str]]:
                else t.mark("the account manager is not installed", tag="span", attrs=sub) if state == "not-installed"
                else t.mark("not read yet", tag="span", attrs=sub) if state is None
                else t.mark("the account manager did not answer", tag="span", attrs=sub))
-    active = (t.mark("a turn recorded in the ledger", tag="span", attrs=sub) if f.get("activeHour") is not None
+    # OBS-597: active is the running sessions with a ledger turn; without the manager's list the ledger's own
+    # count is named as what it is, never shown as the running sessions' activity.
+    active = (t.mark("running, with a turn recorded in the ledger", tag="span", attrs=sub)
+              if f.get("activeHour") is not None
+              else t.mark("{n} sessions recorded a turn; which of them still run needs the account manager",
+                          tag="span", attrs=sub, n=f["ledgerHour"]) if f.get("ledgerHour") is not None
               else t.mark("the ledger could not be read", tag="span", attrs=sub))
     return [("Sessions running", f.get("running"), running), ("Managed", f.get("managed"), managed),
             ("Active in the last hour", f.get("activeHour"), active)]
