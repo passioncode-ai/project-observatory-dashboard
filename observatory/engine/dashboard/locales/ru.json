@@ -2886,6 +2886,25 @@
  "MCP server {server} added the tool {tool} since it was pinned": "MCP-сервер {server} добавил инструмент {tool} с момента закрепления",
  "MCP server {server} dropped the tool {tool} since it was pinned": "MCP-сервер {server} убрал инструмент {tool} с момента закрепления",
  "What changed": "Что изменилось",
+ "Workspace backup out of date": "Резервная копия рабочего пространства устарела",
+ "Daily doctor fix not applied": "Исправление ежедневного доктора не применено",
+ "Maintenance step failing": "Шаг обслуживания сбоит",
+ "Vault metadata unreadable": "Метаданные хранилища не читаются",
+ "The newest workspace backup is {hours} hours old": "Последней резервной копии рабочего пространства {hours} ч.",
+ "No workspace backup is recorded": "Резервная копия рабочего пространства не записана",
+ "The daily doctor could not apply the fix {check}": "Ежедневный доктор не смог применить исправление {check}",
+ "The maintenance step {step} failed on its last {n} passes": {
+  "one": "Шаг обслуживания {step} не удался {n} проход подряд",
+  "few": "Шаг обслуживания {step} не удался {n} прохода подряд",
+  "many": "Шаг обслуживания {step} не удался {n} проходов подряд",
+  "other": "Шаг обслуживания {step} не удался {n} прохода подряд"
+ },
+ "{n} vault metadata files cannot be read": {
+  "one": "{n} файл метаданных хранилища не читается",
+  "few": "{n} файла метаданных хранилища не читаются",
+  "many": "{n} файлов метаданных хранилища не читаются",
+  "other": "{n} файла метаданных хранилища не читаются"
+ },
  "issued by a door": "выпущен шлюзом",
  "handed over": "передан",
  "source unknown": "источник неизвестен",

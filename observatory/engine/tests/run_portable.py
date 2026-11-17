@@ -216,6 +216,8 @@ BOUNDARY += ('dependencies',)
 BOUNDARY += ('integrations', 'issue_filer', 'integrations_page')
 # OBS-554: the key sweep over working trees and histories, its findings, page section and MCP read and settle.
 BOUNDARY += ('key_sweep',)
+# OBS-558: the daily doctor's catalogue, its safe fixes and their undo, `doctor.*` findings, `observatory_doctor`.
+BOUNDARY += ('doctor',)
 # Vault slots across the operator's machines by keyed digests (OBS-194, step 1).
 BOUNDARY += ('vault_digests',)
 # OBS-476: one slot copied into another store on this machine; the value stays in one process.

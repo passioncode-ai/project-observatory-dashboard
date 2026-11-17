@@ -1275,6 +1275,63 @@ def step_shares(base: Path, state: dict, at: datetime.datetime, commands: "Comma
     return result
 
 
+#: The daily doctor (tools/daily_doctor.py, OBS-558, CP-15): once a day, in a process of its own, with a ceiling.
+DOCTOR_EVERY = datetime.timedelta(hours=24)
+DOCTOR_TIMEOUT = 300
+#: A step's answer that counts as a failure for the doctor's `step_failing` check.
+FAILED_RESULTS = frozenset({"error", "failed"})
+
+
+def record_streaks(state: dict, report: dict, at: datetime.datetime) -> None:
+    """How many passes in a row each step of `report` failed (`state["step_streaks"]`), for the daily doctor. A step
+    that answered anything else drops out; a step this pass did not run keeps its streak as it was."""
+    streaks = state.get("step_streaks") if isinstance(state.get("step_streaks"), dict) else {}
+    for name, answer in report.items():
+        if not isinstance(answer, dict) or "result" not in answer:
+            continue
+        if answer.get("result") in FAILED_RESULTS:
+            last = streaks.get(name) if isinstance(streaks.get(name), dict) else {}
+            streaks[name] = {"passes": int(last.get("passes") or 0) + 1, "since": last.get("since") or iso(at),
+                             "detail": str(answer.get("detail") or answer.get("kind") or "")[:200]}
+        else:
+            streaks.pop(name, None)
+    if streaks:
+        state["step_streaks"] = streaks
+    else:
+        state.pop("step_streaks", None)
+
+
+def step_doctor(base: Path, state: dict, at: datetime.datetime, runner=None) -> dict:
+    """The daily doctor (OBS-558): a fixed catalogue of checks once a day; a safe fix runs and journals its undo, the
+    rest becomes a finding. Run as `tools/daily_doctor.py --pass` in a process of its own, so its model summary and
+    its workspace paths stay out of this one. A failed run is recorded and tried again at the next pass; never raises."""
+    if not due(state, "doctor", DOCTOR_EVERY, at, slack=CHECK_SLACK):
+        return {"result": "not-due", "last": (state.get("doctor") or {}).get("at")}
+    environ = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "OBSERVATORY_ROOT"}}
+    environ["OBSERVATORY_HOME"] = str(base)
+    environ[IN_PASS_ENV] = "1"
+    run = runner or subprocess.run
+    try:
+        p = run([engine_python(), "-P", str(Path(__file__).resolve().parent / "tools" / "daily_doctor.py"), "--pass"],
+                capture_output=True, text=True, timeout=DOCTOR_TIMEOUT, env=environ, cwd=tempfile.gettempdir(),
+                stdin=subprocess.DEVNULL)
+        code, line = p.returncode, ((p.stdout or "").strip().splitlines() or [""])[-1]
+    except subprocess.TimeoutExpired:
+        code, line = 124, ""
+    except OSError:
+        code, line = 125, ""
+    try:
+        out = json.loads(line) if line.startswith("{") else {}
+    except ValueError:
+        out = {}
+    if code != 0 or not out:
+        return {"result": "failed", "exit": code}
+    result = {"result": out.get("result") or "ran",
+              **{k: out[k] for k in ("fixed", "findings", "degraded") if k in out}}
+    state["doctor"] = {"at": iso(at), **result}
+    return result
+
+
 def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Commands | None = None,
              services=..., store=None, app=None, sleep=time.sleep, first_check_delay: float = 0,
              clock=time.monotonic, guard=step_guard, machine=None, hung=None) -> dict:
@@ -1353,11 +1410,16 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
             except Exception as exc:  # noqa: BLE001: a share never stops the pass
                 report["shares"] = {"result": "error", "degraded": "shares.unsynced",
                                     "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
+            try:
+                report["doctor"] = step_doctor(base, state, at)
+            except Exception as exc:  # noqa: BLE001: the doctor never stops the pass
+                report["doctor"] = {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
         # Anonymous usage and error events (OBS-324): what the commands, tools and ticks queued since
         # the last pass is sent now, in batches; never raises, a failure is a local counter.
         report["analytics"] = step_analytics(base)
         state["pass"] = {"at": iso(at)}
         report["log_retention"] = state["log_retention"] = _rotate_logs(base)
+        record_streaks(state, report, at)
         write_state(base, state)
         report["schedule_reload"] = _reload_after_pass(base)
         return report

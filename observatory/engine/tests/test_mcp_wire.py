@@ -37,10 +37,10 @@ REQUIRED = ["observatory_status", "observatory_project", "observatory_timeline",
 #: Every tool name `mcp/server.py` publishes in `tools/list` (OSS-07: existing MCP tool
 #: names stay available). Changing this list is changing the published surface.
 GOLDEN_TOOLS = [
-    # observatory_* tools (37)
+    # observatory_* tools (40)
     "observatory_assistant_ask", "observatory_assistant_conversation", "observatory_assistant_status",
     "observatory_checkpoint_latest", "observatory_checkpoint_write", "observatory_configure", "observatory_credentials",
-    "observatory_dependencies",
+    "observatory_dependencies", "observatory_doctor",
     "observatory_explain", "observatory_findings", "observatory_handoff_accept", "observatory_health",
     "observatory_handoff_create", "observatory_handoff_get", "observatory_integrations", "observatory_issues",
     "observatory_key_consumers", "observatory_key_sweep", "observatory_key_sweep_settle",
@@ -193,6 +193,16 @@ async def run() -> None:
             check("dismissBanner stores the dismissal and the notice is no longer shown",
                   (done.get("banner") or {}).get("show") is False
                   and (done.get("banner") or {}).get("dismissed_on"), json.dumps(done)[:200])
+            # OBS-558: the daily doctor before its first run is an empty page that says so; an undo of an unknown
+            # fix is a typed refusal.
+            doctor = payload(await session.call_tool("observatory_doctor", {}))
+            check("doctor before a run: no checks, and degraded says it has not run",
+                  doctor.get("checks") == [] and {d.get("source") for d in doctor.get("degraded") or []}
+                  == {"doctor"}, json.dumps(doctor)[:200])
+            undone = payload(await session.call_tool("observatory_doctor",
+                                                     {"action": "undo", "journalId": "doc_0000000000000000"}))
+            check("undoing a fix the journal does not hold is a typed refusal",
+                  (undone.get("error") or {}).get("code") == "unknown-journal-id", json.dumps(undone)[:200])
             names = sorted(t.name for t in listed.tools)
             missing = [t for t in REQUIRED if t not in names]
             check("every required tool and capability is served", not missing, f"missing {missing}")
