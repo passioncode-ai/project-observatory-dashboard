@@ -37,6 +37,7 @@
     python "$T/cloudflare.py" member add|role|remove --account <slug> --email ADDRESS [--role NAME] [--apply]
     python "$T/cloudflare.py" rotate <label>   # or --leaked, for every open leak
     python "$T/cloudflare.py" revoke <label>
+    python "$T/cloudflare.py" revoke --vault PROJECT/ENV/NAME   # a token delivered to a vault slot
 
 THE ADMIN TOKEN IS STASHED AND NEVER HANDED OUT. It carries write access to
 everything the account has — billing, DNS, Workers, and the power to mint more
@@ -77,6 +78,14 @@ so a copy of it outside this door's files (a Heroku config var, a local env
 file: `tools/key_consumers.py`) would be cut: `rotate` refuses while one is
 found or a place it could be is unreadable, and `--force` rolls anyway and
 journals what it cut (OBS-561).
+
+REVOKING A VAULT-SLOT TOKEN (OBS-575). `revoke <label>` takes a token filed in the
+plugin folder. A token delivered to a vault slot (every zone and account preset) is
+revoked with `revoke --vault PROJECT/ENV/NAME`: the door finds it by the slot its
+managed name records, deletes it at Cloudflare, reads the account's tokens again to
+confirm it is gone, and only then removes the slot and journals the revocation. A
+delete that fails, a token still listed, or a token that cannot be looked for keeps
+the slot.
 
 THE TEAM SIDE READS LIKE THE HEROKU DOOR'S. `accounts` lists every stashed
 account with the tokens Cloudflare holds there (the managed ones with the vault
@@ -2322,6 +2331,77 @@ def cmd_revoke(label: str) -> int:
     return 0
 
 
+def remove_vault_slot(project: str, env: str, name: str) -> str:
+    """The slot whose token was revoked at Cloudflare, removed through the vault's own function, which journals it
+    (`removed` or `absent`). Its open-leak check does not apply: the value it held no longer works."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import vault
+    return vault.remove_value(project, env, name, tool="cloudflare.py", why="revoked at Cloudflare")
+
+
+def cmd_revoke_vault(target: str) -> int:
+    """`revoke --vault PROJECT/ENV/NAME` (OBS-575): a token this door delivered to a vault slot (every zone and
+    account preset), found at Cloudflare by the slot its managed name records, deleted, read back as gone, and only
+    then the slot removed and the revocation journaled. Anything not confirmed keeps the slot: a removed slot
+    whose token still works is a live credential nobody can find. Names and ids only, never a value."""
+    try:
+        project, env, name = parse_vault_target(target)
+    except ValueError as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return 2
+    slot = f"{project}/{env}/{name}"
+    try:
+        stashes = admins()
+    except RuntimeError as exc:
+        print(f"refused: {exc}; the slot is kept", file=sys.stderr)
+        return 1
+    found, unread, seen = [], [], set()
+    for label, _p in stashes:
+        try:
+            _l, admin = read_admin(label)
+        except RuntimeError:
+            unread.append(f"admin/{label}")
+            continue
+        for a in all_stash_accounts(label):
+            if a.get("id") in seen:
+                continue
+            try:
+                tokens = _all(f"/accounts/{a['id']}/tokens", admin)
+            except RuntimeError as exc:
+                unread.append(f"{a.get('name') or a.get('id')} ({exc})")
+                continue
+            seen.add(a.get("id"))
+            found += [(admin, a, t) for t in tokens if slot_of(t.get("name", "")) == slot]
+    if not found:
+        if unread:
+            print(f"refused: no managed token for {slot} in the accounts read, and these could not be read: "
+                  f"{'; '.join(unread)}; nothing was deleted and the slot is kept", file=sys.stderr)
+        else:
+            print(f"refused: no managed token at Cloudflare names {slot}; nothing was deleted and the slot is kept. "
+                  f"A slot whose token is already gone is removed with the vault's own `vault.py remove`",
+                  file=sys.stderr)
+        return 1
+    for admin, a, t in found:
+        try:
+            _request(f"/accounts/{a['id']}/tokens/{t['id']}", admin, method="DELETE")
+            left = [x for x in _all(f"/accounts/{a['id']}/tokens", admin) if x.get("id") == t.get("id")]
+        except RuntimeError as exc:
+            print(f"refused: {exc}; whether {t.get('name')} is gone was not confirmed, so the slot is kept",
+                  file=sys.stderr)
+            return 1
+        if left:
+            print(f"refused: Cloudflare still lists {t.get('name')} after the delete; the slot is kept",
+                  file=sys.stderr)
+            return 1
+    removed = remove_vault_slot(project, env, name)
+    accounts = sorted({a.get("name") or a.get("id") for _admin, a, _t in found})
+    _journal("revoke", slot, account=", ".join(accounts), tokens=len(found))
+    print(f"revoked at Cloudflare ({len(found)} token(s) in {', '.join(accounts)}, confirmed gone) and "
+          f"{'removed the vault slot' if removed == 'removed' else 'the vault slot was already empty'}: {slot}"
+          + (f"; not read: {'; '.join(unread)}" if unread else ""))
+    return 0
+
+
 def cmd_ping() -> int:
     """Does every stashed and issued token still do its job? No values printed."""
     bad = 0
@@ -2449,7 +2529,9 @@ def main() -> int:
                        help="roll even when a copy of the value outside this door's files was found or a place it "
                        "could be could not be read (OBS-561); the copies cut are journaled")
     p_rev = sub.add_parser("revoke", help="delete at Cloudflare, then locally")
-    p_rev.add_argument("label")
+    p_rev.add_argument("label", nargs="?", help="a token filed in the plugin folder")
+    p_rev.add_argument("--vault", help="a token delivered to the slot PROJECT/ENV/NAME: deleted at Cloudflare, "
+                                       "confirmed gone, then the slot removed (OBS-575)")
     a = ap.parse_args()
     if a.cmd == "stash":
         if osprivacy.is_terminal(sys.stdin):
@@ -2507,7 +2589,11 @@ def main() -> int:
     if a.cmd == "rotate":
         return cmd_rotate(a.label, a.leaked, a.force)
     if a.cmd == "revoke":
-        return cmd_revoke(a.label)
+        if bool(a.label) == bool(a.vault):
+            print("refused: revoke takes a plugin token's label or --vault PROJECT/ENV/NAME, one of them",
+                  file=sys.stderr)
+            return 2
+        return cmd_revoke_vault(a.vault) if a.vault else cmd_revoke(a.label)
     return 2
 
 

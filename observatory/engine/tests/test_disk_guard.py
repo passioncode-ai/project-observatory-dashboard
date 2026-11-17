@@ -3363,6 +3363,129 @@ class LimaHomesAndBrokenVms(Base):
         self.assertEqual(self.g.action_rows({"target": "t"}), [{"target": "t"}])
 
 
+class UnusedVolumes(LimaHomesAndBrokenVms):
+    """OBS-584: the Disk page's manual tier lists the Docker volumes no container uses inside each running VM, with
+    their size and owner, for the owner to delete. The guard only reads (`volume ls`, `system df`); it never removes a
+    volume. Fakes only: the runner is injected, no docker or limactl runs."""
+
+    DANGLING = "\n".join(json.dumps(r) for r in (
+        {"Driver": "local", "Labels": "com.docker.compose.project=alpha-web,com.docker.compose.volume=db",
+         "Name": "alpha-web_db"},
+        {"Driver": "local", "Labels": "", "Name": "3f" * 32},
+        {"Driver": "local", "Labels": "", "Name": "bad name; rm -rf"})) + "\n"
+    DF = json.dumps({"Images": [], "Volumes": [
+        {"Name": "alpha-web_db", "Size": "1.5GB", "Links": "0"},
+        {"Name": "3f" * 32, "Size": "12.5MB", "Links": "0"},
+        {"Name": "in-use", "Size": "9GB", "Links": "1"}]})
+
+    def runner(self, answers):
+        """A fake process runner: `limactl list` per home, then each docker read by its subcommand."""
+        self.argvs = []
+
+        def run(argv, **kw):
+            self.argvs.append((list(argv), dict(kw.get("env") or {})))
+            if argv[1:] == ["list", "--json"]:
+                stdout, code = answers["list"].get(kw["env"]["LIMA_HOME"], ""), 0
+            else:
+                sub = " ".join(argv[3:5])
+                stdout, code = answers.get(sub, ("", 1))
+            return subprocess.CompletedProcess(argv, code, stdout, "")
+        return run
+
+    def test_dangling_volumes_are_listed_with_size_and_owner_largest_first(self):
+        a, b = self.homes(".lima", ".colima/_lima")
+        run = self.runner({"list": {a: json.dumps({"name": "default", "status": "Stopped"}),
+                                    b: json.dumps({"name": "colima", "status": "Running"})},
+                           "volume ls": (self.DANGLING, 0), "system df": (self.DF, 0)})
+        with patch.object(self.g, "lima_homes", return_value=[a, b]), \
+                patch.object(self.g, "engine_socket", return_value="/x/docker.sock"), \
+                patch.object(self.g, "find_tool", side_effect=lambda n: "/bin/" + n), \
+                patch.dict(os.environ, {"DOCKER_HOST": "ssh://deploy@prod.example.test"}):
+            found = self.g.vm_unused_volumes(30, run=run)
+        self.assertEqual([(v["instance"], v["name"], v["bytes"], v["owner"]) for v in found["volumes"]],
+                         [("colima", "alpha-web_db", 1_500_000_000, "alpha-web"),
+                          ("colima", "3f" * 32, 12_500_000, None)], "a name that is not a plain name is dropped")
+        self.assertEqual(found["unread"], [])
+        docker = [(argv, env) for argv, env in self.argvs if argv[0] == "/bin/docker"]
+        self.assertEqual([argv[1:3] for argv, _ in docker], [["--host", "unix:///x/docker.sock"]] * 2)
+        for argv, env in docker:
+            self.assertNotIn("DOCKER_HOST", env, "the VM's own socket, never the context")
+
+    def test_the_guard_never_removes_a_volume(self):
+        for args in [*self.g.VOLUME_READS, *self.g.ENGINE_PRUNES]:
+            self.assertFalse(set(args) & {"rm", "remove", "--volumes"}, args)
+        for args in self.g.VOLUME_READS:
+            self.assertIn(args[:2], (["volume", "ls"], ["system", "df"]))
+            self.assertNotIn("prune", args)
+        for args in self.g.ENGINE_PRUNES:
+            self.assertNotIn("volume", args)
+        a = self.homes(".colima/_lima")[0]
+        run = self.runner({"list": {a: json.dumps({"name": "colima", "status": "Running"})},
+                           "volume ls": (self.DANGLING, 0), "system df": (self.DF, 0)})
+        with patch.object(self.g, "lima_homes", return_value=[a]), \
+                patch.object(self.g, "engine_socket", return_value="/x/docker.sock"), \
+                patch.object(self.g, "find_tool", side_effect=lambda n: "/bin/" + n):
+            self.g.vm_unused_volumes(30, run=run)
+        for argv, _ in self.argvs:
+            self.assertFalse({"rm", "prune", "remove"} & set(argv), argv)
+
+    def test_an_engine_that_does_not_answer_is_named_never_shown_as_empty(self):
+        a = self.homes(".colima/_lima")[0]
+        listing = {"list": {a: json.dumps({"name": "colima", "status": "Running"})}}
+        for answers, code in (({**listing, "volume ls": ("", 1)}, "docker-unanswered"),
+                              ({**listing, "volume ls": ("not json", 0), "system df": (self.DF, 0)},
+                               "docker-unanswered")):
+            with self.subTest(code=code), patch.object(self.g, "lima_homes", return_value=[a]), \
+                    patch.object(self.g, "engine_socket", return_value="/x/docker.sock"), \
+                    patch.object(self.g, "find_tool", side_effect=lambda n: "/bin/" + n):
+                found = self.g.vm_unused_volumes(30, run=self.runner(answers))
+            self.assertEqual((found["volumes"], found["unread"]), ([], [{"instance": "colima", "reason_code": code}]))
+        with patch.object(self.g, "lima_homes", return_value=[a]), \
+                patch.object(self.g, "engine_socket", return_value="/x/docker.sock"), \
+                patch.object(self.g, "find_tool", side_effect=lambda n: "/bin/limactl" if n == "limactl" else None):
+            found = self.g.vm_unused_volumes(30, run=self.runner(listing))
+        self.assertEqual(found["unread"], [{"instance": "colima", "reason_code": "no-docker-cli"}])
+
+    def test_nothing_dangling_asks_no_sizes_and_no_vm_reads_nothing(self):
+        a = self.homes(".colima/_lima")[0]
+        run = self.runner({"list": {a: json.dumps({"name": "colima", "status": "Running"})}, "volume ls": ("", 0)})
+        with patch.object(self.g, "lima_homes", return_value=[a]), \
+                patch.object(self.g, "engine_socket", return_value="/x/docker.sock"), \
+                patch.object(self.g, "find_tool", side_effect=lambda n: "/bin/" + n):
+            found = self.g.vm_unused_volumes(30, run=run)
+        self.assertEqual((found["volumes"], found["unread"]), ([], []))
+        self.assertFalse(any("df" in argv for argv, _ in self.argvs))
+        with patch.object(self.g, "lima_homes", return_value=[]):
+            self.assertEqual(self.g.vm_unused_volumes(30, run=run)["unread"], [])
+
+    def test_an_agent_reads_them_from_the_machine_tool(self):
+        sys.path.insert(0, str(ROOT / "mcp"))
+        import server, machine_view
+        volumes = {"at": "2026-11-10T08:00:00Z", "unread": [],
+                   "volumes": [{"instance": "colima", "name": "alpha-web_db", "bytes": 10, "owner": "alpha-web"}]}
+        with patch.object(machine_view, "summary", return_value={"degraded": [], "guard": {"vmVolumes": volumes}}):
+            got = server.observatory_machine()["guard"]["vmVolumes"]
+        self.assertEqual(got["volumes"][0]["owner"], "alpha-web")
+        with patch.object(machine_view, "summary", return_value={"degraded": [], "guard": {"level": "normal"}}):
+            self.assertIsNone(server.observatory_machine()["guard"]["vmVolumes"], "not listed is not none found")
+
+    def test_a_run_that_acts_writes_the_listing_into_its_report(self):
+        listing = {"at": "2026-11-10T08:00:00Z", "volumes": [], "unread": []}
+        with patch.object(self.g, "vm_unused_volumes", return_value=listing) as listed, \
+                patch.object(self.g, "vm_kernel_errors", return_value=[]):
+            doc = self.g.run(["--refresh", "--budget", "40"])
+        self.assertEqual(doc.get("vm_volumes"), listing)
+        self.assertTrue(listed.called)
+
+    def test_sizes_and_labels_parse(self):
+        self.assertEqual(self.g.volume_bytes("0B"), 0)
+        self.assertEqual(self.g.volume_bytes("512kB"), 512_000)
+        self.assertEqual(self.g.volume_bytes("2GiB"), 2 * 1024 ** 3)
+        self.assertIsNone(self.g.volume_bytes("N/A"))
+        self.assertEqual(self.g.volume_labels("a=b, c=d,broken"), {"a": "b", "c": "d"})
+        self.assertEqual(self.g.volume_labels({"a": 1}), {"a": "1"})
+
+
 class VmKernelLogErrors(LimaHomesAndBrokenVms):
     """The guard never repairs a VM's disk (e2fsck would stop Docker and every container on it); it reads the
     kernel log through the same `limactl shell` route and names a journal abort or a file system mounted with

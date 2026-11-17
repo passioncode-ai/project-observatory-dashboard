@@ -73,3 +73,22 @@ the tool's name, a label for every key the door declares, the navigation and the
 link, and the route (plan, apply, undo as the person; an unknown key, a key outside the scope and a plan made for
 another key refused; refused without the token). `tests/test_i18n.py` holds the catalogue complete;
 `tests/test_agent_parity.py` holds the action to `observatory_configure`. Scenario: OSS-117.
+
+## Unused Docker volumes (OBS-584)
+
+The manual tier's section "Unused Docker volumes", after the cleanup classes: per Lima or Colima VM each Docker
+volume no container uses (`dangling`), its size and the owner its labels name (`com.docker.compose.project`, else
+`com.docker.stack.namespace`), largest first, for the owner to delete. A VM whose engine did not answer is listed
+under "Not listed" with the reason, never shown as having none; a guard that has not listed them yet says so.
+
+- Data: `disk_guard.vm_unused_volumes(seconds, run)` (the process runner injected) reads each running VM's own
+  engine through its socket (`engine_socket`, never the context or `DOCKER_HOST`) with two reads only,
+  `VOLUME_READS`: `volume ls -f dangling=true` (names and labels) and `system df -v` (sizes, asked only when
+  something is dangling). A run that acts, or `--refresh`, writes it as `vm_volumes` in `disk-guard.json`;
+  `machine_view` carries it as `guard.vmVolumes`, and `observatory_machine` returns it under `guard.vmVolumes`
+  (`null` when not listed).
+- The guard NEVER removes a volume: `VOLUME_READS` and `ENGINE_PRUNES` carry no remove verb and no `--volumes`
+  (asserted by `UnusedVolumes.test_the_guard_never_removes_a_volume`). No command line is printed on a row; a
+  volume name that is not a plain Docker name is dropped.
+- Tests: `test_disk_guard.py` (`UnusedVolumes`), `test_disk_page.py`
+  (`test_unused_docker_volumes_are_listed_for_their_owner_and_never_removed`). Scenario: OSS-131.

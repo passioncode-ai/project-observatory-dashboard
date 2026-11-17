@@ -137,6 +137,30 @@ class Page(unittest.TestCase):
         self.assertNotIn("<polyline", en)
         relocalizes(self, en, ru)
 
+    def test_unused_docker_volumes_are_listed_for_their_owner_and_never_removed(self):
+        """OBS-584: the manual tier names each volume no container uses inside a VM, its size and owner."""
+        volumes = {"at": "2026-11-10T08:00:00Z",
+                   "volumes": [{"instance": "colima", "name": "alpha-web_db", "bytes": 1_500_000_000,
+                                "owner": "alpha-web"},
+                               {"instance": "colima", "name": "3f" * 32, "bytes": None, "owner": None}],
+                   "unread": [{"instance": "work", "reason_code": "docker-unanswered"}]}
+        en, ru = both(machine(guard={**GUARD, "vmVolumes": volumes}))
+        text = shown(en)
+        for want in ("Unused Docker volumes", "alpha-web_db", "alpha-web", "1.5 GB", "colima",
+                     "never removes a volume", "work"):
+            self.assertIn(want, text)
+        self.assertIn("Неиспользуемые тома Docker", shown(ru))
+        for page in (en, ru):
+            self.assertIsNone(COMMAND.search(page))
+            self.assertIsNone(re.search(r"\bdocker\s+(volume|system|rm|--host)", shown(page)),
+                              "no docker command line on a row")
+        relocalizes(self, en, ru)
+        none, _ = both(machine(guard={**GUARD, "vmVolumes": {"volumes": [], "unread": []}}))
+        self.assertIn("No unused Docker volume", shown(none))
+        unmeasured, _ = both(machine())
+        self.assertIn("Unused Docker volumes", shown(unmeasured))
+        self.assertIn("Not listed yet", shown(unmeasured))
+
     def test_what_auto_cleanup_removes_and_keeps_with_its_idle_days(self):
         en, _ = both(machine())
         text = shown(en)

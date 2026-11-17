@@ -213,6 +213,54 @@ def _classes(cleanup: dict | None, values: dict, t: Translator) -> str:
                         "of someone's work is never removed by itself.", tag="p", attrs=' class="machine-hint"')
 
 
+#: Why a VM's volumes could not be listed (disk_guard.vm_unused_volumes), in a reader's words.
+VOLUME_UNREAD = {
+    "docker-unanswered": "its Docker engine did not answer",
+    "no-docker-cli": "no docker command is installed here",
+    "vm-list-unknown": "the virtual machines could not be listed",
+    "timeout": "the guard's time ran out",
+}
+VOLUME_HINT = ("Docker volumes no container uses, inside this machine's Lima or Colima virtual machines. A volume "
+               "holds data, so the guard never removes a volume: their owner deletes the ones not needed.")
+
+
+def volumes_html(g: dict | None, t: Translator) -> str:
+    """The manual tier's unused Docker volumes (OBS-584): per VM each volume no container uses, the space it takes and
+    the owner its labels name, largest first. Listed for the owner to delete; no command is printed on a row."""
+    head = t.mark("Unused Docker volumes", tag="h2", attrs=HEADING)
+    hint = t.mark(VOLUME_HINT, tag="p", attrs=HINT)
+    found = (g or {}).get("vmVolumes")
+    if not isinstance(found, dict):
+        return (f'<section class="card panel" id="disk-volumes">{head}{hint}'
+                f'{t.mark("Not listed yet. The guard lists them when it acts.", tag="p", attrs=EMPTY)}</section>')
+    rows = [v for v in found.get("volumes") or [] if isinstance(v, dict) and v.get("name")][:ROWS]
+    parts = [f'<section class="card panel" id="disk-volumes">{head}{hint}']
+    if found.get("at"):
+        parts.append(t.mark("Listed {at}", tag="p", attrs=' class="machine-at"', at=stamp(found["at"])))
+    if rows:
+        heads = [("Virtual machine", False), ("Volume", False), ("Owner", False), ("Size", True)]
+        th = "".join(f'<th scope="col"{NUM if num else ""}>{t.mark(h)}</th>' for h, num in heads)
+        body = []
+        for v in rows:
+            size = v.get("bytes")
+            cells = [_e(v.get("instance") or NONE), f'<span class="mono">{_e(v["name"])}</span>',
+                     _e(v["owner"]) if v.get("owner") else t.mark("no owner label"),
+                     _gigabytes(round(size / 1e9, 2), t) if isinstance(size, int) and not isinstance(size, bool)
+                     else NONE]
+            body.append("<tr>" + "".join(f'<td{NUM if num else ""}{t.attr("data-label", h)}>{c}</td>'
+                                         for (h, num), c in zip(heads, cells)) + "</tr>")
+        parts.append(f'<table><thead><tr>{th}</tr></thead><tbody>{"".join(body)}</tbody></table>')
+    else:
+        parts.append(t.mark("No unused Docker volume.", tag="p", attrs=EMPTY))
+    unread = [u for u in found.get("unread") or [] if isinstance(u, dict)]
+    if unread:
+        items = "".join(f'<li>{_e(u.get("instance") or NONE)} · '
+                        f'{t.mark(VOLUME_UNREAD.get(u.get("reason_code"), "unreadable"))}</li>' for u in unread)
+        parts.append(f'{t.mark("Not listed", tag="p", attrs=HINT)}<ul>{items}</ul>')
+    parts.append("</section>")
+    return "".join(parts)
+
+
 def _runs(cleanup: dict | None, t: Translator) -> str:
     runs = (cleanup or {}).get("guardRuns") or []
     return _table(t, "Guard passes in 7 days",
@@ -326,6 +374,7 @@ def disk_html(payload: dict, t: Translator | None = None) -> str:
     parts.append(guard_html(m.get("guard"), t))
     parts.append(_runs(cleanup, t))
     parts.append(_classes(cleanup, values, t))
+    parts.append(volumes_html(m.get("guard"), t))
     parts.append(_journal(cleanup, t))
     parts.append(settings_html(listing, t))
     parts.append(_degraded(m, listing, t))
@@ -338,4 +387,6 @@ DYNAMIC = (tuple(SETTING_LABELS.values()) + tuple(c[1] for c in CLASSES)
            + ("Day", "Lowest", "Last reading", "Readings",      # the trend table's heads (`trend_html`)
               "Setting", "Value", "Default", "Source", "Change",  # the settings table's heads (`settings_html`)
               "Turn on", "Turn off", "Nothing to free at this pressure.", "No file above the size line.",
-              "incomplete measurement", "Not measured", DISABLED))
+              "incomplete measurement", "Not measured", DISABLED,
+              "Virtual machine", "Volume", "Owner", "Size",       # the volumes table's heads (`volumes_html`)
+              "unreadable", VOLUME_HINT) + tuple(VOLUME_UNREAD.values()))
