@@ -6714,8 +6714,8 @@
       "path": "tests/test_runtime_receipts.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d74d053da756483acb80c5622aebc934d0dab64d95f05c9d4e28fbe020d6b2b8",
-      "bytes": 16034
+      "export_sha256": "5bef02d68720c39aca8764c65a71b0242da7490dae1813035b30fa07e7bb5544",
+      "bytes": 19806
     },
     {
       "path": "tests/test_scan_agents.py",
@@ -8137,8 +8137,8 @@
     {
       "path": "tools/serverd.py",
       "source_sha256": "7b7dfc2976658a895b9a9df19cc5a0a8f60828d0b58e922c40d941dfa0cbe266",
-      "export_sha256": "4ff2b7c129919726049f5f429b728e562cbe799c908b24424b04c08a4401b5f6",
-      "bytes": 66694,
+      "export_sha256": "331b59517db19b767392c0ad8dc034e82cf5c333055c6534b962d42a4d34ef22",
+      "bytes": 69147,
       "python_comments_removed": 21,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,

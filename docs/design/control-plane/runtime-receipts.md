@@ -86,3 +86,81 @@ not a receipt: its change still refuses an update that stages beside it, which i
   pass; an undeclared change (settings, `store/raw/tick.json`, an undeclared analytics file, `store/maintenance.json`,
   a secret) still refuses both the snapshot and the upgrade and is named; a foreign server receipt still refuses.
 - `tests/test_workspace_upgrade.py` keeps its OBS-591 and earlier cases, now over the registry's views.
+
+## The server loaded again during an update (OBS-593)
+
+### What loaded it
+
+The 0.40.0 update of 2026-11-17 (UTC) stopped the server at 05:09:33 and rolled back at 05:25 because
+`store/raw/serverd.json` moved while the upgrade was staged ([update-server-receipt.md](update-server-receipt.md)).
+The server that wrote it was started by launchd at 05:18:06. What loaded the job, from the machine's records:
+
+- An agent session working in another project ran the workstation check every agent runs before a change
+  (the workstation launcher's `doctor`, 0.2.78). Its services row for this server read `fail`: nothing listened on the
+  server's port, and the row's fix said the launchd job restarts it, with a `kickstart` repair attached
+  (`lib/doctor.js`, the services section). The session then read `full doctor` and `launchctl print` (the label not
+  loaded) and, at 05:18:04Z, ran `launchctl bootstrap gui/<uid> <the server's plist>`; it answered `rc=0` and the
+  session noted the server "up again". launchd spawned the server two seconds later: the `uptime_s` 319 the moved
+  receipt carried at 05:23:25. The session's transcript holds each step with its time.
+- No engine code did it. Every path in the engine that loads or restarts the server's job was read: the update's
+  own `start_writers` and `recheck_writers` (after staging), the daily snapshot's `finally` (under the update
+  lock), `restart_left_stopped` (at a pass's start, from its own record), `recover_lost_server` (decided once on
+  2026-11-09), `_step_launchd_jobs` (reloads only a job that is loaded), `local_ports._reinstall` and
+  `serverd --install` (a port move, a person), the Mac app's Start server (`assistant.serve`: `kickstart -k`, which
+  fails on an unloaded label) and `full open --serve` (a detached process, not the job). The check job returns at
+  once while an update holds the lock. The machine's lifecycle broker enrols no Observatory target, and its
+  journal has no entry in the window. launchd's own log keeps a `bootout` caller but not a `bootstrap` one, and its
+  files did not reach back to 05:18; the transcript is the record.
+- The same day's second attempt (0.41.0, 20:07Z to 21:04Z) was watched live: nothing loaded the server during its
+  38 minutes of staging (a process watch on `launchctl bootstrap|kickstart|load|enable` and launchd's log for the
+  label). It rolled back for another reason: the staged workspace upgrade ran past its 1800 s limit
+  (`TimeoutExpired`, exit 125).
+
+### The change: the server honours the update lock
+
+Whoever loads the job, the process launchd starts is this engine's server. `serverd.serve` now begins with
+`stand_down_while_updating`: while an update holds this workspace's update lock (`engine_update.update_lock_held`,
+the lock beside the home that `full update --apply` and the daily snapshot hold from the stop to the start), the
+server waits, polling every 2 s, before its instance lock, token, manifest, socket or receipt: it writes nothing
+the stillness check reads. It says so once on stderr (`store/logs/serverd.err`, a log). When the lock is free it
+starts as before.
+
+```
+launchd starts serverd ─▶ an update holds the lock? ─ no ─▶ lock, token, bind, beat (as before)
+                                   │ yes
+                                   ▼
+                    wait 2 s, write nothing (SIGTERM ends it) ─▶ look again
+```
+
+- The update's own start comes while it still holds the lock (`start_writers`, then `maintain ensure`): that server
+  waits the seconds until the update ends, then starts on the installed release. A job someone loaded meanwhile is
+  restarted by the update (`restarted`), and the new process waits the same way.
+- Only a server whose receipt goes into this workspace waits: one with a scratch redirected out of the home (a
+  test, a probe) writes nothing the update checks. A probe of the lock that cannot answer (`OSError`) never keeps
+  the server down. SIGTERM is unblocked before the wait, so launchd and `full open --stop` still end a waiting server.
+- The receipt's exemption (OBS-591, the `SERVERD` declaration) stays: it covers a server that was already past its
+  start when an update began, and a `belongs` refusal still holds a foreign receipt still.
+
+### What this repository cannot change
+
+The reload came from a check that cannot tell a server stopped on purpose from a server that died: nothing answers
+on the port either way. The contract change it needs is outside this repository, and is recorded here, not filed:
+
+- fabric-service/0.1 (the descriptor): a way for a service to say it is held stopped on purpose for a while, for
+  example `lifecycle.held: {by: "update", since}` written by the update next to the descriptor for the stop window,
+  or the descriptor naming the update lock a host may probe without taking it for long.
+- The workstation launcher's doctor: a closed port of a service held that way is `info` ("stopped for an update"),
+  with no repair attached, instead of `fail` with a `kickstart` repair.
+- Fabric Dashboards' Start and Restart: refused while the service is held, as they are for a service placed
+  elsewhere.
+
+### Tests
+
+`observatory/engine/tests/test_runtime_receipts.py`:
+
+- `LiveWriters.test_2026_11_17_a_server_loaded_while_the_update_holds_its_lock_waits`: the real update lock is held
+  around a real staged upgrade; a server started during staging (the gate, then the real heartbeat) waits, the
+  receipt does not exist when the upgrade answers `upgraded`, and the server writes it once the lock is released.
+  Red before this change (the server wrote at once).
+- `TheServerStandsDownForAnUpdate`: waits while held and says so once; starts at once when free; a probe that raises
+  does not keep it down; a scratch outside the home never waits; `serve` runs the gate before its single-instance lock.

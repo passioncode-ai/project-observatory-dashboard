@@ -16,6 +16,7 @@ import json
 import os
 import sys
 import tempfile
+import threading
 import unittest
 from pathlib import Path, PurePosixPath
 from unittest.mock import patch
@@ -282,6 +283,31 @@ class LiveWriters(unittest.TestCase):
     def test_the_session_hooks_while_an_update_stages(self):
         self.assertEqual(self.while_staged(self.hooks)["status"], "upgraded")
 
+    def test_2026_11_17_a_server_loaded_while_the_update_holds_its_lock_waits(self):
+        """OBS-593: launchd started a server of the new release mid-staging, loaded again by a process outside
+        the engine. Whoever loads the job, the server it starts writes nothing while the update holds this
+        workspace's lock, and starts once the update lets go: the staged upgrade holds still without the
+        receipt's exemption, and the server is not left down."""
+        import engine_update
+        import serverd
+        receipt = rr.SERVERD.at(self.home / "store/raw")
+        started = threading.Event()
+
+        def loaded_again():
+            started.set()
+            serverd.stand_down_while_updating(self.home, receipt.parent, poll=0.02, say=lambda line: None)
+            self.server()
+        server = threading.Thread(target=loaded_again, daemon=True)
+        with engine_update.update_lock(self.home):
+            out = self.while_staged(lambda: (server.start(), started.wait(5)))
+            server.join(0.3)
+            self.assertTrue(server.is_alive(), "the server waits while the update holds the lock")
+            self.assertFalse(receipt.exists(), "and has written nothing")
+        self.assertEqual(out["status"], "upgraded")
+        server.join(10)
+        self.assertFalse(server.is_alive(), "the lock let go, the server starts")
+        self.assertEqual(json.loads(receipt.read_text())["workspace"], str(self.home))
+
     # --- the guarantee kept ----------------------------------------------------------------------
 
     def test_an_undeclared_change_still_refuses_and_is_named(self):
@@ -312,6 +338,60 @@ class LiveWriters(unittest.TestCase):
             self.while_staged(foreign)
         self.assertIn(rr.SERVERD.path, str(refused.exception))
         self.assertEqual(rr.foreign(self.home), {rr.SERVERD.path})
+
+
+class TheServerStandsDownForAnUpdate(unittest.TestCase):
+    """OBS-593: the gate at the top of `serverd.serve`, with the update lock's probe injected."""
+
+    def setUp(self):
+        sys.path.insert(0, str(ROOT / "tools"))
+        import serverd
+        self.serverd = serverd
+        self.home = Path("/opt/synthetic/workspace")
+
+    def gate(self, answers, scratch=None):
+        answers, sleeps, said = list(answers), [], []
+
+        def held(home):
+            self.assertEqual(home, self.home)
+            value = answers.pop(0)
+            if isinstance(value, Exception):
+                raise value
+            return value
+        waited = self.serverd.stand_down_while_updating(
+            self.home, scratch or self.home / "store/raw", held=held, sleep=sleeps.append, say=said.append, poll=2.0)
+        return waited, sleeps, said, answers
+
+    def test_it_waits_while_the_lock_is_held_and_says_so_once(self):
+        waited, sleeps, said, left = self.gate([True, True, True, False])
+        self.assertEqual((waited, sleeps, left), (6.0, [2.0, 2.0, 2.0], []))
+        self.assertEqual(len(said), 1)
+        self.assertIn("update", said[0])
+
+    def test_it_starts_at_once_when_no_update_holds_the_lock(self):
+        self.assertEqual(self.gate([False])[:3], (0.0, [], []))
+
+    def test_a_probe_that_cannot_answer_does_not_keep_the_server_down(self):
+        self.assertEqual(self.gate([OSError("unreadable")])[:3], (0.0, [], []))
+
+    def test_a_receipt_written_outside_the_workspace_never_waits(self):
+        # A server whose writes are redirected out of the home (a test's scratch) touches nothing an update stills.
+        self.assertEqual(self.gate([], scratch=Path("/tmp/elsewhere/raw"))[:3], (0.0, [], []))
+
+    def test_serve_stands_down_before_its_lock_its_token_or_its_socket(self):
+        order = []
+
+        class Stop(Exception):
+            pass
+
+        def lock(_where):
+            order.append("lock")
+            raise Stop
+        with patch.object(self.serverd, "stand_down_while_updating", side_effect=lambda *a, **k: order.append("gate")), \
+                patch.object(self.serverd.fs, "hold_single_instance", side_effect=lock):
+            with self.assertRaises(Stop):
+                self.serverd.serve(0)
+        self.assertEqual(order, ["gate", "lock"])
 
 
 if __name__ == "__main__":
