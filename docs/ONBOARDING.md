@@ -2690,6 +2690,11 @@ project-observatory full backups status            # root, which rule chose it, 
 project-observatory full backups migrate           # move the newest legacy copies there, encrypted
 ```
 
+`backups status` also names `newest_counted_as_daily`: the newest copy of any kind that satisfies the
+daily rule (`daily`, `before-upgrade` or a `snapshot` you took), with its `kind`, its UTC time `at`
+and its `file`, or `null` when there is none. Read the backup's age there, not from the newest
+`daily` alone: a fresh `before-upgrade` copy counts for the day.
+
 The root is chosen in this order:
 1. `OBSERVATORY_BACKUPS`;
 2. `project-observatory full configure storage backups /absolute/path` (a path under your home is
