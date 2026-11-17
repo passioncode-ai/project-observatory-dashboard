@@ -4142,8 +4142,8 @@
     {
       "path": "private_io.py",
       "source_sha256": "5d153b53ac595f881dd2252b543ae0c4254494a64e461bd9017492c373fe261a",
-      "export_sha256": "25409431cee514522dea72c9824df50bddc7821605a893588d8617dc1c6c448f",
-      "bytes": 2765,
+      "export_sha256": "3e7ed4c675fc27a41f48526d506d11cbc3a13e3c546b5185af07c420a4d4b915",
+      "bytes": 3464,
       "python_comments_removed": 0,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -6745,8 +6745,8 @@
       "path": "tests/test_secret_prompt.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "aa5c9dfb2eeb801223bf107cd42d8220c738d4af3c425e418f577979b93c5ba0",
-      "bytes": 55510
+      "export_sha256": "0b0c54a14fe3650a7a1426b8809a4a0203b264147eaf4f0ab5f2cedf9dac184b",
+      "bytes": 60322
     },
     {
       "path": "tests/test_secrets.py",

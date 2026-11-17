@@ -8,6 +8,13 @@ from pathlib import Path
 import re
 import stat
 import tempfile
+import time
+
+#: How many times a replace the OS refuses is tried again, and how long apart: on Windows another handle on the
+#: destination (a scanner reading the file just written) makes `os.replace` fail with PermissionError for a moment
+#: (OBS-588; the same pattern as usage_analytics, OBS-341). The last refusal is raised, never swallowed.
+REPLACE_ATTEMPTS = 10
+REPLACE_PAUSE_SECONDS = 0.05
 
 
 def check(path: Path) -> None:
@@ -43,8 +50,19 @@ def write(path: Path, text: str) -> None:
         with os.fdopen(fd,'w',encoding='utf-8') as stream:
             stream.write(text);stream.flush();os.fsync(stream.fileno())
         check(path)
-        os.replace(name,path)
+        _replace(name,path)
     finally:Path(name).unlink(missing_ok=True)
+
+
+def _replace(name: str, path: Path) -> None:
+    for attempt in range(REPLACE_ATTEMPTS):
+        try:
+            os.replace(name,path)
+            return
+        except PermissionError:
+            if attempt == REPLACE_ATTEMPTS - 1:
+                raise
+            time.sleep(REPLACE_PAUSE_SECONDS)
 
 
 def legacy_path(path: Path) -> Path:
