@@ -2899,5 +2899,30 @@
  "the guard's time ran out": "время контроля диска закончилось",
  "MCP was not scanned.": "MCP не сканировался.",
  "An agent points it at your home and switches it on with {configure} ({root}, {switch}), then scans with {refresh}.": "Агент указывает домашнюю папку и включает интеграцию через {configure} ({root}, {switch}), затем сканирует через {refresh}.",
- "an agent asks with {refresh}.": "агент запрашивает её через {refresh}."
+ "an agent asks with {refresh}.": "агент запрашивает её через {refresh}.",
+ "Workspace backup out of date": "Резервная копия рабочего пространства устарела",
+ "Daily doctor fix not applied": "Исправление ежедневного доктора не применено",
+ "Maintenance step failing": "Шаг обслуживания сбоит",
+ "Vault metadata unreadable": "Метаданные хранилища не читаются",
+ "The newest workspace backup is {hours} hours old": "Последней резервной копии рабочего пространства {hours} ч.",
+ "No workspace backup is recorded": "Резервная копия рабочего пространства не записана",
+ "The daily doctor could not apply the fix {check}": "Ежедневный доктор не смог применить исправление {check}",
+ "The maintenance step {step} failed on its last {n} passes": {
+  "one": "Шаг обслуживания {step} не удался {n} проход подряд",
+  "few": "Шаг обслуживания {step} не удался {n} прохода подряд",
+  "many": "Шаг обслуживания {step} не удался {n} проходов подряд",
+  "other": "Шаг обслуживания {step} не удался {n} прохода подряд"
+ },
+ "{n} vault metadata files cannot be read": {
+  "one": "{n} файл метаданных хранилища не читается",
+  "few": "{n} файла метаданных хранилища не читаются",
+  "many": "{n} файлов метаданных хранилища не читаются",
+  "other": "{n} файла метаданных хранилища не читаются"
+ },
+ "issued by a door": "выпущен шлюзом",
+ "handed over": "передан",
+ "source unknown": "источник неизвестен",
+ "from {who}": "от {who}",
+ "same value as {slots}": "то же значение, что {slots}",
+ "put by hand; nobody recorded who handed it over": "положен вручную; кто передал, не записано"
 }

@@ -3862,6 +3862,23 @@ function keepCred(c, q, section) {
   return true;
 }
 
+// WHERE A SLOT'S VALUE CAME FROM (OBS-556, CP-10): issued by a door, handed over by a sender a person named,
+// the same value as another project's slot, or unknown. Names and records only, as the registry row carries them.
+function keySourceOf(c) {
+  if (!c.key_source) return "";
+  const x = c.key_source_context || {};
+  const KIND = {issued: [T("issued by a door"), "ok"], received: [T("handed over"), "ok"],
+                shared: [T("shared with another project"), "warn"], unknown: [T("source unknown"), "warn"]};
+  const [label, tone] = KIND[c.key_source] || KIND.unknown;
+  const said = c.key_source === "issued" ? [x.door, x.account].filter(Boolean).map(E).join(" · ")
+    : c.key_source === "received" ? T("from {who}", {who: E(x.from || "")})
+    : c.key_source === "shared" ? T("same value as {slots}", {slots: E((x.with || []).join(", "))})
+    : T("put by hand; nobody recorded who handed it over");
+  const also = c.key_source !== "shared" && (c.key_source_shared_with || []).length
+    ? `<div class="anchor">${T("same value as {slots}", {slots: E(c.key_source_shared_with.join(", "))})}</div>` : "";
+  return `<div class="tier">${chip(label, tone)}</div><div class="anchor">${said}</div>${also}`;
+}
+
 function renderCreds() {
   const out = document.getElementById("out");
   if (!D.creds) {
@@ -3928,6 +3945,7 @@ function renderCreds() {
         || [c.vault_project, c.env].filter(Boolean).join("/") || c.id)}</div>
       ${c.provider ? `<div class="anchor">${E(c.provider)}${c.serves ? " · " + E(c.serves) : ""}</div>` : ""}
       ${ledgerOf(c) ? `<div class="tier">${T("the door's ledger")}</div>` : ""}
+      ${keySourceOf(c)}
       ${c.identity ? `<div class="anchor mono">${E(c.identity)}</div>` : ""}
       ${                                                                        
                                                                      ""}

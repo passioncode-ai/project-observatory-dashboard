@@ -159,6 +159,30 @@
       "status": "covered"
     },
     {
+      "action": "doctor-daily",
+      "kind": "cli",
+      "where": "tools/daily_doctor.py: run",
+      "tool": "observatory_doctor",
+      "gate": null,
+      "status": "covered"
+    },
+    {
+      "action": "doctor-daily --undo",
+      "kind": "cli",
+      "where": "tools/daily_doctor.py: undo",
+      "tool": "observatory_doctor",
+      "gate": null,
+      "status": "covered"
+    },
+    {
+      "action": "doctor-daily --undo-last",
+      "kind": "cli",
+      "where": "tools/daily_doctor.py: undo",
+      "tool": "observatory_doctor",
+      "gate": null,
+      "status": "covered"
+    },
+    {
       "action": "migrate-local --apply",
       "kind": "cli",
       "where": "workspace.py: migrate-local",
@@ -1079,6 +1103,7 @@
         "version",
         "onboard",
         "machine",
+        "health",
         "tracked",
         "copies",
         "digest",

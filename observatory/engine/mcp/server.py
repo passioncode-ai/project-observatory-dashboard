@@ -514,6 +514,12 @@ def observatory_credentials(
     `expiryReason`, or `expiry: not recorded` for a value put by hand. A value
     issued on a credential request carries `issuedOnRequest` (the request id, its
     context, agent, door and account; `credential_requests.py show ID` has the rest).
+
+    Each vault row says where its value came from (OBS-556): `source` is `issued` (a door's ledger or record, or a
+    credential request, with `sourceContext` naming the door and account), `received` (`vault.py put --from LABEL`:
+    the sender as a person typed it), `shared` (the same keyed digest under another project's folder) or `unknown`
+    (put by hand; never read as issued). `sharedWith` names the other slots holding the value, `consumers` the
+    services started from the slot, and `consumersTool` the tool that finds every other copy by the value.
     """
     bad = _project_id_refusal(projectId, bare=True)
     if bad:
@@ -1016,6 +1022,19 @@ def _key_sweep_doc():
 
 
 @server.tool()
+def observatory_health() -> dict[str, Any]:
+    """One `agent-health/1` reading of this engine (OBS-577, DEC-0179): `{schema, product, version, at, state,
+    checks:[{id, area, state, count, fix}]}`, the worst state of its checks (ok < unknown < warn < fail) and, for
+    each check, a count and the MCP tool that shows or clears it. Counts and codes only: no path, name or id.
+
+    Read-only, from the findings the engine last built. A source not read is `unknown`, never `ok`. The same
+    document as `project-observatory full health --json`. It carries no `degraded` field because the contract's
+    schema is closed: what could not be read is a check with state `unknown`."""
+    import machine_health
+    return machine_health.report()
+
+
+@server.tool()
 def observatory_key_sweep(
     repository: Annotated[str | None, Field(description="Only this repository, as the sweep names it (a project's "
                                                         "local folder, e.g. `alpha-web`).")] = None,
@@ -1144,6 +1163,41 @@ def observatory_issues(
     if dismissBanner:
         issue_filer.dismiss_banner(issue_filer.default_path())
     return issue_filer.agent_view(state=state)
+
+
+@server.tool()
+def observatory_doctor(
+    action: Annotated[str, Field(description="`read` (the default): the last daily doctor run. `undo`: reverse the "
+                                             "one fix `journalId` names (the same act as `full doctor-daily --undo`). "
+                                             "`run`: run the catalogue now (`full doctor-daily`).")] = "read",
+    journalId: Annotated[str | None, Field(validation_alias=AliasChoices("journalId", "journal_id"),
+                                           description="With `undo`: the fix's journal id, `doc_` and 16 hex digits, "
+                                                       "from `fixes` or `undoable`.")] = None,
+) -> dict[str, Any]:
+    """The daily doctor (OBS-558): a fixed catalogue of checks the maintenance job runs once a day. Each check's
+    `state` is `ok`, `fixed` (a safe fix ran: a file the engine can no longer use was moved aside into
+    `store/state/doctor-quarantine/`, never deleted), `finding` (its own `doctor.*` finding type, or `covered_by`
+    the existing rule that already raises it), `fix-failed` or `unknown` (its source could not be read; named in
+    `degraded`). `fixes` and `undoable` carry the journal ids an `undo` takes; an undo never overwrites a newer file
+    and names what it kept (`refused`). `summary` is the model's paragraph, written only when the result changed and
+    inside the engine's model budget, or why not. Refusals are typed `error` answers. Design:
+    docs/design/control-plane/daily-doctor.md.
+    """
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
+    import daily_doctor
+    if action == "undo":
+        if not journalId:
+            return {"error": {"code": "invalid-argument", "message": "undo needs journalId"}, "degraded": []}
+        return daily_doctor.undo(paths.HOME, journal_id=journalId)
+    if action == "run":
+        doc = daily_doctor.run(paths.HOME)
+        if doc.get("status") != "ran":
+            return {"error": {"code": "busy", "message": "another doctor run or undo holds the lock"},
+                    "degraded": doc.get("degraded") or []}
+        return daily_doctor.agent_view(paths.HOME)
+    if action != "read":
+        return {"error": {"code": "invalid-argument", "message": "action is read, run or undo"}, "degraded": []}
+    return daily_doctor.agent_view(paths.HOME)
 
 
 MACHINE_TOP = 10

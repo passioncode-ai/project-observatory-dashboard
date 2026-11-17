@@ -85,6 +85,13 @@
       ],
       "required": []
     },
+    "observatory_doctor": {
+      "input": [
+        "action",
+        "journalId"
+      ],
+      "required": []
+    },
     "observatory_explain": {
       "input": [
         "receiptId"
@@ -143,6 +150,10 @@
       "required": [
         "handoffId"
       ]
+    },
+    "observatory_health": {
+      "input": [],
+      "required": []
     },
     "observatory_integrations": {
       "input": [
