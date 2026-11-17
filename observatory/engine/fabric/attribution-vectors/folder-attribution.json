@@ -6997,7 +6997,7 @@
           "toplevel": "/u/ana/work/app",
           "commonDir": "/u/ana/work/app/.git",
           "mainCheckout": "/u/ana/work/app",
-          "origin": "ssh://git:not-a-real-secret@gitlab.example.com/someone/app.git?ref=main"
+          "origin": "ssh://git\u003anot-a-real-secret@gitlab.example.com/someone/app.git?ref=main"
         },
         "projects": [
           {
@@ -7246,7 +7246,7 @@
       }
     },
     {
-      "name": "AT-15: a remote whose kept part still has a secret's shape records no origin",
+      "name": "AT-15: an ssh remote whose user is a token, 40 hex with no password, records no origin (DEC-0177)",
       "snapshot": {
         "folder": "/u/ana/work/app",
         "home": "/u/ana",
@@ -7262,7 +7262,7 @@
           "toplevel": "/u/ana/work/app",
           "commonDir": "/u/ana/work/app/.git",
           "mainCheckout": "/u/ana/work/app",
-          "origin": "ssh://sk-testtesttesttest@gitlab.example.com/someone/app.git"
+          "origin": "ssh://0123456789abcdef0123456789abcdef01234567@gitlab.example.com/someone/app.git"
         },
         "projects": [
           {
@@ -7295,6 +7295,642 @@
         "path": "/u/ana/work/app",
         "commonDir": "/u/ana/work/app/.git",
         "origin": null,
+        "toplevel": "/u/ana/work/app"
+      }
+    },
+    {
+      "name": "AT-15: an scp remote whose user is a token, 40 hex, records no origin either (DEC-0177)",
+      "snapshot": {
+        "folder": "/u/ana/work/app",
+        "home": "/u/ana",
+        "tempRoots": [
+          "/tmp",
+          "/private/tmp",
+          "/private/var/folders",
+          "/var/tmp",
+          "/u/ana/.cache",
+          "/u/ana/Library/Caches"
+        ],
+        "git": {
+          "toplevel": "/u/ana/work/app",
+          "commonDir": "/u/ana/work/app/.git",
+          "mainCheckout": "/u/ana/work/app",
+          "origin": "0123456789abcdef0123456789abcdef01234567@gitlab.example.com:someone/app.git"
+        },
+        "projects": [
+          {
+            "id": "project:fabric",
+            "folders": [
+              {
+                "path": "/u/ana/work/fabric",
+                "commonDir": "/u/ana/work/fabric/.git",
+                "origin": "git@github.com:example-org/fabric.git"
+              }
+            ],
+            "sources": [
+              "github.com/example-org"
+            ]
+          },
+          {
+            "id": "project:notes",
+            "folders": [
+              {
+                "path": "/u/ana/work/notes",
+                "commonDir": null,
+                "origin": null
+              }
+            ],
+            "sources": []
+          }
+        ]
+      },
+      "record": {
+        "path": "/u/ana/work/app",
+        "commonDir": "/u/ana/work/app/.git",
+        "origin": null,
+        "toplevel": "/u/ana/work/app"
+      }
+    },
+    {
+      "name": "AT-15: an ssh remote whose user holds a token after another @ records no origin (DEC-0177)",
+      "snapshot": {
+        "folder": "/u/ana/work/app",
+        "home": "/u/ana",
+        "tempRoots": [
+          "/tmp",
+          "/private/tmp",
+          "/private/var/folders",
+          "/var/tmp",
+          "/u/ana/.cache",
+          "/u/ana/Library/Caches"
+        ],
+        "git": {
+          "toplevel": "/u/ana/work/app",
+          "commonDir": "/u/ana/work/app/.git",
+          "mainCheckout": "/u/ana/work/app",
+          "origin": "ssh://x@0123456789abcdef0123456789abcdef01234567@gitlab.example.com/someone/app.git"
+        },
+        "projects": [
+          {
+            "id": "project:fabric",
+            "folders": [
+              {
+                "path": "/u/ana/work/fabric",
+                "commonDir": "/u/ana/work/fabric/.git",
+                "origin": "git@github.com:example-org/fabric.git"
+              }
+            ],
+            "sources": [
+              "github.com/example-org"
+            ]
+          },
+          {
+            "id": "project:notes",
+            "folders": [
+              {
+                "path": "/u/ana/work/notes",
+                "commonDir": null,
+                "origin": null
+              }
+            ],
+            "sources": []
+          }
+        ]
+      },
+      "record": {
+        "path": "/u/ana/work/app",
+        "commonDir": "/u/ana/work/app/.git",
+        "origin": null,
+        "toplevel": "/u/ana/work/app"
+      }
+    },
+    {
+      "name": "AT-15: a remote whose kept part still has a secret's shape records no origin",
+      "snapshot": {
+        "folder": "/u/ana/work/app",
+        "home": "/u/ana",
+        "tempRoots": [
+          "/tmp",
+          "/private/tmp",
+          "/private/var/folders",
+          "/var/tmp",
+          "/u/ana/.cache",
+          "/u/ana/Library/Caches"
+        ],
+        "git": {
+          "toplevel": "/u/ana/work/app",
+          "commonDir": "/u/ana/work/app/.git",
+          "mainCheckout": "/u/ana/work/app",
+          "origin": "ssh://sk-test0Test1test2Test3@gitlab.example.com/someone/app.git"
+        },
+        "projects": [
+          {
+            "id": "project:fabric",
+            "folders": [
+              {
+                "path": "/u/ana/work/fabric",
+                "commonDir": "/u/ana/work/fabric/.git",
+                "origin": "git@github.com:example-org/fabric.git"
+              }
+            ],
+            "sources": [
+              "github.com/example-org"
+            ]
+          },
+          {
+            "id": "project:notes",
+            "folders": [
+              {
+                "path": "/u/ana/work/notes",
+                "commonDir": null,
+                "origin": null
+              }
+            ],
+            "sources": []
+          }
+        ]
+      },
+      "record": {
+        "path": "/u/ana/work/app",
+        "commonDir": "/u/ana/work/app/.git",
+        "origin": null,
+        "toplevel": "/u/ana/work/app"
+      }
+    },
+    {
+      "name": "AT-15: a remote holding -sk- inside a word records it (DEC-0151's word start)",
+      "snapshot": {
+        "folder": "/u/ana/work/app",
+        "home": "/u/ana",
+        "tempRoots": [
+          "/tmp",
+          "/private/tmp",
+          "/private/var/folders",
+          "/var/tmp",
+          "/u/ana/.cache",
+          "/u/ana/Library/Caches"
+        ],
+        "git": {
+          "toplevel": "/u/ana/work/app",
+          "commonDir": "/u/ana/work/app/.git",
+          "mainCheckout": "/u/ana/work/app",
+          "origin": "https://gitlab.example.com/someone/helpdesk-customer-support.git"
+        },
+        "projects": [
+          {
+            "id": "project:fabric",
+            "folders": [
+              {
+                "path": "/u/ana/work/fabric",
+                "commonDir": "/u/ana/work/fabric/.git",
+                "origin": "git@github.com:example-org/fabric.git"
+              }
+            ],
+            "sources": [
+              "github.com/example-org"
+            ]
+          },
+          {
+            "id": "project:notes",
+            "folders": [
+              {
+                "path": "/u/ana/work/notes",
+                "commonDir": null,
+                "origin": null
+              }
+            ],
+            "sources": []
+          }
+        ]
+      },
+      "record": {
+        "path": "/u/ana/work/app",
+        "commonDir": "/u/ana/work/app/.git",
+        "origin": "https://gitlab.example.com/someone/helpdesk-customer-support.git",
+        "toplevel": "/u/ana/work/app"
+      }
+    },
+    {
+      "name": "AT-15: a remote holding a weak sk- slug records it (DEC-0151's sk- strength)",
+      "snapshot": {
+        "folder": "/u/ana/work/app",
+        "home": "/u/ana",
+        "tempRoots": [
+          "/tmp",
+          "/private/tmp",
+          "/private/var/folders",
+          "/var/tmp",
+          "/u/ana/.cache",
+          "/u/ana/Library/Caches"
+        ],
+        "git": {
+          "toplevel": "/u/ana/work/app",
+          "commonDir": "/u/ana/work/app/.git",
+          "mainCheckout": "/u/ana/work/app",
+          "origin": "https://gitlab.example.com/someone/sk-learn-experiments-app.git"
+        },
+        "projects": [
+          {
+            "id": "project:fabric",
+            "folders": [
+              {
+                "path": "/u/ana/work/fabric",
+                "commonDir": "/u/ana/work/fabric/.git",
+                "origin": "git@github.com:example-org/fabric.git"
+              }
+            ],
+            "sources": [
+              "github.com/example-org"
+            ]
+          },
+          {
+            "id": "project:notes",
+            "folders": [
+              {
+                "path": "/u/ana/work/notes",
+                "commonDir": null,
+                "origin": null
+              }
+            ],
+            "sources": []
+          }
+        ]
+      },
+      "record": {
+        "path": "/u/ana/work/app",
+        "commonDir": "/u/ana/work/app/.git",
+        "origin": "https://gitlab.example.com/someone/sk-learn-experiments-app.git",
+        "toplevel": "/u/ana/work/app"
+      }
+    },
+    {
+      "name": "AT-15: a remote holding a strong key after a percent-escape records no origin (DEC-0151's escapes)",
+      "snapshot": {
+        "folder": "/u/ana/work/app",
+        "home": "/u/ana",
+        "tempRoots": [
+          "/tmp",
+          "/private/tmp",
+          "/private/var/folders",
+          "/var/tmp",
+          "/u/ana/.cache",
+          "/u/ana/Library/Caches"
+        ],
+        "git": {
+          "toplevel": "/u/ana/work/app",
+          "commonDir": "/u/ana/work/app/.git",
+          "mainCheckout": "/u/ana/work/app",
+          "origin": "https://gitlab.example.com/someone/app%22sk-Test0Example1Key2Value3.git"
+        },
+        "projects": [
+          {
+            "id": "project:fabric",
+            "folders": [
+              {
+                "path": "/u/ana/work/fabric",
+                "commonDir": "/u/ana/work/fabric/.git",
+                "origin": "git@github.com:example-org/fabric.git"
+              }
+            ],
+            "sources": [
+              "github.com/example-org"
+            ]
+          },
+          {
+            "id": "project:notes",
+            "folders": [
+              {
+                "path": "/u/ana/work/notes",
+                "commonDir": null,
+                "origin": null
+              }
+            ],
+            "sources": []
+          }
+        ]
+      },
+      "record": {
+        "path": "/u/ana/work/app",
+        "commonDir": "/u/ana/work/app/.git",
+        "origin": null,
+        "toplevel": "/u/ana/work/app"
+      }
+    },
+    {
+      "name": "AT-15: an sk- run rejected, then a strong key at an inner boundary, records no origin (DEC-0151)",
+      "snapshot": {
+        "folder": "/u/ana/work/app",
+        "home": "/u/ana",
+        "tempRoots": [
+          "/tmp",
+          "/private/tmp",
+          "/private/var/folders",
+          "/var/tmp",
+          "/u/ana/.cache",
+          "/u/ana/Library/Caches"
+        ],
+        "git": {
+          "toplevel": "/u/ana/work/app",
+          "commonDir": "/u/ana/work/app/.git",
+          "mainCheckout": "/u/ana/work/app",
+          "origin": "https://gitlab.example.com/someone/sk\u002dabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmn-sk-aB3cD4eF5gH6jK7mN8pQ9rS2.git"
+        },
+        "projects": [
+          {
+            "id": "project:fabric",
+            "folders": [
+              {
+                "path": "/u/ana/work/fabric",
+                "commonDir": "/u/ana/work/fabric/.git",
+                "origin": "git@github.com:example-org/fabric.git"
+              }
+            ],
+            "sources": [
+              "github.com/example-org"
+            ]
+          },
+          {
+            "id": "project:notes",
+            "folders": [
+              {
+                "path": "/u/ana/work/notes",
+                "commonDir": null,
+                "origin": null
+              }
+            ],
+            "sources": []
+          }
+        ]
+      },
+      "record": {
+        "path": "/u/ana/work/app",
+        "commonDir": "/u/ana/work/app/.git",
+        "origin": null,
+        "toplevel": "/u/ana/work/app"
+      }
+    },
+    {
+      "name": "AT-15: an sk- run whose only digit lies past 256 characters records the origin (DEC-0151)",
+      "snapshot": {
+        "folder": "/u/ana/work/app",
+        "home": "/u/ana",
+        "tempRoots": [
+          "/tmp",
+          "/private/tmp",
+          "/private/var/folders",
+          "/var/tmp",
+          "/u/ana/.cache",
+          "/u/ana/Library/Caches"
+        ],
+        "git": {
+          "toplevel": "/u/ana/work/app",
+          "commonDir": "/u/ana/work/app/.git",
+          "mainCheckout": "/u/ana/work/app",
+          "origin": "https://gitlab.example.com/someone/sk\u002dabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmn1.git"
+        },
+        "projects": [
+          {
+            "id": "project:fabric",
+            "folders": [
+              {
+                "path": "/u/ana/work/fabric",
+                "commonDir": "/u/ana/work/fabric/.git",
+                "origin": "git@github.com:example-org/fabric.git"
+              }
+            ],
+            "sources": [
+              "github.com/example-org"
+            ]
+          },
+          {
+            "id": "project:notes",
+            "folders": [
+              {
+                "path": "/u/ana/work/notes",
+                "commonDir": null,
+                "origin": null
+              }
+            ],
+            "sources": []
+          }
+        ]
+      },
+      "record": {
+        "path": "/u/ana/work/app",
+        "commonDir": "/u/ana/work/app/.git",
+        "origin": "https://gitlab.example.com/someone/sk\u002dabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmn1.git",
+        "toplevel": "/u/ana/work/app"
+      }
+    },
+    {
+      "name": "AT-15: an sk- run whose digit and capital lie past 256 characters is still a long mixed run: no origin (DEC-0151)",
+      "snapshot": {
+        "folder": "/u/ana/work/app",
+        "home": "/u/ana",
+        "tempRoots": [
+          "/tmp",
+          "/private/tmp",
+          "/private/var/folders",
+          "/var/tmp",
+          "/u/ana/.cache",
+          "/u/ana/Library/Caches"
+        ],
+        "git": {
+          "toplevel": "/u/ana/work/app",
+          "commonDir": "/u/ana/work/app/.git",
+          "mainCheckout": "/u/ana/work/app",
+          "origin": "https://gitlab.example.com/someone/sk\u002dabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmnopqrstuvwxyzabcdefghijklmn1A.git"
+        },
+        "projects": [
+          {
+            "id": "project:fabric",
+            "folders": [
+              {
+                "path": "/u/ana/work/fabric",
+                "commonDir": "/u/ana/work/fabric/.git",
+                "origin": "git@github.com:example-org/fabric.git"
+              }
+            ],
+            "sources": [
+              "github.com/example-org"
+            ]
+          },
+          {
+            "id": "project:notes",
+            "folders": [
+              {
+                "path": "/u/ana/work/notes",
+                "commonDir": null,
+                "origin": null
+              }
+            ],
+            "sources": []
+          }
+        ]
+      },
+      "record": {
+        "path": "/u/ana/work/app",
+        "commonDir": "/u/ana/work/app/.git",
+        "origin": null,
+        "toplevel": "/u/ana/work/app"
+      }
+    },
+    {
+      "name": "AT-15: an upper-case SK- user with a digit and a capital is no key: the origin is recorded as written (DEC-0151)",
+      "snapshot": {
+        "folder": "/u/ana/work/app",
+        "home": "/u/ana",
+        "tempRoots": [
+          "/tmp",
+          "/private/tmp",
+          "/private/var/folders",
+          "/var/tmp",
+          "/u/ana/.cache",
+          "/u/ana/Library/Caches"
+        ],
+        "git": {
+          "toplevel": "/u/ana/work/app",
+          "commonDir": "/u/ana/work/app/.git",
+          "mainCheckout": "/u/ana/work/app",
+          "origin": "ssh://SK-Test0Example1Key2Value3@gitlab.example.com/someone/app.git"
+        },
+        "projects": [
+          {
+            "id": "project:fabric",
+            "folders": [
+              {
+                "path": "/u/ana/work/fabric",
+                "commonDir": "/u/ana/work/fabric/.git",
+                "origin": "git@github.com:example-org/fabric.git"
+              }
+            ],
+            "sources": [
+              "github.com/example-org"
+            ]
+          },
+          {
+            "id": "project:notes",
+            "folders": [
+              {
+                "path": "/u/ana/work/notes",
+                "commonDir": null,
+                "origin": null
+              }
+            ],
+            "sources": []
+          }
+        ]
+      },
+      "record": {
+        "path": "/u/ana/work/app",
+        "commonDir": "/u/ana/work/app/.git",
+        "origin": "ssh://SK-Test0Example1Key2Value3@gitlab.example.com/someone/app.git",
+        "toplevel": "/u/ana/work/app"
+      }
+    },
+    {
+      "name": "AT-15: a lower-case sk- slug of 16 to 31 characters holding a digit records the origin (DEC-0151)",
+      "snapshot": {
+        "folder": "/u/ana/work/app",
+        "home": "/u/ana",
+        "tempRoots": [
+          "/tmp",
+          "/private/tmp",
+          "/private/var/folders",
+          "/var/tmp",
+          "/u/ana/.cache",
+          "/u/ana/Library/Caches"
+        ],
+        "git": {
+          "toplevel": "/u/ana/work/app",
+          "commonDir": "/u/ana/work/app/.git",
+          "mainCheckout": "/u/ana/work/app",
+          "origin": "https://gitlab.example.com/someone/sk-learn-experiments-2026.git"
+        },
+        "projects": [
+          {
+            "id": "project:fabric",
+            "folders": [
+              {
+                "path": "/u/ana/work/fabric",
+                "commonDir": "/u/ana/work/fabric/.git",
+                "origin": "git@github.com:example-org/fabric.git"
+              }
+            ],
+            "sources": [
+              "github.com/example-org"
+            ]
+          },
+          {
+            "id": "project:notes",
+            "folders": [
+              {
+                "path": "/u/ana/work/notes",
+                "commonDir": null,
+                "origin": null
+              }
+            ],
+            "sources": []
+          }
+        ]
+      },
+      "record": {
+        "path": "/u/ana/work/app",
+        "commonDir": "/u/ana/work/app/.git",
+        "origin": "https://gitlab.example.com/someone/sk-learn-experiments-2026.git",
+        "toplevel": "/u/ana/work/app"
+      }
+    },
+    {
+      "name": "AT-15: a strong sk- run glued after a letter records the origin (DEC-0151's word start)",
+      "snapshot": {
+        "folder": "/u/ana/work/app",
+        "home": "/u/ana",
+        "tempRoots": [
+          "/tmp",
+          "/private/tmp",
+          "/private/var/folders",
+          "/var/tmp",
+          "/u/ana/.cache",
+          "/u/ana/Library/Caches"
+        ],
+        "git": {
+          "toplevel": "/u/ana/work/app",
+          "commonDir": "/u/ana/work/app/.git",
+          "mainCheckout": "/u/ana/work/app",
+          "origin": "https://gitlab.example.com/someone/xsk-aB3cD4eF5gH6jK7m.git"
+        },
+        "projects": [
+          {
+            "id": "project:fabric",
+            "folders": [
+              {
+                "path": "/u/ana/work/fabric",
+                "commonDir": "/u/ana/work/fabric/.git",
+                "origin": "git@github.com:example-org/fabric.git"
+              }
+            ],
+            "sources": [
+              "github.com/example-org"
+            ]
+          },
+          {
+            "id": "project:notes",
+            "folders": [
+              {
+                "path": "/u/ana/work/notes",
+                "commonDir": null,
+                "origin": null
+              }
+            ],
+            "sources": []
+          }
+        ]
+      },
+      "record": {
+        "path": "/u/ana/work/app",
+        "commonDir": "/u/ana/work/app/.git",
+        "origin": "https://gitlab.example.com/someone/xsk-aB3cD4eF5gH6jK7m.git",
         "toplevel": "/u/ana/work/app"
       }
     },

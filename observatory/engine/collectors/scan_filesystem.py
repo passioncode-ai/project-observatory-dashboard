@@ -33,6 +33,7 @@ missing, malformed or excluded declaration is reported, never silently dropped.
 import sys, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import atomic
+import folder_attribution
 import paths
 import safe_git
 import slow_command
@@ -438,6 +439,7 @@ def scan_folder(entry: str, p: Path) -> tuple[dict, list[dict]]:
             unread[field] = why
         out, why = sh(["git", "remote", "-v"], cwd=p)
         rec["remotes_all"] = out.splitlines()[:6]
+        scrub_origins(rec)
         if why:
             unread["remotes_all"] = why
         out, why = sh(["git", "status", "--porcelain"], cwd=p)
@@ -473,6 +475,40 @@ def scan_folder(entry: str, p: Path) -> tuple[dict, list[dict]]:
     return rec, found
 
 
+def _stored_line(line: str) -> str | None:
+    """One `git remote -v` line (`name<TAB>url (fetch)`) with its URL as the engine stores it; None to drop it."""
+    name, tab, rest = line.partition("\t")
+    url, space, kind = rest.rpartition(" ") if rest.endswith(")") else (rest, "", "")
+    if not tab or not url:
+        return line
+    kept = folder_attribution.stored_remote(url)
+    return None if kept is None else f"{name}\t{kept}{space}{kind}"
+
+
+def scrub_origins(rec: dict) -> bool:
+    """STORED ORIGINS CARRY NO CREDENTIAL (OBS-576, fabric-agent-contract DEC-0177). `remote` and
+    `remotes_all` keep what the contract's `recordOrigin` keeps: an https remote loses its user (a token is
+    often written there), and an ssh or scp remote whose user is a token, or whose kept part still has a
+    secret's shape, is withheld: `remote` empty with `remote_withheld`, which the merge still reads as a
+    remote (the history is published somewhere), never as `no_origin`. True when the row changed; running
+    it again changes nothing."""
+    changed = False
+    raw = rec.get("remote")
+    if isinstance(raw, str) and raw:
+        kept = folder_attribution.stored_remote(raw)
+        if kept is None:
+            rec["remote"], rec["remote_withheld"] = "", True
+            changed = True
+        elif kept != raw:
+            rec["remote"], changed = kept, True
+    lines = rec.get("remotes_all")
+    if isinstance(lines, list):
+        kept_lines = [k for k in (_stored_line(x) if isinstance(x, str) else x for x in lines) if k is not None]
+        if kept_lines != lines:
+            rec["remotes_all"], changed = kept_lines, True
+    return changed
+
+
 def _previous_scan(dest: str) -> tuple[str, dict[str, dict]]:
     """(scanned_at, rows by folder) of the scan last written to `dest`, or ("", {})."""
     try:
@@ -493,6 +529,7 @@ PREV_AT, PREV_ROWS = _previous_scan(sys.argv[1]) if len(sys.argv) > 1 else ("", 
 out_of_time = ""
 carried: list[str] = []
 unmeasured: list[str] = []
+rewritten = 0
 targets: list[tuple[str, Path, bool]] = []
 for entry in sorted(os.listdir(DATA)):
     p = DATA/entry
@@ -524,6 +561,8 @@ for entry, p, declared in targets:
     if not out_of_time:
         try:
             rec, found = scan_folder(entry, p)
+            if scrub_origins(dict(PREV_ROWS.get(entry) or {})):
+                rewritten += 1  # the row stored before DEC-0177 held a credential origin; this one does not
             if declared:
                 rec["display_name"] = p.name
             rows.append(rec)
@@ -535,6 +574,9 @@ for entry, p, declared in targets:
     if last is None:
         unmeasured.append(entry)
         continue
+    last = dict(last)
+    if scrub_origins(last):
+        rewritten += 1  # a row stored before DEC-0177: the first tick after the upgrade rewrites it, once
     rows.append({**last, "carried_from": last.get("carried_from") or PREV_AT or "an undated scan"})
     carried.append(entry)
 
@@ -546,9 +588,11 @@ if out_of_time:
         + f", {len(unmeasured)} not yet measured"
         + (f" ({', '.join(unmeasured[:5])})" if unmeasured else ""))})
 
-atomic.write_json(sys.argv[1], {"scanned_at": now(), "folders": rows,
+atomic.write_json(sys.argv[1], {"scanned_at": now(), "folders": rows, "origins_rewritten": rewritten,
                                 "skipped": skipped, "degraded": degraded})
 print(f"scanned {len(rows)} folders -> {sys.argv[1]}")
+if rewritten:
+    print(f"  rewrote {rewritten} stored origin(s) that carried a credential (fabric-agent-contract DEC-0177)")
 if skipped:
     print(f"  skipped {len(skipped)}: {', '.join(s['folder'] for s in skipped)}")
 for d in degraded:
