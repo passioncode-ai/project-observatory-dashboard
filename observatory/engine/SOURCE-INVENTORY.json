@@ -3680,8 +3680,8 @@
     {
       "path": "observatory.py",
       "source_sha256": "62ad1eb73adff9a9d741314ddde1da9390a4e4b32fa9be94d5858a98f1f5aa58",
-      "export_sha256": "0351ad437dec6a4be6033dd53280aa4bc41646d53b8bda888f742574bb232aec",
-      "bytes": 111288,
+      "export_sha256": "43d90aeaa7b51d3cc46772f4d440ef78bec035fa8d5fd1832fca460b32e0ba40",
+      "bytes": 111364,
       "python_comments_removed": 234,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
@@ -6282,6 +6282,13 @@
       "upstream_modified": true
     },
     {
+      "path": "tests/test_prowl_door.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "2da258e9ada5574fcf60a56190d9cc6110d6992e200796a74332d8df53912538",
+      "bytes": 13693
+    },
+    {
       "path": "tests/test_public_contracts.py",
       "source_sha256": "4afdb929cba828c428ac2127a066d0675a34ee6bd5bc418822b2ebd262b1c933",
       "export_sha256": "8832cabf22560f6132dd37cfe1d658a94ca6618b5a6c763577d73a7105c6c8ef",
@@ -7696,6 +7703,13 @@
       "upstream_modified": true
     },
     {
+      "path": "tools/prowl.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "b6d2a79e42577ef9d5119fa77a7cb936bf3d787bb42aa108c8c26157f63e8755",
+      "bytes": 15050
+    },
+    {
       "path": "tools/publish_contract.py",
       "source_sha256": "64a46fb9830596fab1d3d677944951b4480e7ec2c09d6acd2bd608893909a6e1",
       "export_sha256": "642e73fd274d056e23e9dc8e5e792393cc3dac96a1ff00b21e4a14c4e4125e24",
@@ -8163,7 +8177,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 1102,
+  "file_count": 1104,
   "excluded": [
     "git-history",
     "operator-registries",
