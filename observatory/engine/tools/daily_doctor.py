@@ -284,10 +284,8 @@ def _journal(base: pathlib.Path) -> list[dict]:
 
 
 def _append(base: pathlib.Path, row: dict) -> None:
-    path = _journal_path(base)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as out:
-        out.write(json.dumps(row, sort_keys=True) + "\n")
+    import journal_writer
+    journal_writer.append(_journal_path(base), [row], sort_keys=True, ensure_ascii=True)
 
 
 def _fixes(base: pathlib.Path) -> dict[str, dict]:

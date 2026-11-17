@@ -43,7 +43,6 @@ reason, the approver and the backends, never the erased text.
 from __future__ import annotations
 
 import json
-import os
 import pathlib
 import sqlite3
 import sys
@@ -52,7 +51,6 @@ from typing import Any
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-import osprivacy  # noqa: E402
 
 MARKER = "[forgotten]"
 JOURNAL = "forget.jsonl"
@@ -438,11 +436,8 @@ def _backups() -> list[dict]:
 
 def _journal(receipt: dict) -> None:
     import paths
-    target = pathlib.Path(paths.STATE) / "logs" / JOURNAL
+    import journal_writer
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        fd = osprivacy.open(target, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as f:
-            f.write(json.dumps(receipt, ensure_ascii=False) + "\n")
+        journal_writer.append(pathlib.Path(paths.STATE) / "logs" / JOURNAL, [receipt])
     except OSError:
         receipt["note"] += "; the receipt could not be journalled (store/logs unwritable)"

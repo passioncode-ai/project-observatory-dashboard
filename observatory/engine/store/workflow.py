@@ -51,7 +51,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 import pathlib
 import re
 import secrets
@@ -64,7 +63,6 @@ from typing import Any, Callable
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 import memory_redact                                                               # noqa: E402
-import osprivacy                                                                   # noqa: E402
 from store import ledger as L                                                      # noqa: E402
 
 #: Statuses a step can be left in. `closed` is not one of them: closing is a
@@ -971,12 +969,9 @@ def _journal_known(kind: str, workflow_id: str | None, step_id: str | None,
     import paths
     row = {"at": _iso(_now()), "kind": kind, "workflowId": workflow_id, "stepId": step_id,
            "names": report.get("knownNames", []), "count": report.get("knownValues")}
-    target = pathlib.Path(paths.STATE) / "logs" / REDACTIONS
+    import journal_writer
     try:
-        target.parent.mkdir(parents=True, exist_ok=True)
-        fd = osprivacy.open(target, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as f:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        journal_writer.append(pathlib.Path(paths.STATE) / "logs" / REDACTIONS, [row])
     except OSError:
         # The write itself succeeded redacted; losing the note about it is a
         # smaller failure than refusing the memory, and the leak scan over the

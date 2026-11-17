@@ -328,13 +328,8 @@ def append_journal(rows: list[dict]) -> None:
     if not rows:
         return
     folder().mkdir(parents=True, exist_ok=True, mode=0o700)
-    import osprivacy
-    fd = osprivacy.open(journal_path(), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
-    with os.fdopen(fd, "a", encoding="utf-8") as fh:
-        for row in rows:
-            fh.write(_canon(row) + "\n")
-        fh.flush()
-        os.fsync(fh.fileno())
+    import journal_writer
+    journal_writer.append_lines(journal_path(), [_canon(row) for row in rows], fsync=True)
 
 
 @contextlib.contextmanager

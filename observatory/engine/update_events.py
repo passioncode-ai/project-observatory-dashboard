@@ -24,7 +24,6 @@ import datetime
 import hashlib
 import json
 import os
-import osprivacy
 from pathlib import Path
 import sys
 
@@ -82,11 +81,8 @@ def emit(event: str, code: str, *, subject: str = "engine", base: Path | None = 
             # A check every five minutes (operator rule, 2026-10-17) that finds what the last
             # one found is logged once, not every time: the line marks a change.
             return
-        import log_policy
-        log_policy.rotate(file)
-        fd = osprivacy.open(file, os.O_WRONLY | os.O_APPEND | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as out:
-            out.write(json.dumps(row, sort_keys=True) + "\n")
+        import journal_writer
+        journal_writer.append(file, [row], rotate=True, sort_keys=True, ensure_ascii=True)
     except (OSError, ImportError):
         pass
 

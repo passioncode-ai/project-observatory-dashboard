@@ -254,10 +254,8 @@ def plan(values: dict[str, str], force_full: bool, today: datetime.date) -> tupl
 
 
 def journal(entry: dict) -> None:
-    JOURNAL.parent.mkdir(parents=True, exist_ok=True)
-    with JOURNAL.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
-    JOURNAL.chmod(0o600)
+    import journal_writer
+    journal_writer.append(JOURNAL, [entry])
 
 
 def main(argv: list[str]) -> int:

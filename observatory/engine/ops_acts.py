@@ -39,7 +39,6 @@ ROOT = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 import memory_redact  # noqa: E402
 import key_acts  # noqa: E402
-import osprivacy  # noqa: E402
 
 Refusal = key_acts.Refusal
 CALLER = key_acts.CALLER
@@ -195,11 +194,8 @@ def _target(action: str, params: dict[str, Any]) -> str:
 def _journal(row: dict, *, job: str) -> None:
     """Written BEFORE the job's process starts: a log written after loses the crash. Every string is scrubbed but the
     job's id, which `jobs.JOB_ID` has checked (its hex would read as a credential)."""
-    file = journal_path()
-    file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = osprivacy.open(file, os.O_WRONLY | os.O_APPEND | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
-    with os.fdopen(fd, "a", encoding="utf-8") as out:
-        out.write(json.dumps({**_scrub(row), "job": job}, ensure_ascii=False, sort_keys=True) + "\n")
+    import journal_writer
+    journal_writer.append(journal_path(), [{**_scrub(row), "job": job}], sort_keys=True)
 
 
 def act(action: str, *, file: str | None = None, output: str | None = None, include: str | None = None,
