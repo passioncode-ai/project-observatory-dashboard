@@ -648,8 +648,8 @@
     {
       "path": "dashboard/build_dashboard.py",
       "source_sha256": "9169551d891a47eb7e9d96011b07f6b0a621338884beeba4c868c10d3f84724a",
-      "export_sha256": "9090feb86a7049cb29e5167df3a6caf89647c733079cb36404a5c211683cfea6",
-      "bytes": 316960,
+      "export_sha256": "0b22330926b75693550ab563f04f9dd66090efd0e74cda3d64fc214184d58012",
+      "bytes": 317262,
       "python_comments_removed": 235,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,
@@ -715,8 +715,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9d03e09c2f63f76a935de03dfeb313ac5320dada09cdc9ca18c66cb86ddffd54",
-      "bytes": 240699
+      "export_sha256": "24dea76db1a4cd49b8c03dbbb451a49d19f0af963c6cf7ba490005f8e4e9c1f3",
+      "bytes": 240954
     },
     {
       "path": "dashboard/machine_page.py",
@@ -1045,8 +1045,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "37cb1dda7dddd859f7503586884ae95306c15cdf693f1155174b049d02267a90",
-      "bytes": 261704,
+      "export_sha256": "cd12d6c205284c08b909da17f8e357ed9d891827ac68c58aba990366cffa391f",
+      "bytes": 262023,
       "upstream_modified": true
     },
     {
@@ -4986,8 +4986,8 @@
     {
       "path": "tests/test_dashboard_render.py",
       "source_sha256": "48ff53d5e309194a35d8b1b6a1f9bffee2191a720be5a5d7493560dc8fa946fc",
-      "export_sha256": "2f78e4eb7149bc77b30361bde0afe0098a09757e96e92be146ef5e75a57e8956",
-      "bytes": 65329,
+      "export_sha256": "ba8704c5903e9213707432e82f29819edaa37a5ca9fa6c7b2b6ee7b4f3e06d7b",
+      "bytes": 65916,
       "python_comments_removed": 13,
       "python_docstrings_removed": 12,
       "tool_descriptions_retained": 0,

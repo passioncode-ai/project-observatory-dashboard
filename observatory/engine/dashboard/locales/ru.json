@@ -1885,7 +1885,6 @@
  "unreadable: {error}": "не читается: {error}",
  "Credentials were not scanned. Add a key to this workspace's vault (the value on stdin), then rebuild:": "Ключи не сканировались. Добавьте ключ в хранилище этой папки данных (значение — через stdin), затем пересоберите:",
  "Environment files were not scanned. Scan the projects folder, then rebuild:": "Файлы окружения не сканировались. Просканируйте папку проектов, затем пересоберите:",
- "MCP was not scanned. Point it at your home, switch it on and scan:": "MCP не сканировался. Укажите домашнюю папку, включите интеграцию и просканируйте:",
  "Analytics was not scanned. It needs a Google service account in the secret store; then switch it on and scan:": "Аналитика не сканировалась. Нужен сервисный аккаунт Google в хранилище секретов; затем включите интеграцию и просканируйте:",
  "Heroku was not scanned. Log in with the Heroku CLI, then switch it on and scan:": "Heroku не сканировался. Войдите через Heroku CLI, затем включите интеграцию и просканируйте:",
  "No project measured yet. Name the folder that holds your project checkouts, then measure it:": "Ни один проект ещё не измерен. Укажите папку с рабочими копиями проектов и измерьте её:",
@@ -2897,5 +2896,8 @@
  "its Docker engine did not answer": "её движок Docker не ответил",
  "no docker command is installed here": "команда docker здесь не установлена",
  "the virtual machines could not be listed": "не удалось перечислить виртуальные машины",
- "the guard's time ran out": "время контроля диска закончилось"
+ "the guard's time ran out": "время контроля диска закончилось",
+ "MCP was not scanned.": "MCP не сканировался.",
+ "An agent points it at your home and switches it on with {configure} ({root}, {switch}), then scans with {refresh}.": "Агент указывает домашнюю папку и включает интеграцию через {configure} ({root}, {switch}), затем сканирует через {refresh}.",
+ "an agent asks with {refresh}.": "агент запрашивает её через {refresh}."
 }
