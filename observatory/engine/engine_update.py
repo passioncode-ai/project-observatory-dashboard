@@ -300,6 +300,10 @@ class Fetcher:
         # then anonymous reads for the rest of the run (A13 review: it used to be retried,
         # and announced, on every request).
         self.token_refused = False
+        #: How the release API was read in this run: "authenticated" and/or "anonymous" (OBS-581). A
+        #: scheduled job may reach no token (`gh` off its PATH, or its keychain out of reach), and the
+        #: anonymous API limit is per address.
+        self.api_reads: set[str] = set()
 
     def _open(self, url: str, accept: str, anonymous: bool = False):
         check_url(url)
@@ -313,6 +317,8 @@ class Fetcher:
             github_token() if urllib.parse.urlsplit(url).hostname == API_HOST else None)
         if token:
             headers["Authorization"] = f"Bearer {token}"
+        if accept == "application/vnd.github+json":
+            self.api_reads.add("authenticated" if token else "anonymous")
         request = urllib.request.Request(url, headers=headers)
         last = "no attempt was made"
         for attempt in range(self.attempts):
@@ -824,6 +830,12 @@ class LaunchdServices:
 
     def loaded(self, label: str) -> bool:
         return self.launch.job_loaded(label)
+
+    def system_daemon(self, label: str) -> bool:
+        """LABEL runs as a system daemon root's space_daemons.py loaded for this account (OBS-361 part 2).
+        `loaded` asks `gui/<uid>`, which never sees it, and only root can stop it (OBS-581)."""
+        import machine_move
+        return machine_move._system_daemon_loaded(subprocess.run, label, os.getuid())
 
     def stop(self, label: str) -> tuple[bool, str]:
         return self.launch.stop_job(label)
@@ -1354,6 +1366,10 @@ class Transaction:
         self.steps: list[dict] = []
         self.stopped: list[dict] = []
         self.work: Path | None = None   # the run's temporary folder, while run() holds it
+        #: The step the run is in now: a failure names it (`failed_step`, OBS-581).
+        self.stage = "preflight"
+        #: Root's restarts of the jobs it runs as system daemons, said at the end (OBS-581).
+        self.system_steps: list[str] = []
         self.report: dict = {"status": "failed", "current": current, "target": release.version,
                              "steps": self.steps, "services_stopped": [], "rolled_back": False,
                              "workspace_restored": False, "rollback_available": False, "degraded": []}
@@ -1365,6 +1381,7 @@ class Transaction:
     # refusals: before anything changes -------------------------------------------------
 
     def refuse_early(self) -> None:
+        self.stage = "preflight"
         rel = relation(self.current, self.release.version)
         if rel < 0:
             raise UpdateError(f"{self.release.version} is older than the running {self.current}; automatic downgrade "
@@ -1437,7 +1454,9 @@ class Transaction:
             except config.ConfigurationError:
                 raise UpdateError("A tick or another workspace operation is running, so the workspace is busy; "
                                   "the automatic update waits for it and nothing was changed") from None
-        jobs = [j for j in services.managed() if services.loaded(j["label"])]
+        managed = services.managed()
+        jobs = [j for j in managed if services.loaded(j["label"])]
+        self.system_domain(services, [j for j in managed if j not in jobs])
         for job in jobs:
             if not Path(job["plist"]).is_file():
                 raise UpdateError(f"The {job['name']} job is loaded but its plist is gone, so it could not be "
@@ -1450,6 +1469,29 @@ class Transaction:
             self.stopped.append(job)
             self.step("stopped", service=job["name"])
         self.report["services_stopped"] = [j["name"] for j in self.stopped]
+
+    def system_domain(self, services, others: list[dict]) -> None:
+        """Jobs root's space_daemons.py runs as system daemons of this account (OBS-581). `gui/<uid>`
+        cannot see them and only root can stop them, so the update neither stops nor restarts them;
+        it says so instead of installing under them in silence."""
+        probe = getattr(services, "system_daemon", None)
+        if probe is None:
+            return
+        held = []
+        for job in others:
+            try:
+                if probe(job["label"]):
+                    held.append(job)
+            except Exception:  # noqa: BLE001: a probe that cannot answer reads as "not a system daemon"
+                continue
+        if not held:
+            return
+        self.report["services_system_domain"] = [j["name"] for j in held]
+        self.report["degraded"].append(
+            "the " + " and ".join(j["name"] for j in held) + " job" + ("s run" if len(held) > 1 else " runs")
+            + " as a system daemon of this account, which only root can stop: not stopped for this update, "
+            "and still running the code it started with until root restarts it")
+        self.system_steps = [f"sudo launchctl kickstart -k system/{j['label']}" for j in held]
 
     def start_writers(self) -> list[dict]:
         failed = []
@@ -1544,6 +1586,7 @@ class Transaction:
             report["services_not_restarted"] = failed
             human.extend(f["fix"] for f in failed)
         report["human_steps"] = human
+        report["failed_step"] = self.stage
         report["status"] = "rolled-back" if not human else "needs-attention"
         # The last line, written into the home as it now is: a `rolled-back` written
         # before a workspace swap went with the changed copy into `.failed-update-*`, and
@@ -1585,6 +1628,7 @@ class Transaction:
         work = Path(tempfile.mkdtemp(prefix="observatory-update-"))  # paths-check: allow — removed by the finally below on every path
         try:
             self.work = work
+            self.stage = "download"
             self.event("update_download", "started")
             try:
                 wheel, meta = fetch_verified(self.deps.fetcher, self.release, work)
@@ -1617,8 +1661,10 @@ class Transaction:
                 self.report["degraded"].append(
                     f"{wheel.name} carries no {LOCK_MEMBER}: its [full] dependencies are installed "
                     "unconstrained, at the newest releases the index offers rather than the tested set")
+            self.stage = "rollback-wheel"
             rollback = self.rollback_wheel(work)
             self.report["rollback_available"] = rollback is not None
+            self.stage = "machine-backup"
             if self.has_ws:
                 # The machine's agent setup, before anything is stopped (OBS-157): it reads the
                 # home and the checkouts, not the workspace, so the jobs stay up meanwhile.
@@ -1631,9 +1677,12 @@ class Transaction:
                                                    + str(self.report["machine_backup"].get("detail", ""))[:200])
             # Again, with the machine bundle written and the wheels downloaded: the last
             # moment at which a refusal changes nothing.
+            self.stage = "space-check"
             self.check_space(rollback_cached=rollback is not None and rollback.parent == self.base / CACHE,
                              downloaded=True)
+            self.stage = "stop-writers"
             self.stop_writers()
+            self.stage = "snapshot"
             snapshot = before = None
             try:
                 if self.has_ws:
@@ -1652,6 +1701,7 @@ class Transaction:
                 raise
             # The point of change: from here every failure goes through undo().
             self.event("update_install", "started")
+            self.stage = "install"
             try:
                 self.deps.installer.install(wheel, force=relation(self.current, self.release.version) == 0,
                                             constraints=meta["constraints"])
@@ -1660,17 +1710,20 @@ class Transaction:
                 self.install_failed("timeout" if "TimeoutExpired" in str(exc) else "failed")
                 return self.undo(f"install failed: {exc}", rollback, snapshot, before)
             if self.has_ws:
+                self.stage = "workspace-upgrade"
                 code, detail = self.deps.engine(self.base).upgrade()
                 if code:
                     self.install_failed("timeout" if code == 125 and "TimeoutExpired" in detail else "failed")
                     return self.undo(f"the new release's workspace upgrade failed (exit {code}): {detail}",
                                      rollback, snapshot, before)
                 self.step("workspace-upgraded")
+            self.stage = "verify"
             problem = self.verify(meta)
             if problem:
                 self.install_failed("failed")
                 return self.undo(f"verification failed: {problem}", rollback, snapshot, before)
             self.step("verified-installed")
+            self.stage = "finish"
             return self.finish(wheel, rollback, snapshot)
         finally:
             shutil.rmtree(work, ignore_errors=True)
@@ -1723,6 +1776,8 @@ class Transaction:
         if failed:
             report["services_not_restarted"] = failed
             report["human_steps"] = [f["fix"] for f in failed]
+        if self.system_steps:
+            report["human_steps"] = report.get("human_steps", []) + self.system_steps
         try:
             running = list(self.deps.sessions())
         except Exception:  # noqa: BLE001 — the update is done; the census is advice
@@ -1822,6 +1877,9 @@ def main(argv: list[str], deps: Dependencies | None = None) -> int:
         deps = Dependencies()
     current = config.VERSION
     code, result, base = EXIT_REFUSED, {}, None
+    # Where a failed apply stopped (OBS-581): before the transaction, the step main is in;
+    # inside it, the transaction's own.
+    stage, tx = "release-source", None
     try:
         base = config.home()
         if args.version:
@@ -1835,6 +1893,7 @@ def main(argv: list[str], deps: Dependencies | None = None) -> int:
                 code, "check_failed"), base=_workspace_or_none(base))
             print(json.dumps(result, indent=2, ensure_ascii=False))
             return code
+        stage = "resolve-release"
         release = resolve_release(deps.fetcher, api, repo, args.version)
         if args.check:
             code, result = check_result(current, release)
@@ -1843,14 +1902,17 @@ def main(argv: list[str], deps: Dependencies | None = None) -> int:
         elif not args.apply:
             code, result = EXIT_OK, preview(base, current, release, deps, args)
         else:
+            stage = "job-helpers"
             if deps.services is None and not args.writers_stopped:
                 try:
                     deps.services = services_for()
                 except Exception as exc:  # noqa: BLE001 — an unusable helper is a refusal, not a crash
                     raise UpdateError(f"The job helpers could not be loaded ({type(exc).__name__}); "
                                       "stop the writers yourself and pass --writers-stopped") from None
+            stage = "update-lock"
             with update_lock(base):
-                code, result = Transaction(base, current, release, deps, args).run()
+                tx = Transaction(base, current, release, deps, args)
+                code, result = tx.run()
     except Undetermined as exc:
         code, result = EXIT_UNDETERMINED, {"status": "degraded", "current": current, "degraded": [str(exc)]}
         if args.check:
@@ -1863,8 +1925,19 @@ def main(argv: list[str], deps: Dependencies | None = None) -> int:
     except (config.ConfigurationError, RuntimeError, OSError) as exc:
         code, result = EXIT_REFUSED, {"status": "refused", "current": current,
                                       "error": f"{type(exc).__name__}: {exc}", "degraded": []}
+    if args.apply and code not in (EXIT_OK, EXIT_SERVICES, EXIT_HELD):
+        result.setdefault("failed_step", tx.stage if tx is not None else stage)
+        reads = getattr(deps.fetcher, "api_reads", None)
+        if reads:
+            result["api_reads"] = sorted(reads)
     if args.apply and base is not None and result.get("status") == "refused":
-        log(base, "refused", **{"from": current, "error": result.get("error")})
+        log(base, "refused", **{"from": current, "error": result.get("error"), "failed_step": result.get("failed_step")})
+    elif args.apply and base is not None and code == EXIT_UNDETERMINED:
+        # A release that could not be looked up or fetched: said in the journal too, with its reason,
+        # so an automatic apply that ended here leaves something to read (OBS-581).
+        log(base, "undetermined", **{"from": current, "exit": code, "failed_step": result.get("failed_step"),
+                                     "api_reads": result.get("api_reads"),
+                                     "degraded": [str(d)[:300] for d in result.get("degraded") or []][:5]})
     print(json.dumps(result, indent=2, ensure_ascii=False))
     return code
 

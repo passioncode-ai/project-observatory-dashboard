@@ -43,6 +43,8 @@ import pgp_fixture
 SIGNER = pgp_fixture.Key()
 
 AT = datetime.datetime(2026, 10, 5, 12, 0, tzinfo=datetime.timezone.utc)
+#: A fake credential in the shape of a GitHub token: never real, and never in a record (OBS-581).
+FAKE_SECRET = "ghp_" + "Ab3dEf6hIj9kLm2nOp5qRs8tUv1wXy4zAb7c"
 SECRET_MARK = "zebra-orchard-" + "5521"
 
 
@@ -73,8 +75,9 @@ class FakeStore:
 class FakeCommands:
     """`full update --check` and `--apply`, answered from a script of exit codes."""
 
-    def __init__(self, check=0, apply=0, latest="9.9.9"):
+    def __init__(self, check=0, apply=0, latest="9.9.9", report=None, output=None):
         self.check, self.apply_code, self.latest, self.calls = check, apply, latest, []
+        self.report, self.output = report, output
 
     def full(self, *args, timeout=0, env=None):
         self.calls.append((args, dict(env or {})))
@@ -82,6 +85,10 @@ class FakeCommands:
 
     def apply(self, *args, env=None):
         self.calls.append((("update", *args), dict(env or {})))
+        if self.output is not None:
+            self.last_output = self.output
+        if self.report is not None:
+            return self.apply_code, dict(self.report), ""
         return (self.apply_code, {"version": self.latest},
                 "" if self.apply_code == 0 else "synthetic failure")
 
@@ -721,6 +728,29 @@ class ApplyProcess(Base):
         self.assertEqual((code, doc), (125, {}))
         self.assertIn("Error", err)
 
+    def test_the_apply_keeps_the_last_lines_of_both_streams_redacted(self):
+        # OBS-581: an automatic apply that failed left only "exit 3" to read.
+        python = self.fake_python(
+            f"secret = {FAKE_SECRET!r}\n"
+            "for i in range(100):\n"
+            "    print(f'out line {i}')\n"
+            "    print(f'err line {i}', file=sys.stderr)\n"
+            "print('token in a header: ' + secret, file=sys.stderr)\n"
+            # A password in an index URL, assembled at run time so no source line carries one.
+            "print('index https://' + 'user' + ':' + 'pass' + '@pypi.example.org/simple', file=sys.stderr)\n"
+            "sys.exit(3)")
+        commands = M.Commands(self.home, python=str(python))
+        code, doc, err = commands.apply("--apply")
+        self.assertEqual(code, 3)
+        out, errs = commands.last_output["stdout"], commands.last_output["stderr"]
+        self.assertEqual((len(out), len(errs)), (M.OUTPUT_TAIL_LINES, M.OUTPUT_TAIL_LINES))
+        self.assertEqual(out[-1], "out line 99")
+        self.assertEqual(errs[-3], "err line 99")
+        self.assertIn("[redacted]", errs[-2])
+        self.assertNotIn(FAKE_SECRET, json.dumps(commands.last_output))
+        self.assertNotIn("user:pass", json.dumps(commands.last_output))
+        self.assertNotIn(FAKE_SECRET, err)
+
     def test_output_that_is_not_json_reads_as_empty(self):
         python = self.fake_python("print('not json')")
         self.assertEqual(M.Commands(self.home, python=str(python)).apply("--apply")[:2], (0, {}))
@@ -884,6 +914,34 @@ class Pass(Base):
         self.assertFalse(any("did not complete" in w
                              for w in M.status(self.home, schedule=FakeSchedule())["warnings"]))
 
+    def test_an_undetermined_apply_leaves_its_reason_step_and_output_to_read(self):
+        # OBS-581, 2026-11-16: `undetermined: exit 3` with nothing in maintain.log, maintain.err or update.jsonl.
+        report = {"status": "degraded", "current": "0.1.0", "failed_step": "resolve-release",
+                  "degraded": ["GitHub API rate limit reached; retry after it resets"]}
+        output = {"stdout": ['  "status": "degraded",'],
+                  "stderr": ["Observatory: reading anonymously", "Authorization: Bearer " + FAKE_SECRET]}
+        self.run_pass(FakeCommands(check=10, apply=3, report=report, output=output))
+        update = M.read_state(self.home)["update"]
+        self.assertEqual((update["result"], update["failed_step"]), ("undetermined", "resolve-release"))
+        self.assertIn("rate limit", update["detail"], "the reason the updater printed, not `exit 3`")
+        self.assertEqual(update["stderr_tail"][0], "Observatory: reading anonymously")
+        rows = [json.loads(line) for line in (self.home / "store/logs/update.jsonl").read_text().splitlines()]
+        last = rows[-1]
+        self.assertEqual((last["event"], last["exit"], last["failed_step"]),
+                         ("automatic-update-failed", 3, "resolve-release"))
+        self.assertIn("rate limit", last["detail"])
+        self.assertEqual(last["stdout_tail"], output["stdout"])
+        for path in (self.home / "store/logs/update.jsonl", M.state_path(self.home)):
+            self.assertNotIn(FAKE_SECRET, path.read_text(), path)
+
+    def test_a_failed_apply_without_output_still_says_its_exit(self):
+        self.run_pass(FakeCommands(check=10, apply=1))
+        update = M.read_state(self.home)["update"]
+        self.assertEqual(update["detail"], "synthetic failure")
+        self.assertNotIn("stdout_tail", update)
+        rows = [json.loads(line) for line in (self.home / "store/logs/update.jsonl").read_text().splitlines()]
+        self.assertEqual((rows[-1]["event"], rows[-1]["exit"]), ("automatic-update-failed", 1))
+
     def test_after_an_update_the_check_reads_as_done(self):
         self.run_pass(FakeCommands(check=10, apply=0))
         self.assertEqual(M.read_state(self.home)["check"]["result"], "updated")
@@ -920,6 +978,16 @@ class Pass(Base):
             got = M.reconcile_in_flight(self.home, {"update_in_flight": {"at": "2026-10-05T11:00:00Z"}})
             with self.subTest(outcome=outcome):
                 self.assertEqual((got["result"], got["detail"]), (result, "pip: connection reset"))
+
+    def test_an_in_flight_apply_that_ended_undetermined_is_read_with_its_reason(self):
+        journal = self.home / "store" / "logs" / "update.jsonl"
+        journal.parent.mkdir(parents=True, exist_ok=True)
+        journal.write_text(json.dumps({"at": "2026-10-05T11:20:00Z", "event": "undetermined", "exit": 3,
+                                       "failed_step": "download", "degraded": ["release source unreachable"],
+                                       "from": "0.1.0"}) + "\n")
+        got = M.reconcile_in_flight(self.home, {"update_in_flight": {"at": "2026-10-05T11:00:00Z", "to": "9.9.9"}})
+        self.assertEqual((got["result"], got["failed_step"], got["detail"]),
+                         ("undetermined", "download", "release source unreachable"))
 
     def test_an_in_flight_apply_with_no_final_entry_is_a_failure_not_silence(self):
         state = M.read_state(self.home)
@@ -2043,6 +2111,20 @@ class Schedule(Base):
         self.assertIn(f"apply --user ", out["next"][0])
         self.assertIn(f"--label {sched.label}", out["next"][0])
         self.assertTrue(sched.installed())
+
+    def test_a_system_daemon_names_where_root_writes_its_logs(self):
+        # OBS-581: space_daemons.py moves a daemon's logs to a root-owned folder; maintain.log stays empty.
+        sched = self.headless(loaded=True)
+        daemon = Path(self.base) / "LaunchDaemons"
+        daemon.mkdir()
+        (daemon / f"{sched.label}.plist").write_bytes(plistlib.dumps({
+            "Label": sched.label, "StandardOutPath": f"/Library/Logs/ProjectObservatory/user/{sched.label}.out.log",
+            "StandardErrorPath": f"/Library/Logs/ProjectObservatory/user/{sched.label}.err.log"}))
+        with patch.object(M.LaunchdSchedule, "DAEMONS", daemon):
+            out = sched.status()
+        self.assertEqual(out["domain"], "system")
+        self.assertEqual(out["logs"], {"stdout": f"/Library/Logs/ProjectObservatory/user/{sched.label}.out.log",
+                                       "stderr": f"/Library/Logs/ProjectObservatory/user/{sched.label}.err.log"})
 
     def test_headless_the_agent_copy_stays_until_roots_daemon_runs(self):
         # launchctl answers 125 for an ordinary account reached over SSH too: its agent loads at sign-in.
