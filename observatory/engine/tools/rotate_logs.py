@@ -20,9 +20,10 @@ sys.path.insert(0, str(ROOT))
 import log_policy  # noqa: E402
 import osprivacy  # noqa: E402
 import paths  # noqa: E402
+import runtime_receipts as rr  # noqa: E402  OBS-610: declared runtime files
 
 #: Journals outside store/logs that grow by appending, one line per event.
-SCRATCH_JOURNALS = ("store-faults.jsonl", "companion-faults.jsonl")
+SCRATCH_JOURNALS = ("store-faults.jsonl", rr.COMPANION_FAULTS.name)
 
 
 def targets() -> tuple[pathlib.Path, tuple[pathlib.Path, ...]]:

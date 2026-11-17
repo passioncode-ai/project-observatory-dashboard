@@ -75,7 +75,7 @@ LEGACY = (
 BOUNDARY = (
     'open_unlinked',
     'heroku_scoped', 'holder_capture',
-    'workspace', 'workspace_upgrade', 'workspace_boundaries', 'dashboard_shell',
+    'workspace', 'workspace_upgrade', 'runtime_receipts', 'workspace_boundaries', 'dashboard_shell',
     'workspace_scheduler', 'schema_compatibility', 'keyserver_boundary',
     'private_sources', 'public_contracts', 'vault_boundaries', 'provider_secret_boundaries', 'cli_compatibility', 'handed_commands', 'dashboard_portability',
     'agent_plugin', 'audit_regressions', 'identity_map', 'zone_accounts', 'deployed_commit', 'scrub_incremental', 'leak_scan_incremental', 'tick_health', 'accounts', 'environments', 'credential_bindings', 'local_keys', 'trap_anchors', 'leak_coverage', 'backup_vault', 'organizations', 'org_selection', 'machine', 'local_folders', 'config_locations', 'dashboard_stop',
@@ -435,6 +435,8 @@ ROOT_FILES = (
     'why_asks.py',
     # Updates that arrive by themselves and data that survives a reinstall (2026-10-05).
     'maintenance.py', 'app_update.py', 'update_events.py', 'usage_analytics.py',
+    # What a live writer may change while an update stages, declared by its writer (OBS-610).
+    'runtime_receipts.py',
     # The machine's agent setup in one encrypted bundle, and its restore (OBS-157).
     'machine_backup.py',
     # The machine id, the placement file and a job's move between two machines (OBS-283, OBS-284).

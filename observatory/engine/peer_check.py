@@ -263,7 +263,8 @@ def status(base: pathlib.Path | None = None) -> dict:
     snap = gate.snapshot()
     try:
         import paths
-        receipt = json.loads((pathlib.Path(paths.SCRATCH) / "serverd.json").read_text(encoding="utf-8"))
+        import runtime_receipts as rr
+        receipt = json.loads(rr.SERVERD.at(pathlib.Path(paths.SCRATCH)).read_text(encoding="utf-8"))
         refused = ((receipt or {}).get("peer") or {}).get("refused")
     except (OSError, ValueError, ImportError, AttributeError):
         refused = None

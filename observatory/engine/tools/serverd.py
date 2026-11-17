@@ -123,6 +123,7 @@ import osproc  # noqa: E402
 import fabric_service as fs  # noqa: E402 — the vendored fabric-service/0.1 kit
 import leak_register  # noqa: E402
 import paths                                                                    
+import runtime_receipts as rr  # noqa: E402  OBS-610: the files this writes while an update stages
 import service_events  # noqa: E402
 import service_health  # noqa: E402
 import service_identity  # noqa: E402
@@ -132,7 +133,7 @@ import secret_prompt  # noqa: E402  OBS-260: the secret-request queue served on 
 import peer_check  # noqa: E402  OBS-355: another OS account's connection refused before it is read
 
 PORT = int(os.environ.get("OBSERVATORY_SERVER_PORT", "47311"))
-RECEIPT = paths.SCRATCH / "serverd.json"
+RECEIPT = rr.SERVERD.at(paths.SCRATCH)
 import configuration
 try:
     from tools import install_launchd
@@ -1021,15 +1022,63 @@ def _port_for(a) -> int:
     return local_ports.resolve("server", allocate_missing=a.install)
 
 
-def serve(port: int) -> int:
-    """Lock, token, bind, beat — in that order, and the order is the point.
+#: How often a server started while an update holds this workspace's lock looks again (OBS-593).
+UPDATE_POLL_SECONDS = 2.0
 
-    The lock comes before ANY side effect (fabric-service/0.1, "one copy"): a
+
+def _update_holds(home: pathlib.Path) -> bool:
+    import engine_update
+    return engine_update.update_lock_held(home)
+
+
+def stand_down_while_updating(home: pathlib.Path | None = None, scratch: pathlib.Path | None = None, *,
+                              held=None, sleep=time.sleep, say=None, poll: float = UPDATE_POLL_SECONDS) -> float:
+    """Wait, writing nothing, while an update holds this workspace's lock (OBS-593). Answers the seconds waited.
+
+    `full update --apply` and the daily snapshot stop this server and hold the update lock until they start it
+    again; meanwhile the workspace must hold still. On 2026-11-17 a process outside the engine loaded the job
+    again while an update was staged, and the server it started (the new release, from the installed wheel)
+    rewrote its receipt: the update rolled back. Whoever loads the job (a person, an agent, a host's Start
+    button), the server it starts now waits here before its lock, token, socket or receipt, and starts once the
+    lock is free: the update's own start, which comes while it still holds the lock, waits the few seconds
+    until the update ends. Only a server that writes into this workspace waits; a probe that cannot answer
+    never keeps the server down."""
+    home = pathlib.Path(home or paths.HOME)
+    scratch = pathlib.Path(scratch or RECEIPT.parent)
+    try:
+        scratch.resolve().relative_to(home.resolve())
+    except ValueError:
+        return 0.0
+    held = held or _update_holds
+    say = say or (lambda line: print(line, file=sys.stderr, flush=True))
+    waited, said = 0.0, False
+    while True:
+        try:
+            if not held(home):
+                return waited
+        except Exception:  # noqa: BLE001 - a probe that cannot answer (unreadable lock, import) never keeps it down
+            return waited
+        if not said:
+            say("an update of this workspace holds its lock: waiting for it to end before starting, "
+                "writing nothing meanwhile")
+            said = True
+        sleep(poll)
+        waited += poll
+
+
+def serve(port: int) -> int:
+    """Gate, lock, token, bind, beat: in that order, and the order is the point.
+
+    An update holding this workspace's lock is waited out first, writing nothing (OBS-593). The lock comes
+    before ANY side effect (fabric-service/0.1, "one copy"): a
     second copy started by hand, by `full open --serve` or by a stale launchd
     job must leave nothing behind — no token, no receipt, no socket. It exits
     75 with one sentence naming the holder (`fs.hold_single_instance`).
     """
     global RUNTIME, LIFECYCLE
+    # launchd's SIGTERM must end a server that is still waiting (a blocked mask survives exec, as below).
+    osproc.unblock_stop_signals()
+    stand_down_while_updating()
     lock = fs.hold_single_instance(service_identity.lock_dir())
     token, problem = None, None
     try:
