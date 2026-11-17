@@ -3430,6 +3430,13 @@
       "bytes": 12927
     },
     {
+      "path": "key_acts.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "91aeb05eb214258d93a62b06bdad77802b02c61a9deb9722b696c220c2b0fca5",
+      "bytes": 12144
+    },
+    {
       "path": "key_source.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -5726,6 +5733,13 @@
       "upstream_modified": true,
       "export_sha256": "ce7e8e2ceb23585265fe17581b15e32a7ddd95b316bc6a4b5beb2bd1b28b5dfa",
       "bytes": 10732
+    },
+    {
+      "path": "tests/test_key_acts.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "5ab5fd0a93f150a2c397964a329bc11eb32224dd731511a896b3883808da45df",
+      "bytes": 17123
     },
     {
       "path": "tests/test_key_expiry.py",
@@ -8366,7 +8380,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 1131,
+  "file_count": 1133,
   "excluded": [
     "git-history",
     "operator-registries",
