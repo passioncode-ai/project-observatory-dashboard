@@ -514,6 +514,12 @@ def observatory_credentials(
     `expiryReason`, or `expiry: not recorded` for a value put by hand. A value
     issued on a credential request carries `issuedOnRequest` (the request id, its
     context, agent, door and account; `credential_requests.py show ID` has the rest).
+
+    Each vault row says where its value came from (OBS-556): `source` is `issued` (a door's ledger or record, or a
+    credential request, with `sourceContext` naming the door and account), `received` (`vault.py put --from LABEL`:
+    the sender as a person typed it), `shared` (the same keyed digest under another project's folder) or `unknown`
+    (put by hand; never read as issued). `sharedWith` names the other slots holding the value, `consumers` the
+    services started from the slot, and `consumersTool` the tool that finds every other copy by the value.
     """
     bad = _project_id_refusal(projectId, bare=True)
     if bad:

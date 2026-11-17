@@ -62,6 +62,9 @@ ANNOTATIONS = pathlib.Path(os.environ.get(
 #: leak register, closed here for the two curated ones. A MISSING file is still
 #: empty: not having curated anything is a state, not a fault.
 REGISTER_PROBLEMS: list[dict] = []
+#: What the key-source classification could not read (OBS-556): a slot's metadata, a door's record, the digest
+#: manifest. Carried into the document's `degraded`; a slot it touches reads `unknown`, never a guess.
+KEY_SOURCE_DEGRADED: list[dict] = []
 
 
 def _register_problem(path: pathlib.Path, exc: Exception) -> None:
@@ -532,7 +535,8 @@ def records(scan: dict, store: pathlib.Path, projects: list[dict]) -> tuple[list
     known = {p["id"] for p in projects}
     by_name = {p["name"]: p["id"] for p in projects}
     by_folder = {f: p["id"] for p in projects for f in (p.get("local_folders") or [])}
-    REGISTER_PROBLEMS.clear()                                                               
+    REGISTER_PROBLEMS.clear()
+    KEY_SOURCE_DEGRADED.clear()                                                               
     open_leaks = leaks(store)
     creds = (from_openrouter(scan) + from_vault(store) + from_machine_secrets()
              + from_project_secrets())
@@ -634,6 +638,19 @@ def records(scan: dict, store: pathlib.Path, projects: list[dict]) -> tuple[list
                 "no vault path and no curated row names a project for it — a shared "
                 "account's membership cannot be measured, and guessing it would send "
                 "somebody to rotate a credential other projects are using")
+    # WHERE EACH SLOT'S VALUE CAME FROM (OBS-556, CP-10), for the keys page. `key_source`, because a record's
+    # own `source` already says which reader found it.
+    slots = [c["id"].split("credential:vault/", 1)[1] for c in creds if c["kind"] == "project-secret"]
+    if slots:
+        import key_source
+        classes = key_source.classify(slots, KEY_SOURCE_DEGRADED, root=store)
+        for c in creds:
+            if c["kind"] == "project-secret":
+                got = classes.get(c["id"].split("credential:vault/", 1)[1]) or {}
+                c["key_source"] = got.get("source", "unknown")
+                c["key_source_context"] = got.get("sourceContext") or {}
+                if got.get("sharedWith"):
+                    c["key_source_shared_with"] = got["sharedWith"]
     signatures = load_annotations()
     for c in creds:
         sig = signatures.get(c["id"])
@@ -672,7 +689,7 @@ def document(creds: list[dict], scan: dict, obs_date: str) -> dict:
         "credentials": creds,
         "destinations": scan.get("destinations") or {},
         "unlisted_destinations": scan.get("unlisted_destinations") or [],
-        "degraded": scan.get("degraded") or [],
+        "degraded": (scan.get("degraded") or []) + list(KEY_SOURCE_DEGRADED),
         # A curated register that exists and would not read. Empty is the
         # normal state; a row here is a board row (`credential.register_unreadable`)
         # and withholds `credential.unsigned`, which would otherwise fire on every
