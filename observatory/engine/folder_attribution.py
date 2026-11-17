@@ -130,11 +130,16 @@ _CREDENTIAL_PAIRS = {
     "key": ("private", "api", "access", "secret", "session", "auth", "signing", "encryption", "master", "client",
             "login", "refresh"),
     "auth": ("token", "code", "header"), "session": ("token", "id"), "code": ("login", "auth", "access", "session")}
-_JWT = re.compile(r"eyJ[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]*")
-_SECRET_VALUE = re.compile(r"(^bearer\s.+|sk-[A-Za-z0-9_-]{16,}|gh[pousr]_[A-Za-z0-9]{20,}|xox[abposr]-[A-Za-z0-9-]{10,}"
-                           r"|AKIA[0-9A-Z]{16}|glpat-[A-Za-z0-9_-]{20,})", re.I)
+#: DEC-0151: a provider key's prefix in its canonical case only, after a boundary (the start, a character that is no
+#: ASCII letter or digit, or an escape), and an `sk-` key only with the strength `src/connections.ts` asks of one. The
+#: contract's pattern, compiled without a case-insensitive flag and with its digits written `[0-9]` (JavaScript's `\\d` is ASCII).
+_SECRET_VALUE = re.compile(
+    r"(^[Bb][Ee][Aa][Rr][Ee][Rr]\s.+|(?:^|[^A-Za-z0-9]|%[0-9A-Fa-f]{2}|\\[nrt\"']|\\u[0-9A-Fa-f]{4}|\\x[0-9A-Fa-f]{2}"
+    r"|\\[bfv0ae]|\\[0-7]{1,3}|%25[0-9A-Fa-f]{2}|\x1b\[[0-9;:]*m|(?:\\u001[bB]|\\x1[bB]|\\e|\\033|\\33)\[[0-9;:]*m)"
+    r"(?:sk-(?=[A-Za-z0-9_-]{0,255}?[0-9])(?:(?=[A-Za-z0-9_-]{0,255}?[A-Z])[A-Za-z0-9_-]{16,}|[A-Za-z0-9_-]{32,})"
+    r"|gh[pousr]_[A-Za-z0-9]{20,}|xox[abposr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|glpat-[A-Za-z0-9_-]{20,}))")
 _LONG_RUN = re.compile(r"[A-Za-z0-9+/=_-]{40,}")
-_BEARER_INSIDE = re.compile(r"\bbearer\s+(?=[A-Za-z0-9._~+/-]*\d)[A-Za-z0-9._~+/-]{12,}=*", re.I)
+_BEARER_INSIDE = re.compile(r"\bbearer\s+(?=[A-Za-z0-9._~+/-]*[0-9])[A-Za-z0-9._~+/-]{12,}=*", re.I)
 _PATH_LIKE = re.compile(r"^(?:[/~.]|[A-Za-z]:[\\/]|[a-z][a-z0-9+.-]*://)", re.I)
 
 
@@ -159,8 +164,36 @@ def _long_secret(value: str) -> bool:
                for r in _LONG_RUN.findall(value))
 
 
+def _has_jwt(text: str) -> bool:
+    """Whether the contract's `JWT_SHAPE` (`eyJ` and three base64url segments) is in `text`, read in one pass as its
+    `hasJwt` does: every `eyJ` of one
+    base64url run shares that run's end, so only its first is tried (the regex backtracks from each)."""
+    def run_end(start: int) -> int:
+        end = start
+        while end < len(text) and (text[end].isascii() and (text[end].isalnum() or text[end] in "-_")):
+            end += 1
+        return end
+    at = text.find("eyJ")
+    while at >= 0:
+        one = run_end(at + 3)
+        nxt = one
+        if one - at - 3 >= 2 and one < len(text) and text[one] == ".":
+            two = run_end(one + 1)
+            if two - one - 1 >= 2 and two < len(text) and text[two] == ".":
+                return True
+        at = text.find("eyJ", nxt)
+    return False
+
+
+def token_user_name(user: str) -> bool:
+    """A URL's user name read as a token (DEC-0177): 40 or more of `[A-Za-z0-9_-]` holding a letter and a digit,
+    a classic token's 40 hex. A name such as `git`, `deploy-bot` or 40 letters is none."""
+    return (bool(re.fullmatch(r"[A-Za-z0-9_-]{40,}", user)) and bool(re.search(r"[0-9]", user))
+            and bool(re.search(r"[A-Za-z]", user)))
+
+
 def _secret_value(value: str) -> bool:
-    return bool(_JWT.search(value) or _SECRET_VALUE.search(value)) or _long_secret(value)
+    return _has_jwt(value) or bool(_SECRET_VALUE.search(value)) or _long_secret(value)
 
 
 def _path_like(piece: str) -> bool:
@@ -171,13 +204,23 @@ def _path_like(piece: str) -> bool:
 
 
 def _secret_argument(value: str) -> bool:
-    if _JWT.search(value) or _SECRET_VALUE.search(value) or _BEARER_INSIDE.search(value):
+    if _has_jwt(value) or _SECRET_VALUE.search(value) or _BEARER_INSIDE.search(value):
         return True
     for piece in re.split(r"[\s=]", value):
         parts = re.split(r"[\\/]", piece) if _path_like(piece) else [piece]
         if any(_long_secret(p) for p in parts):
             return True
     return False
+
+
+def secret_value(value: str) -> bool:
+    """The contract's `secretValue`: a JWT, a provider key or `Bearer`, or a long mixed-case run."""
+    return _secret_value(value)
+
+
+def secret_url(value: str) -> bool:
+    """The contract's `secretUrl` (LC-21, DEC-0177): whether a URL carries a credential."""
+    return _secret_url(value)
 
 
 def _secret_url(value: str) -> bool:
@@ -188,9 +231,12 @@ def _secret_url(value: str) -> bool:
         if not url.scheme or not url.netloc:
             return False
         password = url.password
+        user = url.netloc.rpartition("@")[0].partition(":")[0] if "@" in url.netloc else ""
     except ValueError:
         return False
     if password:
+        return True
+    if token_user_name(unquote(user)):  # DEC-0177: a remote's user name that is a token
         return True
     for part in (url.query, url.fragment):
         for piece in part.split("&"):
@@ -204,7 +250,10 @@ def _secret_url(value: str) -> bool:
 
 
 def record_origin(origin: str | None) -> str | None:
-    """The origin a record keeps: the raw remote without what can carry a credential, or None."""
+    """The origin a record keeps: the raw remote without what can carry a credential, or None.
+
+    None too when the scp form's user, or a part of a kept URL user between `@`, is a token (DEC-0177): an
+    `ssh://<token>@host/path` or `<token>@host:path` remote records no origin, and an `https` one drops its user."""
     if origin is None:
         return None
     value = origin.strip()
@@ -219,6 +268,9 @@ def record_origin(origin: str | None) -> str | None:
         authority = rest[:slash]
         at = authority.rfind("@")
         user = "" if at < 0 or re.search("http", scheme.group(1), re.I) else authority[:at].split(":")[0]
+        # A kept user up to the last `@` may hold a token after another `@`, which the detector reads as no token.
+        if any(token_user_name(part) for part in user.split("@")):
+            return None
         value = f"{scheme.group(0)}{user + '@' if user else ''}{authority[at + 1:]}{rest[slash:]}"
     elif not (value.startswith("/") or re.match(r"^[A-Za-z]:[\\/]", value) or value.startswith(".")):
         scp = re.fullmatch(r"(?:([^@/\s]+)@)?([^:/\s]+):(\S+)", value)
@@ -226,10 +278,44 @@ def record_origin(origin: str | None) -> str | None:
         if not scp or normalize_origin(value) is None:
             return None
         host = scp.group(2)  # the host ends the user information at its last `@`, as normalize_origin reads it
+        # The scp form is no URL, so the detector reads no user name in it: a token user is read here (DEC-0177).
+        if scp.group(1) is not None and token_user_name(scp.group(1).split(":")[0]):
+            return None
         user = "" if scp.group(1) is None else scp.group(1).split(":")[0] + "@"
         value = f"{user}{host[host.rfind('@') + 1:]}:{re.split(r'[?#]', scp.group(3))[0]}"
     # The kept origin names the same repository as the raw one, by construction.
     return None if _secret_url(value) or normalize_origin(value) != normalize_origin(origin) else value
+
+
+def _remote_carries_credential(raw: str) -> bool:
+    """A remote as git holds it carries a credential: what the detector reads, a password, or a user name that is a
+    token (DEC-0177) in its URL or scp form, after any `@` of its user information."""
+    value = raw.strip()
+    if secret_url(value):
+        return True
+    scheme = re.match(r"^[A-Za-z][A-Za-z0-9+.-]*://", value)
+    if scheme:
+        info = re.split(r"[/?#]", value[scheme.end():], maxsplit=1)[0].rpartition("@")[0]
+    else:
+        scp = re.fullmatch(r"(?:([^@/\s]+)@)?([^:/\s]+):(\S+)", value)
+        if not scp or scp.group(1) is None:
+            return False
+        info = (scp.group(1) + "@" + scp.group(2)).rpartition("@")[0]
+    if not info:
+        return False
+    return bool(info.partition(":")[2]) or any(token_user_name(unquote(p)) for p in re.split(r"[@:]", info))
+
+
+def stored_remote(raw: str | None) -> str | None:
+    """A remote as the engine stores it beside a folder (OBS-576): the origin `record_origin` keeps where the
+    contract reads one; a remote it cannot read (an ssh alias, a host with no dot) as written, unless it carries a
+    credential; None when nothing of it may be kept. An empty remote stays empty. Idempotent."""
+    if raw is None or raw == "":
+        return raw
+    kept = record_origin(raw)
+    if kept is not None:
+        return kept
+    return None if _remote_carries_credential(raw) else raw
 
 
 def owner_of(repository: str) -> str:

@@ -281,8 +281,8 @@
     {
       "path": "collectors/merge.py",
       "source_sha256": "832e43056d8f239ebe5184d9c2a20c12ef771d641064c2bee03365b1c75b5e69",
-      "export_sha256": "f22f7da9037155a830d89a89f952b00af93fa4637be3b4d0be7151606f4214ab",
-      "bytes": 45089,
+      "export_sha256": "e87ca672344252de894b129d1856b2dcdad863ca38b88b0ef2027a02c32a6264",
+      "bytes": 45283,
       "python_comments_removed": 202,
       "python_docstrings_removed": 3,
       "tool_descriptions_retained": 0,
@@ -413,8 +413,8 @@
     {
       "path": "collectors/scan_filesystem.py",
       "source_sha256": "c99bffa1518af8a0bba6600890a7bde2fb1643fb004feb635ffdaacdb64d562c",
-      "export_sha256": "75c415078f93bf9699a12ed42116c0927dd4a2208d0717477829dd9041e3dc96",
-      "bytes": 27878,
+      "export_sha256": "7a3d9a671ba905249078dd10bd8ff6f1235c4f0034abb208e6d6cf410e6d4545",
+      "bytes": 30096,
       "python_comments_removed": 96,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
@@ -1266,15 +1266,15 @@
       "path": "fabric/attribution-vectors/SOURCE.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ad22996a86e70bf9e738db72044d8758f06d30dcf14bfdaeedabcd9ac5af9c33",
-      "bytes": 1201
+      "export_sha256": "b626cb44fdd19fa4a46e9cc97756483e90b453d28b59df8bb3f52b2280aa5cc3",
+      "bytes": 1446
     },
     {
       "path": "fabric/attribution-vectors/folder-attribution.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f3b2ce9875aa96f76f60f9edf5e2913ece93267ad22a02070007fefd8ece5d1d",
-      "bytes": 216860
+      "export_sha256": "c05a84e543dfe95768b3f0c1a9924f0a1224dda341d4bc7508a47ee7c1c54ed8",
+      "bytes": 236528
     },
     {
       "path": "fabric/delegation-schemas/README.md",
@@ -3374,8 +3374,8 @@
       "path": "folder_attribution.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "cd4b7dfe15c3287a872da152249a5c4156cbdf9d55621506863fc28fbf84e4a9",
-      "bytes": 22299
+      "export_sha256": "2a68a24de1082dd2ff519f65428b85821bd2cfeb852543eb36b29612b4484019",
+      "bytes": 26719
     },
     {
       "path": "holders.py",
@@ -5420,8 +5420,8 @@
       "path": "tests/test_filesystem_scan.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8d3440d2f1492728d7b3247bf5a23658ed3e2183b5b3b101d3e2489989289f90",
-      "bytes": 35197
+      "export_sha256": "9ebc39ee51432d98b0f6ed3dbb965cf7b748107b8c10edbd3af910a6ac43d267",
+      "bytes": 39733
     },
     {
       "path": "tests/test_finding_rules.py",
@@ -5451,8 +5451,8 @@
       "path": "tests/test_folder_attribution.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8166fb25f37b89d6608c7285143da38b42f467450ab8beaa38fa45676a5f29a2",
-      "bytes": 3463
+      "export_sha256": "f4020a5f45aea08d15cde75eb0c9ed596b19d09bf6eacb430a9536e18aaccfe7",
+      "bytes": 7679
     },
     {
       "path": "tests/test_footprint.py",
@@ -7404,8 +7404,8 @@
     {
       "path": "tools/check_secrets.py",
       "source_sha256": "bfd9be34804f652745f6085df1791139eea563b8e924002f9b7759d2f2f05f41",
-      "export_sha256": "6d98de8146638761018011b3b0a7726441f611ca419add36d5e83c0aacaa51b3",
-      "bytes": 47815,
+      "export_sha256": "4756892e3aa5de14079d84c0ebc4eb3fb36d6b58848b470a81407bdc39635f29",
+      "bytes": 48189,
       "python_comments_removed": 69,
       "python_docstrings_removed": 3,
       "tool_descriptions_retained": 0,
