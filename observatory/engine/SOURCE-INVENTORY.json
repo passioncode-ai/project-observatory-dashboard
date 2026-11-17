@@ -576,8 +576,8 @@
       "path": "configuration_door.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "3e874bd99bdd7a9911a5a0e4e60e821b4cead4158d6b5272373b61dfbdbba9e2",
-      "bytes": 41147
+      "export_sha256": "e6550a815f0f6dca6596ebb8246a9f00519baaf38fb368aad109d4b910d7a225",
+      "bytes": 40515
     },
     {
       "path": "contract_lock.py",
@@ -1038,8 +1038,8 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "6e65d81a628448ef664cf7f7f057e172c27e282345673474360bc1c6ef45f88a",
-      "bytes": 148866,
+      "export_sha256": "9d5bee10232bfd81337ad4fe601bca19496c9e2e19cd3d85ef26213847a3a642",
+      "bytes": 151409,
       "upstream_modified": true
     },
     {
@@ -3440,8 +3440,8 @@
       "path": "key_acts.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "c5271e4452052fc29b1e1e348efd48df9e965ce03eb36273bc999bf86a779194",
-      "bytes": 12824
+      "export_sha256": "ac9b0bf37362589e6e946364ca770ecbf6bfcb02c9aedf38f87524e9aca2afa5",
+      "bytes": 12021
     },
     {
       "path": "key_source.py",
@@ -3551,7 +3551,7 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "02843d79711b8ece2230a6d0bbc413a2f550263647931c7367ad0a38347cacae",
+      "export_sha256": "48a0ac6ecf3c823beb080a0dbd2f5eda964ea8327514abaa1e0310618cbbd0a3",
       "bytes": 166543,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
@@ -3618,8 +3618,8 @@
       "path": "node/actions.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "469ec8f05528d70ad5d0f07842b79c54c2d2fe0a5c713bfcc0c8e7b7525e0c8c",
-      "bytes": 9655
+      "export_sha256": "5e2605f5ca1094d288606710d08350c65a32b56e71dbe4aa73974944431aa039",
+      "bytes": 16128
     },
     {
       "path": "node/blobs.py",
@@ -3908,8 +3908,8 @@
       "path": "org_selection.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "479efe4a6309a8533df613c8c973f1ec1345bac4a635f62ed6cbac2fe6f26777",
-      "bytes": 112443
+      "export_sha256": "d88c1e65e09894812f409f23a44dd18e12efbcad787d330d12b5ec4752b4d458",
+      "bytes": 110013
     },
     {
       "path": "org_view.py",
@@ -3957,8 +3957,8 @@
       "path": "own_share.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "e7c90b39fd3b2a677be200a59d36c849950e2b081fe1e780475c91932e20397f",
-      "bytes": 6266
+      "export_sha256": "00f6542a402e92fe81937d22e52dee3c785dc9f61c303d016c26ad36c58ccd96",
+      "bytes": 6345
     },
     {
       "path": "paths.py",
@@ -4232,8 +4232,8 @@
       "path": "secret_prompt.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "33e787f767bb672a7973acee6b8db5703766a09ebafd6e04ee10e3b16d9bca10",
-      "bytes": 63313
+      "export_sha256": "cdd5e9a58651bbe43adaac869123f2a71ab31b56865c963a55e3d6d59cd20e92",
+      "bytes": 63437
     },
     {
       "path": "secret_store_carry.py",
@@ -4731,8 +4731,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "f8f090819b9922f8f84069e32c9499c6c0a5f810c887dc88a0534a4090f2c888",
-      "bytes": 59891,
+      "export_sha256": "91ac601e15e8885f154be1246c1b706424c49a7372e2be75994619845dc86748",
+      "bytes": 60023,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -5079,7 +5079,7 @@
       "path": "tests/test_configure.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "29de1edf0c1deaa45d86b9949e38bea2be845c2079e15d921178c85fe2e112e8",
+      "export_sha256": "904a767e7ec343c6e5cae5c5a2a7f1e4130ea308f224570c376b5be460457eb6",
       "bytes": 17010
     },
     {
@@ -6780,8 +6780,8 @@
       "path": "tests/test_secret_prompt.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0b0c54a14fe3650a7a1426b8809a4a0203b264147eaf4f0ab5f2cedf9dac184b",
-      "bytes": 60322
+      "export_sha256": "2875987683be2b63c15b364cb6eafbc5222bf803031c6bbe6f87a56121570482",
+      "bytes": 60443
     },
     {
       "path": "tests/test_secret_shape_sites.py",

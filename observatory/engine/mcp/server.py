@@ -858,7 +858,7 @@ def observatory_configure(
     (store/logs/configure.jsonl); a change that needs the person also needs their words as `decision`. `undo`
     restores the values an apply found, only while the files still hold what it wrote (else `undo_refused`).
     Refusals are typed (`unknown_key`, `invalid_value`, `secret_refused`, `plan_stale`, `plan_unknown`,
-    `operator_decision_required`, `decision_invalid`, `journal_unknown`, `already_undone`) and never echo a refused
+    `operator-decision-required`, `decision-invalid`, `journal_unknown`, `already_undone`) and never echo a refused
     value; a credential is never configuration (`observatory_secret_request`)."""
     import configuration_door as D
     words = decision if decision is not None else _meta_decision(ctx)

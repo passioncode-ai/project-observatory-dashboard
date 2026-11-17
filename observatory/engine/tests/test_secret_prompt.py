@@ -440,8 +440,9 @@ class TheDeclineTwin(Base):
         out = twin("beta", "secret.decline", {"requestId": rid}, self.decision(rid, at=stamp(self.now[0] - 5)))
         self.assertEqual(out["request"]["outcome"], "no-answer")
         self.assertNotIn("declinedBy", out["request"])
+        # The words name the request they decline (OBS-611), so an unknown one is answered as unknown.
         self.assertEqual(twin("beta", "secret.decline", {"requestId": "sreq_" + "f" * 24},
-                              self.decision())["error"], "unknown-request")
+                              self.decision("sreq_" + "f" * 24))["error"], "unknown-request")
 
     def test_the_agents_own_withdrawal_is_never_the_persons_decline(self):
         rid = ask("alpha", "TWIN_WITHDRAWN_KEY")["request"]["requestId"]

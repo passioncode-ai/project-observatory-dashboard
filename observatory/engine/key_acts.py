@@ -93,33 +93,24 @@ def _decided(action: str, target: str, decision: Any) -> dict:
 
 def decided(act: str, title: str, tool: str, target: str, decision: Any, *, label: str,
             why: str = "spends money or cannot be undone") -> dict:
-    """The operator's words for the act `act` on `target`, checked by `node/actions.py` as every relayed act is; the
-    record the journal keeps, or a refusal. Shared with `ops_acts.py` (OBS-559, the operations verbs)."""
-    if decision is None:
-        raise Refusal("operator-decision-required",
+    """The operator's words for the act `act` on `target`, checked by the engine's one decision check
+    (`node/actions.decided`, OBS-611) as every relayed act is; the record the journal keeps, or a refusal. Shared with
+    `ops_acts.py` (OBS-559, the operations verbs)."""
+    import engine_node
+    actions = engine_node.module("actions")
+    answer = actions.decided(
+        action={"id": act, "title": title, "tool": tool, "gate": "relayed"}, target=target, caller=CALLER,
+        decision=decision, now=_now())
+    if answer.get("ok") is True:
+        return answer["record"]
+    reason = answer.get("why")
+    if reason == "absent":
+        raise Refusal(answer["code"],
                       f"{label} {why}: ask the person, then call again with their words "
                       f"as `decision` (by operator, via relayed-instruction, action {act}, target {target}, the words "
                       "verbatim, when they said them)", action=act, target=target)
-    if not isinstance(decision, dict):
-        raise Refusal("decision-invalid", "the decision is not one JSON object in contract DEC-0121's shape",
-                      action=act)
-    kept = [decision.get("instruction"), decision.get("target"),
-            *((decision.get("source") or {}).values() if isinstance(decision.get("source"), dict) else [])]
-    if any(isinstance(v, str) and credential_shape.shaped(v, uuids=False) for v in kept):
-        raise Refusal("decision-invalid", "the decision carries something shaped like a credential; send it without",
-                      action=act)
-    import engine_node
-    answer = engine_node.module("actions").action_decision(
-        action={"id": act, "title": title, "tool": tool, "gate": "relayed"}, tier="T0",
-        caller=CALLER, decision=decision, target=target, now=_now())
-    if answer.get("ok") is not True or decision.get("target") != target:
-        raise Refusal("decision-invalid", "the decision is not the operator's for this action and object, or is "
-                                          "older than 24 hours: ask again and send their words as they said them",
-                      action=act, target=target)
-    record = {k: decision[k] for k in ("by", "via", "action", "target", "instruction", "at", "source")
-              if k in decision}
-    record["caller"] = CALLER
-    return record
+    raise Refusal(answer["code"], actions.REASONS.get(reason, actions.REASONS["contract"]), action=act,
+                  **({"target": target} if reason in ("contract", "target") else {}))
 
 
 def _raises_ceiling(ks, name: str, limit: float) -> bool:

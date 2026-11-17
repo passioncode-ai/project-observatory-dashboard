@@ -214,11 +214,11 @@ class Door(unittest.TestCase):
         self.assertEqual(self.door.apply(safe["digest"], actor="agent:mcp", base=self.home)["status"], "applied")
         gated = self.door.plan({"features.auto_cleanup": True}, base=self.home)
         self.assertEqual(gated["needsPerson"], ["features.auto_cleanup"])
-        answer = self.refused("operator_decision_required", self.door.apply, gated["digest"], actor="agent:mcp",
+        answer = self.refused("operator-decision-required", self.door.apply, gated["digest"], actor="agent:mcp",
                               base=self.home)
         self.assertEqual(answer["keys"], ["features.auto_cleanup"])
         self.assertIsNot(self.read("settings.json")["features"].get("auto_cleanup"), True)
-        self.refused("decision_invalid", self.door.apply, gated["digest"], actor="agent:mcp", base=self.home,
+        self.refused("decision-invalid", self.door.apply, gated["digest"], actor="agent:mcp", base=self.home,
                      decision={"by": "operator", "via": "relayed-instruction", "action": "configure.apply",
                                "target": "sha256:" + "1" * 64, "instruction": "turn it on",
                                "at": self.door._now()})

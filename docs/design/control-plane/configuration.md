@@ -41,8 +41,8 @@ journalled. Modules M8, M9, M11 and M13 write configuration only through it.
 
 Refusals are typed and never echo a refused value: `unknown_key`, `invalid_value`, `secret_refused` (any value shaped
 like a credential; a path may hold a system's random temporary folder name), `no_changes`, `file_unreadable`,
-`plan_stale`, `plan_unknown`, `operator_decision_required`, `decision_invalid`, `journal_unknown`, `already_undone`,
-`undo_refused`. A file that cannot be read is named in `degraded` and its keys read `null`, never the default. A journal
+`plan_stale`, `plan_unknown`, `operator-decision-required`, `decision-invalid` (the contract's spelling since OBS-611,
+[decisions-and-settings.md](decisions-and-settings.md)), `journal_unknown`, `already_undone`, `undo_refused`. A file that cannot be read is named in `degraded` and its keys read `null`, never the default. A journal
 line that cannot be written is named in `degraded` (`journal-unwritten`); the change stands.
 
 ## Tests

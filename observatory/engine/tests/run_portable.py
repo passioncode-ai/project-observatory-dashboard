@@ -238,6 +238,8 @@ BOUNDARY += ('node_peer_share', 'shares', 'share_cli')
 # OBS-291: the relayed decision a button's agent twin carries (contract DEC-0121 AP-2, the port of `actionDecision`
 # over the contract's vectors), for the twins of the secret prompt's Decline and of Open a share (DEC-0147).
 BOUNDARY += ('node_actions',)
+# OBS-611: one operator-decision check (`node/actions.decided`) and the five wrappers that call it.
+BOUNDARY += ('decision_check',)
 # OBS-263: the share mailbox as a Cloudflare Worker (cloud/worker.mjs) against the stores, and `full cloud deploy`.
 BOUNDARY += ('cloud_worker', 'cloud_deploy')
 # ENG-018: a manifest never pins a tag its release does not have.

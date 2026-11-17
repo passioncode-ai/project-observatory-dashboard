@@ -8,10 +8,16 @@ consent`) and no decision makes it an agent's.
 
 What the port leaves out: the operator's mandate (DEC-0125, `byMandate`), which the node's twins do not read, so a
 call carrying a mandate and no decision is answered `operator-decision-required`.
+
+`decided` (OBS-611) is the engine's one operator-decision check around the port: every door that takes the operator's
+relayed words (the configuration door, the key acts, the operations verbs, the organization selection, the secret
+prompt's twins, the own-share acts) calls it, with one refusal vocabulary (the contract's spelling) and one rule for a
+person's caller, a decision without a target and the words a record keeps.
 """
 from __future__ import annotations
 
 import copy
+import json
 import re
 from typing import Any
 
@@ -141,6 +147,99 @@ def action_decision(*, action: Any = None, tier: Any = None, caller: Any = None,
     if 'source' in decision:
         record['source'] = dict(decision['source'])                # where the operator said it (DEC-0126 OA-6)
     return {'ok': True, 'recordAs': record}
+
+
+#: The callers that are a person: the terminal, and the page the local control server serves with its token (OBS-562).
+PERSON_CALLERS = ('person:cli', 'person:page')
+#: Relayed acts whose object is in the operator's words themselves: "Open a share" carries the link, which pins the
+#: sender's key only when the words hold it unchanged (PS-4). Such an act needs no `target`, and its words are not read
+#: for a credential's shape, because the link's fragment is one and `redact_link` replaces it before it is kept.
+OBJECT_IN_WORDS = frozenset({SHARE_OPEN['id']})
+#: The refusal codes as the configuration door spelled them before OBS-611: read, and answered in the contract's spelling.
+LEGACY_CODES = {'operator_decision_required': OPERATOR_DECISION_REQUIRED, 'decision_invalid': DECISION_INVALID}
+#: The words a door answers each refusal of `decided` with, by its `why`; `absent` is worded by each door, naming its
+#: own act and object.
+REASONS = {
+    'shape': "the decision is not one JSON object in contract DEC-0121's shape",
+    'unicode': "the decision is not valid Unicode text in contract DEC-0121's shape",
+    'credential': ('the decision carries something shaped like a credential (in the words, the object or where they '
+                   'were said); send it without'),
+    'contract': ("the decision is not the operator's for this action and object, or is older than 24 hours: ask "
+                 'again and send their words as they said them'),
+    'fault': 'the decision could not be checked on this machine now; call again',
+}
+REASONS['target'] = REASONS['contract']
+_DIGEST = re.compile(r'\bsha256:[0-9a-f]{64}\b')
+_RECORD = ('by', 'via', 'action', 'target', 'instruction', 'at', 'source')
+
+
+def refusal_code(code: Any) -> Any:
+    """A refusal code in the one spelling this engine answers: the contract's (`operator-decision-required`,
+    `decision-invalid`). The configuration door's earlier spelling is read as the same code; any other passes."""
+    return LEGACY_CODES.get(code, code) if isinstance(code, str) else code
+
+
+def _kept_words(decision: dict, target: str) -> list:
+    """The decision's fields a record keeps verbatim, with what is no credential taken out: a `sha256:` digest (a plan's
+    own, which the operator may repeat) and this act's own object, as a whole token (a share or request id)."""
+    source = decision.get('source')
+    kept = [decision.get('instruction'), decision.get('target'),
+            *(source.values() if isinstance(source, dict) else [])]
+    whole = re.compile(r'(?<![A-Za-z0-9_-])' + re.escape(target) + r'(?![A-Za-z0-9_-])') if _non_empty(target) else None
+    out = []
+    for value in kept:
+        if isinstance(value, str):
+            value = _DIGEST.sub('sha256:digest', value)
+            out.append(whole.sub('object', value) if whole else value)
+    return out
+
+
+def decided(*, action: Any, target: Any, caller: Any, now: Any, decision: Any = None) -> dict:
+    """The one operator-decision check of this engine (OBS-611): who decided a relayed act on `target`.
+
+    One rule for every door that takes the operator's words (the configuration door, the key acts, the organization
+    selection, the secret prompt's twins, the own-share acts), in this order:
+
+    1. no decision (absent or null) from a person's caller (`PERSON_CALLERS`) is the person's own act;
+    2. no decision from anyone else is `operator-decision-required`;
+    3. a decision that is not one JSON object, or whose text is not valid Unicode (a record could not keep it), is
+       `decision-invalid`;
+    4. `action_decision` checks it (the contract's `actionDecision`, T0): its refusal is answered; a fault of the node
+       is `unavailable` and names the fault, never a decision;
+    5. the decision names this object as its `target` (the contract leaves it optional; here it is required, so words
+       about one object never decide another), except for an act whose object is in the words (`OBJECT_IN_WORDS`);
+    6. none of the words kept verbatim is shaped like a credential, a digest and the act's own object aside (same
+       exception).
+
+    Answers `{ok: True, record, recordAs}` (`record`: the decision's own fields and `caller`, as a journal keeps it;
+    `recordAs`: the node's), `{ok: True, person: True, record}` for a person, or `{ok: False, code, why}` with `why`
+    one of `absent`, `shape`, `unicode`, `fault`, `contract`, `target`, `credential`. Each door words its own refusal
+    from `why`; the code is the contract's."""
+    if decision is None:
+        if caller in PERSON_CALLERS:
+            return {'ok': True, 'person': True, 'record': {'by': 'person', 'via': caller.split(':', 1)[1]}}
+        return {'ok': False, 'code': OPERATOR_DECISION_REQUIRED, 'why': 'absent'}
+    if not isinstance(decision, dict):
+        return {'ok': False, 'code': DECISION_INVALID, 'why': 'shape'}
+    try:
+        json.dumps(decision, ensure_ascii=False).encode('utf-8')
+    except (UnicodeError, ValueError, TypeError, RecursionError):
+        return {'ok': False, 'code': DECISION_INVALID, 'why': 'unicode'}
+    answer = action_decision(action=action, tier='T0', caller=caller, decision=decision, target=target, now=now)
+    if 'fault' in answer:
+        return {'ok': False, 'code': 'unavailable', 'why': 'fault', 'fault': answer['fault']}
+    if answer.get('ok') is not True:
+        return {'ok': False, 'code': answer.get('code') or DECISION_INVALID, 'why': 'contract'}
+    in_words = action['id'] in OBJECT_IN_WORDS
+    if not in_words and decision.get('target') != target:
+        return {'ok': False, 'code': DECISION_INVALID, 'why': 'target'}
+    if not in_words:
+        import credential_shape
+        if any(credential_shape.shaped(v, uuids=False) for v in _kept_words(decision, target)):
+            return {'ok': False, 'code': DECISION_INVALID, 'why': 'credential'}
+    record = {k: copy.deepcopy(decision[k]) for k in _RECORD if k in decision}
+    record['caller'] = caller
+    return {'ok': True, 'record': record, 'recordAs': answer['recordAs']}
 
 
 def redact_link(decision: dict, link: str, share_id: str) -> dict:

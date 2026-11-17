@@ -66,7 +66,10 @@ class Refusal(ValueError):
 
     def __init__(self, code: str, message: str, **extra: Any):
         super().__init__(message)
-        self.code = code
+        import engine_node
+        # One spelling of the decision codes (OBS-611): the earlier `operator_decision_required` is read as the
+        # contract's `operator-decision-required`, and only the contract's is answered.
+        self.code = engine_node.module("actions").refusal_code(code)
         self.extra = extra
 
     def answer(self) -> dict:
@@ -571,40 +574,31 @@ def applied_keys(journal_id: Any, *, base: Path | None = None) -> list[str]:
 
 
 def _decided(action: str, target: str, actor: str, decision: Any, keys: list[str]) -> dict | None:
-    """Who decided a change that needs the person: the person at the terminal, or the operator's words an agent
-    relays (DEC-0121, checked as `node/actions.py` checks them, `target` the digest or the journal id)."""
-    if actor in ("person:cli", "person:page"):
-        # The person at a terminal, or at the page the local control server serves with its token (OBS-562).
-        return {"by": "person", "via": actor.split(":", 1)[1]} if keys else None
+    """Who decided a change that needs the person: the person at the terminal or at the page, or the operator's words
+    an agent relays, checked by the engine's one decision check (`node/actions.decided`, DEC-0121, OBS-611; `target`
+    the digest or the journal id). A change no key of which needs the person, and that carries no words, needs no
+    one."""
     if not keys and decision is None:
         return None
     act, title = ACTIONS[action]
-    if decision is None:
-        raise Refusal("operator_decision_required",
+    import engine_node
+    actions = engine_node.module("actions")
+    answer = actions.decided(
+        action={"id": act, "title": title, "tool": "observatory.configure", "gate": "relayed"}, target=target,
+        caller=actor, decision=decision, now=_now())
+    if answer.get("person"):
+        # The person at a terminal, or at the page the local control server serves with its token (OBS-562).
+        return answer["record"] if keys else None
+    if answer.get("ok") is True:
+        return answer["record"]
+    why = answer.get("why")
+    if why == "absent":
+        raise Refusal(answer["code"],
                       f"{', '.join(keys)} need the person: ask them, then call again with their words as `decision` "
                       f"(by operator, via relayed-instruction, action {act}, target {target}, the words verbatim, "
                       "when they said them)", keys=keys, action=act, target=target)
-    if not isinstance(decision, dict):
-        raise Refusal("decision_invalid", "the decision is not one JSON object in contract DEC-0121's shape",
-                      action=act)
-    import engine_node
-    answer = engine_node.module("actions").action_decision(
-        action={"id": act, "title": title, "tool": "observatory.configure", "gate": "relayed"}, tier="T0",
-        caller=actor, decision=decision, target=target, now=_now())
-    kept = [decision.get("instruction"), decision.get("target"),
-            *((decision.get("source") or {}).values() if isinstance(decision.get("source"), dict) else [])]
-    kept = [DIGEST.sub("sha256:digest", v) if isinstance(v, str) else v for v in kept]
-    if answer.get("ok") is True and any(credential_shape.shaped(v, uuids=False) for v in kept if isinstance(v, str)):
-        raise Refusal("decision_invalid", "the decision carries something shaped like a credential; send it without",
-                      action=act)
-    if answer.get("ok") is not True or decision.get("target") != target:
-        raise Refusal("decision_invalid", "the decision is not the operator's for this action and object, or is "
-                                          "older than 24 hours: ask again and send their words as they said them",
-                      action=act, target=target)
-    record = {k: copy.deepcopy(decision[k]) for k in ("by", "via", "action", "target", "instruction", "at", "source")
-              if k in decision}
-    record["caller"] = actor
-    return record
+    raise Refusal(answer["code"], actions.REASONS.get(why, actions.REASONS["contract"]), action=act,
+                  **({"target": target} if why in ("contract", "target") else {}))
 
 
 def _actor(actor: Any) -> str:
