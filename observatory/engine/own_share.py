@@ -86,8 +86,9 @@ def gate(own: dict, human: dict, *, agent: Any, decision: Any, share_id: str, no
         raise Outside(human, step, f"the vault project {project} belongs to an organization (OM-1.1)")
     if pinned is False:
         raise Outside(human, step, "the link was not in the operator's words unchanged, so it is not pinned (OM-1.4)")
-    answer = actions.action_decision(action=own, tier="T0", caller="agent:" + agent.strip(), decision=decision,
-                                     target=share_id, now=now_stamp(clock))
+    # The engine's one decision check (OBS-611): the words name this share id as their `target` (OM-1.3).
+    answer = actions.decided(action=own, target=share_id, caller="agent:" + agent.strip(), decision=decision,
+                             now=now_stamp(clock))
     if answer.get("ok") is not True:
         raise Outside(human, step, f"the operator's decision for {own['id']} on this share is missing or invalid "
                                    f"({answer.get('code') or answer.get('fault') or 'unreadable'}) (OM-1.3)")

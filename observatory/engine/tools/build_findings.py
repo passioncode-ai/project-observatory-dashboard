@@ -2775,10 +2775,11 @@ def collect() -> list[dict]:
             _s = json.loads(_sf.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             _s = {}
+        # The limit and the ratio through the configuration door, which owns them (OBS-612).
+        import configuration_door
         try:
-            _mc = json.loads(paths.config_file("meter.json").read_text(encoding="utf-8")) \
-                if paths.config_file("meter.json").is_file() else {}
-        except (OSError, ValueError):
+            _mc = {k: configuration_door.read(f"meter.{k}", base=paths.HOME) for k in ("estateMonthUsd", "alertRatio")}
+        except Exception:                                  # noqa: BLE001  an unreadable door reads the defaults
             _mc = {}
         _limit = float(_mc.get("estateMonthUsd", 1000) or 1000)
         _ratio = float(_mc.get("alertRatio", 0.8) or 0.8)

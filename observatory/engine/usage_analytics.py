@@ -202,15 +202,10 @@ def _read_json(path: Path) -> dict:
 
 def read_switch(base: Path | None = None) -> str | None:
     """`on` or `off` from the switch file, or None when there is none. Only `off` is off; a
-    link or a folder in its place is not a switch."""
-    file = switch_path(base)
-    try:
-        if file.is_symlink() or not file.is_file():
-            return None
-        text = file.read_text(encoding="utf-8", errors="replace")[:64]
-    except OSError:
-        return None
-    return "off" if text.strip().lower() == "off" else "on"
+    link or a folder in its place is not a switch. The configuration door's reading of a switch
+    file (OBS-612), where the switch is the setting `analytics.send`."""
+    import configuration_door
+    return configuration_door.switch_word(switch_path(base))
 
 
 def env_off(environ: dict | None = None) -> str | None:

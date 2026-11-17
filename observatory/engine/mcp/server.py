@@ -836,7 +836,8 @@ def observatory_configure(
                                         "`digest` names; undo restores what `journalId` changed.")] = "list",
     changes: Annotated[dict[str, Any] | None, Field(
         description="plan: {key: value} for keys `list` names, typed as `list` says (true/false, a number, one of "
-                    "the choices, an absolute path, a list of vendor/model ids); null is back to the default.")] = None,
+                    "the choices, an absolute path, a list of vendor/model ids, one line of text, a JSON list or "
+                    "object); null is back to the default.")] = None,
     digest: Annotated[str | None, Field(description="apply: the `digest` the plan answered.")] = None,
     journalId: Annotated[str | None, Field(validation_alias=AliasChoices("journalId", "journal_id"),
                                            description="undo: the `journal` id an apply answered.")] = None,
@@ -858,7 +859,7 @@ def observatory_configure(
     (store/logs/configure.jsonl); a change that needs the person also needs their words as `decision`. `undo`
     restores the values an apply found, only while the files still hold what it wrote (else `undo_refused`).
     Refusals are typed (`unknown_key`, `invalid_value`, `secret_refused`, `plan_stale`, `plan_unknown`,
-    `operator_decision_required`, `decision_invalid`, `journal_unknown`, `already_undone`) and never echo a refused
+    `operator-decision-required`, `decision-invalid`, `journal_unknown`, `already_undone`) and never echo a refused
     value; a credential is never configuration (`observatory_secret_request`)."""
     import configuration_door as D
     words = decision if decision is not None else _meta_decision(ctx)

@@ -228,15 +228,11 @@ def read_switch(base: Path) -> str | None:
     """`on` or `off` from the switch file, or None when there is none.
 
     Only the word `off` (any case, surrounding space ignored) turns updates off; anything
-    else a person wrote reads as on. A link or a folder in its place is not a switch."""
-    file = switch_path(base)
-    try:
-        if file.is_symlink() or not file.is_file():
-            return None
-        text = file.read_text(encoding="utf-8", errors="replace")[:64]
-    except OSError:
-        return None
-    return "off" if text.strip().lower() == "off" else "on"
+    else a person wrote reads as on. A link or a folder in its place is not a switch. The
+    configuration door's reading of a switch file (OBS-612), where the switch is the setting
+    `updates.auto`."""
+    import configuration_door
+    return configuration_door.switch_word(switch_path(base))
 
 
 def legacy_off(base: Path) -> bool:
@@ -246,11 +242,14 @@ def legacy_off(base: Path) -> bool:
 
 def auto_enabled(base: Path) -> bool:
     """On unless a person turned it off: the switch file decides; without one, an older
-    install's `updates.auto: false` still reads as off (D1, LC-16)."""
-    word = read_switch(base)
-    if word is not None:
-        return word != "off"
-    return not legacy_off(base)
+    install's `updates.auto: false` still reads as off (D1, LC-16). Read through the
+    configuration door (`updates.auto`, OBS-612); a settings file it cannot read is raised
+    as before, never read as on."""
+    import configuration_door
+    value = configuration_door.read("updates.auto", base=base)
+    if value is None:
+        return not legacy_off(base)
+    return value
 
 
 def switch_status(base: Path) -> dict:

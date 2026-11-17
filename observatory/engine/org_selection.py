@@ -327,53 +327,23 @@ def _node_actions():
 
 def decided(action: str, target: str, decision: Any = None, *, caller: str) -> dict:
     """Who decided a relayed act. No decision from the CLI: the person at their terminal. With one: the operator's
-    words, checked as the contract's `actionDecision` checks them (this space's agent is T0), kept verbatim."""
-    if decision is None:
-        if caller == "cli":
-            return {"by": "person", "via": "cli"}
-        raise Refusal("operator-decision-required",
+    words, checked by the engine's one decision check (`node/actions.decided`, OBS-611: this space's agent is T0,
+    the words name this organization or key as their `target`, nothing in them shaped like a credential), kept
+    verbatim."""
+    actions = _node_actions()
+    act = {"id": ACTIONS[action], "title": TITLES[action], "tool": "observatory.org.selection", "gate": "relayed"}
+    answer = actions.decided(action=act, target=target, caller="person:cli" if caller == "cli" else caller,
+                             decision=decision, now=_now())
+    if answer.get("ok") is True:
+        return answer["record"]
+    if answer.get("why") == "absent":
+        raise Refusal(answer["code"],
                       f"{TITLES[action].lower()} is the person's decision: ask them, then call again with their words "
                       "as `decision` (by operator, via relayed-instruction, action "
                       f"{ACTIONS[action]}, target {_echo(target)}, the words verbatim, when they said them)",
                       gate=GATES[action], action=ACTIONS[action])
-    if not isinstance(decision, dict):
-        # A string, a list or a number is not a decision (CLI and MCP refuse it alike, before anything is written).
-        raise Refusal("decision-invalid", "the decision is not one JSON object in contract DEC-0121's shape",
-                      gate=GATES[action], action=ACTIONS[action])
-    try:
-        # Kept verbatim in the record: words that are not valid Unicode (a lone surrogate) could never be written.
-        json.dumps(decision, ensure_ascii=False).encode("utf-8")
-    except (UnicodeError, ValueError, TypeError, RecursionError):
-        raise Refusal("decision-invalid", "the decision is not valid Unicode text in contract DEC-0121's shape",
-                      gate=GATES[action], action=ACTIONS[action]) from None
-    actions = _node_actions()
-    act = {"id": ACTIONS[action], "title": TITLES[action], "tool": "observatory.org.selection", "gate": "relayed"}
-    answer = actions.action_decision(action=act, tier="T0", caller=caller, decision=decision, target=target,
-                                     now=_now())
-    import credential_shape
-    kept = [decision.get("instruction"), decision.get("target"),
-            *(((decision.get("source") or {}).values()) if isinstance(decision.get("source"), dict) else [])]
-    # A selection's own digest (`sha256:` and 64 hex, as the plan's command quotes it) is not a credential: the
-    # operator may repeat that command in their words.
-    kept = [re.sub(r"\bsha256:[0-9a-f]{64}\b", "sha256:digest", v) if isinstance(v, str) else v for v in kept]
-    if answer.get("ok") is True and any(credential_shape.shaped(v, uuids=False) for v in kept if isinstance(v, str)):
-        # The words, the object and where they were said are kept verbatim and shown back: none may carry something
-        # shaped like a credential (a session's id, a UUID, is not one).
-        raise Refusal("decision-invalid", "the decision carries something shaped like a credential (in the words, the "
-                                          "object or where they were said); send it without", gate=GATES[action],
-                      action=ACTIONS[action])
-    if answer.get("ok") is True and (not isinstance(decision, dict) or decision.get("target") != target):
-        # The contract leaves `target` optional; here it is required, so words about one organization (or one key)
-        # never decide another's selection.
-        answer = {"ok": False, "code": "decision-invalid"}
-    if answer.get("ok") is not True:
-        raise Refusal(answer.get("code") or "decision-invalid",
-                      "the decision is not the operator's for this action and object, or is older than 24 hours: "
-                      "ask again and send their words as they said them", gate=GATES[action], action=ACTIONS[action])
-    record = {k: copy.deepcopy(decision[k]) for k in ("by", "via", "action", "target", "instruction", "at", "source")
-              if k in decision}
-    record["caller"] = answer["recordAs"]["caller"]
-    return record
+    raise Refusal(answer["code"], actions.REASONS.get(answer.get("why"), actions.REASONS["contract"]),
+                  gate=GATES[action], action=ACTIONS[action])
 
 
 # ── what can be chosen ─────────────────────────────────────────────────────────

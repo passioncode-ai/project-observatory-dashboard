@@ -843,13 +843,13 @@ def _audit(entry: dict) -> None:
 
 
 def _decided(action: dict, agent: str, decision: Any, target: str) -> dict:
-    """The relayed action's check (`node/actions.py`, the contract's `actionDecision`): a local agent binding on this
-    machine's loopback is T0 (DL-25); no decision, or one that is not the operator's for this action and object,
-    refuses."""
+    """The relayed action's check, the engine's one (`node/actions.decided`, OBS-611, around the contract's
+    `actionDecision`): a local agent binding on this machine's loopback is T0 (DL-25); no decision (absent or null), or
+    one that is not the operator's for this action and object, refuses. A decline's words name its request as their
+    `target`; an "Open a share" carries its object, the link, in the words."""
     actions = engine_node.module("actions")              # the engine's own, wherever tools/node.py took the name
-    kwargs = {} if decision is _NO_DECISION else {"decision": decision}
-    answer = actions.action_decision(action=action, tier="T0", caller="agent:" + agent, target=target,
-                                     now=_stamp(CLOCK()), **kwargs)
+    answer = actions.decided(action=action, target=target, caller="agent:" + agent, now=_stamp(CLOCK()),
+                             decision=None if decision is _NO_DECISION else decision)
     if answer.get("ok") is True:
         return answer["recordAs"]
     raise Refused(answer.get("code") or "unavailable")

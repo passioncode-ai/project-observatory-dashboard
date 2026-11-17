@@ -391,6 +391,48 @@ change that needs the person). No file changes shape: `settings.json`, `local.js
 neither. Downgrade: an older engine has no door and no tool and never reads the journal or the plans. Tests:
 `tests/test_configure.py`.
 
+## One operator-decision check (OBS-611)
+
+Every door that takes the operator's relayed words (contract DEC-0121 AP-2: `observatory_configure`,
+`observatory_key_act`, `observatory_ops`, `observatory_org_selection`, the secret prompt's `secret.decline` and
+`share.open`, and the own-share acts of `full share`) checks them with one function, `node/actions.decided`. What an
+agent sees change:
+
+- **One spelling.** The configuration door answered `operator_decision_required` and `decision_invalid`; it now answers
+  the contract's `operator-decision-required` and `decision-invalid`, as every other door already did. The door still
+  reads the earlier spelling where a code is passed to it (`node/actions.refusal_code`), and answers only the
+  contract's. A client that compared the configuration door's `error` with the earlier spelling compares with the
+  contract's, or accepts both.
+- **A decision names its object.** The words carry `target`, the object they decide (a digest, a journal id, a key,
+  an organization, a request id, a share id), at every door. The secret prompt's decline and the own-share acts read
+  a decision without one as valid before; it is now `decision-invalid` (OM-1.3 already said the own-share acts need
+  it). `share.open` carries its object, the link, in the words, and needs no `target`.
+- **Null is no decision.** A `decision` that is JSON `null` is answered `operator-decision-required`, as an absent one,
+  at every door (the secret prompt answered `decision-invalid`).
+- **What a record keeps verbatim is checked.** Words shaped like a credential are `decision-invalid` at every door
+  (the secret prompt's decline and the own-share acts kept them before), a `sha256:` digest and the act's own object
+  aside (the key acts refused a digest before); words that are not valid Unicode are `decision-invalid` everywhere
+  (only the organization selection refused them before; elsewhere the journal write failed).
+- **A person's caller.** `person:cli` and `person:page` without words are the person's own act, as before. Words they
+  do carry are now read like any others (the configuration door ignored them).
+
+No file, journal line or answer field changes shape. Downgrade: an older engine answers as before. Tests:
+`tests/test_decision_check.py` (suite `decision_check`), whose matrix keeps each changed answer
+with the answer before and why. Design: [decisions-and-settings.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/control-plane/decisions-and-settings.md).
+
+## Every setting through the one door (OBS-612)
+
+The configuration door now also declares the settings that had files of their own: the switch files `auto-update`
+(`updates.auto`) and `analytics` (`analytics.send`) in the workspace home, and `config/meter.json`, `retention.json`,
+`machine.json`, `review-policy.json`, `machine-backup.json`, `relay.json`, `tracked.json` and `organizations.json`
+(their keys, types, defaults and gates are listed by `configure --list` and in
+[decisions-and-settings.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/control-plane/decisions-and-settings.md)). No file moves or changes shape: an
+existing install reads the same values, `full auto-update`, `full relay`, `full review policy` and the other commands
+keep writing the same files, and an older engine reads files the door wrote. A file the door creates holds its
+reader's whole document. One reading changed: with no `config/retention.json` the events collector windows at the
+shipped 365 days instead of reading every event. Downgrade: an older engine lists fewer keys and never reads the
+journal lines that name the new ones. Tests: `tests/test_configure.py` (`EverySettingThroughTheDoor`).
+
 ## Ports per OS account (OBS-354)
 
 `project-observatory full ports show|allocate|set|release` records the port of each listener (server,
