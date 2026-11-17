@@ -44,6 +44,9 @@ SECRET_MARKER = b'synthetic-private-key-material'
 TOKEN = 'fake-fixture-value'
 #: A remote URL with user information, built so the text holds no credential-shaped URL.
 WITH_USER = 'https://' + 'user:' + TOKEN + '@' + 'example.invalid/alpha-web.git'
+#: A token written as an scp remote's user name (fabric-agent-contract DEC-0177): the contract's own fake, 40 hex.
+TOKEN_USER = '0123456789abcdef' * 2 + '01234567'
+SCP_TOKEN_USER = TOKEN_USER + '@' + 'example.invalid:example-org/alpha-web.git'
 
 
 def git(*args, cwd=None, env=None):
@@ -159,6 +162,7 @@ class Machine(Base):
         git('remote', 'add', 'origin', str(self.remote), cwd=alpha, env=env)
         git('push', '-q', '-u', 'origin', 'main', cwd=alpha, env=env)
         git('remote', 'add', 'mirror', WITH_USER, cwd=alpha, env=env)
+        git('remote', 'add', 'scpmirror', SCP_TOKEN_USER, cwd=alpha, env=env)
         (alpha / 'local.txt').write_text('unpushed\n')
         git('add', '.', cwd=alpha, env=env)
         git('commit', '-qm', 'unpushed', cwd=alpha, env=env)
@@ -296,6 +300,7 @@ class Taking(Machine):
         for text in (json.dumps(manifest), MB.state_path(self.ws).read_text(), json.dumps(result),
                      json.dumps(MB.status(self.ws, AT))):
             self.assertNotIn(TOKEN, text)
+            self.assertNotIn(TOKEN_USER, text)
             self.assertNotIn(SECRET_MARKER.decode(), text)
             self.assertNotIn(PASS, text)
 
@@ -541,6 +546,24 @@ class Refusals(Base):
         self.assertEqual(MB.redact_url(WITH_USER), 'https://example.invalid/alpha-web.git')
         self.assertEqual(MB.redact_url('git@example.invalid:org/x.git'), 'git@example.invalid:org/x.git')
         self.assertEqual(MB.redact_url('ssh://git@example.invalid/x'), 'ssh://example.invalid/x')
+
+    def test_an_scp_remote_keeps_a_plain_user_and_loses_a_token_user(self):
+        """DEC-0177: the scp form `user@host:path` is no URL, so its user is read here; a token written as the
+        user name is dropped, a plain one (`git`, `deploy-bot`) is kept, and so is a remote with no user."""
+        tail = 'example.invalid:example-org/alpha-web.git'
+        for kept in ('git@' + tail, 'deploy-bot@' + tail, 'a' * 40 + '@' + tail, tail, '/srv/mirrors/alpha-web.git',
+                     'work-alias:example-org/alpha-web'):
+            self.assertEqual(MB.redact_url(kept), kept)
+        for raw in (SCP_TOKEN_USER, 'x@' + TOKEN_USER + '@' + tail, 'git:' + TOKEN + '@' + tail,
+                    ' ' + SCP_TOKEN_USER + ' ', TOKEN_USER + '@work-alias:example-org/alpha-web'):
+            with self.subTest(raw=raw[:8]):
+                out = MB.redact_url(raw)
+                self.assertNotIn(TOKEN_USER, out)
+                self.assertNotIn(TOKEN, out)
+                self.assertNotIn('@', out)
+        self.assertEqual(MB.redact_url(SCP_TOKEN_USER), tail)
+        # Idempotent: what it keeps, it keeps again unchanged.
+        self.assertEqual(MB.redact_url(MB.redact_url(SCP_TOKEN_USER)), tail)
 
 
 class Restore(Machine):

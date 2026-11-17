@@ -643,9 +643,25 @@ def find_checkouts(roots: list[Path], depth: int, deadline: float) -> tuple[list
     return found, notes
 
 
+#: The scp form of a remote, `user@host:path` (no scheme): the user is everything up to the host's `@`.
+_SCP_REMOTE = re.compile(r"([^/\s]+)@([^@:/\s]+:\S*)")
+
+
 def redact_url(url: str) -> str:
-    """A remote URL without its user information: `https://token@host/x` keeps no token."""
-    return re.sub(r"^([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@]*@", r"\1", url.strip())
+    """A remote URL without its user information: `https://token@host/x` keeps no token. The scp form
+    (`user@host:path`) is no URL, so its user is read here (fabric-agent-contract DEC-0177, OBS-587): a plain user
+    name such as `git` stays, a user that is a token (`folder_attribution.token_user_name`), is shaped like a
+    credential or carries a password is dropped, `host:path` kept."""
+    value = re.sub(r"^([a-zA-Z][a-zA-Z0-9+.-]*://)[^/@]*@", r"\1", url.strip())
+    scp = None if "://" in value else _SCP_REMOTE.fullmatch(value)
+    if scp is None:
+        return value
+    import folder_attribution
+    user = scp.group(1)
+    if ":" in user or any(folder_attribution.token_user_name(part) or folder_attribution.secret_value(part)
+                          for part in user.split("@")):
+        return scp.group(2)
+    return value
 
 
 def _git(args: list[str], repo: Path, *, text: bool = True, timeout: float = GIT_TIMEOUT):

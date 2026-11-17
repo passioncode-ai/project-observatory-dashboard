@@ -194,7 +194,8 @@ class OverStdio(unittest.TestCase):
         # The closed schema: a member it does not name, a log line's text among them, is malformed input.
         self.assertTrue(self.call({"digest": {**daily(), "note": "a log line"}})["_isError"])
         self.assertTrue(self.call({"digest": json.dumps(daily())})["_isError"])
-        self.assertEqual(self.call({"digest": daily(), "source": "mask-" + "abcdefghijklmnop"})["code"],
+        # DEC-0151: a lower-case label holds no `sk-` key, but a Slack key's shape after a boundary is still one.
+        self.assertEqual(self.call({"digest": daily(), "source": "app-xo" + "xb-" + "abcdefghij"})["code"],
                          "source-refused")
         self.assertFalse(self.store().exists())
 
