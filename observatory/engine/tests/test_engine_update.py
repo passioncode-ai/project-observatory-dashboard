@@ -1220,6 +1220,35 @@ class UpdateTest(unittest.TestCase):
         self.assertIn(("restart", "server"), self.services.calls)
         self.assertIn("restarted", [s.get("step") for s in doc["steps"]])
 
+    def test_a_server_loaded_again_while_the_upgrade_is_staged_leaves_the_logged_sequence(self):
+        # OBS-591, 2026-11-17, 0.39.1 to 0.40.0: update.jsonl read stopped tick, stopped server, then
+        # workspace-restored, started tick, RESTARTED server and undo-ended rolled-back with "Workspace
+        # changed while upgrade was staged (changed: store/raw/serverd.json)". `restarted` is written
+        # only when the update's own bootstrap meets a job that is already loaded: the server's job was
+        # loaded again by another process while the upgrade was staged, and that server (pid and
+        # version of the new release, in the failed copy's receipt) rewrote its receipt. The stop
+        # itself had waited until launchd no longer knew the label (`install_launchd.stop_job`).
+        real_upgrade = self.engine.upgrade
+
+        def upgrade_while_another_process_loads_the_server():
+            self.services.state["server"] = True
+            (self.home / "store/raw/serverd.json").write_text(json.dumps(
+                {"pid": 70074, "port": 47311, "version": NEWER, "workspace": str(self.home)}))
+            real_upgrade()
+            return 2, ("Observatory: Workspace changed while upgrade was staged; stop all writers "
+                       "(changed: store/raw/serverd.json)")
+        self.engine.upgrade = upgrade_while_another_process_loads_the_server
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply")
+        self.assertEqual(code, self.mod.EXIT_FAILED, doc)
+        rows = [json.loads(line) for line in (self.home / "store/logs/update.jsonl").read_text().splitlines()]
+        tail = [(r["event"], r.get("service") or r.get("outcome")) for r in rows
+                if r["event"] in ("stopped", "workspace-restored", "started", "restarted", "undo-ended")]
+        self.assertEqual(tail, [("stopped", "tick"), ("stopped", "server"), ("workspace-restored", None),
+                                ("started", "tick"), ("restarted", "server"), ("undo-ended", "rolled-back")])
+        self.assertIn("store/raw/serverd.json", rows[-1]["error"])
+        self.assertEqual(self.services.calls.count(("stop", "server")), 1)
+
     def test_cached_rollback_wheel_is_reused_without_network(self):
         self.gh.publish(NEWER)
         self.assertEqual(self.run_cli("--apply")[0], 0)

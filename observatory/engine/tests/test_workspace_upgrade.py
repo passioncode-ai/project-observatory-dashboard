@@ -423,6 +423,113 @@ class WorkspaceUpgrade(unittest.TestCase):
         self.assertTrue(written)
         self.assertEqual(written - set(upgrade.SESSION_RECEIPTS), set())
 
+    # --- OBS-591: the local server's receipt --------------------------------------------------
+
+    def server_heartbeat(self):
+        """The real `tools/serverd.py` heartbeat, writing this workspace's receipt (its slow inputs stubbed)."""
+        tools = str(ROOT / 'tools')
+        if tools not in sys.path:
+            sys.path.insert(0, tools)
+        import serverd
+        receipt = self.home / 'store/raw/serverd.json'
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        with patch.object(serverd, 'RECEIPT', receipt), \
+                patch.object(serverd, 'refresh_remote', return_value={}), \
+                patch.object(serverd, 'refresh_leaks', return_value={}), \
+                patch.object(serverd, 'refresh_skills', return_value={}), \
+                patch.object(serverd, '_tick_health', return_value={}), \
+                patch.object(serverd, '_LAST_RECEIPT', [None, 0.0]):
+            serverd.heartbeat()
+        return receipt
+
+    def an_earlier_receipt(self, **fields):
+        receipt = self.home / 'store/raw/serverd.json'
+        receipt.parent.mkdir(parents=True, exist_ok=True)
+        doc = {'at': '2026-01-01T00:00:00Z', 'pid': 1971, 'port': 47311, 'version': '0.0.1',
+               'workspace': str(self.home), 'uptime_s': 5}
+        doc.update(fields)
+        receipt.write_text(json.dumps(doc))
+        return receipt
+
+    def test_the_local_servers_receipt_may_change_while_staged(self):
+        # 2026-11-17, 0.39.1 to 0.40.0: the update booted the server out, something loaded its job
+        # again while the upgrade was staged, and the new server's heartbeat rewrote
+        # store/raw/serverd.json; the stillness check refused and the update rolled back. The
+        # receipt is a pure runtime record the next server rewrites at its start.
+        self.an_earlier_receipt()
+        real = upgrade.prepare_upgrade
+
+        def staged_while_a_server_beats(stage):
+            out = real(stage)
+            self.server_heartbeat()
+            return out
+        with patch.object(upgrade, 'prepare_upgrade', side_effect=staged_while_a_server_beats):
+            result = upgrade.upgrade(self.home, apply=True, writers_stopped=True)
+        self.assertEqual(result['status'], 'upgraded')
+        doc = json.loads((self.home / 'store/raw/serverd.json').read_text())
+        self.assertEqual(doc['pid'], os.getpid(), 'the server\'s write is kept')
+
+    def test_a_server_receipt_of_another_workspace_still_refuses(self):
+        # Only this workspace's own server may rewrite it: a receipt naming another home (or one
+        # that is no receipt at all) is a writer the upgrade cannot account for.
+        for written in (json.dumps({'pid': 7, 'port': 47400, 'workspace': str(self.base / 'another workspace')}),
+                        'not a receipt', json.dumps(['a list'])):
+            with self.subTest(written=written):
+                self.an_earlier_receipt()
+                real = upgrade.prepare_upgrade
+
+                def staged_while_something_writes(stage, written=written):
+                    out = real(stage)
+                    (self.home / 'store/raw/serverd.json').write_text(written)
+                    return out
+                with patch.object(upgrade, 'prepare_upgrade', side_effect=staged_while_something_writes):
+                    with self.assertRaises(config.ConfigurationError) as refused:
+                        upgrade.upgrade(self.home, apply=True, writers_stopped=True)
+                self.assertIn('store/raw/serverd.json', str(refused.exception))
+                self.assertFalse((self.home / upgrade.JOURNAL).exists())
+
+    def test_a_server_receipt_on_another_port_is_still_this_workspaces(self):
+        # The port is not the server's identity: one workspace has one server (its instance lock),
+        # and `full ports` may move it to another port; the receipt names the workspace it serves.
+        self.an_earlier_receipt(port=47311)
+        real = upgrade.prepare_upgrade
+
+        def staged_while_the_server_moved(stage):
+            out = real(stage)
+            self.an_earlier_receipt(port=47400, pid=4242)
+            return out
+        with patch.object(upgrade, 'prepare_upgrade', side_effect=staged_while_the_server_moved):
+            self.assertEqual(upgrade.upgrade(self.home, apply=True, writers_stopped=True)['status'], 'upgraded')
+
+    def test_the_local_servers_receipt_may_change_during_a_snapshot(self):
+        self.an_earlier_receipt()
+        real = workspace.copy_private
+
+        def copy_while_a_server_beats(source, dest):
+            real(source, dest)
+            self.server_heartbeat()
+        with patch.object(workspace, 'copy_private', side_effect=copy_while_a_server_beats):
+            source = self.snapshot()
+        self.assertTrue((source / 'manifest.json').exists())
+
+    def test_a_foreign_server_receipt_during_a_snapshot_still_refuses(self):
+        self.an_earlier_receipt()
+        real = workspace.copy_private
+
+        def copy_while_something_writes(source, dest):
+            real(source, dest)
+            (self.home / 'store/raw/serverd.json').write_text(json.dumps({'workspace': str(self.base / 'another workspace')}))
+        with patch.object(workspace, 'copy_private', side_effect=copy_while_something_writes):
+            with self.assertRaises(config.ConfigurationError) as refused:
+                self.snapshot()
+        self.assertIn('store/raw/serverd.json', str(refused.exception))
+
+    def test_the_runtime_receipts_are_the_files_the_server_writes(self):
+        import re
+        text = (ROOT / 'tools/serverd.py').read_text(encoding='utf-8')
+        written = {'store/raw/' + n for n in re.findall(r'RECEIPT = paths\.SCRATCH / "([^"]+)"', text)}
+        self.assertEqual(written, set(upgrade.RUNTIME_RECEIPTS))
+
     def test_a_settings_file_changed_while_staged_still_refuses(self):
         # What must hold still still must: only the databases and the logs are exempt.
         real = upgrade.prepare_upgrade
@@ -608,7 +715,9 @@ class WorkspaceUpgrade(unittest.TestCase):
                                ('store/logs/tick.log.3', True), ('store/logs/update-apply.err', True),
                                ('store/other.db-wal', False), ('config/settings.json', False),
                                ('store/logs/notes.txt', False), ('store/logs.log', False),
-                               ('secrets/demo-slot', False)):
+                               ('secrets/demo-slot', False), ('store/raw/serverd.json', True),
+                               ('store/raw/.serverd.json.k2x9.tmp', True), ('store/raw/tick.json', False),
+                               ('store/raw/.tick.json.k2x9.tmp', False), ('config/serverd.json', False)):
             self.assertEqual(upgrade.volatile(name, dbs), expected, name)
 
     # --- OBS-284: a snapshot restored on another machine ------------------------------------
