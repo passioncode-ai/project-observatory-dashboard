@@ -352,6 +352,8 @@ BOUNDARY += ('tools_page',)
 BOUNDARY += ('mcp_supply',)
 # OBS-556 (CP-10): keys by source, each vault slot issued, received, shared or unknown, with its context.
 BOUNDARY += ('key_source',)
+# OBS-559 part 2 (CP-18): the key page's acts as MCP tools, through the key server's own functions and a stubbed door.
+BOUNDARY += ('key_acts',)
 SUITES = LEGACY + BOUNDARY
 #: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
 #: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.
@@ -399,6 +401,8 @@ ROOT_FILES = (
     'identity_map.py', 'identifiers.py', 'derivations.py', 'folder_attribution.py', 'fabric_attribution.py', 'ops_digest_folders.py', 'activity_collector.py', 'fabric_hub.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'sessions_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'tick_progress.py', 'tick_budget.py', 'dashboard_stamp.py', 'workspace.py',
     'workspace_upgrade.py', 'backup_vault.py', 'secret_store_carry.py', 'organizations.py', 'org_view.py', 'key_source.py', 'org_selection.py', 'machine_view.py', 'memory_snapshot.py', 'checkout_inventory.py', 'checkout_state.py', 'checkout_graph.py', 'cache_coverage.py', 'open_unlinked.py', 'coverage_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
     'configuration_door.py',
+    # The key page's acts for an agent (OBS-559 part 2).
+    'key_acts.py',
     # The supply-chain watch over MCP servers (OBS-555).
     'mcp_supply.py',
     # The Installed tools page's view (OBS-552).
