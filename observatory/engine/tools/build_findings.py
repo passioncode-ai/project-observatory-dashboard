@@ -39,6 +39,7 @@ import companion_faults
 import why_asks  # noqa: E402
 import leak_register  # noqa: E402
 import paths              
+import runtime_receipts  # noqa: E402  OBS-610: declared runtime files
 from store import db as store_db              
 sys.path.append(str(ROOT / "dashboard"))
 from finding_types import titled  # noqa: E402  (a title is a message id)
@@ -1366,7 +1367,7 @@ def companion_findings(rows: list[dict], slot: dict,
                       "by hand to see the error, `companion_faults.py` for the "
                       "history, and check that the INSTALLED copy of the plugin "
                       "matches this repository",
-            "evidence": ["store/raw/companion-faults.jsonl"]})
+            "evidence": [runtime_receipts.COMPANION_FAULTS.path]})
 
     # THE THIRD OUTCOME: the slot says the last turn faulted and the durable log
     # has no such line. The append is the one write in this path that can fail on
@@ -1438,7 +1439,7 @@ def why_unanswered_findings(measured: dict | None) -> list[dict]:
                    "still do not answer, the ask is noise here: answer pending records with "
                    "observatory_record(memory_id=…, why=…), or disable the observatory-log "
                    "plugin's UserPromptSubmit hook"),
-        "evidence": ["store/raw/why-asks.jsonl", "store/raw/record-turn.json#whyAsks"]}]
+        "evidence": [runtime_receipts.WHY_ASKS.path, runtime_receipts.RECORD_TURN.path + "#whyAsks"]}]
 
 
 def blank_page_findings(receipt: dict | None,
@@ -1835,7 +1836,7 @@ def collect() -> list[dict]:
     _pj = paths.REGISTRY / "projects.json"
     _known = {f for p in (json.loads(_pj.read_text(encoding="utf-8")).get("projects") or [] if _pj.is_file() else [])
               for f in (p.get("local_folders") or [])}
-    out.extend(session_findings.findings(paths.SCRATCH / "sessions-seen.jsonl", _known, paths.DATA))
+    out.extend(session_findings.findings(runtime_receipts.SESSIONS_SEEN.at(paths.SCRATCH), _known, paths.DATA))
     # WHAT PRODUCTION HOLDS. The env rules above read this disk; this one reads
     # what the applications are actually configured with, and the two differ in
     # the direction that matters: a value equal on both sides is the debt, not a
@@ -2593,7 +2594,7 @@ def collect() -> list[dict]:
     sys.path.insert(0, str(paths.ROOT / "tools"))
     import dashboard_open   # launchd's plist, or the Task Scheduler task / systemd unit (W4b)
     import install_launchd
-    sd = paths.SCRATCH / "serverd.json"
+    sd = runtime_receipts.SERVERD.at(paths.SCRATCH)
     sd_plist = (pathlib.Path.home() / "Library/LaunchAgents" / f"{install_launchd.instance_label('server')}.plist"
                 if sys.platform == "darwin" else "the server's Task Scheduler task or systemd unit")
     if dashboard_open._always_on():
@@ -2617,7 +2618,7 @@ def collect() -> list[dict]:
                            "its receipt — not that it was turned off, which "
                            "removes the agent entirely."),
                 "action": "python \"$(project-observatory full-path)/tools/serverd.py\" --status; the log is store/logs/serverd.err",
-                "evidence": ["store/raw/serverd.json",
+                "evidence": [runtime_receipts.SERVERD.path,
                              str(sd_plist)]})
 
     # A SESSION OBEYING OLD RULES. The handshake in `tools/skill_check.py`
@@ -3279,7 +3280,7 @@ def collect() -> list[dict]:
     # 2026-09-07, roughly seventy-two turns of one session raised
     # `IllegalTransition: observed -> proposed` and the only sign was a ledger
     # row that had stopped moving fifteen hours earlier.
-    rt = paths.SCRATCH / "record-turn.json"
+    rt = runtime_receipts.RECORD_TURN.at(paths.SCRATCH)
     slot = {}
     if rt.is_file():
         try:

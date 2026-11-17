@@ -31,6 +31,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 import atomic                                                                    
 import paths                                                                     
+import runtime_receipts as rr  # noqa: E402  OBS-610: the files this writes while an update stages
 import safe_git                                                                  
 import why_asks                                                                  
 sys.path.insert(1, str(pathlib.Path(__file__).resolve().parent))
@@ -113,7 +114,7 @@ def out(payload: dict, receipt: dict | None = None) -> int:
                "at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                "session": _session_id or ""}
     try:
-        atomic.write_json(paths.SCRATCH / "record-turn.json", payload)
+        atomic.write_json(rr.RECORD_TURN.at(paths.SCRATCH), payload)
     except Exception as exc:                                                      
         # NAMED ON STDERR, not swallowed. A hook must not fail because its own
         # receipt could not be written — the facts are already in the ledger —

@@ -123,6 +123,7 @@ import osproc  # noqa: E402
 import fabric_service as fs  # noqa: E402 — the vendored fabric-service/0.1 kit
 import leak_register  # noqa: E402
 import paths                                                                    
+import runtime_receipts as rr  # noqa: E402  OBS-610: the files this writes while an update stages
 import service_events  # noqa: E402
 import service_health  # noqa: E402
 import service_identity  # noqa: E402
@@ -132,7 +133,7 @@ import secret_prompt  # noqa: E402  OBS-260: the secret-request queue served on 
 import peer_check  # noqa: E402  OBS-355: another OS account's connection refused before it is read
 
 PORT = int(os.environ.get("OBSERVATORY_SERVER_PORT", "47311"))
-RECEIPT = paths.SCRATCH / "serverd.json"
+RECEIPT = rr.SERVERD.at(paths.SCRATCH)
 import configuration
 try:
     from tools import install_launchd

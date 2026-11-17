@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 import atomic
 sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))                       
 import paths                                                                    
+import runtime_receipts as rr  # noqa: E402  OBS-610: declared runtime files
 import i18n
 import finding_types
 import subject_links
@@ -529,7 +530,7 @@ def from_store() -> dict:
         # absent (never ran here / turned off) — the page says which, because
         # "no row" would read as "no server exists" on a machine where one is
         # supposed to be up.
-        sd = paths.SCRATCH / "serverd.json"
+        sd = rr.SERVERD.at(paths.SCRATCH)
         if sd.is_file():
             try:
                 beat = json.loads(sd.read_text(encoding="utf-8"))

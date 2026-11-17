@@ -21,6 +21,7 @@ sys.path.insert(0,str(ROOT))
 import configuration as config
 import workspace
 import workspace_upgrade as upgrade
+import runtime_receipts  # noqa: E402  OBS-610
 import machine_identity as MI  # noqa: E402  OBS-357: ids carry the place
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from secret_store_fixture import VALUES, all_values, make_external_store  # noqa: E402
@@ -177,10 +178,14 @@ class WorkspaceUpgrade(unittest.TestCase):
         self.assertTrue((source / 'manifest.json').exists())
 
     def test_the_analytics_receipts_are_the_files_usage_analytics_writes(self):
+        # OBS-610: usage_analytics takes each path from its declaration, so the two cannot drift;
+        # test_runtime_receipts runs the real writer and checks every file it changes is declared.
         import usage_analytics
         text = Path(usage_analytics.__file__).read_text(encoding='utf-8')
         for name in upgrade.ANALYTICS_RECEIPTS:
-            self.assertIn(PurePosixPath(name).name, text, name)
+            receipt = runtime_receipts.declaration(name)
+            self.assertIn('usage_analytics.py', receipt.owners, name)
+        self.assertIn('rr.ANALYTICS_QUEUE', text)
         self.assertTrue(all(name.startswith('store/analytics/') for name in upgrade.ANALYTICS_RECEIPTS))
 
     def test_a_steady_file_that_moves_still_refuses_and_is_named(self):
@@ -412,16 +417,12 @@ class WorkspaceUpgrade(unittest.TestCase):
             self.assertIn('while staging', (self.home / name).read_text(), f'{name} kept its write')
 
     def test_every_receipt_a_session_hook_writes_is_exempt(self):
-        import re
-        engine = Path(upgrade.__file__).resolve().parent
-        written = set()
-        for source in ('tools/record_turn.py', 'tools/session_start.py', 'companion_faults.py', 'why_asks.py'):
-            text = (engine / source).read_text(encoding='utf-8')
-            written |= {'store/raw/' + n for n in re.findall(r'paths\.SCRATCH / "([^"]+)"', text)}
-        # record_turn READS vault.json (the tick writes it); everything else named is written.
-        written.discard('store/raw/vault.json')
-        self.assertTrue(written)
-        self.assertEqual(written - set(upgrade.SESSION_RECEIPTS), set())
+        # OBS-610: the hooks take their paths from `runtime_receipts`, which declares each for them;
+        # test_runtime_receipts proves no hook writes a file it did not declare.
+        owners = {o for name in upgrade.SESSION_RECEIPTS for o in runtime_receipts.declaration(name).owners}
+        self.assertEqual(owners, {'tools/record_turn.py', 'tools/session_start.py', 'companion_faults.py', 'why_asks.py'})
+        for name in upgrade.SESSION_RECEIPTS:
+            self.assertTrue(upgrade.volatile(name, set()), name)
 
     # --- OBS-591: the local server's receipt --------------------------------------------------
 
@@ -525,10 +526,9 @@ class WorkspaceUpgrade(unittest.TestCase):
         self.assertIn('store/raw/serverd.json', str(refused.exception))
 
     def test_the_runtime_receipts_are_the_files_the_server_writes(self):
-        import re
         text = (ROOT / 'tools/serverd.py').read_text(encoding='utf-8')
-        written = {'store/raw/' + n for n in re.findall(r'RECEIPT = paths\.SCRATCH / "([^"]+)"', text)}
-        self.assertEqual(written, set(upgrade.RUNTIME_RECEIPTS))
+        self.assertIn('RECEIPT = rr.SERVERD.at(paths.SCRATCH)', text)
+        self.assertEqual({runtime_receipts.SERVERD.path}, set(upgrade.RUNTIME_RECEIPTS))
 
     def test_a_settings_file_changed_while_staged_still_refuses(self):
         # What must hold still still must: only the databases and the logs are exempt.
