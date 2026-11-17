@@ -353,7 +353,7 @@ class Accept(unittest.TestCase):
                 accept = getattr(server.observatory_mcp_accept, "fn", server.observatory_mcp_accept)
                 self.assertEqual(accept(server_name="claude:alpha", tool=None)["accepted"], 1)
                 bad = accept(server_name="x" * 300, tool=None)
-                self.assertEqual(bad["error"], "invalid_argument")
+                self.assertEqual(bad["error"], "invalid-argument")
 
 
 if __name__ == "__main__":

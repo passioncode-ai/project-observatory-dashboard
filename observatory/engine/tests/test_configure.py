@@ -2,7 +2,7 @@
 """OBS-563, CP-20: the configuration door.
 
 Every setting the engine reads is a declared entry with a type, a default, its file and its gate. One door previews a
-change (`plan`), applies exactly the previewed change (`apply DIGEST`, refused `plan_stale` when a file moved since),
+change (`plan`), applies exactly the previewed change (`apply DIGEST`, refused `plan-stale` when a file moved since),
 journals it with the values before and after, and undoes it (`undo ID`, refused when the files no longer hold what it
 wrote). An unknown key, a value of the wrong type and anything shaped like a credential are refused by type and never
 echoed. The existing `configure SECTION NAME VALUE` keeps its answers and writes through the same door.
@@ -141,21 +141,21 @@ class Door(unittest.TestCase):
                          (False, True))
         self.assertEqual(by_key["guard.temp_days.normal"]["before"], 3)
         # The same digest twice is not a second write.
-        self.refused("plan_unknown", self.door.apply, plan["digest"], actor="person:cli", base=self.home)
+        self.refused("plan-unknown", self.door.apply, plan["digest"], actor="person:cli", base=self.home)
 
         undone = self.door.undo(done["journal"], actor="person:cli", base=self.home)
         self.assertEqual(undone["status"], "undone")
         self.assertEqual({name: self.read(name) for name in before}, before)
         self.assertEqual(self.journal()[-1]["undoes"], done["journal"])
-        self.refused("already_undone", self.door.undo, done["journal"], actor="person:cli", base=self.home)
-        self.refused("journal_unknown", self.door.undo, "cfg_" + "0" * 16, actor="person:cli", base=self.home)
+        self.refused("already-undone", self.door.undo, done["journal"], actor="person:cli", base=self.home)
+        self.refused("journal-unknown", self.door.undo, "cfg_" + "0" * 16, actor="person:cli", base=self.home)
 
     def test_a_plan_whose_files_moved_is_stale_and_writes_nothing(self):
         plan = self.door.plan({"integrations.github": True}, base=self.home)
         code, _, _ = self.cli("configure", "features", "notifications", "true")
         self.assertEqual(code, 0)
         written = self.read("settings.json")
-        self.refused("plan_stale", self.door.apply, plan["digest"], actor="person:cli", base=self.home)
+        self.refused("plan-stale", self.door.apply, plan["digest"], actor="person:cli", base=self.home)
         self.assertEqual(self.read("settings.json"), written)
         self.assertNotIn("github", written["integrations"])
 
@@ -163,7 +163,7 @@ class Door(unittest.TestCase):
         done = self.door.apply(self.door.plan({"features.notifications": True}, base=self.home)["digest"],
                                actor="person:cli", base=self.home)
         self.cli("configure", "features", "notifications", "false")
-        answer = self.refused("undo_refused", self.door.undo, done["journal"], actor="person:cli", base=self.home)
+        answer = self.refused("undo-refused", self.door.undo, done["journal"], actor="person:cli", base=self.home)
         self.assertIn("features.notifications", answer["keys"])
         self.assertIs(self.read("settings.json")["features"]["notifications"], False)
 
@@ -186,23 +186,37 @@ class Door(unittest.TestCase):
 
     # --- refusals ----------------------------------------------------------------
 
+    def test_every_refusal_is_answered_in_the_contracts_spelling_and_the_earlier_one_is_read(self):
+        """OBS-613: the door answered `plan_stale` beside every other tool's `invalid-argument`. It answers the
+        contract's hyphenated spelling only, and a code it is handed in the earlier spelling reads as the same."""
+        for earlier in ("unknown_key", "invalid_value", "secret_refused", "no_changes", "file_unreadable",
+                        "plan_stale", "plan_unknown", "journal_unknown", "already_undone", "undo_refused",
+                        "actor_refused", "invalid_argument", "workspace_refused", "operator_decision_required",
+                        "decision_invalid"):
+            with self.subTest(earlier):
+                now = earlier.replace("_", "-")
+                self.assertEqual(self.door.refusal_code(earlier), now)
+                self.assertEqual(self.door.refusal_code(now), now)
+                self.assertEqual(self.door.Refusal(earlier, "why").answer()["error"], now)
+        self.assertEqual(self.door.refusal_code("some_other_word"), "some_other_word")
+
     def test_unknown_keys_and_invalid_values_are_refused_by_type(self):
-        self.refused("unknown_key", self.door.plan, {"integrations.colours": True}, base=self.home)
-        self.refused("unknown_key", self.door.plan, {"nothing": 1}, base=self.home)
+        self.refused("unknown-key", self.door.plan, {"integrations.colours": True}, base=self.home)
+        self.refused("unknown-key", self.door.plan, {"nothing": 1}, base=self.home)
         for change in ({"integrations.github": "yes"}, {"learning_review.settle_hour_utc": 24},
                        {"learning_review.settle_hour_utc": True}, {"interface.locale": "fr"},
                        {"sources.projects": "relative/path"}, {"budget.daily_ceiling": -1},
                        {"model.chain": ["not a model"]}, {"guard.levels.low.free_gb": "many"}):
             with self.subTest(change):
-                self.refused("invalid_value", self.door.plan, change, base=self.home)
-        self.refused("no_changes", self.door.plan, {}, base=self.home)
+                self.refused("invalid-value", self.door.plan, change, base=self.home)
+        self.refused("no-changes", self.door.plan, {}, base=self.home)
         self.assertEqual(self.journal(), [])
 
     def test_a_credential_shaped_key_or_value_is_refused_and_never_echoed(self):
         for change in ({"sources.projects": f"/srv/example-ws/{FAKE_KEY}"}, {"model.chain": [f"vendor/{FAKE_KEY}"]},
                        {FAKE_KEY: True}):
             with self.subTest(sorted(change)):
-                answer = self.refused("secret_refused" if FAKE_KEY not in change else "unknown_key",
+                answer = self.refused("secret-refused" if FAKE_KEY not in change else "unknown-key",
                                       self.door.plan, change, base=self.home)
                 self.assertNotIn(FAKE_KEY, json.dumps(answer))
         self.assertEqual(self.journal(), [])
@@ -266,7 +280,7 @@ class Door(unittest.TestCase):
         code, out, _ = self.cli("configure", "--undo", journal)
         self.assertEqual((code, json.loads(out)["status"]), (0, "undone"))
         code, out, _ = self.cli("configure", "--plan", "integrations.colours=true")
-        self.assertEqual((code, json.loads(out)["error"]), (2, "unknown_key"))
+        self.assertEqual((code, json.loads(out)["error"]), (2, "unknown-key"))
         code, _, err = self.cli("configure")
         self.assertEqual(code, 2)
         self.assertIn("usage: project-observatory full configure", err)
@@ -326,7 +340,7 @@ class EverySettingThroughTheDoor(Door):
         for change in ({"meter.issuer": FAKE_KEY}, {"relay.origin": f"https://{FAKE_KEY}.example"},
                        {"tracked.local_folders": [{"path": f"/srv/{FAKE_KEY}"}]}):
             with self.subTest(change):
-                self.assertNotIn(FAKE_KEY, json.dumps(self.refused("secret_refused", self.door.plan, change,
+                self.assertNotIn(FAKE_KEY, json.dumps(self.refused("secret-refused", self.door.plan, change,
                                                                    base=self.home)))
 
     def test_the_auto_update_switch_file_is_the_doors(self):
@@ -398,8 +412,8 @@ class EverySettingThroughTheDoor(Door):
         self.assertEqual(self.read("machine-backup.json"), {"limits": {"total_mb": 400}})
 
     def test_a_structured_value_is_checked_by_its_owner(self):
-        self.refused("invalid_value", self.door.plan, {"tracked.local_folders": ["/srv/alpha-web"]}, base=self.home)
-        self.refused("invalid_value", self.door.plan, {"retention.ledger.never": {"not": "a list"}}, base=self.home)
+        self.refused("invalid-value", self.door.plan, {"tracked.local_folders": ["/srv/alpha-web"]}, base=self.home)
+        self.refused("invalid-value", self.door.plan, {"retention.ledger.never": {"not": "a list"}}, base=self.home)
         rows = [{"path": str(self.base / "alpha-web"), "why": "a folder outside Git"}]
         self.apply({"tracked.local_folders": rows})
         import tracked
