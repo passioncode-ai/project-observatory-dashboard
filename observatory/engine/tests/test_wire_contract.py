@@ -268,10 +268,14 @@ def test_the_served_instructions_describe_the_served_surface() -> None:
     # `observatory_mcp_supply` and `observatory_mcp_accept` (OBS-555); thirty-nine with `observatory_integrations`
     # and `observatory_issues` (OBS-557); forty with `observatory_health` (OBS-577); forty-one with
     # `observatory_doctor` (OBS-558); forty-three with the key page's acts, `observatory_key_act` (named on the WRITE
-    # line) and `observatory_credential_mark` (OBS-559 part 2).
-    check("the server serves forty-three observatory tools (wave 1, the key sweep OBS-554, the supply chain OBS-555, "
-          "integrations OBS-557, health OBS-577, the daily doctor OBS-558, the key page's acts OBS-559)",
-          tools == 43, str(tools))
+    # line) and `observatory_credential_mark` (OBS-559 part 2); forty-four with the operations verbs, `observatory_ops`
+    # (OBS-559, named on the WRITE line).
+    check("the server serves forty-four observatory tools (wave 1, the key sweep OBS-554, the supply chain OBS-555, "
+          "integrations OBS-557, health OBS-577, the daily doctor OBS-558, the key page's acts and the operations "
+          "verbs OBS-559)",
+          tools == 44, str(tools))
+    check("the instructions name the operations verbs' write rule and their job",
+          "`_ops` is a job" in src.split("instructions=(", 1)[1][:2600])
     check("the instructions name the key acts' write rule",
           "_key_act" in src.split("instructions=(", 1)[1][:2600])
     check("the instructions name the coding sessions beside the machine",

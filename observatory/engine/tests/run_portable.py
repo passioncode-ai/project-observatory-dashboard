@@ -358,6 +358,8 @@ BOUNDARY += ('mcp_supply',)
 BOUNDARY += ('key_source',)
 # OBS-559 part 2 (CP-18): the key page's acts as MCP tools, through the key server's own functions and a stubbed door.
 BOUNDARY += ('key_acts',)
+# OBS-559, the operations verbs (backup, disk, update, maintenance) as one MCP tool, through the CLI's own functions.
+BOUNDARY += ('ops_acts',)
 SUITES = LEGACY + BOUNDARY
 #: Engine test files this runner does not run, each with what does. Every other `tests/test_*.py` is a suite or a
 #: helper above (tests/test_runner_evidence.py), so a new suite cannot ship without running anywhere.
@@ -407,6 +409,8 @@ ROOT_FILES = (
     'configuration_door.py',
     # The key page's acts for an agent (OBS-559 part 2).
     'key_acts.py',
+    # The operations verbs for an agent (OBS-559, backup, disk, update, maintenance).
+    'ops_acts.py',
     # The supply-chain watch over MCP servers (OBS-555).
     'mcp_supply.py',
     # The Installed tools page's view (OBS-552).
