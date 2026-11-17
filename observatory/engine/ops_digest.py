@@ -24,7 +24,7 @@ WHERE PYTHON AND JAVASCRIPT DIFFER, the JavaScript reading wins, because the con
   line feed. The schema's `pattern` keyword is run by `jsonschema` with Python's `re.search`, so an operation named
   `x` followed by a line feed would pass it here and fail there. `check` therefore reads every name again with
   `fullmatch` (and every window with `whole_hour` and `real_day`, which also use `fullmatch`).
-- `\\s` is spelled with ECMAScript's own set (`delegation.JS_SPACE`), and every case-insensitive pattern carries
+- `\\s` is spelled with ECMAScript's own set (`credential_shape.JS_SPACE`), and every case-insensitive pattern carries
   `re.ASCII`, so `re.IGNORECASE` does not let U+017F or U+212A stand for `s` or `k` as Python's Unicode folding would.
 - A count is an integer from 0 to 2^53 - 1. JSON has one number type: `3.0` is the integer JavaScript's
   `Number.isSafeInteger` takes, so it is one here too, and `normalized` writes it back as `3`.
@@ -40,7 +40,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from delegation import JS_SPACE
+import credential_shape
+from credential_shape import JS_SPACE
 
 ROOT = Path(__file__).resolve().parent
 #: The vendored contract files (fabric/ops-digest/README.md names the tag, the commit and the digests).
@@ -68,53 +69,17 @@ _DAY = re.compile(r"([0-9]{4})-([0-9]{2})-([0-9]{2})")
 
 # ── the shared detectors (`src/secret-shape.ts`, `src/activity-rules.ts`) ─────────────────────────────────────
 
-#: A JWT or JWS anywhere in a value: three base64url segments, the first a JSON object's `eyJ`. Case-sensitive. The
-#: contract's `JWT_SHAPE`; `secret_value` reads it with `has_jwt`, in one pass.
-JWT_SHAPE = re.compile(r"eyJ[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]{2,}\.[A-Za-z0-9_-]*")
-#: A value that says it is a credential (`Bearer` at its start, in any case), or a provider key's shape with its prefix
-#: in its canonical case only, after a boundary (the start, a character that is no ASCII letter or digit, or an
-#: escape), and an `sk-` key only with its strength (DEC-0151, OBS-587). The contract's `SECRET_VALUE`, with no case
-#: flag: JavaScript's `\s` is `JS_SPACE`, its `.` any code unit but a line terminator, its `\d` is `[0-9]`.
-SECRET_VALUE = re.compile(
-    r"(\A[Bb][Ee][Aa][Rr][Ee][Rr][" + JS_SPACE + r"][^\n\r\u2028\u2029]"
-    r"|(?:\A|[^A-Za-z0-9]|%[0-9A-Fa-f]{2}|\\[nrt\"']|\\u[0-9A-Fa-f]{4}|\\x[0-9A-Fa-f]{2}"
-    r"|\\[bfv0ae]|\\[0-7]{1,3}|%25[0-9A-Fa-f]{2}|\x1b\[[0-9;:]*m|(?:\\u001[bB]|\\x1[bB]|\\e|\\033|\\33)\[[0-9;:]*m)"
-    r"(?:sk-(?=[A-Za-z0-9_-]{0,255}?[0-9])(?:(?=[A-Za-z0-9_-]{0,255}?[A-Z])[A-Za-z0-9_-]{16,}|[A-Za-z0-9_-]{32,})"
-    r"|gh[pousr]_[A-Za-z0-9]{20,}|xox[abposr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|glpat-[A-Za-z0-9_-]{20,}))")
-_LONG_RUN = re.compile(r"[A-Za-z0-9+/=_-]{40,}")
-_BASE64URL = frozenset("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_")
-
-
-def _run_end(text: str, start: int) -> int:
-    end = start
-    while end < len(text) and text[end] in _BASE64URL:
-        end += 1
-    return end
-
-
-def has_jwt(text: str) -> bool:
-    """`hasJwt`: whether `JWT_SHAPE` matches anywhere in `text`, read in one pass (the regex backtracks from every
-    `eyJ` of a long run): every `eyJ` of one base64url run shares that run's end, so only its first is tried."""
-    at = text.find("eyJ")
-    while at >= 0:
-        one = _run_end(text, at + 3)
-        if one - at - 3 >= 2 and one < len(text) and text[one] == ".":
-            two = _run_end(text, one + 1)
-            if two - one - 1 >= 2 and two < len(text) and text[two] == ".":
-                return True
-        at = text.find("eyJ", one)
-    return False
-
-
-def long_secret(value: str) -> bool:
-    """A run of 40 or more base64 or base64url characters that mixes upper case, lower case and a digit."""
-    return any(re.search(r"[a-z]", run) and re.search(r"[A-Z]", run) and re.search(r"[0-9]", run)
-               for run in _LONG_RUN.findall(value))
+#: The contract's `JWT_SHAPE`, `SECRET_VALUE`, `hasJwt` and `secretValue` are the credential-shape rule in its
+#: CONTRACT reading (OBS-595): JavaScript's `\s`, `.` and `\d`, no case flag. Named here for this module's readers.
+JWT_SHAPE = credential_shape.JWT_SHAPE
+SECRET_VALUE = credential_shape.CONTRACT_SECRET_VALUE
+has_jwt = credential_shape.has_jwt
+long_secret = credential_shape.long_secret
 
 
 def secret_value(value: str) -> bool:
     """`secretValue`: a JWT anywhere, a provider key or `Bearer ...`, or a long secret-shaped run."""
-    return has_jwt(value) or bool(SECRET_VALUE.search(value)) or long_secret(value)
+    return credential_shape.contract_secret(value)
 
 
 _SLASH = r"(?:[/\\]|%(?:25)?2[fF])"

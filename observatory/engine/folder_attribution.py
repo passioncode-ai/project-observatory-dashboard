@@ -22,6 +22,8 @@ import re
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
+import credential_shape
+
 _PATH = re.compile(r"^(?:/|[A-Z]:/)(?:[^/]+(?:/[^/]+)*)?$")
 MAX_PATH = 4096
 MAX_LIST = 10_000
@@ -130,15 +132,11 @@ _CREDENTIAL_PAIRS = {
     "key": ("private", "api", "access", "secret", "session", "auth", "signing", "encryption", "master", "client",
             "login", "refresh"),
     "auth": ("token", "code", "header"), "session": ("token", "id"), "code": ("login", "auth", "access", "session")}
-#: DEC-0151: a provider key's prefix in its canonical case only, after a boundary (the start, a character that is no
-#: ASCII letter or digit, or an escape), and an `sk-` key only with the strength `src/connections.ts` asks of one. The
-#: contract's pattern, compiled without a case-insensitive flag and with its digits written `[0-9]` (JavaScript's `\\d` is ASCII).
-_SECRET_VALUE = re.compile(
-    r"(^[Bb][Ee][Aa][Rr][Ee][Rr]\s.+|(?:^|[^A-Za-z0-9]|%[0-9A-Fa-f]{2}|\\[nrt\"']|\\u[0-9A-Fa-f]{4}|\\x[0-9A-Fa-f]{2}"
-    r"|\\[bfv0ae]|\\[0-7]{1,3}|%25[0-9A-Fa-f]{2}|\x1b\[[0-9;:]*m|(?:\\u001[bB]|\\x1[bB]|\\e|\\033|\\33)\[[0-9;:]*m)"
-    r"(?:sk-(?=[A-Za-z0-9_-]{0,255}?[0-9])(?:(?=[A-Za-z0-9_-]{0,255}?[A-Z])[A-Za-z0-9_-]{16,}|[A-Za-z0-9_-]{32,})"
-    r"|gh[pousr]_[A-Za-z0-9]{20,}|xox[abposr]-[A-Za-z0-9-]{10,}|AKIA[0-9A-Z]{16}|glpat-[A-Za-z0-9_-]{20,}))")
-_LONG_RUN = re.compile(r"[A-Za-z0-9+/=_-]{40,}")
+#: DEC-0151: the contract's `SECRET_VALUE` and its long run are the credential-shape rule's CONTRACT reading (OBS-595),
+#: read as JavaScript reads them. This port read `\s` and `.` the way Python does, so `Bearer` followed by U+FEFF
+#: passed and `Bearer` followed by U+001C or U+0085, or by a space and a line separator, was refused, against the
+#: contract.
+_SECRET_VALUE = credential_shape.CONTRACT_SECRET_VALUE
 _BEARER_INSIDE = re.compile(r"\bbearer\s+(?=[A-Za-z0-9._~+/-]*[0-9])[A-Za-z0-9._~+/-]{12,}=*", re.I)
 _PATH_LIKE = re.compile(r"^(?:[/~.]|[A-Za-z]:[\\/]|[a-z][a-z0-9+.-]*://)", re.I)
 
@@ -159,30 +157,8 @@ def _credential_name(name: str) -> bool:
     return any(w in words and any(p in words for p in partners) for w, partners in _CREDENTIAL_PAIRS.items())
 
 
-def _long_secret(value: str) -> bool:
-    return any(re.search(r"[a-z]", r) and re.search(r"[A-Z]", r) and re.search(r"[0-9]", r)
-               for r in _LONG_RUN.findall(value))
-
-
-def _has_jwt(text: str) -> bool:
-    """Whether the contract's `JWT_SHAPE` (`eyJ` and three base64url segments) is in `text`, read in one pass as its
-    `hasJwt` does: every `eyJ` of one
-    base64url run shares that run's end, so only its first is tried (the regex backtracks from each)."""
-    def run_end(start: int) -> int:
-        end = start
-        while end < len(text) and (text[end].isascii() and (text[end].isalnum() or text[end] in "-_")):
-            end += 1
-        return end
-    at = text.find("eyJ")
-    while at >= 0:
-        one = run_end(at + 3)
-        nxt = one
-        if one - at - 3 >= 2 and one < len(text) and text[one] == ".":
-            two = run_end(one + 1)
-            if two - one - 1 >= 2 and two < len(text) and text[two] == ".":
-                return True
-        at = text.find("eyJ", nxt)
-    return False
+_long_secret = credential_shape.long_secret
+_has_jwt = credential_shape.has_jwt
 
 
 def token_user_name(user: str) -> bool:
@@ -193,7 +169,7 @@ def token_user_name(user: str) -> bool:
 
 
 def _secret_value(value: str) -> bool:
-    return _has_jwt(value) or bool(_SECRET_VALUE.search(value)) or _long_secret(value)
+    return credential_shape.contract_secret(value)
 
 
 def _path_like(piece: str) -> bool:

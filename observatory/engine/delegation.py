@@ -52,8 +52,9 @@ OPAQUE_ID = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 AGENT_ID = re.compile(r"^[a-z][a-z0-9-]{1,62}(\.[a-z][a-z0-9-]{0,31})?$")
 #: ECMAScript's white space and line terminators (ECMA-262 WhiteSpace, LineTerminator): what `\s` means in the
 #: contract's JavaScript. Python's `\s` differs (it takes U+001C-U+001F and U+0085, and not U+FEFF), so every grammar
-#: the contract writes with `\s` or `\S` is spelled with this set here (OBS-162 review round 2).
-JS_SPACE = "\t\n\x0b\x0c\r \u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+#: the contract writes with `\s` or `\S` is spelled with this set here (OBS-162 review round 2). One definition, in
+#: the credential-shape rule's contract reading (OBS-595).
+from credential_shape import JS_SPACE  # noqa: E402
 #: A URI as DL-2 types one: a scheme, a colon and no white space (`iss`, `sub`, `project`).
 URI = re.compile(rf"[A-Za-z][A-Za-z0-9+.-]*:[^{JS_SPACE}]+")
 #: `delegation-token.schema.json` `jti` and `scope` grammars.

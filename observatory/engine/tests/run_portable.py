@@ -165,6 +165,8 @@ BOUNDARY += ('review_policy',)
 BOUNDARY += ('provider_deadline',)
 # One credential-shape heuristic for every door that judges typed text.
 BOUNDARY += ('credential_shape',)
+# OBS-595: every site that asks whether text is credential-shaped asks that rule.
+BOUNDARY += ('secret_shape_sites',)
 # PROJECT is the folder name; the registry id names the same folder.
 BOUNDARY += ('vault_project',)
 # The product lifecycle contract: bounded steps, idle server, rotated logs, the watch.

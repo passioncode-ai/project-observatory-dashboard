@@ -88,7 +88,7 @@ MIN_BODY = 24
 #: what catches an unbranded token.
 PATTERNS = [
     # Any algorithm word, ENCRYPTED (PKCS#8) and DSA included (review round 6).
-    ("private key block", re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY")),
+    ("private key block", credential_shape.PRIVATE_KEY_BLOCK),
     # An unbranded token assigned to a name that says what it is. The name is
     # what makes it worth measuring; the entropy is what decides.
     # A bare word as the whole name (`api_key = "…"`), measured by entropy. An
@@ -112,8 +112,8 @@ PATTERNS = [
 #   token start   the start of the text, a character other than an ASCII letter,
 #                 an ASCII digit or `_` (a non-ASCII letter before a prefix is a
 #                 token start), or a literal `\n`, `\t` or `\r` escape in a string
-#   issuers       `credential_shape.PREFIXES`, `sk-or-v1-`, `sk-proj-`,
-#                 `sk-ant-api03-`; the LONGEST prefix the token starts with is its issuer
+#   issuers       `credential_shape.ISSUERS` (its `PREFIXES` and the longer forms
+#                 of `sk-` that name a provider); the LONGEST prefix the token starts with is its issuer
 #   refused       a body at or above the issuer's minimum (`credential_shape.BODY_MIN`
 #                 where it names one, else 24), whatever its entropy, unless it is a
 #                 placeholder or a name
@@ -126,11 +126,10 @@ PATTERNS = [
 #                 resumes right after its prefix, so an inner token is still judged
 #   AWS           `AKIA`/`ASIA` at a token start, exactly sixteen `[0-9A-Z]`, then
 #                 anything but an ASCII letter or digit (`-backup`, `_x`, end of text)
-ISSUERS = tuple(sorted({"sk-or-v1-", "sk-proj-", "sk-ant-api03-", *credential_shape.PREFIXES},
-                       key=len, reverse=True))
+ISSUERS = credential_shape.ISSUERS
 _START = r"(?:(?<![A-Za-z0-9_])|(?<=\\[nrt]))"
 TOKEN = re.compile(_START + r"(?:" + "|".join(re.escape(p) for p in ISSUERS) + r")[A-Za-z0-9_\-]*")
-AWS_ID = re.compile(_START + r"(?:AKIA|ASIA)[0-9A-Z]{16}(?![A-Za-z0-9])")
+AWS_ID = re.compile(_START + credential_shape.AWS_ID)
 NAME_BODY = re.compile(r"[a-z]+(?:_[a-z]+)+")
 PLACEHOLDER_BODY = re.compile(r"[a-z]{1,15}(?:[-_][a-z]{1,15})+")
 #: The bare-word rule's measured minimum: the table says 20+, and it is 20.
@@ -264,8 +263,8 @@ def is_hex_secret(value: str) -> bool:
     entropy (review round 13). `looks_secret` needs entropy 3.4, which about 1% of
     40-hex and 6.5% of 32-hex values miss, and a hex value can never reach the
     0.78 normalised floor; `credential_shape` already counts such a run as a
-    credential, and this is its own pattern (`credential_shape._HEX`)."""
-    return credential_shape._HEX.fullmatch(value) is not None
+    credential, and this is its own pattern (`credential_shape.HEX`)."""
+    return credential_shape.HEX.fullmatch(value) is not None
 
 
 def placeholder_body(body: str) -> bool:
@@ -277,10 +276,7 @@ def placeholder_body(body: str) -> bool:
 
 def issuer_of(raw: str) -> str | None:
     """The known issuer prefix `raw` starts with (longest first), or None."""
-    for pre in ISSUERS:
-        if raw.startswith(pre):
-            return pre
-    return None
+    return credential_shape.issuer_of(raw)
 
 
 def judge_token(raw: str) -> tuple[str, str] | None:
@@ -526,8 +522,7 @@ def body_of(match: str) -> str:
     lowers the entropy of every real key by diluting it with a known string;
     the measurement has to be about the part that is supposed to be random.
     """
-    for pre in sorted({"sk-or-v1-", "sk-proj-", "sk-ant-api03-", "AKIA", *credential_shape.PREFIXES},
-                      key=len, reverse=True):
+    for pre in sorted({"AKIA", *credential_shape.ISSUERS}, key=len, reverse=True):
         if match.startswith(pre):
             return match[len(pre):]
     return match
