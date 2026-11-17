@@ -676,7 +676,7 @@ def observatory_ops(
     ctx: "Context | None" = None,
 ) -> dict[str, Any]:
     """The operations verbs for an agent (OBS-559): backups, the disk, the engine update and the maintenance job,
-    each the SAME function the CLI runs (`project-observatory full <verb>`), in a detached job: the answer is a job
+    each the SAME function its CLI verb runs, in a detached job: the answer is a job
     handle {action, job: {id, status}}; follow it with fabric.job.get (its result's output carries the command's
     `exit`, its JSON `result` and the last lines it `said`, scrubbed) and stop it with fabric.job.cancel (an update
     runs in a process of its own and is never stopped half-way: a cancel stops following it).

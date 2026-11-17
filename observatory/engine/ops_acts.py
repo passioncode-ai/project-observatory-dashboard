@@ -39,6 +39,7 @@ ROOT = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 import credential_shape  # noqa: E402
 import key_acts  # noqa: E402
+import osprivacy  # noqa: E402
 
 Refusal = key_acts.Refusal
 CALLER = key_acts.CALLER
@@ -201,7 +202,7 @@ def _journal(row: dict, *, job: str) -> None:
     job's id, which `jobs.JOB_ID` has checked (its hex would read as a credential)."""
     file = journal_path()
     file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd = os.open(file, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    fd = osprivacy.open(file, os.O_WRONLY | os.O_APPEND | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
     with os.fdopen(fd, "a", encoding="utf-8") as out:
         out.write(json.dumps({**_scrub(row), "job": job}, ensure_ascii=False, sort_keys=True) + "\n")
 
@@ -366,7 +367,7 @@ def run(job: dict, *, inprocess=None, process=None) -> dict:
                                           "reason": f"the command exited {code}; `result` and `said` say why"}]
     output = {"action": action, "command": argv[0], "exit": code, "result": result, "said": said}
     return interop.envelope(job_id=job.get("id", ""), capability=f"ops.{action}", span=span, output=output,
-                            done=[{"claimId": "OPS-ACT", "statement": f"ran `project-observatory full "
-                                                                      f"{' '.join(argv[:2])}`; it exited {code}"}],
+                            done=[{"claimId": "OPS-ACT", "statement": f"ran the CLI verb "
+                                                                      f"{' '.join(argv[:2])!r}; it exited {code}"}],
                             proof=[], not_verified=not_verified, write_scopes=ACTIONS[action]["writes"],
                             wall_ms=int((time.monotonic() - started) * 1000), created_at=jobs.now_iso())
