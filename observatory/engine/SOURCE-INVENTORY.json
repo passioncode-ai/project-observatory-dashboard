@@ -597,8 +597,8 @@
       "path": "credential_shape.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "a8e9cf471f51911516c7ad91d6edb50cf31f1118ab8a8458deaebd14a4a8a4bd",
-      "bytes": 17593
+      "export_sha256": "8ebf7cde672e34f2ab76b6abc3d520ca0792acd5c5e8f76577a39b92652390a8",
+      "bytes": 17594
     },
     {
       "path": "dashboard/agent_panel.py",
@@ -5138,8 +5138,8 @@
       "path": "tests/test_credential_requests.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "cdb14b29292aeb89abe889e62a702859737d4f017031cc5c96b8ac9058652c72",
-      "bytes": 44564
+      "export_sha256": "31bd2cd2b578f4abc5f73d3aa623a5fd359aca991b0486efa6d38278d3c0ae73",
+      "bytes": 44796
     },
     {
       "path": "tests/test_credential_shape.py",

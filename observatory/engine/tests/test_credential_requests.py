@@ -624,6 +624,8 @@ class TheRealDoors(Suite):
         private_io.write(m.ADMIN_STORE / "example", "prov\n")
         m.LEDGER = store / "ledger.json"
         m._journal = lambda *a, **k: None
+        m.paths.SCRATCH = pathlib.Path(tmpdir.mkdtemp())      # an empty consumer scan: a revoke never proceeds
+        (m.paths.SCRATCH / "openrouter.json").write_text(json.dumps({"keys": []}), encoding="utf-8")  # blind (OBS-594)
         keys: dict[str, dict] = {}
         listed: list[str] = []
 

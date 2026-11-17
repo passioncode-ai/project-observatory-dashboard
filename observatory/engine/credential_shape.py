@@ -1,4 +1,4 @@
-"""Does this text carry something shaped like a credential? One answer, everywhere.
+r"""Does this text carry something shaped like a credential? One answer, everywhere.
 
 WHY ONE MODULE. Four doors decide this question about text a person or an agent
 typed: the vault's slot names (`tools/vault.py`, and the keyserver routes that
