@@ -239,6 +239,95 @@ class Unread(unittest.TestCase):
         self.assertEqual(v["measuredAt"], NOW)
 
 
+class OneInventory(unittest.TestCase):
+    """OBS-600 (CP-05): the page and `observatory_machine(section="skills")` read one inventory, built by one function
+    (`tooling_view.summary`), so both show the same agents, rows, tiers, findings beside their items and counts."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        base = pathlib.Path(self.tmp.name).resolve()
+        self.home = base / "workspace"
+        self.env = patch.dict(os.environ, {"OBSERVATORY_HOME": str(self.home), "HOME": str(base),
+                                           "USERPROFILE": str(base)}, clear=True)
+        self.env.start()
+        import workspace
+        workspace.initialize(self.home)
+        import paths
+        importlib.reload(paths)
+        for name in ("machine_view", "tooling_view"):
+            if name in sys.modules:
+                importlib.reload(sys.modules[name])
+        sys.path.insert(0, str(ROOT / "mcp"))
+        import server
+        self.server = importlib.reload(server)
+        self.paths = paths
+        (paths.SCRATCH).mkdir(parents=True, exist_ok=True)
+        (paths.SCRATCH / "harness.json").write_text(json.dumps(HARNESS))
+        silenced = {**finding("f-acked", "harness.skill_risk", "harness:skill:helper:other:abc", "warning",
+                              "skill {skill} ships opaque or oversized files", skill="helper"), "acked": True}
+        self.all = [*FINDINGS, silenced]
+        paths.REGISTRY.mkdir(parents=True, exist_ok=True)
+        (paths.REGISTRY / "findings.json").write_text(json.dumps({"findings": self.all}))
+
+    def tearDown(self):
+        self.env.stop()
+        self.tmp.cleanup()
+
+    def walk(self, limit):
+        """Every page of the tool's answer: the first answer and every plugin and skill row, in page order."""
+        first, cursor, rows = None, None, []
+        for _ in range(50):
+            out = self.server.observatory_machine(section="skills", limit=limit, cursor=cursor)
+            first = first or out
+            for space in out["skills"]["spaces"]:
+                rows += [("plugin", r) for r in space["plugins"]] + [("skill", r) for r in space["skills"]]
+            cursor = out["skills"]["page"]["nextCursor"]
+            if cursor is None:
+                break
+        return first, rows
+
+    @staticmethod
+    def key(kind, r):
+        return (kind, r.get("agent"), r.get("scope"), r.get("name"), r.get("project") or r.get("plugin"),
+                r.get("tier"), tuple(f["id"] for f in r.get("findings") or []))
+
+    def test_the_page_and_the_tool_show_the_same_rows_and_counts(self):
+        import tooling_view as tv
+        # What build_dashboard hands the page: the open findings (an acknowledged row stays silent).
+        page = tv.summary([f for f in self.all if not f.get("acked")])
+        first, rows = self.walk(limit=3)
+        tool = first["tooling"]
+        self.assertEqual(tool["counts"], page["counts"])
+        self.assertEqual([(a["id"], a["name"], a["installed"], a["version"], [f["id"] for f in a["findings"]])
+                          for a in tool["agents"]],
+                         [(a["id"], a["name"], a["installed"], a["version"], [f["id"] for f in a["findings"]])
+                          for a in page["agents"]])
+        shown = [self.key("plugin", p) for a in page["agents"] for p in a["plugins"]]
+        shown += [self.key("skill", s) for a in page["agents"] for scope in a["skills"].values() for s in scope]
+        self.assertEqual(sorted(self.key(kind, r) for kind, r in rows), sorted(shown))
+        self.assertEqual([(h["program"], [f["id"] for f in h.get("findings") or []]) for h in tool["hooks"]],
+                         [(h["program"], [f["id"] for f in h["findings"]]) for a in page["agents"]
+                          for h in a["hooks"]])
+        self.assertEqual([f["id"] for f in tool["other"]], [f["id"] for f in page["other"]])
+        self.assertEqual((first["skills"]["counts"]["skills"], first["skills"]["counts"]["plugins"]),
+                         (page["counts"]["skills"], page["counts"]["plugins"]))
+        self.assertEqual(sorted(d["source"] for d in first["degraded"]), sorted(d["source"] for d in page["degraded"]))
+        self.assertNotIn("f-acked", json.dumps(first), "a silenced finding is silent in both")
+        tiles = text(tools_page.tools_html({"tooling": page}, EN))
+        self.assertIn(f"Skills {tool['counts']['skills']}", tiles)
+
+    def test_the_published_fields_stay(self):
+        out = self.server.observatory_machine(section="skills")
+        self.assertEqual(set(out["skills"]), {"spaces", "page", "counts", "findings", "open"})
+        self.assertEqual(out["skills"]["counts"], {"skills": 4, "plugins": 4, "findings": 1})
+        self.assertEqual(out["skills"]["findings"][0]["code"], "plugin-behind")
+
+    def test_findings_not_built_are_named_by_the_tool_as_on_the_page(self):
+        (self.paths.REGISTRY / "findings.json").unlink()
+        out = self.server.observatory_machine(section="skills")
+        self.assertIn(("findings", "not-built"), [(d["source"], d.get("code")) for d in out["degraded"]])
+
+
 class Page(unittest.TestCase):
     def page(self, t=EN, **over):
         return tools_page.tools_html({"tooling": {**view(), **over}}, t)

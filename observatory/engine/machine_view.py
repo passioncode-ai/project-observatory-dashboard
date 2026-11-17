@@ -101,18 +101,17 @@ SKILLS_OPEN = [{"finding": "organization-plugin-in-personal-space", "waitsOn": "
 
 
 def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
+    """The `skills` section (OBS-477), read and paged: `skills_page(skills_read(), limit, cursor)`."""
+    return skills_page(skills_read(), limit, cursor)
+
+
+def skills_read() -> dict:
     """The `skills` section (OBS-477): every skill and plugin each agent of this space loads or has installed, with
     its version, scope and agent, and the findings the records support (a plugin behind the newest version its
     marketplace's local copy publishes). Read from the harness scan's `inventory` (collectors/scan_harness.py), which
     the tick refreshes when `integrations.harness` is on and `full scan-harness` refreshes on request; nothing is
     scanned here. A scan that is missing, unreadable or older than the inventory is named in `degraded` with the
-    command that fills it, and the lists are then empty, never a claim that nothing is installed.
-
-    `limit` pages every row (a machine can hold over a thousand skills and a plugin row per project install; the MCP
-    tool answers 100 rows at a time): one window over the findings, then each space's plugins, then its skills;
-    `cursor` is what `page.nextCursor` gave (`offset@stamp`); `counts` are always whole. `degraded` code
-    `invalid-cursor` answers a cursor of an earlier scan or a malformed one (with the first page) and one past the end
-    (with an empty last page)."""
+    command that fills it, and the lists are then empty, never a claim that nothing is installed."""
     doc, problem = _load("harness.json", "scan-harness")
     if problem:
         if problem["code"] == "not-surveyed":
@@ -151,6 +150,29 @@ def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
                                    f"run `project-observatory full scan-harness`"})
     counts = {"skills": sum(len(sp["skills"]) for sp in spaces),
               "plugins": sum(len(sp["plugins"]) for sp in spaces), "findings": len(findings)}
+    # `open` as the scan wrote it when it is a list of entries; anything else (an older or foreign scan) is this
+    # release's own list.
+    opened = inventory.get("open")
+    if not (isinstance(opened, list) and opened and all(isinstance(o, dict) for o in opened)):
+        opened = SKILLS_OPEN
+    return {"measuredAt": doc.get("generated_at"), "spaces": spaces, "counts": counts, "findings": findings,
+            "open": opened, "degraded": degraded}
+
+
+def skills_page(section: dict, limit: int | None = None, cursor: str | None = None) -> dict:
+    """One page of a section `skills_read` answered (its rows may be replaced one for one first, as
+    `tooling_view.summary` does to set each row's tier and findings beside it); a section with nothing to page (no scan,
+    one before the inventory) already carries its empty `page` and is answered as it is.
+
+    `limit` pages every row (a machine can hold over a thousand skills and a plugin row per project install; the MCP
+    tool answers 100 rows at a time): one window over the findings, then each space's plugins, then its skills;
+    `cursor` is what `page.nextCursor` gave (`offset@stamp`); `counts` are always whole. `degraded` code
+    `invalid-cursor` answers a cursor of an earlier scan or a malformed one (with the first page) and one past the end
+    (with an empty last page)."""
+    if "page" in section:
+        return section
+    spaces, findings = section["spaces"], section["findings"]
+    degraded = list(section["degraded"])
     # One window over every row, in one order: the findings, then each space's plugins, then its skills. A page of
     # `limit` rows is bounded whatever a machine holds (a project install is a plugin row per project).
     rows: list[tuple[str, int, dict]] = [("finding", -1, f) for f in findings]
@@ -160,7 +182,7 @@ def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
     start = 0
     # A cursor carries the scan it was given for (`offset@stamp`): the tick rewrites the scan every half hour, and a
     # walk that spans a rescan would skip or repeat rows without saying so. A bare offset is taken as it is.
-    stamp = re.sub(r"[^0-9]", "", str(doc.get("generated_at") or ""))[:14]
+    stamp = re.sub(r"[^0-9]", "", str(section.get("measuredAt") or ""))[:14]
     given = re.fullmatch(r"([0-9]{1,9})(?:@([0-9]{0,14}))?", str(cursor)) if cursor is not None else None
     if given and given.group(2) is not None and given.group(2) != stamp:
         degraded.append({"source": "cursor", "code": "invalid-cursor",
@@ -194,11 +216,6 @@ def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
                 end = at
                 break
     window = rows[start:end]
-    # `open` as the scan wrote it when it is a list of entries; anything else (an older or foreign scan) is this
-    # release's own list.
-    opened = inventory.get("open")
-    if not (isinstance(opened, list) and opened and all(isinstance(o, dict) for o in opened)):
-        opened = SKILLS_OPEN
     findings = [r for kind, _, r in window if kind == "finding"]
     spaces = [{**space, "plugins": [r for kind, i, r in window if kind == "plugin" and i == index],
                "skills": [r for kind, i, r in window if kind == "skill" and i == index]}
@@ -206,8 +223,8 @@ def skills_section(limit: int | None = None, cursor: str | None = None) -> dict:
     page = {"limit": limit, "cursor": f"{start}@{stamp}", "nextCursor": f"{end}@{stamp}" if end < total else None,
             "total": total,
             "order": "findings, then each space's plugins, then its skills"}
-    return {"measuredAt": doc.get("generated_at"), "spaces": spaces, "page": page, "counts": counts,
-            "findings": findings, "open": opened, "degraded": degraded}
+    return {"measuredAt": section.get("measuredAt"), "spaces": spaces, "page": page, "counts": section["counts"],
+            "findings": findings, "open": section["open"], "degraded": degraded}
 
 
 def summary(explain_pid: int | None = None) -> dict:

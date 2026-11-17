@@ -980,7 +980,10 @@ def observatory_machine(
 
     `section="skills"`: every skill and plugin here with version, scope and agent, a plugin's
     enabled state and its marketplace's newest LOCAL version, findings (`plugin-behind`), `open`
-    (OBS-359) and `degraded`; from the last harness scan; 100 rows a page (`cursor`).
+    (OBS-359) and `degraded`; from the last harness scan; 100 rows a page (`cursor`). It is the Installed tools
+    page's inventory (OBS-600): each plugin and skill row also carries its source `tier` and the engine's `findings`
+    beside it, and `tooling` holds the agents with their versions and findings, the hooks, the findings about the
+    setup as a whole (`other`) and the page's counts.
     """
     if section == "accounts" and explainPid is None:
         # OBS-354: the account count and this account's ports, read only; no account name.
@@ -992,15 +995,24 @@ def observatory_machine(
                              if n["code"] in ("claims-folder-unreadable", "port-record-stale")],
                 "accounts": shown}
     if section == "skills" and explainPid is None:
-        import machine_view
-        skills = machine_view.skills_section(limit=limit or SKILLS_PAGE, cursor=cursor)
+        # OBS-600: the Installed tools page's inventory (`tooling_view.summary`, one function for both), paged.
+        import tooling_view
+        view = tooling_view.summary(limit=limit or SKILLS_PAGE, cursor=cursor)
+        skills = view["skills"]
         # Bounded for the host: `degraded` and `measuredAt` once, at the top; rows without their empty fields.
-        degraded = skills.pop("degraded")
-        skills["spaces"] = [{**space, "skills": [_present_fields(r) for r in space.get("skills") or []],
-                             "plugins": [_present_fields(r) for r in space.get("plugins") or []]}
+        skills.pop("degraded")
+        skills.pop("measuredAt")
+        skills["spaces"] = [{**space, "skills": [_item_fields(r) for r in space.get("skills") or []],
+                             "plugins": [_item_fields(r) for r in space.get("plugins") or []]}
                             for space in skills["spaces"]]
         skills["findings"] = [_present_fields(r) for r in skills.get("findings") or []]
-        return {"measuredAt": skills.pop("measuredAt"), "degraded": degraded, "skills": skills}
+        # What the page shows beside the rows: each agent with its version and own findings, the hooks with theirs,
+        # the findings about the setup as a whole, and the page's counts (its tiles).
+        tooling = {"agents": [{k: a.get(k) for k in ("id", "name", "installed", "version", "findings")}
+                              for a in view["agents"]],
+                   "hooks": [{**_item_fields(h), "agent": a["id"]} for a in view["agents"] for h in a["hooks"]],
+                   "other": view["other"], "counts": view["counts"]}
+        return {"measuredAt": view["measuredAt"], "degraded": view["degraded"], "skills": skills, "tooling": tooling}
     if section == "move" and explainPid is None:
         # The agent's path to the checklist (decision D13): the CLI's own function and peers.
         import machine_backup
@@ -1365,6 +1377,15 @@ def _present_fields(row: Any) -> Any:
     if not isinstance(row, dict):
         return row
     return {k: v for k, v in row.items() if v is not None}
+
+
+def _item_fields(row: Any) -> Any:
+    """An inventory row as `_present_fields` gives it, and without an empty `findings`: a row the page shows with no
+    finding beside it reads the same in fewer characters."""
+    row = _present_fields(row)
+    if isinstance(row, dict) and row.get("findings") == []:
+        row = {k: v for k, v in row.items() if k != "findings"}
+    return row
 
 
 # Publish the additive bounded coverage contract on the actual tool, not only prose.
