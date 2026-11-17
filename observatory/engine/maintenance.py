@@ -143,7 +143,8 @@ def _transient(record: dict) -> bool:
 
 #: The journal events that end a `full update --apply` (engine_update.Transaction).
 FINAL_EVENTS = {"updated": "updated", "rolled-back": "failed-rolled-back",
-                "rollback-failed": "needs-person", "refused": "refused", "held": "held"}
+                "rollback-failed": "needs-person", "refused": "refused", "held": "held",
+                "undetermined": "undetermined"}
 
 
 def reconcile_in_flight(base: Path, state: dict) -> dict | None:
@@ -180,6 +181,10 @@ def reconcile_in_flight(base: Path, state: dict) -> dict | None:
                 outcome["needs_person"] = str(row["needs_person"])[:1000]
             if row.get("error"):
                 outcome["detail"] = str(row["error"])[:300]
+            elif row.get("degraded"):
+                outcome["detail"] = str((row["degraded"] or [""])[0])[:300]
+            if row.get("failed_step"):
+                outcome["failed_step"] = str(row["failed_step"])[:60]
             break
     state.pop("update_in_flight", None)
     if outcome is None:
@@ -462,6 +467,8 @@ class Commands:
 
     def __init__(self, base: Path, python: str | None = None, runner=subprocess.run):
         self.base, self.python, self.runner = base, python or engine_python(), runner
+        #: The last apply's output, bounded and redacted: {"stdout": [...], "stderr": [...]} (OBS-581).
+        self.last_output: dict | None = None
 
     def apply(self, *args: str, env: dict | None = None) -> tuple[int, dict, str]:
         """`full update --apply …`, in a session of its own with its output in a file.
@@ -472,6 +479,7 @@ class Commands:
         environ = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "OBSERVATORY_ROOT"}}
         environ.update(env or {})
         environ[IN_PASS_ENV] = "1"
+        self.last_output = None
         # BESIDE the home, next to the update lock, never inside it: a rollback renames the
         # home to `.failed-update-*` and puts the snapshot in its place, and output written
         # inside followed the old copy, so the pass read an empty report (A03 review).
@@ -486,16 +494,19 @@ class Commands:
             code = proc.wait()
         except OSError as exc:
             return 125, {}, type(exc).__name__
+        text = ""
         try:
-            text = out_path.read_text(encoding="utf-8")
+            text = out_path.read_text(encoding="utf-8", errors="replace")
             doc = json.loads(text) if text.strip() else {}
         except (OSError, ValueError):
             doc = {}
         try:
-            tail = err_path.read_text(encoding="utf-8").strip().splitlines()
+            tail = err_path.read_text(encoding="utf-8", errors="replace").strip().splitlines()
         except OSError:
             tail = []
-        return code, doc if isinstance(doc, dict) else {}, (tail[-1] if tail else "")[:300]
+        self.last_output = {"stdout": output_tail(text),
+                            "stderr": output_tail("\n".join(tail))}
+        return code, doc if isinstance(doc, dict) else {}, redact_line(tail[-1] if tail else "")
 
     def full(self, *args: str, timeout: int = 3600, env: dict | None = None) -> tuple[int, dict, str]:
         environ = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "OBSERVATORY_ROOT"}}
@@ -513,6 +524,23 @@ class Commands:
             doc = {}
         tail = (p.stderr or "").strip().splitlines()
         return p.returncode, doc if isinstance(doc, dict) else {}, (tail[-1] if tail else "")[:300]
+
+
+#: How much of an automatic apply's stdout and stderr a failure keeps (OBS-581), and of each line.
+OUTPUT_TAIL_LINES, OUTPUT_LINE_CHARS = 40, 300
+
+
+def redact_line(line: str) -> str:
+    """One output line, bounded, with a password in a URL and every credential shape replaced."""
+    import credential_shape
+    text = re.sub(r"(https?://)[^\s/@]+@", r"\1***@", str(line or ""))
+    return credential_shape.redact(text, uuids=False)[:OUTPUT_LINE_CHARS]
+
+
+def output_tail(text: str, lines: int = OUTPUT_TAIL_LINES) -> list[str]:
+    """The last LINES non-empty lines of TEXT, each through `redact_line`."""
+    rows = [row for row in str(text or "").splitlines() if row.strip()]
+    return [redact_line(row) for row in rows[-lines:]]
 
 
 def apply_output_paths(base: Path) -> tuple[Path, Path]:
@@ -750,15 +778,37 @@ def step_update(base: Path, state: dict, at: datetime.datetime, commands: Comman
     if code == UPDATE_HELD:
         update["needs_person"] = str(report.get("needs_person") or "")[:1000]
     elif code not in (UPDATE_OK, UPDATE_SERVICES):
-        # `full update` names its reason in the JSON it prints, not on stderr.
-        update["detail"] = (str(report.get("error") or "") or err or f"exit {code}")[:300]
+        # `full update` names its reason in the JSON it prints, not on stderr: `error` for a refusal,
+        # `degraded` for a release it could not look up or fetch (exit 3, which read as "exit 3"
+        # alone before OBS-581).
+        degraded = report.get("degraded") if isinstance(report.get("degraded"), list) else []
+        update["detail"] = redact_line(str(report.get("error") or "") or (str(degraded[0]) if degraded else "")
+                                       or err or f"exit {code}")
         update["failures"] = int((state.get("update") or {}).get("failures") or 0) + 1
+        failure_record(base, commands, update, report)
     else:
         # The check found a release, and it is now installed: the check reads as done, so
         # `maintain status` never says "update available" beside "updated" (audit A14).
         check["result"] = "updated"
     state["update"] = update
     return {"result": outcome}
+
+
+def failure_record(base: Path, commands, update: dict, report: dict) -> None:
+    """Where a failed automatic apply stopped and what it printed last, in the maintenance record
+    and in update.jsonl (OBS-581): the apply's own output file is overwritten by the next attempt,
+    and a system daemon's maintain.log is not where root's space_daemons.py writes it."""
+    if report.get("failed_step"):
+        update["failed_step"] = str(report["failed_step"])[:60]
+    output = getattr(commands, "last_output", None)
+    if isinstance(output, dict):
+        for stream in ("stdout", "stderr"):
+            rows = [redact_line(r) for r in (output.get(stream) or [])[-OUTPUT_TAIL_LINES:]]
+            if rows:
+                update[f"{stream}_tail"] = rows
+    import engine_update
+    engine_update.log(base, "automatic-update-failed", **{k: update[k] for k in (
+        "exit", "result", "from", "to", "detail", "failed_step", "stdout_tail", "stderr_tail") if k in update})
 
 
 def _services():
@@ -1865,6 +1915,24 @@ class LaunchdSchedule:
             return False
         return any(daemon.get(key) != doc.get(key) for key in ("ProgramArguments", "WorkingDirectory"))
 
+    def system_logs(self) -> dict:
+        """Where root's daemon of this label writes: space_daemons.py replaces the definition's own log
+        paths with a root-owned folder, so the workspace's `<job>.log` stays empty (OBS-581). Read from
+        the loaded daemon, else the layout space_daemons.py writes."""
+        path = self.DAEMONS / f"{self.label}.plist"
+        try:
+            daemon = plistlib.loads(path.read_bytes()) if path.is_file() else {}
+        except (OSError, ValueError, plistlib.InvalidFileException):
+            daemon = {}
+        out, err = (daemon.get("StandardOutPath"), daemon.get("StandardErrorPath")) if isinstance(daemon, dict) else (None, None)
+        if not (isinstance(out, str) and isinstance(err, str)):
+            sys.path.insert(0, str(config.SOURCE / "tools"))
+            import machine_move
+            import space_daemons
+            out, err = space_daemons.log_paths(space_daemons.default_log_dir(machine_move.account_name(self.launch.uid())),
+                                               self.label)
+        return {"stdout": out, "stderr": err}
+
     def background_definition(self) -> Path:
         """The definition root's space_daemons.py loads: the account's background folder."""
         import machine_identity
@@ -2093,9 +2161,10 @@ class LaunchdSchedule:
             state = self.launch.job_state(self.label)
             out.update(pid=state["pid"], last_exit=state["last_exit"])
             if out["loaded"] and self.system_daemon():
-                out.update(installed=True, domain="system")
+                out.update(installed=True, domain="system", logs=self.system_logs())
             return out
         out["domain"] = "system"
+        out["logs"] = self.system_logs()
         if out["installed"] and not out["loaded"]:
             import machine_move
             out["next"] = machine_move.root_step("apply", self.label, self.launch.uid())
