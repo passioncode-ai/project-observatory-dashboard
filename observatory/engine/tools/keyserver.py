@@ -125,6 +125,11 @@ ACTION_SCOPES = {"mint": ("keys.mint", "charge"), "limit": ("keys.limit", "chang
 REFUSAL_STATUS = {"unauthenticated": 401, "token-expired": 401, "principal-unproven": 401,
                   "issuer-unavailable": 503, "unknown-state": 503}
 _IDENTITY: contextvars.ContextVar[dict | None] = contextvars.ContextVar("identity", default=None)
+#: THE OPERATOR'S WORDS AN AGENT RELAYED (OBS-559, contract DEC-0121). The MCP tools `observatory_key_act` and
+#: `observatory_credential_mark` call the acts below in process (`key_acts.py`); stdio proves no caller, so an act that
+#: spends or cannot be undone carries the operator's decision instead of a delegation token, and the journal row keeps
+#: it. Empty for the page and for an HTTP caller.
+_RELAYED: contextvars.ContextVar[dict | None] = contextvars.ContextVar("relayed", default=None)
 
 
 def caller_name(raw: str | None) -> str:
@@ -226,6 +231,9 @@ def audit(action: str, subject: str, detail: dict) -> None:
            # `detail` so no action can overwrite it, and a later reader never
            # mistakes the label for a verified identity.
            "caller_verified": False, "principal": "local-token-holder"}
+    relayed = _RELAYED.get()
+    if relayed:
+        row["decision"] = relayed
     proven = _IDENTITY.get()
     if proven:
         # A verified delegation token: the caller is who the hub's signed chain says (OBS-62).
@@ -398,10 +406,20 @@ def act_annotate(body: dict) -> dict:
         row = sign_credential.write(cred, {
             "purpose": body.get("purpose"), "evidence": body.get("evidence"),
             "owner": body.get("owner"), "rotation_days": body.get("rotation_days"),
-            "tags": body.get("tags") or []})
+            "tags": body.get("tags") or []}, by=_signer())
     except ValueError as exc:
         raise ValueError(str(exc)) from None
     return {"ok": True, "id": cred, "signed_on": row["signed_on"]}
+
+
+def _signer() -> str:
+    """Who signs an annotation: the agent a delegation token proves, or an agent or service that named itself (the
+    MCP tool, OBS-559), else the operator at the page. A self-named agent only ever lowers the claim from operator."""
+    proven = _IDENTITY.get()
+    if proven:
+        return proven["caller"]
+    caller = _CALLER.get()
+    return caller if re.fullmatch(r"(agent|service):[A-Za-z0-9][A-Za-z0-9._+-]{0,63}", caller) else "operator"
 
 
 def act_reveal(body: dict) -> dict:
