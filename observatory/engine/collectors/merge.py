@@ -535,6 +535,8 @@ for folder,l in local.items():
     # can carry a user or a token, so the whole address never reaches a rule.
     _remote = (l.get("remote") or "").strip() if l["is_git"] else ""
     _host = re.sub(r"^[a-z+]+://", "", _remote).split("@")[-1].split("/")[0].split(":")[0] if _remote else ""
+    # A remote the scan withheld because it carried a credential (OBS-576, DEC-0177) is still a remote.
+    _remote = _remote or ("withheld" if l["is_git"] and l.get("remote_withheld") else "")
     rule = (f"{folder}: git repository whose remote is on {_host or 'a host'}, which is not inventoried here"
             if _remote else
             f"{folder}: git repository with no remote, local only"
