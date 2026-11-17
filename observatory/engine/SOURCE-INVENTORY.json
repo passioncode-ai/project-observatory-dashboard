@@ -3468,8 +3468,8 @@
       "path": "machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d2dfed595a676c9645d760c711f6d846c7db0f8a0e173bf06ad0f18aa0e05ad6",
-      "bytes": 154202
+      "export_sha256": "1b7b02d8a5c79b4566f1bc6b9f79ccee0f8934835c6ae71f2d2834992a4d7455",
+      "bytes": 155040
     },
     {
       "path": "machine_forward.py",
@@ -3660,8 +3660,8 @@
       "path": "node/estate.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8b756989c30c87d0d99337e6c5fcfbb92ba72953f8c9ca5d52a0350c8a26a7c1",
-      "bytes": 47374
+      "export_sha256": "9b5e2ee733968d902e08d1c53146ff62c01274dcf3e89c628124fa2581330b5b",
+      "bytes": 47178
     },
     {
       "path": "node/http_signature.py",
@@ -3866,15 +3866,15 @@
       "path": "ops_digest.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "cca68046764131fafa4adb85c440d338f3118eb4f7cbcc1a0e8afb0b4f409b76",
-      "bytes": 24707
+      "export_sha256": "efa026269b2de0c73c9ad5cb9f15a18ff0588e6e2fd629453ce691decb31c3f9",
+      "bytes": 26169
     },
     {
       "path": "ops_digest_folders.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "170a7cbc8001a9916befd9f79b734eff1fd46a34cd1ceff5030317258714a23c",
-      "bytes": 16108
+      "export_sha256": "636f69847c88c19f2b02f4860f198a16f65ae47c4077ed5029d46fc6963899a3",
+      "bytes": 16099
     },
     {
       "path": "ops_digest_store.py",
@@ -5884,8 +5884,8 @@
       "path": "tests/test_machine_backup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0c72984a4b42bf3aaecaf1e6a12bb94e7f02fd3cb77ea336e2b77306f25b7ba6",
-      "bytes": 170396
+      "export_sha256": "49a921f013eb7cdaefbd05b4f5781841593eafeb2260fb3bef13be2304a06068",
+      "bytes": 171973
     },
     {
       "path": "tests/test_machine_findings.py",
@@ -6100,8 +6100,8 @@
       "path": "tests/test_node_estate.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ecb64228829c1a208fadd2fe67348ff22f0a6c69c5790f48051a6dad22b2ecf2",
-      "bytes": 13247
+      "export_sha256": "16390d8a4003b6ea4175289be2139fe90d3c7f7e908727f70e6522dc41bba293",
+      "bytes": 15767
     },
     {
       "path": "tests/test_node_foundation.py",
@@ -6226,8 +6226,8 @@
       "path": "tests/test_ops_digest.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "7d9e19d5423370e43430280ae354fccbd9ce563dbfb966cc698d9e5645a04e6f",
-      "bytes": 10070
+      "export_sha256": "740edc728fe736ed06d8269b1c24dd8dbd83f2c369ad497bdf3abb2bfbcd6ea3",
+      "bytes": 13579
     },
     {
       "path": "tests/test_ops_digest_folders.py",
@@ -6240,8 +6240,8 @@
       "path": "tests/test_ops_digest_record.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2135a9886e964be070e70d4d8207fd721cbbc62f213dd6dc3acb844bf8e2c16e",
-      "bytes": 22465
+      "export_sha256": "c4d1e42cad4bd3fa56be38b5dd709cd2e555a6db7ea509fe01cdfce2e00c751f",
+      "bytes": 22582
     },
     {
       "path": "tests/test_org_selection.py",
