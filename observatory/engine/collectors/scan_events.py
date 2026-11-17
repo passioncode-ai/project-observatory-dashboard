@@ -36,9 +36,11 @@ def retention_horizon_days() -> int | None:
     # (`paths.config_file`). This read `paths.STORE / "retention.json"`, a file
     # that exists in no workspace, so the collector had no window and every tick
     # inserted about 29,000 events that retention deleted again (PB-136).
+    # Read through the configuration door (`retention.events_days`, OBS-612), which owns the value.
     try:
-        return int(json.loads(
-            paths.config_file("retention.json").read_text(encoding="utf-8"))["events_days"])
+        import configuration_door
+        value = configuration_door.read("retention.events_days", base=paths.HOME)
+        return int(value) if value is not None else None
     except Exception:
         return None
 

@@ -836,7 +836,8 @@ def observatory_configure(
                                         "`digest` names; undo restores what `journalId` changed.")] = "list",
     changes: Annotated[dict[str, Any] | None, Field(
         description="plan: {key: value} for keys `list` names, typed as `list` says (true/false, a number, one of "
-                    "the choices, an absolute path, a list of vendor/model ids); null is back to the default.")] = None,
+                    "the choices, an absolute path, a list of vendor/model ids, one line of text, a JSON list or "
+                    "object); null is back to the default.")] = None,
     digest: Annotated[str | None, Field(description="apply: the `digest` the plan answered.")] = None,
     journalId: Annotated[str | None, Field(validation_alias=AliasChoices("journalId", "journal_id"),
                                            description="undo: the `journal` id an apply answered.")] = None,

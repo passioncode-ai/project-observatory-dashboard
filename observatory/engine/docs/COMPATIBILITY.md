@@ -420,6 +420,19 @@ No file, journal line or answer field changes shape. Downgrade: an older engine 
 `tests/test_decision_check.py` (suite `decision_check`), whose matrix keeps each changed answer
 with the answer before and why. Design: [decisions-and-settings.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/control-plane/decisions-and-settings.md).
 
+## Every setting through the one door (OBS-612)
+
+The configuration door now also declares the settings that had files of their own: the switch files `auto-update`
+(`updates.auto`) and `analytics` (`analytics.send`) in the workspace home, and `config/meter.json`, `retention.json`,
+`machine.json`, `review-policy.json`, `machine-backup.json`, `relay.json`, `tracked.json` and `organizations.json`
+(their keys, types, defaults and gates are listed by `configure --list` and in
+[decisions-and-settings.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/control-plane/decisions-and-settings.md)). No file moves or changes shape: an
+existing install reads the same values, `full auto-update`, `full relay`, `full review policy` and the other commands
+keep writing the same files, and an older engine reads files the door wrote. A file the door creates holds its
+reader's whole document. One reading changed: with no `config/retention.json` the events collector windows at the
+shipped 365 days instead of reading every event. Downgrade: an older engine lists fewer keys and never reads the
+journal lines that name the new ones. Tests: `tests/test_configure.py` (`EverySettingThroughTheDoor`).
+
 ## Ports per OS account (OBS-354)
 
 `project-observatory full ports show|allocate|set|release` records the port of each listener (server,

@@ -1,7 +1,9 @@
 """The configuration door (OBS-563, CP-20): one place that previews, applies and undoes a setting.
 
 WHY ONE DOOR. The engine's settings live in four files of the workspace's `config/` (settings.json, local.json,
-models.json, cleanup.json), and each grew its own writer: `configure`, the disk guard's thresholds by hand, the modules
+models.json, cleanup.json), eight more files of their own (meter.json, retention.json, machine.json,
+review-policy.json, machine-backup.json, relay.json, tracked.json, organizations.json, OBS-612) and two one-word switch
+files in the workspace home (`auto-update`, `analytics`), and each grew its own writer: `configure`, the disk guard's thresholds by hand, the modules
 of the control plane that will switch watches and apply fixes. A writer of its own has its own idea of a valid value,
 writes without a preview and leaves nothing to undo. Here every setting is a declared entry (`catalogue()`) with its
 type, its allowed values or range, its default, its file and its gate, and every change goes the same way:
@@ -45,7 +47,24 @@ PLANS = "configure-plans"
 #: How long a plan waits for its apply.
 PLAN_SECONDS = 24 * 3600
 FILES = {"settings": "config/settings.json", "local": "config/local.json", "models": "config/models.json",
-         "cleanup": "config/cleanup.json"}
+         "cleanup": "config/cleanup.json",
+         # OBS-612: the settings that had a file of their own, in the same files and formats as before.
+         "auto-update": "auto-update", "analytics": "analytics", "meter": "config/meter.json",
+         "retention": "config/retention.json", "machine": "config/machine.json",
+         "review": "config/review-policy.json", "machine-backup": "config/machine-backup.json",
+         "relay": "config/relay.json", "tracked": "config/tracked.json",
+         "organizations": "config/organizations.json"}
+#: The two switches that are a one-word text file in the workspace home (LC-16): absent is on, only `off` is off.
+SWITCH_FILES = ("auto-update", "analytics")
+#: The other JSON files the door reads and writes beside the four it began with.
+OWN_FILES = ("meter", "retention", "machine", "review", "machine-backup", "relay", "tracked", "organizations")
+#: Files whose readers read every key (or refuse a rule without its `on`): back to the default writes the default,
+#: never removes the key.
+FILLED_FILES = ("retention", "machine", "review", "organizations")
+#: How long a text setting may be.
+TEXT_LIMIT = 500
+#: How large a structured setting may be, as JSON.
+JSON_LIMIT = 64 * 1024
 ACTIONS = {"apply": ("configure.apply", "Apply a configuration change"),
            "undo": ("configure.undo", "Undo a configuration change")}
 JOURNAL_ID = re.compile(r"cfg_[0-9a-f]{16}")
@@ -81,16 +100,17 @@ class Refusal(ValueError):
 @dataclass(frozen=True)
 class Setting:
     key: str
-    kind: str                 # bool | enum | int | number | path | models
+    kind: str                 # bool | enum | int | number | path | models | text | json
     file: str                 # a key of FILES
     where: tuple              # the path inside that file
     default: Any
     description: str
-    person: str = "never"     # never | always | on | set | raise | lower | values
+    person: str = "never"     # never | always | on | off | set | raise | lower | values
     person_values: tuple = ()
     choices: tuple = ()
     minimum: float | None = None
     maximum: float | None = None
+    shape: str = ""           # json: list | object
 
     def row(self) -> dict:
         out = {"key": self.key, "type": self.kind, "default": self.default, "file": FILES[self.file],
@@ -103,7 +123,9 @@ class Setting:
             out["minimum"] = self.minimum
         if self.maximum is not None:
             out["maximum"] = self.maximum
-        if (self.where[0], self.where[-1]) in config.LOCAL_MOVED:
+        if self.shape:
+            out["shape"] = self.shape
+        if self.file == "settings" and (self.where[0], self.where[-1]) in config.LOCAL_MOVED:
             out["file"] = FILES["local"]       # decided per machine (OBS-353), mirrored into settings.json
         return out
 
@@ -236,33 +258,211 @@ def catalogue() -> dict[str, Setting]:
         rows.append(Setting(f"cleanup.auto.{name}", "int", "cleanup", ("auto", name),
                             (cleanup.get("auto") or {}).get(name), "the cleanup: " + text, "lower", minimum=0,
                             maximum=3650))
+    rows += _own_file_rows()
     return {row.key: row for row in rows}
+
+
+#: The meter's fields (config/meter.json, `meter.py`): the trusted issuer and where the estate's keys and grants are
+#: are the person's (they decide whose tokens the meter believes); a raised limit spends more.
+METER_KEYS = (
+    ("issuer", "text", None, "set", "the estate issuer whose tokens the meter trusts (urn:fabric:estate:<id>)"),
+    ("hubJson", "path", None, "set", "the hub's hub.json: its issuer, keys and grant projection"),
+    ("jwks", "path", None, "set", "a JWK Set file of the estate's keys (overrides hub.json's)"),
+    ("grantsDir", "path", None, "set", "the hub's grant projection folder (overrides hub.json's)"),
+    ("estateMonthUsd", "number", 1000.0, "raise", "the estate's monthly spend limit across every key, in USD"),
+    ("alertRatio", "number", 0.8, "never", "the share of the monthly limit at which a warning is raised"),
+    ("reservationSeconds", "int", 3600, "never", "how long a reservation is held before it lapses"),
+    ("keyCeilingsUsd", "json", None, "always", "each provider key's monthly ceiling in USD, by its reference"),
+)
+#: retention.json's numbers (`store/retention.py`): fewer days or fewer kept removes sooner.
+RETENTION_DAYS = ("events_days", "observations_days", "metrics_days", "wallet_days", "idempotency_days",
+                  "migration_backups_days")
+RETENTION_COUNTS = ("fingerprints_keep", "metrics_keep_per_series", "wallet_events", "wallet_months",
+                    "migration_backups_keep")
+RETENTION_LEDGER_DAYS = ("proposed_days", "observed_days", "rejected_days", "checkpoint_closed_days", "handoff_days")
+#: machine.json's thresholds (`collectors/scan_machine.py`): they size and raise findings; nothing is removed.
+MACHINE_KEYS = (
+    ("every_hours", "int", 720, "hours between two measurements of the disk locations"),
+    ("disk_budget_seconds", "int", 86400, "seconds the tick's disk measurement may take"),
+    ("disk_budget_seconds_manual", "int", 86400, "seconds a person's disk measurement may take"),
+    ("disk_location_timeout_seconds", "int", 86400, "seconds one location's measurement may take"),
+    ("private_every_hours", "int", 8760, "hours between two walks for a location's private size (macOS)"),
+    ("free_space_warning_percent", "number", 100, "free space (percent) below which the disk is a warning"),
+    ("free_space_critical_percent", "number", 100, "free space (percent) below which the disk is critical"),
+    ("memory_group_warning_mb", "int", 10_000_000, "memory (MB) one process group may hold before a warning"),
+)
+
+
+def _own_file_rows() -> list[Setting]:
+    """The settings that lived in a file of their own (OBS-612), declared where they are kept."""
+    import machine_backup
+    import review_policy
+    rows = [
+        Setting("updates.auto", "bool", "auto-update", ("switch",), True,
+                "automatic updates: the maintenance job installs a newer signed release by itself (the file "
+                "`auto-update`; while it is off a newer version is announced, never installed)", "always"),
+        Setting("analytics.send", "bool", "analytics", ("switch",), True,
+                "anonymous usage and error data sent to help improve the engine (the file `analytics`; off "
+                "also deletes the install id and the queue)", "on"),
+    ]
+    for name, kind, default, person, text in METER_KEYS:
+        rows.append(Setting(f"meter.{name}", kind, "meter", (name,), default, "the meter: " + text, person,
+                            minimum=(1 if name == "reservationSeconds" else 0) if kind in ("int", "number") else None,
+                            maximum={"alertRatio": 1, "reservationSeconds": 86400}.get(name, 1_000_000)
+                            if kind in ("int", "number") else None, shape="object" if kind == "json" else ""))
+    rows.append(Setting("meter.slotsRequireGrant", "enum", "meter", ("slotsRequireGrant",), "when-token",
+                        "the meter: whether a vault slot is released only under a grant", "values", ("off",),
+                        choices=("when-token", "always", "off")))
+    rows.append(Setting("meter.keyserverRequiresDelegation", "enum", "meter", ("keyserverRequiresDelegation",),
+                        "off", "the meter: whether the key server asks a caller other than the page for a token",
+                        choices=("off", "agents")))
+    shipped = _shipped("retention.json")
+    ledger = shipped.get("ledger") or {}
+    for name in RETENTION_DAYS + RETENTION_COUNTS:
+        rows.append(Setting(f"retention.{name}", "int", "retention", (name,), shipped.get(name),
+                            f"how long the store keeps it: {name.replace('_', ' ')}", "lower", minimum=1,
+                            maximum=36500))
+    for name in RETENTION_LEDGER_DAYS:
+        rows.append(Setting(f"retention.ledger.{name}", "int", "retention", ("ledger", name), ledger.get(name),
+                            f"the ledger's {name.replace('_', ' ')}", "lower", minimum=1, maximum=36500))
+    for name, shape, text in (("never", "list", "the record states retention never erases"),
+                              ("owner_exempt", "list", "the owners whose records retention never erases"),
+                              ("kinds", "object", "the horizons of one kind of record, by kind")):
+        rows.append(Setting(f"retention.ledger.{name}", "json", "retention", ("ledger", name), ledger.get(name),
+                            "the ledger: " + text, "always", shape=shape))
+    machine = _shipped("machine.json")
+    for name, kind, top, text in MACHINE_KEYS:
+        rows.append(Setting(f"machine.{name}", kind, "machine", (name,), machine.get(name), "the machine watch: "
+                            + text, minimum=0 if kind == "number" else 1, maximum=top))
+    rows.append(Setting("machine.locations", "json", "machine", ("locations",), machine.get("locations"),
+                        "the machine watch: where disk goes outside the projects folder, and what each place is",
+                        shape="list"))
+    for rid, spec in review_policy.RULES.items():
+        rows.append(Setting(f"review.rules.{rid}", "bool", "review", ("rules", rid, "on"), True,
+                            f"the review policy's rule {rid}: {spec['decides']} (applied once the policy is "
+                            "enabled at a terminal)", "on"))
+    for name, top in (("count", 100_000), ("age_days", 3650)):
+        rows.append(Setting(f"review.remind.{name}", "int", "review", ("remind", name),
+                            review_policy.REMIND_DEFAULT[name],
+                            f"the review queue reminds a person past this {name.replace('_', ' ')}", minimum=1,
+                            maximum=top))
+    rows += [
+        Setting("machine_backup.enabled", "bool", "machine-backup", ("enabled",), True,
+                "the daily machine backup of the agents' setup", "off"),
+        Setting("machine_backup.transcripts", "bool", "machine-backup", ("transcripts",), False,
+                "the machine backup also carries the agents' transcripts", "on"),
+        Setting("machine_backup.include", "json", "machine-backup", ("include",), [],
+                "the machine backup: more files and folders it carries", "set", shape="list"),
+        Setting("machine_backup.exclude", "json", "machine-backup", ("exclude",), [],
+                "the machine backup: patterns it never carries", shape="list"),
+        Setting("machine_backup.roots", "json", "machine-backup", ("roots",), [],
+                "the machine backup: where checkouts are looked for", "set", shape="list"),
+    ]
+    for name, default in machine_backup.LIMITS.items():
+        rows.append(Setting(f"machine_backup.limits.{name}", "int", "machine-backup", ("limits", name), default,
+                            f"the machine backup's limit {name}", minimum=0, maximum=10_000_000))
+    rows += [
+        Setting("relay.enabled", "bool", "relay", ("enabled",), False,
+                "the share relay this node's server starts: it listens for other machines", "on"),
+        Setting("relay.origin", "text", "relay", ("origin",), None,
+                "the relay's public origin (https:// and a host name, or this machine's http:// loopback)", "set"),
+        Setting("relay.host", "text", "relay", ("host",), None,
+                "the address the relay binds (127.0.0.1 when unset)", "set"),
+        Setting("relay.port", "int", "relay", ("port",), None, "the relay's port (this OS account's when unset)",
+                minimum=1, maximum=65535),
+        Setting("relay.trusted_proxy", "bool", "relay", ("trusted_proxy",), False,
+                "the relay trusts the forwarded address of the TLS terminator in front of it", "on"),
+        Setting("tracked.local_folders", "json", "tracked", ("local_folders",), [],
+                "folders outside Git the next pass reads as projects", shape="list"),
+        Setting("tracked.dismissed_local_folders", "json", "tracked", ("dismissed_local_folders",), [],
+                "folders a person dismissed from that list", shape="list"),
+        Setting("organizations.organizations", "json", "organizations", ("organizations",), {},
+                "the organizations and where their accounts are", "always", shape="object"),
+        Setting("organizations.projects", "json", "organizations", ("projects",), {},
+                "which organization each project belongs to", "always", shape="object"),
+    ]
+    return rows
+
+
+def _template(name: str) -> dict:
+    """The whole document a file the door creates starts from, so its reader reads every key it expects."""
+    if name in ("retention", "machine", "organizations"):
+        return _shipped(f"{name}.json")
+    if name == "review":
+        import review_policy
+        return review_policy.default_document()
+    if name == "relay":
+        return {"schema": "observatory-relay/1"}
+    if name == "tracked":
+        import tracked
+        return tracked.empty()
+    return {}
+
+
+def _file_problems(name: str, doc: dict) -> list[str]:
+    """What the owner of a file refuses in a document the door would write (before anything is kept)."""
+    if name == "tracked":
+        import tracked
+        return tracked.validate(doc)
+    if name == "review":
+        import review_policy
+        try:
+            review_policy.parse(doc)
+        except review_policy.PolicyError as exc:
+            return [str(exc)]
+    if name == "relay" and doc.get("schema") != "observatory-relay/1":
+        return ["relay.json is not observatory-relay/1"]
+    return []
+
+
+def switch_word(file: Path) -> str | None:
+    """`on` or `off` from a switch file, or None when there is none (LC-16): only the word `off` (any case,
+    surrounding space ignored) is off, anything else a person wrote is on, and a link or a folder in its place is no
+    switch. The one reading of both switch files (`maintenance.read_switch`, `usage_analytics.read_switch`)."""
+    try:
+        if file.is_symlink() or not file.is_file():
+            return None
+        text = file.read_text(encoding="utf-8", errors="replace")[:64]
+    except OSError:
+        return None
+    return "off" if text.strip().lower() == "off" else "on"
 
 
 # --- reading ------------------------------------------------------------------------
 
 class _Docs:
-    """One read of the four files; a file that cannot be read is named in `degraded`, never read as defaults."""
+    """One read of the door's files (or of `only`); a file that cannot be read is named in `degraded`, never read as
+    defaults. A switch file reads as `{"switch": word}`, or `{}` when there is none."""
 
-    def __init__(self, base: Path):
+    def __init__(self, base: Path, only: tuple | None = None):
         self.base = base
         self.degraded: list[dict] = []
         self.docs: dict[str, Any] = {}
-        try:
-            self.docs["settings"] = config.load(base)
-        except config.ConfigurationError as exc:
-            self._fail("settings", exc)
-        local, notes = config.read_local(base)
-        if notes:
-            self.degraded += [{"source": FILES["local"], "code": n.get("code"), "reason": n.get("step")} for n in notes]
-        else:
-            self.docs["local"] = local or {}
-        for name in ("models", "cleanup"):
+        wanted = set(only) if only is not None else set(FILES)
+        if "settings" in wanted:
+            try:
+                self.docs["settings"] = config.load(base)
+            except config.ConfigurationError as exc:
+                self._fail("settings", exc)
+        if "local" in wanted:
+            local, notes = config.read_local(base)
+            if notes:
+                self.degraded += [{"source": FILES["local"], "code": n.get("code"), "reason": n.get("step")}
+                                  for n in notes]
+            else:
+                self.docs["local"] = local or {}
+        for name in ("models", "cleanup", *OWN_FILES):
+            if name not in wanted:
+                continue
             file = base / FILES[name]
             try:
-                self.docs[name] = config.read_json(file) if file.exists() else {}
+                self.docs[name] = config.read_json(file) if file.exists() or file.is_symlink() else {}
             except config.ConfigurationError as exc:
                 self._fail(name, exc)
+        for name in SWITCH_FILES:
+            if name in wanted:
+                word = switch_word(base / FILES[name])
+                self.docs[name] = {} if word is None else {"switch": word}
 
     def _fail(self, name: str, exc: Exception) -> None:
         self.degraded.append({"source": FILES[name], "code": "unreadable", "reason": str(exc)[:200]})
@@ -280,7 +480,20 @@ class _Docs:
             return None
         if s.file == "cleanup" and s.where[0] == "guard":
             return _guard_value(self.docs["cleanup"].get("guard") or {}, s)
-        return _from_stored(s, self.stored(s))
+        stored = self.stored(s)
+        if s.key == "updates.auto" and stored is ABSENT:
+            if "settings" not in self.docs:
+                return None                 # whether an older install turned it off cannot be read
+            if _legacy_updates_off(self.docs["settings"]):
+                return False
+        return _from_stored(s, stored)
+
+
+def _legacy_updates_off(settings: Any) -> bool:
+    """`updates.auto: false` in settings.json: how 0.17 and 0.18 turned updates off, still read as off while the
+    switch file is absent (D1, LC-16; the next `auto-update` command moves it into the file)."""
+    updates = settings.get("updates") if isinstance(settings, dict) else None
+    return isinstance(updates, dict) and updates.get("auto", True) is False
 
 
 def _from_stored(s: Setting, stored: Any) -> Any:
@@ -288,7 +501,17 @@ def _from_stored(s: Setting, stored: Any) -> Any:
         return copy.deepcopy(s.default)
     if s.kind == "models":
         return [e.get("id") for e in stored or [] if isinstance(e, dict)]
+    if s.file in SWITCH_FILES:
+        return stored != "off"
     return stored
+
+
+def read(key: str, *, base: Path | None = None) -> Any:
+    """One setting's value as the engine reads it, from its own file only (None when that file cannot be read).
+    The reader of every value the door owns: a module that reads one routes through here rather than its file."""
+    s = _setting(key)
+    files = (s.file, "settings") if s.key == "updates.auto" else (s.file,)
+    return _Docs(_home(base), only=files).value(s)
 
 
 def _guard_value(own: dict, s: Setting) -> Any:
@@ -338,11 +561,17 @@ def _setting(key: Any) -> Setting:
     return table[key]
 
 
-def _texts(value: Any) -> list[str]:
+def _texts(value: Any, depth: int = 0) -> list[str]:
+    """Every text in a value, keys of a structured one included (a structure deeper than 16 is not walked further:
+    `check` refuses it)."""
     if isinstance(value, str):
         return [value]
+    if depth > 16:
+        return []
     if isinstance(value, (list, tuple)):
-        return [v for v in value if isinstance(v, str)]
+        return [t for v in value for t in _texts(v, depth + 1)]
+    if isinstance(value, dict):
+        return [t for k, v in value.items() for t in (*_texts(k, depth + 1), *_texts(v, depth + 1))]
     return []
 
 
@@ -353,7 +582,7 @@ PATH_KINDS = frozenset({"random", "uuid"})
 
 
 def _secret(s: Setting, text: str) -> bool:
-    if s.kind != "path":
+    if s.kind not in ("path", "json"):
         return credential_shape.shaped(text)
     return any(kind not in PATH_KINDS for _, _, kind in credential_shape._spans(text, True))
 
@@ -391,7 +620,33 @@ def check(s: Setting, value: Any) -> Any:
                 or not all(isinstance(i, str) and config.MODEL_ID.fullmatch(i) for i in value):
             raise bad
         return list(value)
+    if s.kind == "text":
+        if not isinstance(value, str) or not 0 < len(value) <= TEXT_LIMIT \
+                or any(ord(c) < 32 or ord(c) == 127 for c in value):
+            raise bad
+        return value
+    if s.kind == "json":
+        if not isinstance(value, list if s.shape == "list" else dict):
+            raise bad
+        try:
+            text = json.dumps(value, ensure_ascii=False, allow_nan=False)
+            text.encode("utf-8")
+        except (TypeError, ValueError, UnicodeError, RecursionError):
+            raise bad from None
+        if len(text) > JSON_LIMIT or _depth(value) > 16:
+            raise bad
+        return json.loads(text)
     raise bad
+
+
+def _depth(value: Any, at: int = 0) -> int:
+    if at > 16:
+        return at
+    if isinstance(value, dict):
+        return max([_depth(v, at + 1) for v in value.values()], default=at + 1)
+    if isinstance(value, list):
+        return max([_depth(v, at + 1) for v in value], default=at + 1)
+    return at
 
 
 def _expects(s: Setting) -> str:
@@ -404,6 +659,10 @@ def _expects(s: Setting) -> str:
         return f"{whole} from {s.minimum} to {s.maximum}" if s.maximum is not None else f"{whole} of at least {s.minimum}"
     if s.kind == "path":
         return "an absolute path"
+    if s.kind == "text":
+        return f"one line of text of at most {TEXT_LIMIT} characters"
+    if s.kind == "json":
+        return f"a JSON {'list' if s.shape == 'list' else 'object'} of at most {JSON_LIMIT // 1024} KB"
     return "one or more model ids like vendor/model"
 
 
@@ -424,12 +683,19 @@ def parse(key: str, text: str) -> Any:
         return int(number) if number.is_integer() and "." not in text and "e" not in text.lower() else number
     if s.kind == "models":
         return [part.strip() for part in text.split(",") if part.strip()]
+    if s.kind == "json":
+        try:
+            return json.loads(text)
+        except ValueError:
+            return text
     return text
 
 
 def _to_stored(s: Setting, value: Any) -> Any:
     if s.kind == "models":
         return [{"id": i, "why": "configured"} for i in value]
+    if s.file in SWITCH_FILES:
+        return "on" if value else "off"
     return value
 
 
@@ -440,6 +706,8 @@ def _needs_person(s: Setting, before: Any, after: Any) -> bool:
         return True
     if s.person == "on":
         return after is True
+    if s.person == "off":
+        return after is False
     if s.person == "set":
         return after is not None
     if s.person == "values":
@@ -504,6 +772,32 @@ def _prune_plans(folder: Path) -> None:
             pass
 
 
+def _own_document(base: Path, name: str, docs: Any = None) -> dict:
+    """A file of its own as the door writes it: what it holds, or the reader's whole document when it is absent."""
+    file = base / FILES[name]
+    if not file.exists():
+        return _template(name)
+    return copy.deepcopy(docs.docs[name]) if docs is not None else config.read_json(file)
+
+
+def _check_files(base: Path, docs: _Docs, settings: list, stored: dict) -> None:
+    """Every file of its own as the plan would leave it, checked by the module that reads it: a value its reader
+    would refuse is refused here, before anything is kept."""
+    for name in sorted({s.file for s, _ in settings if s.file in OWN_FILES}):
+        doc = _own_document(base, name, docs)
+        changed = [s for s, _ in settings if s.file == name]
+        for s in changed:
+            if stored[s.key] is None:
+                _pop(doc, s.where, keep=(s.where[0],))
+            else:
+                config._local_set(doc, s.where, _to_stored(s, stored[s.key]))
+        problems = _file_problems(name, doc)
+        if problems:
+            keys = [s.key for s in changed]
+            raise Refusal("invalid_value", f"{FILES[name]} would be refused by its reader: "
+                                           f"{credential_shape.redact(problems[0])[:300]}", key=keys[0], keys=keys)
+
+
 def plan(changes: Any, *, base: Path | None = None) -> dict:
     """The values before and after, the effects and which changes need the person; writes no configuration."""
     base = _home(base)
@@ -517,6 +811,10 @@ def plan(changes: Any, *, base: Path | None = None) -> dict:
         if not docs.readable(s):
             raise Refusal("file_unreadable", f"{', '.join(_touched(s))} cannot be read; fix it before changing "
                                              f"{s.key}", key=s.key, degraded=docs.degraded)
+    for s, _ in settings:
+        if s.file in FILLED_FILES and stored[s.key] is None and s.default is not None:
+            stored[s.key] = copy.deepcopy(s.default)     # back to the default writes it: its reader reads every key
+    _check_files(base, docs, settings, stored)
     rows, files = [], {}
     for s, _ in settings:
         after_stored = stored[s.key]
@@ -627,13 +925,36 @@ def _set(base: Path, s: Setting, stored: Any, present: bool) -> None:
                 _pop(doc, s.where, keep=())
                 _write_private(config.local_path(base), doc)
         return
+    if s.file in SWITCH_FILES:
+        _set_switch(base, s.file, stored, present)
+        return
     file = base / FILES[s.file]
-    doc = config.load(base) if s.file == "settings" else (config.read_json(file) if file.exists() else {})
+    if s.file in OWN_FILES:
+        doc = _own_document(base, s.file)
+    else:
+        doc = config.load(base) if s.file == "settings" else (config.read_json(file) if file.exists() else {})
     if present:
         config._local_set(doc, s.where, stored)
     else:
         _pop(doc, s.where, keep=("sources", "integrations", "features") if s.file == "settings" else (s.where[0],))
     workspace.write_json(file, doc)
+
+
+def _set_switch(base: Path, name: str, word: Any, present: bool) -> None:
+    """A switch file through its owner's writer (owner-only, atomic, never through a link), so what the switch does
+    besides is kept: analytics off deletes the install id and the queue. Back to the default removes the file."""
+    if not present:
+        workspace_file = base / FILES[name]
+        if workspace_file.is_symlink():
+            raise config.ConfigurationError(f"{FILES[name]} is a link; the door writes no switch through one")
+        workspace_file.unlink(missing_ok=True)
+        return
+    if name == "auto-update":
+        import maintenance
+        maintenance.write_switch(base, word != "off")
+    else:
+        import usage_analytics
+        usage_analytics.write_switch(base, word != "off")
 
 
 def _pop(doc: dict, where: tuple, *, keep: tuple) -> None:

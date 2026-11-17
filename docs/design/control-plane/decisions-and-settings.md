@@ -68,3 +68,82 @@ refusal keeps the door's own exception type and answer shape; no answer echoes t
 
 `observatory/engine/tests/test_decision_check.py` (suite `decision_check`); the doors' own suites (`configure`,
 `key_acts`, `ops_acts`, `org_selection`, `secret_prompt`, `share_cli`, `node_actions`).
+
+## Every setting through the one door (OBS-612)
+
+### What
+
+The configuration door (`configuration_door.py`, OBS-563) declared the keys of four files. Ten more held settings
+with their own readers and writers. Each is now a set of declared keys with a type, a default, its file and its gate;
+`list`, `plan`, `apply` and `undo` (the CLI's `configure` and `observatory_configure`) reach them like any other.
+
+| File | Keys | Gate (person) |
+|---|---|---|
+| `auto-update` (home, one word) | `updates.auto` | always: both directions are the person's |
+| `analytics` (home, one word) | `analytics.send` | on: turning it on sends data out |
+| `config/meter.json` | `meter.issuer`, `hubJson`, `jwks`, `grantsDir` | set: whose tokens the meter believes |
+| | `meter.estateMonthUsd` | raise |
+| | `meter.alertRatio`, `reservationSeconds`, `keyserverRequiresDelegation` | never |
+| | `meter.slotsRequireGrant` | the value `off` |
+| | `meter.keyCeilingsUsd` (an object) | always |
+| `config/retention.json` | every day count and keep count, `retention.ledger.*` days | lower: removes sooner |
+| | `retention.ledger.never`, `owner_exempt`, `kinds` | always |
+| `config/machine.json` | the watch's thresholds, `machine.locations` | never: nothing is removed |
+| `config/review-policy.json` | `review.rules.<rule>` | on |
+| | `review.remind.count`, `age_days` | never |
+| `config/machine-backup.json` | `machine_backup.enabled` | off |
+| | `transcripts` | on |
+| | `include`, `roots` | set |
+| | `exclude`, `limits.*` | never |
+| `config/relay.json` | `relay.enabled`, `trusted_proxy` | on |
+| | `relay.origin`, `host` | set |
+| | `relay.port` | never |
+| `config/tracked.json` | `tracked.local_folders`, `dismissed_local_folders` | never |
+| `config/organizations.json` | `organizations.organizations`, `projects` | always |
+
+Two kinds join the door's types: `text` (one line, at most 500 characters) and `json` (a list or an object, at most
+64 KB and 16 levels deep), and one gate rule, `off` (turning a switch off needs the person).
+
+### Data: the same files, the same formats
+
+No file moves or changes shape, so an existing install reads the same values:
+
+- A switch file is written by its owner's writer (`maintenance.write_switch`, `usage_analytics.write_switch`), so
+  analytics off still deletes the install id and the queue; back to the default removes the file (on). The legacy
+  `updates.auto: false` in settings.json still reads as off while the file is absent.
+- A JSON file the door creates starts from its reader's whole document (the shipped `retention.json`, `machine.json`
+  and `organizations.json`, `review_policy.default_document()`, the relay's schema, `tracked.empty()`), so the reader
+  never meets a partial file.
+- retention.json and machine.json are read key by key without defaults (`store/retention.py`), and the review policy
+  refuses a rule without its `on`: in these files and organizations.json, back to the default writes the default
+  rather than removing the key.
+- Before anything is kept, the file as the plan would leave it is checked by its owner (`tracked.validate`,
+  `review_policy.parse`, the relay's schema): what its reader would refuse is `invalid_value`.
+
+### Readers through the door
+
+`configuration_door.read(key)` answers one value from its own file only (None when the file cannot be read), and
+`switch_word(file)` is the one reading of a switch file. Routed through them: `maintenance.read_switch` and
+`auto_enabled` (`updates.auto`), `usage_analytics.read_switch` (`analytics.send`), the events collector's window
+(`retention.events_days`; a missing retention.json now reads the default 365 days, not "no window") and the estate
+spend finding (`meter.estateMonthUsd`, `meter.alertRatio`). The readers of a whole document (the meter, the store's
+retention, the machine watch, the review policy, the machine backup, the relay, the tracked folders, the
+organizations) keep reading their file, which the door writes in their format; the board row lists them.
+
+### Never a credential
+
+No declared key holds a secret's value. Every text the door would keep, inside a structure too, is refused
+`secret_refused` when shaped like a credential (a path's random temporary folder name aside), and never echoed.
+
+### Failure behaviour
+
+A file that cannot be read is named in `degraded` and its keys read `null`, never a default; a plan that touches it
+is `file_unreadable`. A switch file that is a link is no switch, and the door writes none through one.
+
+### Tests
+
+`observatory/engine/tests/test_configure.py`, class `EverySettingThroughTheDoor` (suite `configure`): each file's
+keys with their type, default, file and gate; the auto-update switch through plan, apply and undo, the legacy setting,
+and one reading of both switch words; analytics off deleting the install id; retention keeping every key and its
+reader reading through the door; a file the door creates read whole by its owner; a structured value its owner
+refuses; the meter's limit and its gate.
