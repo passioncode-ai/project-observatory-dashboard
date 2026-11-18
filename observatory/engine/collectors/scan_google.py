@@ -34,6 +34,9 @@ re-fetch inside the age window and says so; `--force` is the refresh button's
 path, and `project-observatory full google --force` is the operator's.
 """
 from __future__ import annotations
+
+#: The provider this collector reads (OBS-605): `tools/door_registry.py` counts it as tracked.
+COVERS_PROVIDERS = ("google",)
 import argparse
 import json
 import pathlib

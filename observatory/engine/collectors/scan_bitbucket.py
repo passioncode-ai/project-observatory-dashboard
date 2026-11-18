@@ -33,6 +33,9 @@ retry a missing file forever.
     scan_bitbucket.py store/raw/bitbucket.json
 """
 from __future__ import annotations
+
+#: The provider this collector reads (OBS-605): `tools/door_registry.py` counts it as tracked.
+COVERS_PROVIDERS = ("bitbucket",)
 import base64, json, pathlib, stat, sys, urllib.error, urllib.request
 from datetime import datetime, timezone
 

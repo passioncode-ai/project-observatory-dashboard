@@ -9,6 +9,9 @@ Writes one JSON file per owner into the output directory, and reports the owners
 it could NOT read rather than dropping them silently.
 """
 from __future__ import annotations
+
+#: The provider this collector reads (OBS-605): `tools/door_registry.py` counts it as tracked.
+COVERS_PROVIDERS = ("github",)
 import json, os, subprocess, sys
 from pathlib import Path
 

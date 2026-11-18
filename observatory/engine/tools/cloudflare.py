@@ -100,6 +100,9 @@ access is set by policies (this door writes legacy roles only); and the stashed
 admin's own membership when this token can read its user.
 """
 from __future__ import annotations
+
+#: This door declares itself (OBS-605): `tools/door_registry.py` reads it, so integration health tracks cloudflare.
+DOOR_PROVIDER = "cloudflare"
 import argparse
 import datetime
 import hashlib

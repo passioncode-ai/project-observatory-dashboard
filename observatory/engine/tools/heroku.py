@@ -94,6 +94,9 @@ their last write, and each write replaces only its own row in the ledger as read
 under that lock.
 """
 from __future__ import annotations
+
+#: This door declares itself (OBS-605): `tools/door_registry.py` reads it, so integration health tracks heroku.
+DOOR_PROVIDER = "heroku"
 import argparse
 import contextlib
 import datetime

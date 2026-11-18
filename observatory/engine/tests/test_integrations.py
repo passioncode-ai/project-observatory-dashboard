@@ -243,5 +243,330 @@ class Run(unittest.TestCase):
         self.assertEqual([k["slot"] for k in v["keys"]], ["a", "b"])
 
 
+
+# ---- OBS-605: the tracked providers come from the doors, scope is compared, every finding has a code -----------
+
+import door_registry                                                # noqa: E402
+
+
+def write_module(folder: pathlib.Path, name: str, text: str) -> None:
+    (folder / f"{name}.py").write_text(text, encoding="utf-8")
+
+
+class Registry(unittest.TestCase):
+    def test_every_door_and_collector_declares_itself(self):
+        found, degraded = door_registry.declarations()
+        self.assertEqual(degraded, [])
+        doors = {d["provider"]: d["module"] for d in found if d["kind"] == "door"}
+        self.assertEqual(doors, {"cloudflare": "cloudflare", "digitalocean": "digitalocean", "heroku": "heroku",
+                                 "openrouter": "openrouter", "prowl": "prowl", "sentry": "sentry"})
+        covered = {d["provider"] for d in found if d["kind"] == "collector"}
+        self.assertTrue(covered >= {"github", "google", "cloudflare", "digitalocean", "heroku", "openrouter"})
+
+    def test_tracked_is_derived_never_kept_by_hand(self):
+        self.assertEqual(ih.TRACKED, door_registry.providers())
+        self.assertNotIn("TRACKED = frozenset({", (ROOT / "tools" / "integration_health.py").read_text())
+
+    def test_a_new_door_is_tracked_once_it_declares_itself(self):
+        tools = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-doors-"))
+        cols = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-cols-"))
+        write_module(tools, "acme", 'DOOR_PROVIDER = "acme"\n')
+        write_module(tools, "helper", "X = 1\n")
+        write_module(cols, "scan_acme_two", 'COVERS_PROVIDERS = ("acme-two",)\n')
+        self.assertEqual(door_registry.providers(tools, cols), frozenset({"acme", "acme-two"}))
+        self.assertEqual(door_registry.doors(tools, cols), {"acme": "acme"})
+        deps = {"projects": [{"project": "project:p", "packages": [{"name": "stripe"}]}]}
+        self.assertEqual(ih.untracked(deps, None, tracked=frozenset({"stripe"})), [])
+
+    def test_a_declaration_in_no_known_shape_is_named_with_a_code(self):
+        tools = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-doors-"))
+        write_module(tools, "odd", "DOOR_PROVIDER = make_door()\n")
+        write_module(tools, "bad", 'DOOR_PROVIDER = "Not A Name"\n')
+        write_module(tools, "broken", "DOOR_PROVIDER = (\n")
+        found, degraded = door_registry.declarations(tools, tools / "none")
+        self.assertEqual(found, [])
+        self.assertEqual(sorted(d["code"] for d in degraded),
+                         ["declaration-unshaped", "declaration-unshaped", "module-unreadable"])
+
+    def test_the_run_names_the_doors_whose_keys_are_not_asked(self):
+        raw = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-ih-raw-"))
+        doc, _ = ih.run([ih.Provider("cloudflare", lambda: [], lambda v: None)], raw_dir=raw, registry_dir=raw,
+                        previous=None, seen=None, today="2026-11-18")
+        self.assertEqual(doc["tracked_providers"], sorted(door_registry.providers()))
+        self.assertIn("prowl", doc["keys_not_asked"])
+        self.assertNotIn("cloudflare", doc["keys_not_asked"])
+
+
+class Builders(unittest.TestCase):
+    def test_every_builder_is_for_a_declared_provider_and_opens_without_a_network(self):
+        self.assertTrue(set(ih.BUILDERS) <= door_registry.providers())
+        degraded: list = []
+        built = ih.default_providers(degraded)
+        self.assertEqual({p.name for p in built} | {d["source"].split(":", 1)[1] for d in degraded}, set(ih.BUILDERS))
+        self.assertTrue(all(d["code"] == "door-unavailable" for d in degraded))
+
+
+class UntrackedCodes(unittest.TestCase):
+    def test_a_key_with_no_door_and_a_package_with_no_door_have_their_codes(self):
+        rows = {r["provider"]: r for r in ih.untracked(Untracked.DEPS, Untracked.ENV)}
+        self.assertEqual(rows["stripe"]["code"], "untracked-key")
+        self.assertEqual(rows["aws"]["code"], "untracked-package")
+        self.assertEqual(rows["paddle"]["code"], "untracked-key")
+
+
+class Scope(unittest.TestCase):
+    def test_the_judgement(self):
+        j = ih.judge_scope
+        self.assertEqual(j({"granted": ["a", "b"], "needed": ["a", "b"]})["code"], "scope-ok")
+        missing = j({"granted": ["a"], "needed": ["a", "b"]})
+        self.assertEqual((missing["state"], missing["code"], missing["missing"]), ("missing", "scope-missing", ["b"]))
+        excess = j({"granted": ["a", "b", "c", "gist"], "needed": ["a", "b"], "allowed": ["gist"]})
+        self.assertEqual((excess["state"], excess["code"], excess["excess"]), ("excess", "scope-excess", ["c"]))
+        both = j({"granted": ["a", "z"], "needed": ["a", "b"]})
+        self.assertEqual((both["missing"], both["excess"]), (["b"], ["z"]))
+        self.assertEqual(j({"granted": None, "needed": ["a"]})["code"], "scope-unknown")
+        self.assertEqual(j({"granted": ["a"], "needed": None})["code"], "scope-unknown")
+
+    def provider(self, scope):
+        return ih.Provider("heroku", lambda: [("heroku/issued/a/prod/K", lambda: VALUE_A, {"preset": "read"})],
+                           lambda v, ctx: {"seen": True}, scope)
+
+    def test_a_scope_is_recorded_on_the_key_and_its_findings_carry_codes(self):
+        got = []
+
+        def scope(slot, value, answer, ctx):
+            got.append((slot, answer, ctx))
+            return {"granted": ["global"], "needed": ["read"]}
+        keys, degraded = ih.check_keys([self.provider(scope)], None, "2026-11-18")
+        self.assertEqual(degraded, [])
+        self.assertEqual(got, [("heroku/issued/a/prod/K", {"seen": True}, {"preset": "read"})])
+        rec = keys[0]
+        self.assertEqual((rec["state"], rec["scope"]["missing"], rec["scope"]["excess"]),
+                         ("valid", ["read"], ["global"]))
+        found = ifn.findings({"checked_on": "2026-11-18", "keys": keys})
+        by = {f["type"]: f for f in found}
+        self.assertEqual(set(by), {"integration.scope_missing", "integration.scope_excess"})
+        self.assertEqual(by["integration.scope_missing"]["code"], "scope-missing")
+        self.assertEqual(by["integration.scope_excess"]["code"], "scope-excess")
+        self.assertEqual(by["integration.scope_missing"]["subject"], "integration:scope/heroku/issued/a/prod/K")
+        blob = json.dumps([keys, found])
+        self.assertNotIn(VALUE_A, blob)
+        self.assertNotIn("fakevalue", blob)
+
+    def test_a_scope_that_cannot_be_read_is_named_never_a_value(self):
+        def scope(slot, value, answer, ctx):
+            raise RuntimeError(f"failed with {value}")
+        keys, degraded = ih.check_keys([self.provider(scope)], None, "2026-11-18")
+        self.assertEqual(keys[0]["scope"], {"state": "unread", "code": "scope-unreadable", "reason": "RuntimeError"})
+        self.assertEqual(degraded[0]["code"], "scope-unreadable")
+        self.assertNotIn("fakevalue", json.dumps([keys, degraded]))
+
+    def test_a_provider_without_a_scope_records_none(self):
+        keys, _ = ih.check_keys([fake("openrouter", {"openrouter/admin/a": None}, [])], None, "2026-11-18")
+        self.assertNotIn("scope", keys[0])
+
+    def test_every_integration_finding_has_a_code_and_a_label(self):
+        doc = Findings().doc()
+        doc["keys"].append({"provider": "x", "slot": "x/y", "state": "valid",
+                            "scope": ih.judge_scope({"granted": ["a", "c"], "needed": ["a", "b"]})})
+        found = ifn.findings(doc)
+        self.assertTrue(found)
+        for f in found:
+            self.assertTrue(f.get("code"), f["type"])
+        import finding_types
+        for t in ifn.TYPES:
+            self.assertIn(t, finding_types.LABELS)
+
+
+def run_out(stdout="", stderr="", rc=0, asked=None):
+    def run(argv, **kw):
+        if asked is not None:
+            asked.append((list(argv), kw))
+        import subprocess
+        return subprocess.CompletedProcess(argv, rc, stdout, stderr)
+    return run
+
+
+class GitHub(unittest.TestCase):
+    HEAD = "HTTP/2.0 200 OK\nContent-Type: application/json\nX-Oauth-Scopes: {scopes}\n\n{{\"login\": \"example\"}}\n"
+
+    def test_the_session_scopes_header_is_compared(self):
+        asked: list = []
+        p = ih.github_provider(run=run_out(self.HEAD.format(scopes="repo, gist, admin:org"), asked=asked),
+                               which=lambda n: "/usr/bin/gh")
+        keys, degraded = ih.check_keys([p], None, "2026-11-18")
+        self.assertEqual(degraded, [])
+        rec = keys[0]
+        self.assertEqual((rec["slot"], rec["state"]), ("github/gh-session", "valid"))
+        self.assertEqual((rec["scope"]["missing"], rec["scope"]["excess"]), (["read:org"], ["admin:org"]))
+        self.assertEqual(asked[0][0], ["gh", "api", "-i", "user"])
+
+    def test_a_refused_session_is_invalid_and_a_missing_gh_holds_no_key(self):
+        p = ih.github_provider(run=run_out("HTTP/2.0 401 Unauthorized\n\n{}", "gh: Bad credentials (HTTP 401)", 1),
+                               which=lambda n: "/usr/bin/gh")
+        keys, _ = ih.check_keys([p], None, "2026-11-18")
+        self.assertEqual((keys[0]["state"], keys[0]["status"]), ("invalid", 401))
+        none = ih.github_provider(run=run_out(), which=lambda n: None)
+        self.assertEqual(ih.check_keys([none], None, "2026-11-18")[0], [])
+
+    def test_a_fine_grained_token_answers_no_scope_header(self):
+        p = ih.github_provider(run=run_out("HTTP/2.0 200 OK\n\n{}"), which=lambda n: "/usr/bin/gh")
+        keys, _ = ih.check_keys([p], None, "2026-11-18")
+        self.assertEqual(keys[0]["scope"]["code"], "scope-unknown")
+
+
+class FakeCloudflare:
+    PRESETS = {"analytics": {"name": "observatory-analytics-read (managed)",
+                             "groups": ("Zone Read", "Analytics Read", "DNS Read")}}
+
+    def __init__(self, base: pathlib.Path, granted):
+        self.base = base
+        self.granted = granted
+        self.calls: list = []
+        self.token = base / "example"
+        self.token.write_text(VALUE_A + "\n", encoding="utf-8")
+
+    def admins(self):
+        return [("acct", self.base / "admin")]
+
+    def issued(self):
+        return [self.token]
+
+    def label_of(self, p):
+        return p.name
+
+    def read_meta(self, p):
+        return {"account_id": "acc-1", "preset": "analytics", "stash": "acct"}
+
+    def read_admin(self, label):
+        return label, VALUE_B
+
+    def _request(self, path, token, payload=None, method=None):
+        self.calls.append((path, token == VALUE_A, token == VALUE_B))
+        if path.endswith("/tokens/verify"):
+            return {"result": {"id": "tok-1", "status": "active"}}
+        if path.endswith("/tokens/tok-1"):
+            return {"result": {"policies": [{"permission_groups": [{"name": g} for g in self.granted]}]}}
+        return {"result": []}
+
+
+class CloudflareScope(unittest.TestCase):
+    def test_an_issued_token_is_verified_and_its_groups_compared(self):
+        base = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-cf-"))
+        (base / "admin").write_text(VALUE_B + "\n", encoding="utf-8")
+        cf = FakeCloudflare(base, ["Zone Read", "Analytics Read", "DNS Write"])
+        p = ih.cloudflare_provider(cf, read=lambda path: path.read_text().strip())
+        keys, degraded = ih.check_keys([p], None, "2026-11-18")
+        self.assertEqual(degraded, [])
+        by = {k["slot"]: k for k in keys}
+        issued = by["cloudflare/issued/example"]
+        self.assertEqual((issued["scope"]["missing"], issued["scope"]["excess"]), (["DNS Read"], ["DNS Write"]))
+        self.assertNotIn("scope", by["cloudflare/admin/acct"])
+        self.assertIn(("/accounts/acc-1/tokens/verify", True, False), cf.calls)
+        self.assertIn(("/accounts/acc-1/tokens/tok-1", False, True), cf.calls)
+        self.assertNotIn("fakevalue", json.dumps(keys))
+
+
+class FakeHerokuDoor:
+    PRESETS = {"read": {"scopes": ("read",)}, "identity": {"scopes": ("identity",)}}
+
+    def __init__(self, granted):
+        self.granted = granted
+        self.calls: list = []
+
+    def admins(self):
+        return [("main", pathlib.Path("/nonexistent/heroku-admin/main"))]
+
+    def ledger(self):
+        return {"issued": {"alpha/prod/K": {"preset": "read", "authorization_id": "auth-1", "admin": "main"}}}
+
+    def read_admin(self, label):
+        return label, VALUE_B
+
+    def q(self, text):
+        return text
+
+    def _request(self, method, path, token, payload=None):
+        self.calls.append((method, path, token == VALUE_A, token == VALUE_B))
+        if path == "/oauth/authorizations/auth-1":
+            return {"id": "auth-1", "scope": self.granted}
+        return {"id": "account"}
+
+
+class HerokuScope(unittest.TestCase):
+    def test_issued_authorizations_are_asked_and_their_scope_compared(self):
+        hk = FakeHerokuDoor(["global"])
+        p = ih.heroku_provider(hk, slot_value=lambda *slot: VALUE_A, read=lambda path: VALUE_B)
+        keys, degraded = ih.check_keys([p], None, "2026-11-18")
+        self.assertEqual(degraded, [])
+        by = {k["slot"]: k for k in keys}
+        self.assertEqual(sorted(by), ["heroku/admin/main", "heroku/issued/alpha/prod/K"])
+        rec = by["heroku/issued/alpha/prod/K"]
+        self.assertEqual((rec["state"], rec["scope"]["missing"], rec["scope"]["excess"]),
+                         ("valid", ["read"], ["global"]))
+        self.assertIn(("GET", "/account", True, False), hk.calls)
+        self.assertIn(("GET", "/oauth/authorizations/auth-1", False, True), hk.calls)
+        self.assertNotIn("fakevalue", json.dumps(keys))
+
+    def test_an_empty_slot_is_unreadable_and_never_sent(self):
+        hk = FakeHerokuDoor(["read"])
+        p = ih.heroku_provider(hk, slot_value=lambda *slot: None, read=lambda path: VALUE_B)
+        keys, _ = ih.check_keys([p], None, "2026-11-18")
+        rec = {k["slot"]: k for k in keys}["heroku/issued/alpha/prod/K"]
+        self.assertEqual(rec["state"], "unreadable")
+        self.assertFalse([c for c in hk.calls if c[2]])
+
+
+class SentryRefusal(Exception):
+    pass
+
+
+class FakeSentry:
+    PRESETS = {"releases": {"scopes": ("org:ci",)}}
+
+    def __init__(self, scopes, proof_holds=True):
+        self.scopes = scopes
+        self.proof = proof_holds
+        self.sent: list = []
+
+    def ledger(self):
+        return {"issued": {"alpha/prod/SENTRY": {"preset": "releases", "base_url": "https://sentry.example"}},
+                "broad": {}}
+
+    def read_slot(self, *slot):
+        return VALUE_A
+
+    def _narrow_value_ok(self, slot, row, value):
+        if not self.proof:
+            raise SentryRefusal("the slot no longer holds the token recorded for it; nothing sent")
+
+    def scopes_of(self, value, base):
+        self.sent.append(base)
+        if isinstance(self.scopes, Exception):
+            raise self.scopes
+        return self.scopes
+
+
+class SentryScope(unittest.TestCase):
+    def test_auth_info_scopes_are_compared(self):
+        sn = FakeSentry(["org:ci", "org:read"])
+        keys, degraded = ih.check_keys([ih.sentry_provider(sn)], None, "2026-11-18")
+        rec = keys[0]
+        self.assertEqual((rec["slot"], rec["state"]), ("sentry/issued/alpha/prod/SENTRY", "valid"))
+        self.assertEqual(rec["scope"]["excess"], ["org:read"])
+        self.assertEqual(sn.sent, ["https://sentry.example"])
+
+    def test_a_value_the_ledger_did_not_prove_is_never_sent(self):
+        sn = FakeSentry(["org:ci"], proof_holds=False)
+        keys, _ = ih.check_keys([ih.sentry_provider(sn)], None, "2026-11-18")
+        self.assertEqual((keys[0]["state"], sn.sent), ("unreadable", []))
+
+    def test_a_401_is_invalid(self):
+        sn = FakeSentry(RuntimeError("Sentry answered HTTP 401 on GET /api/0/; provider response withheld"))
+        keys, _ = ih.check_keys([ih.sentry_provider(sn)], None, "2026-11-18")
+        self.assertEqual((keys[0]["state"], keys[0]["status"]), ("invalid", 401))
+
+
+
 if __name__ == "__main__":
     unittest.main()

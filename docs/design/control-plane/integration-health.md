@@ -95,9 +95,87 @@ notice, key server action), `test_mcp_wire` (the two tools), `test_agent_parity`
 
 ## Not done here
 
-- Heroku and Sentry keys are not asked in this change: only the OpenRouter, Cloudflare and DigitalOcean doors are
-  wrapped; `default_providers()` is the one place to add another.
-- Token scope against what the collectors need (the third half of CP-12's wording) is not checked; a key whose scope
-  is too narrow shows as drift once the collector stops receiving the field.
 - The filer does not search GitHub, it reads the first hundred labelled issues of a repository; more than that many
   observatory issues in one repository is outside the design.
+
+## Scope, the declared providers, codes (OBS-605)
+
+Built 2026-11-18 on `refactor/r4-doors`, row OBS-605 of wave R4 ([refactor-plan.md](refactor-plan.md)), CP-12 and
+CP-13.
+
+### What changed
+
+| Before | Now |
+|---|---|
+| `TRACKED` was a list kept by hand beside the step (`sentry` counted as tracked while the step asked none of its keys) | each door declares `DOOR_PROVIDER = "<name>"` in its own file, each collector `COVERS_PROVIDERS = (...)`; `tools/door_registry.py` reads them with `ast`, never importing a door, and `tracked_providers` is that set |
+| Only OpenRouter, Cloudflare and DigitalOcean keys were asked | Heroku (admin tokens and every authorization in the door's ledger, value from its vault slot) and Sentry (every narrow token in the door's ledger) are asked, and the `gh` session the GitHub collector and the issue filer use |
+| No scope check | where the provider answers a key's scope, it is compared with what the collectors and the door's preset need |
+| Findings had no code | every `integration.*` finding and every `untracked` row carries a `code` |
+
+### Scope, per provider
+
+| Provider | Asked through | Granted | Needed |
+|---|---|---|---|
+| GitHub | `gh api -i user` (the existing client: the token never enters this process) | the `X-OAuth-Scopes` header | `repo`, `read:org`; `gist` and `workflow` (what `gh auth login` always asks for) are allowed, no finding |
+| Cloudflare, issued tokens | token verify with the token's own value (`/accounts/{id}/tokens/verify`) names its id; the stashed admin reads `/accounts/{id}/tokens/{tid}` | the permission groups of its policies | the preset's `groups`, `zone_groups`, `account_groups` |
+| Heroku, issued authorizations | `GET /account` with the value (valid); the admin reads `GET /oauth/authorizations/{id}` | the authorization's `scope` | the preset's `scopes` |
+| Sentry, narrow tokens | `GET /api/0/` (validity and scope in one call); a slot is sent only while it holds the value the ledger proved (`_narrow_value_ok`), else `unreadable` | `auth.scopes` | the preset's exact `scopes` |
+
+Admin tokens and OpenRouter and DigitalOcean keys have no scope to compare: no `scope` field on their records.
+
+### Data (added fields only)
+
+- A key record may carry `scope`: `granted`, `needed` (lists, or null when the provider did not say), `missing`,
+  `excess`, `state` (`ok`, `missing`, `excess`, `unknown`, `unread`) and `code` (`scope-ok`, `scope-missing`,
+  `scope-excess`, `scope-unknown`, `scope-unreadable`).
+- An `untracked` row carries `code`: `untracked-key` when a variable (a key) points at the provider, else
+  `untracked-package`.
+- The document carries `keys_not_asked` (MCP `keysNotAsked`): declared doors whose keys this step does not ask
+  (Prowl today).
+
+### Contract
+
+- `Provider(name, holders, ping, scope=None)`. `holders()` may answer (slot, reader, context); `ping(value, context)`
+  then gets the context, and returns the provider's answer; `scope(slot, value, answer, context)` answers
+  `{granted, needed, allowed?}` or None. `judge_scope` compares: `missing = needed - granted`,
+  `excess = granted - needed - allowed`.
+- Findings: `integration.scope_missing` (warning, subject `integration:scope/<slot>`, code `scope-missing`) and
+  `integration.scope_excess` (warning, `integration:scope-excess/<slot>`, code `scope-excess`). The others gain
+  `key-invalid`, `field-drift`, `untracked-key` or `untracked-package`.
+- Builders take the door module as an argument (`cloudflare_provider(cf)`, `heroku_provider(hk)`,
+  `sentry_provider(sn)`, `github_provider(run, which)`): the doors' own clients make every call, and tests pass
+  fakes. `BUILDERS` maps a provider to its builder; `default_providers(degraded)` names a door that cannot be opened
+  (`door-unavailable`).
+
+```
+door files ─ DOOR_PROVIDER ─┐
+collectors ─ COVERS_PROVIDERS ┴─> door_registry.declarations() ─> tracked_providers ─> untracked(...)
+                                                     doors() ─────> keys_not_asked
+BUILDERS ─> Provider(holders, ping, scope) ─> check_keys ─> key.scope ─> integration.scope_* findings
+```
+
+### Failure behaviour
+
+- A declaration in no known shape, or a module that cannot be parsed, is named in `degraded`
+  (`declaration-unshaped`, `module-unreadable`) and contributes nothing: the provider then reads as untracked, the
+  safe side.
+- A scope that cannot be read is `scope-unreadable` on the key, named by the exception's type, and in `degraded`; the
+  key's validity stands.
+- A provider that did not say (a fine-grained GitHub token answers no scope header) is `scope-unknown`, never a
+  clean bill and never a finding.
+- No value reaches a record, a finding, a `degraded` entry or argv: `gh` reads its own token, every other value is
+  sent by its door's client and dropped.
+
+### Tests
+
+`test_integrations` (suite `integrations`): the registry finds every door and collector, a new door is tracked once
+it declares itself, a declaration in no known shape is named with its code, `TRACKED` is the registry's; the
+judgement; scope recorded and its findings with codes; a scope that cannot be read; GitHub through a fake `gh`
+(scopes header, a 401, no header); Cloudflare verify and policies, Heroku authorization, Sentry auth info through
+fake doors, with a value the ledger did not prove never sent; every finding has a code and a label; every fixture
+value absent from every answer.
+
+### Not done
+
+- The integrations page shows no scope column yet: the scope findings reach the findings pages and the MCP view.
+- Prowl and Google keys are not asked (`keys_not_asked` names Prowl); DigitalOcean token scopes are not compared.

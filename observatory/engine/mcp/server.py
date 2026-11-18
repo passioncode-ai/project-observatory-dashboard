@@ -1300,8 +1300,11 @@ def observatory_integrations(
     Read-only, from `store/raw/integration-health.json` (`checkedOn`): each key is asked once a UTC day through its
     door's own validity call, and is named by its slot, never by value. A 401 or 403 is `invalid`; any other failure
     is `unreachable` and says nothing about the key. `drift` rows carry the collector, the field and the day it was
-    last seen; `untracked` rows carry the project, the provider and the package or variable NAMES that point at it.
-    A step that has not run, or an offline run, is named in `degraded`. Design:
+    last seen; `untracked` rows carry the project, the provider, the package or variable NAMES that point at it and a
+    `code` (`untracked-key`, `untracked-package`). Where the provider answers a key's scope, the key carries `scope`
+    (`granted`, `needed`, `missing`, `excess`, `code` `scope-ok`, `scope-missing`, `scope-excess` or
+    `scope-unknown`). `trackedProviders` is what the doors and collectors declare; `keysNotAsked` names doors whose
+    keys this step does not ask. A step that has not run, or an offline run, is named in `degraded`. Design:
     docs/design/control-plane/integration-health.md.
     """
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))

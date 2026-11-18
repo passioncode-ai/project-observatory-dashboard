@@ -30,6 +30,9 @@ step; OBS-421): its team is asked of DigitalOcean with that context's own token,
 """
 from __future__ import annotations
 
+#: The provider this collector reads (OBS-605): `tools/door_registry.py` counts it as tracked.
+COVERS_PROVIDERS = ("digitalocean",)
+
 import json
 import pathlib
 import re
