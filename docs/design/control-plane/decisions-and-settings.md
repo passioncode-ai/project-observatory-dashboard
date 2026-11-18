@@ -118,7 +118,7 @@ No file moves or changes shape, so an existing install reads the same values:
   refuses a rule without its `on`: in these files and organizations.json, back to the default writes the default
   rather than removing the key.
 - Before anything is kept, the file as the plan would leave it is checked by its owner (`tracked.validate`,
-  `review_policy.parse`, the relay's schema): what its reader would refuse is `invalid_value`.
+  `review_policy.parse`, the relay's schema): what its reader would refuse is `invalid-value`.
 
 ### Readers through the door
 
@@ -133,12 +133,12 @@ organizations) keep reading their file, which the door writes in their format; t
 ### Never a credential
 
 No declared key holds a secret's value. Every text the door would keep, inside a structure too, is refused
-`secret_refused` when shaped like a credential (a path's random temporary folder name aside), and never echoed.
+`secret-refused` when shaped like a credential (a path's random temporary folder name aside), and never echoed.
 
 ### Failure behaviour
 
 A file that cannot be read is named in `degraded` and its keys read `null`, never a default; a plan that touches it
-is `file_unreadable`. A switch file that is a link is no switch, and the door writes none through one.
+is `file-unreadable`. A switch file that is a link is no switch, and the door writes none through one.
 
 ### Tests
 

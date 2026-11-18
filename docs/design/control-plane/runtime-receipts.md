@@ -114,7 +114,7 @@ The server that wrote it was started by launchd at 05:18:06. What loaded the job
 - The same day's second attempt (0.41.0, 20:07Z to 21:04Z) was watched live: nothing loaded the server during its
   38 minutes of staging (a process watch on `launchctl bootstrap|kickstart|load|enable` and launchd's log for the
   label). It rolled back for another reason: the staged workspace upgrade ran past its 1800 s limit
-  (`TimeoutExpired`, exit 125).
+  (`TimeoutExpired`, exit 125). Its cause and the fix are in [update-staging.md](update-staging.md) (OBS-626).
 
 ### The change: the server honours the update lock
 

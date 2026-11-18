@@ -248,12 +248,13 @@ class LiveWriters(unittest.TestCase):
     # --- the three rollbacks, reproduced ---------------------------------------------------------
 
     def during_snapshot(self, writer):
-        real = workspace.copy_private
+        real = upgrade._copy_file
 
         def copy_while_writing(source, dest):
-            real(source, dest)
+            out = real(source, dest)
             writer()
-        with patch.object(workspace, "copy_private", side_effect=copy_while_writing):
+            return out
+        with patch.object(upgrade, "_copy_file", side_effect=copy_while_writing):
             return Path(upgrade.snapshot(self.home, writers_stopped=True)["snapshot"])
 
     def while_staged(self, writer):

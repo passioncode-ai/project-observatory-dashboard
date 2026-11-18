@@ -472,6 +472,17 @@ class AssistantWire(Workspace):
         self.assertEqual(payload(bad)['error'],'invalid-conversation-id')
         self.assertEqual(payload(missing)['error'],'unknown-conversation')
         self.assertIn('degraded',payload(missing))
+    def test_a_conversation_read_whole_answers_an_empty_degraded(self):
+        # OBS-613: every read carries `degraded`; a stored conversation came back without one.
+        cid='chat-'+'1'*32
+        folder=self.home/'store/assistant/conversations';folder.mkdir(parents=True)
+        (folder/f'{cid}.json').write_text(json.dumps({'id':cid,'title':'Demo','created_at':'2026-11-17T00:00:00Z',
+                                                      'updated_at':'2026-11-17T00:00:00Z','turns':[]}))
+        async def case():
+            async with self.session() as s:
+                return await s.call_tool('observatory_assistant_conversation',{'id':cid})
+        got=payload(asyncio.run(case()))
+        self.assertEqual((got.get('id'),got.get('degraded')),(cid,[]),got)
 
 
 if __name__ == "__main__":

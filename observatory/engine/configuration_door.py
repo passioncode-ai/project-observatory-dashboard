@@ -11,7 +11,7 @@ type, its allowed values or range, its default, its file and its gate, and every
     plan(changes)          the values before and after and what each change does; writes no configuration, keeps the
                            plan under its digest (store/raw/configure-plans/) for apply
     apply(digest)          writes exactly that plan, atomically, under the workspace lock, only while every file it
-                           touches still holds what the plan read (else `plan_stale`), and journals the values before
+                           touches still holds what the plan read (else `plan-stale`), and journals the values before
                            and after with the actor (store/logs/configure.jsonl)
     undo(journal_id)       restores the values before, only while the files still hold what that apply wrote
 
@@ -79,15 +79,28 @@ def _now() -> str:
     return CLOCK().replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
+#: This door's refusal codes as it spelled them before OBS-613, read as the contract's hyphenated spelling.
+LEGACY_CODES = {earlier: earlier.replace("_", "-") for earlier in (
+    "unknown_key", "invalid_value", "secret_refused", "no_changes", "file_unreadable", "plan_stale", "plan_unknown",
+    "journal_unknown", "already_undone", "undo_refused", "actor_refused", "invalid_argument", "workspace_refused")}
+
+
+def refusal_code(code: Any) -> Any:
+    """A refusal code in the one spelling this door answers, the contract's (with hyphens): the decision codes as
+    `node/actions.refusal_code` reads them (OBS-611) and this door's own earlier spelling (OBS-613). Any other passes."""
+    import engine_node
+    code = engine_node.module("actions").refusal_code(code)
+    return LEGACY_CODES.get(code, code) if isinstance(code, str) else code
+
+
 class Refusal(ValueError):
     """A change this door does not make, by type, with the keys it concerns. Never carries a refused value."""
 
     def __init__(self, code: str, message: str, **extra: Any):
         super().__init__(message)
-        import engine_node
-        # One spelling of the decision codes (OBS-611): the earlier `operator_decision_required` is read as the
-        # contract's `operator-decision-required`, and only the contract's is answered.
-        self.code = engine_node.module("actions").refusal_code(code)
+        # One spelling (OBS-611, OBS-613): a code handed in the earlier spelling (`operator_decision_required`,
+        # `plan_stale`) is read as the contract's, and only the contract's is answered.
+        self.code = refusal_code(code)
         self.extra = extra
 
     def answer(self) -> dict:
@@ -554,7 +567,7 @@ def _shown_key(key: Any) -> str:
 def _setting(key: Any) -> Setting:
     table = catalogue()
     if not isinstance(key, str) or key not in table:
-        raise Refusal("unknown_key", f"{_shown_key(key)} is not a setting this engine has; "
+        raise Refusal("unknown-key", f"{_shown_key(key)} is not a setting this engine has; "
                                      "`configure --list` names every one", key=credential_shape.shown(key)
                       if isinstance(key, str) else None)
     return table[key]
@@ -589,11 +602,11 @@ def _secret(s: Setting, text: str) -> bool:
 def check(s: Setting, value: Any) -> Any:
     """The value as the setting stores it, or a refusal by type. None is "back to the default"."""
     if any(_secret(s, text) for text in _texts(value)):
-        raise Refusal("secret_refused", f"the value for {s.key} is shaped like a credential; credentials go to the "
+        raise Refusal("secret-refused", f"the value for {s.key} is shaped like a credential; credentials go to the "
                                         "vault (`observatory_secret_request`), never into configuration", key=s.key)
     if value is None:
         return None
-    bad = Refusal("invalid_value", f"{s.key} takes {_expects(s)}", key=s.key, expects=_expects(s))
+    bad = Refusal("invalid-value", f"{s.key} takes {_expects(s)}", key=s.key, expects=_expects(s))
     if s.kind == "bool":
         if type(value) is not bool:
             raise bad
@@ -793,7 +806,7 @@ def _check_files(base: Path, docs: _Docs, settings: list, stored: dict) -> None:
         problems = _file_problems(name, doc)
         if problems:
             keys = [s.key for s in changed]
-            raise Refusal("invalid_value", f"{FILES[name]} would be refused by its reader: "
+            raise Refusal("invalid-value", f"{FILES[name]} would be refused by its reader: "
                                            f"{credential_shape.redact(problems[0])[:300]}", key=keys[0], keys=keys)
 
 
@@ -802,13 +815,13 @@ def plan(changes: Any, *, base: Path | None = None) -> dict:
     base = _home(base)
     config.validate_workspace(base, required=True)
     if not isinstance(changes, dict) or not changes:
-        raise Refusal("no_changes", "a plan takes one or more {key: value} changes; `configure --list` names the keys")
+        raise Refusal("no-changes", "a plan takes one or more {key: value} changes; `configure --list` names the keys")
     settings = [(_setting(key), value) for key, value in changes.items()]
     stored = {s.key: check(s, value) for s, value in settings}     # every refusal before anything is kept
     docs = _Docs(base)
     for s, _ in settings:
         if not docs.readable(s):
-            raise Refusal("file_unreadable", f"{', '.join(_touched(s))} cannot be read; fix it before changing "
+            raise Refusal("file-unreadable", f"{', '.join(_touched(s))} cannot be read; fix it before changing "
                                              f"{s.key}", key=s.key, degraded=docs.degraded)
     for s, _ in settings:
         if s.file in FILLED_FILES and stored[s.key] is None and s.default is not None:
@@ -843,7 +856,7 @@ def plan(changes: Any, *, base: Path | None = None) -> dict:
 
 def _load_plan(base: Path, digest: Any) -> dict:
     if not isinstance(digest, str) or not DIGEST.fullmatch(digest):
-        raise Refusal("plan_unknown", "apply takes the `digest` a plan answered (sha256: and 64 hex digits)")
+        raise Refusal("plan-unknown", "apply takes the `digest` a plan answered (sha256: and 64 hex digits)")
     file = _plans(base) / f"{digest.split(':', 1)[1]}.json"
     try:
         doc = config.read_json(file)
@@ -851,23 +864,23 @@ def _load_plan(base: Path, digest: Any) -> dict:
     except (config.ConfigurationError, OSError):
         doc, fresh = None, False
     if not doc or doc.get("digest") != digest or not fresh:
-        raise Refusal("plan_unknown", "no waiting plan has this digest (applied already, older than a day, or never "
+        raise Refusal("plan-unknown", "no waiting plan has this digest (applied already, older than a day, or never "
                                       "made): plan again", digest=digest)
     return doc
 
 
 def planned_keys(digest: Any, *, base: Path | None = None) -> list[str]:
-    """The keys a waiting plan changes, so a caller can check them before it applies (`plan_unknown` otherwise)."""
+    """The keys a waiting plan changes, so a caller can check them before it applies (`plan-unknown` otherwise)."""
     return [row.get("key") for row in _load_plan(_home(base), digest).get("changes") or []]
 
 
 def applied_keys(journal_id: Any, *, base: Path | None = None) -> list[str]:
-    """The keys an applied change wrote, so a caller can check them before it undoes (`journal_unknown` otherwise)."""
+    """The keys an applied change wrote, so a caller can check them before it undoes (`journal-unknown` otherwise)."""
     if isinstance(journal_id, str) and JOURNAL_ID.fullmatch(journal_id):
         for row in _journal_lines(_home(base)):
             if row.get("id") == journal_id and row.get("kind") == "apply":
                 return [c.get("key") for c in row.get("changes") or []]
-    raise Refusal("journal_unknown", "undo takes the `journal` id an apply answered (cfg_ and 16 hex digits)")
+    raise Refusal("journal-unknown", "undo takes the `journal` id an apply answered (cfg_ and 16 hex digits)")
 
 
 def _decided(action: str, target: str, actor: str, decision: Any, keys: list[str]) -> dict | None:
@@ -900,7 +913,7 @@ def _decided(action: str, target: str, actor: str, decision: Any, keys: list[str
 
 def _actor(actor: Any) -> str:
     if not isinstance(actor, str) or not ACTOR.fullmatch(actor):
-        raise Refusal("actor_refused", "the actor is `person:cli` (a terminal), `person:page` (the page the local "
+        raise Refusal("actor-refused", "the actor is `person:cli` (a terminal), `person:page` (the page the local "
                                        "control server serves) or `agent:<name>` / `service:<name>`")
     return actor
 
@@ -1071,7 +1084,7 @@ def apply(digest: Any, *, actor: str, decision: Any = None, base: Path | None = 
         who = _decided("apply", digest, actor, decision, keys)
         moved = sorted(rel for rel, value in (doc.get("files") or {}).items() if _hash(base, rel) != value)
         if moved:
-            raise Refusal("plan_stale", f"{', '.join(moved)} changed since the plan: plan again", files=moved)
+            raise Refusal("plan-stale", f"{', '.join(moved)} changed since the plan: plan again", files=moved)
         _write_all(base, rows, after=True)
         (_plans(base) / f"{digest.split(':', 1)[1]}.json").unlink(missing_ok=True)
         ident = _new_id()
@@ -1091,14 +1104,14 @@ def undo(journal_id: Any, *, actor: str, decision: Any = None, base: Path | None
     actor = _actor(actor)
     config.validate_workspace(base, required=True)
     if not isinstance(journal_id, str) or not JOURNAL_ID.fullmatch(journal_id):
-        raise Refusal("journal_unknown", "undo takes the `journal` id an apply answered (cfg_ and 16 hex digits)")
+        raise Refusal("journal-unknown", "undo takes the `journal` id an apply answered (cfg_ and 16 hex digits)")
     with workspace.lock(base):
         lines = _journal_lines(base)
         done = next((r for r in lines if r.get("id") == journal_id and r.get("kind") == "apply"), None)
         if done is None:
-            raise Refusal("journal_unknown", f"no applied change has the id {journal_id}", journal=journal_id)
+            raise Refusal("journal-unknown", f"no applied change has the id {journal_id}", journal=journal_id)
         if any(r.get("kind") == "undo" and r.get("undoes") == journal_id for r in lines):
-            raise Refusal("already_undone", f"{journal_id} was undone already", journal=journal_id)
+            raise Refusal("already-undone", f"{journal_id} was undone already", journal=journal_id)
         table = catalogue()
         docs = _Docs(base)
         changed = []
@@ -1111,7 +1124,7 @@ def undo(journal_id: Any, *, actor: str, decision: Any = None, base: Path | None
             if (now is ABSENT) != (not r.get("wasSetAfter")) or (now is not ABSENT and now != r.get("storedAfter")):
                 changed.append(s.key)
         if changed:
-            raise Refusal("undo_refused", f"{', '.join(map(str, changed))} changed since {journal_id}; undoing would "
+            raise Refusal("undo-refused", f"{', '.join(map(str, changed))} changed since {journal_id}; undoing would "
                                           "overwrite that: plan the values you want instead", keys=changed,
                           journal=journal_id)
         rows = [{**r, "before": r["after"], "after": r["before"],
@@ -1148,7 +1161,7 @@ def command(a, base: Path) -> tuple[dict, int]:
             for item in a.plan:
                 key, sep, text = item.partition("=")
                 if not sep:
-                    raise Refusal("invalid_value", "each change is KEY=VALUE (an empty VALUE is the default)",
+                    raise Refusal("invalid-value", "each change is KEY=VALUE (an empty VALUE is the default)",
                                   key=_shown_key(key))
                 changes[key] = parse(key, text)
             return plan(changes, base=base), 0

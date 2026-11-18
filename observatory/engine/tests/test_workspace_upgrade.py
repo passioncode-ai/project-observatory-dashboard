@@ -148,32 +148,34 @@ class WorkspaceUpgrade(unittest.TestCase):
     def test_the_check_jobs_record_may_change_during_a_snapshot(self):
         """The five-minute check job is not stopped for the daily snapshot; its record moving
         mid-copy failed every daily from 2026-11-10 with the server down for each try."""
-        real = workspace.copy_private
+        real = upgrade._copy_file
         def copy_while_the_check_writes(source, dest):
-            real(source, dest)
+            out = real(source, dest)
             for name in upgrade.JOB_RECEIPTS:
                 with open(self.home / name, 'a') as receipt:
                     receipt.write('{"at": "while copying"}\n')
-        with patch.object(workspace, 'copy_private', side_effect=copy_while_the_check_writes):
+            return out
+        with patch.object(upgrade, '_copy_file', side_effect=copy_while_the_check_writes):
             source = self.snapshot()
         self.assertTrue((source / 'manifest.json').exists())
 
     def test_the_analytics_queue_may_grow_during_a_snapshot(self):
         """An MCP server a coding session runs records every call and is not stopped for an update:
         its queue growing mid-copy rolled the 0.35.13 update back on 2026-11-11."""
-        real = workspace.copy_private
+        real = upgrade._copy_file
         def copy_while_a_session_records(source, dest):
-            real(source, dest)
+            out = real(source, dest)
             for name in upgrade.ANALYTICS_RECEIPTS:
                 path = self.home / name
                 path.parent.mkdir(parents=True, exist_ok=True)
                 with open(path, 'a') as receipt:
                     receipt.write('{"n": "tool_called"}\n')
+            return out
         for name in upgrade.ANALYTICS_RECEIPTS:
             path = self.home / name
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('{}\n')
-        with patch.object(workspace, 'copy_private', side_effect=copy_while_a_session_records):
+        with patch.object(upgrade, '_copy_file', side_effect=copy_while_a_session_records):
             source = self.snapshot()
         self.assertTrue((source / 'manifest.json').exists())
 
@@ -189,12 +191,13 @@ class WorkspaceUpgrade(unittest.TestCase):
         self.assertTrue(all(name.startswith('store/analytics/') for name in upgrade.ANALYTICS_RECEIPTS))
 
     def test_a_steady_file_that_moves_still_refuses_and_is_named(self):
-        real = workspace.copy_private
+        real = upgrade._copy_file
         def copy_while_settings_change(source, dest):
-            real(source, dest)
+            out = real(source, dest)
             with open(self.home / 'config/settings.json', 'a') as settings:
                 settings.write(' ')
-        with patch.object(workspace, 'copy_private', side_effect=copy_while_settings_change):
+            return out
+        with patch.object(upgrade, '_copy_file', side_effect=copy_while_settings_change):
             with self.assertRaisesRegex(config.ConfigurationError, 'changed during snapshot.*config/settings.json'):
                 self.snapshot()
 
@@ -504,23 +507,25 @@ class WorkspaceUpgrade(unittest.TestCase):
 
     def test_the_local_servers_receipt_may_change_during_a_snapshot(self):
         self.an_earlier_receipt()
-        real = workspace.copy_private
+        real = upgrade._copy_file
 
         def copy_while_a_server_beats(source, dest):
-            real(source, dest)
+            out = real(source, dest)
             self.server_heartbeat()
-        with patch.object(workspace, 'copy_private', side_effect=copy_while_a_server_beats):
+            return out
+        with patch.object(upgrade, '_copy_file', side_effect=copy_while_a_server_beats):
             source = self.snapshot()
         self.assertTrue((source / 'manifest.json').exists())
 
     def test_a_foreign_server_receipt_during_a_snapshot_still_refuses(self):
         self.an_earlier_receipt()
-        real = workspace.copy_private
+        real = upgrade._copy_file
 
         def copy_while_something_writes(source, dest):
-            real(source, dest)
+            out = real(source, dest)
             (self.home / 'store/raw/serverd.json').write_text(json.dumps({'workspace': str(self.base / 'another workspace')}))
-        with patch.object(workspace, 'copy_private', side_effect=copy_while_something_writes):
+            return out
+        with patch.object(upgrade, '_copy_file', side_effect=copy_while_something_writes):
             with self.assertRaises(config.ConfigurationError) as refused:
                 self.snapshot()
         self.assertIn('store/raw/serverd.json', str(refused.exception))
@@ -672,7 +677,7 @@ class WorkspaceUpgrade(unittest.TestCase):
         self.assertTrue((dest/'docs/dashboard').is_dir())
 
     def moving_copy(self, change):
-        original=workspace.copy_private
+        original=upgrade._copy_file
         mutated=[]
         def moving(source,destination):
             result=original(source,destination)
@@ -680,7 +685,7 @@ class WorkspaceUpgrade(unittest.TestCase):
                 mutated.append(True)
                 change()
             return result
-        return mutated, patch.object(workspace,'copy_private',side_effect=moving)
+        return mutated, patch.object(upgrade,'_copy_file',side_effect=moving)
 
     def test_source_movement_aborts_snapshot(self):
         mutated, copying = self.moving_copy(lambda: (self.home/'secrets'/'demo-slot').write_text('a writer moved this'))
@@ -952,6 +957,221 @@ class WorkspaceUpgrade(unittest.TestCase):
         snapshot=self.snapshot()
         upgrade.verify_snapshot(snapshot)
         self.assertTrue((snapshot/'data/store/vector-fixture.db').exists())
+
+
+class ProportionalStaging(unittest.TestCase):
+    """OBS-626: staging an update reads and writes in proportion to what changes.
+
+    On 2026-11-17 the automatic update to 0.41.0 rolled back after the new release's workspace upgrade
+    ran past its 1800 s limit. Its upgrade had committed after 7 minutes (20:28:51Z); the rest went to
+    work the update did not need: a second full snapshot of the home (the update had taken one 13
+    minutes before), encrypting and exporting it (9 minutes), and carrying a plaintext copy an earlier
+    attempt left behind (11 minutes), while every step hashed the whole home again."""
+    setUp=WorkspaceUpgrade.setUp
+    tearDown=WorkspaceUpgrade.tearDown
+
+    def update_snapshot(self):
+        result=upgrade.snapshot(self.home,self.home/'backups'/'before-update-fixture',writers_stopped=True,
+                                update=True,plaintext=True)
+        return Path(result['snapshot'])
+
+    def test_an_upgrade_reuses_the_snapshot_the_update_took(self):
+        snapshot=self.update_snapshot()
+        with patch.object(upgrade,'_snapshot',side_effect=AssertionError('no second snapshot')):
+            result=upgrade.upgrade(self.home,apply=True,writers_stopped=True,snapshot=snapshot)
+        self.assertEqual(result['status'],'upgraded')
+        self.assertEqual(Path(result['snapshot']),snapshot)
+        self.assertTrue((snapshot/'manifest.json').is_file(),'the update keeps and exports its own snapshot')
+        self.assertEqual(list((self.home/'backups').glob('before-upgrade-*')),[])
+        self.assertFalse((self.home/upgrade.JOURNAL).exists())
+
+    def test_a_reused_snapshot_that_no_longer_matches_the_home_is_refused_by_name(self):
+        snapshot=self.update_snapshot()
+        setting=config.read_json(self.home/'config/settings.json')
+        setting['changed_after_the_snapshot']=True
+        workspace.write_json(self.home/'config/settings.json',setting)
+        before=upgrade.inventory(self.home)
+        with self.assertRaises(config.ConfigurationError) as refused:
+            upgrade.upgrade(self.home,apply=True,writers_stopped=True,snapshot=snapshot)
+        self.assertIn('config/settings.json',str(refused.exception))
+        self.assertEqual(upgrade.inventory(self.home),before,'nothing changed')
+
+    def test_a_reused_snapshot_must_be_one_of_the_homes_own_backups(self):
+        outside=self.base/'elsewhere'
+        upgrade.snapshot(self.home,outside,writers_stopped=True,plaintext=True)
+        with self.assertRaises(config.ConfigurationError) as refused:
+            upgrade.upgrade(self.home,apply=True,writers_stopped=True,snapshot=outside)
+        self.assertIn('backups',str(refused.exception))
+
+    def test_the_stage_holds_only_what_the_upgrade_changes_or_reads(self):
+        (self.home/'archive').mkdir(exist_ok=True)
+        (self.home/'archive/big.bundle').write_bytes(b'\0'*4096)
+        seen=[]
+        real=upgrade.prepare_upgrade
+
+        def record(stage):
+            seen.extend(sorted(p.relative_to(stage).as_posix() for p in stage.rglob('*') if p.is_file()))
+            return real(stage)
+        with patch.object(upgrade,'prepare_upgrade',side_effect=record):
+            self.assertEqual(upgrade.upgrade(self.home,apply=True,writers_stopped=True)['status'],'upgraded')
+        tops={name.split('/')[0] for name in seen}
+        self.assertLessEqual(tops,{'workspace.json','config','registry','store'})
+        self.assertIn('store/observatory.db',seen)
+        self.assertNotIn('secrets/demo-slot',seen,'the vault is not copied into the stage any more')
+        self.assertNotIn('archive/big.bundle',seen)
+        self.assertNotIn('store/logs/test.log',seen)
+
+    def test_2026_11_17_under_the_updates_lock_the_upgrade_exports_no_snapshot_of_its_own(self):
+        import backup_vault
+        import engine_update
+        backup_vault.set_passphrase(self.home,'synthetic passphrase for the export')
+        exported=[]
+        with engine_update.update_lock(self.home), \
+                patch.object(backup_vault,'after_snapshot',side_effect=lambda *a,**k: exported.append(a)):
+            result=upgrade.upgrade(self.home,apply=True,writers_stopped=True)
+        self.assertEqual(result['status'],'upgraded')
+        self.assertEqual(exported,[],'the update exports its own snapshot after the upgrade answers')
+        self.assertEqual(list((self.home/'backups').glob('before-upgrade-*')),[],
+                         'no plaintext copy of the home is left for a later export to carry')
+
+    def test_under_the_updates_lock_a_refused_upgrade_leaves_no_copy_behind(self):
+        import engine_update
+        with engine_update.update_lock(self.home), \
+                patch.object(upgrade,'prepare_upgrade',side_effect=RuntimeError('synthetic staging failure')):
+            with self.assertRaises(RuntimeError):
+                upgrade.upgrade(self.home,apply=True,writers_stopped=True)
+        self.assertEqual(list((self.home/'backups').glob('before-upgrade-*')),[])
+
+    def test_each_step_is_named_on_stderr_so_a_limit_can_say_where_it_stopped(self):
+        err=io.StringIO()
+        with contextlib.redirect_stderr(err):
+            upgrade.upgrade(self.home,apply=True,writers_stopped=True)
+        steps=[line.split(upgrade.STEP_PREFIX,1)[1].split()[0] for line in err.getvalue().splitlines()
+               if line.startswith(upgrade.STEP_PREFIX)]
+        self.assertEqual(steps[:2],['preflight','inventory'])
+        for step in ('snapshot','stage','migrate-staged','stillness','migrate-live','commit'):
+            self.assertIn(step,steps)
+
+    @unittest.skipIf(os.name=='nt','Windows keeps no status-change time, so every inventory hashes again')
+    def test_a_scaled_home_is_hashed_twice_by_an_upgrade_that_reuses_the_snapshot(self):
+        # Before: the home was hashed by the upgrade's inventory, the snapshot's two inventories, the
+        # copy's own check, the manifest, the verification, the stage copy and the last inventory.
+        (self.home/'archive').mkdir(exist_ok=True)
+        for n in range(40):
+            (self.home/f'archive/part-{n:02}.bin').write_bytes(os.urandom(2048))
+        snapshot=self.update_snapshot()
+        upgrade._DIGESTS.clear()  # the new release runs in a process of its own
+        files=len(upgrade.inventory(self.home))
+        upgrade._DIGESTS.clear()
+        hashed=[]
+        real=upgrade.digest
+
+        def counting(file):
+            hashed.append(file)
+            return real(file)
+        with patch.object(upgrade,'RACY_NS',0), patch.object(upgrade,'digest',side_effect=counting):
+            self.assertEqual(upgrade.upgrade(self.home,apply=True,writers_stopped=True,
+                                             snapshot=snapshot)['status'],'upgraded')
+        # Once to read the home, once to verify the snapshot it reuses, and the few files it stages.
+        self.assertLessEqual(len(hashed),2*files+30)
+
+
+class DigestReuse(unittest.TestCase):
+    """OBS-626: a file whose identity has not moved since it was hashed is not read again."""
+
+    def setUp(self):
+        import tmp as tmpdir
+        self.dir=Path(tmpdir.mkdtemp()).resolve()
+        upgrade._DIGESTS.clear()
+
+    def tearDown(self):
+        shutil.rmtree(self.dir,ignore_errors=True)
+        upgrade._DIGESTS.clear()
+
+    def counted(self):
+        calls=[]
+        real=upgrade.digest
+
+        def counting(file):
+            calls.append(Path(file).name)
+            return real(file)
+        return calls,patch.object(upgrade,'digest',side_effect=counting)
+
+    @unittest.skipIf(os.name=='nt','the reuse rests on the status-change time, which Windows does not keep')
+    def test_an_unchanged_file_is_hashed_once(self):
+        (self.dir/'steady.json').write_text('{"a": 1}')
+        calls,counting=self.counted()
+        with patch.object(upgrade,'RACY_NS',0), counting:
+            first=upgrade.inventory(self.dir)
+            second=upgrade.inventory(self.dir)
+        self.assertEqual(first,second)
+        self.assertEqual(calls,['steady.json'])
+
+    def test_a_rewrite_that_keeps_size_and_mtime_is_still_seen(self):
+        file=self.dir/'steady.json'
+        file.write_text('{"a": 1}')
+        with patch.object(upgrade,'RACY_NS',0):
+            first=upgrade.inventory(self.dir)
+            info=file.stat()
+            file.write_text('{"a": 2}')
+            os.utime(file,ns=(info.st_atime_ns,info.st_mtime_ns))
+            second=upgrade.inventory(self.dir)
+        self.assertEqual(first['steady.json'][:2],second['steady.json'][:2],'size and mtime alike')
+        self.assertNotEqual(first['steady.json'][2],second['steady.json'][2],'the content change is found')
+
+    def test_a_file_changed_inside_the_racy_window_is_hashed_again(self):
+        (self.dir/'fresh.json').write_text('{}')
+        calls,counting=self.counted()
+        with counting:
+            upgrade.inventory(self.dir)
+            upgrade.inventory(self.dir)
+        self.assertEqual(calls,['fresh.json','fresh.json'])
+
+
+class CopyFile(unittest.TestCase):
+    """OBS-626: the snapshot's copy of a file is a clone where the filesystem offers one, else one pass
+    that hashes what it writes; either way private, with the file's own times."""
+
+    def setUp(self):
+        import tmp as tmpdir
+        self.dir=Path(tmpdir.mkdtemp()).resolve()
+        self.source=self.dir/'source.bin'
+        self.source.write_bytes(os.urandom(300_000))
+        os.utime(self.source,ns=(1_700_000_000_000_000_000,1_700_000_000_000_000_000))
+
+    def tearDown(self):
+        shutil.rmtree(self.dir,ignore_errors=True)
+
+    def check(self,dest,sha):
+        self.assertEqual(dest.read_bytes(),self.source.read_bytes())
+        self.assertEqual(sha,upgrade.digest(self.source))
+        self.assertEqual(dest.stat().st_mtime_ns,self.source.stat().st_mtime_ns)
+        if os.name!='nt':
+            self.assertEqual(stat.S_IMODE(dest.stat().st_mode),0o600)
+
+    def test_the_streamed_copy_hashes_what_it_writes(self):
+        dest=self.dir/'streamed.bin'
+        with patch.object(upgrade,'_clone',return_value=False):
+            self.check(dest,upgrade._copy_file(self.source,dest))
+
+    def test_a_clone_or_its_fallback_gives_the_same_file(self):
+        dest=self.dir/'cloned.bin'
+        self.check(dest,upgrade._copy_file(self.source,dest))
+
+    @unittest.skipIf(os.name=='nt','Windows keeps the earlier copy-and-compare')
+    def test_a_source_that_keeps_changing_refuses_the_copy(self):
+        dest=self.dir/'torn.bin'
+        real=upgrade._stream
+
+        def changing(source,target):
+            out=real(source,target)
+            with open(source,'ab') as more:
+                more.write(b'appended while copying')
+            return out
+        with patch.object(upgrade,'_clone',return_value=False), patch.object(upgrade,'_stream',side_effect=changing):
+            with self.assertRaises(config.ConfigurationError):
+                upgrade._copy_file(self.source,dest)
+        self.assertFalse(dest.exists())
 
 
 class HomeRelativeSources(unittest.TestCase):

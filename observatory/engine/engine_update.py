@@ -64,16 +64,19 @@ import dataclasses
 import datetime
 import email.parser
 import oslocks
+import osproc
 import osprivacy
 import hashlib
 import http.client
 import importlib.metadata
 import importlib.util
 import json
+import math
 import os
 from pathlib import Path
 import re
 import shutil
+import signal
 import stat
 import subprocess
 import sys
@@ -130,6 +133,22 @@ EXIT_SERVICES = 5          # updated, but a stopped job did not start again
 EXIT_HELD = 6              # --unattended only: the release declares a step that needs a person
 EXIT_NO_SPACE = 7          # refused before any change: a volume it writes to has too little free space
 EXIT_UPDATE_AVAILABLE = 10  # --check only
+
+#: THE STAGED UPGRADE'S TIME LIMIT FOLLOWS THE MACHINE (OBS-626). It was a fixed 1800 s. On 2026-11-17
+#: a loaded machine with a nearly full disk took 13 minutes for the update's own snapshot of a 0.87 GB
+#: home (its copy ran at about 1.4 MB/s), and the 0.41.0 update rolled back at the limit. The snapshot
+#: reads and writes the whole home, as much as the staged upgrade does now that it reuses that snapshot,
+#: so its measured time is the measure: the limit is UPGRADE_FACTOR times it, never under the old
+#: 1800 s. Past UPGRADE_CEILING_S the update refuses before it installs anything, naming the measure,
+#: rather than keep the jobs stopped for hours.
+UPGRADE_FLOOR_S = 1800
+UPGRADE_FACTOR = 4
+UPGRADE_CEILING_S = 4 * 3600
+
+
+def upgrade_limit(snapshot_seconds: float) -> int:
+    """Seconds the new release's staged upgrade may take, from how long the update's snapshot took."""
+    return max(UPGRADE_FLOOR_S, math.ceil(UPGRADE_FACTOR * max(0.0, snapshot_seconds)))
 
 #: A release that cannot be installed without a person (a data or schema migration that must
 #: be run or confirmed by hand) says so in its own verified wheel, at this path:
@@ -938,6 +957,60 @@ def system_setup_refused(env=None) -> bool:
     return (os.environ if env is None else env).get("OBSERVATORY_SYSTEM_SETUP") == "0"
 
 
+def _end_group(proc: subprocess.Popen) -> None:
+    """End `proc` and every process it started: its process group (POSIX), its tree (Windows)."""
+    try:
+        osproc.stop_group(proc.pid, 2.0)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        proc.kill()
+    except OSError:
+        pass
+
+
+def run_bounded(argv: list[str], *, capture_output: bool = False, text: bool = False, timeout: float | None = None,
+                env: dict | None = None, cwd: str | None = None) -> subprocess.CompletedProcess:
+    """`subprocess.run` for the new release's commands, whose limit or interruption ends the whole
+    process tree it started (OBS-626).
+
+    `python -m observatory full ...` runs the engine as a child of its own, and `subprocess.run`'s
+    timeout kills only the process it started: on 2026-11-17 the engine went on writing the workspace
+    after its launcher was killed, while the update rolled back around it. The command runs in a
+    process group (a session on POSIX, a new group on Windows) that a timeout, a Ctrl-C or any other
+    exception here ends whole. A timeout raises `TimeoutExpired` carrying what the command printed."""
+    pipe = subprocess.PIPE if capture_output else None
+    proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=pipe, stderr=pipe, text=text, env=env, cwd=cwd,
+                            **osproc.new_group())
+    try:
+        out, err = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        _end_group(proc)
+        try:
+            out, err = proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            out, err = None, None
+        raise subprocess.TimeoutExpired(argv, timeout, output=out, stderr=err) from None
+    except BaseException:
+        _end_group(proc)
+        proc.wait()
+        raise
+    return subprocess.CompletedProcess(argv, proc.returncode, out, err)
+
+
+def _steps(text) -> tuple[str | None, str]:
+    """The last `upgrade step` a command said (workspace_upgrade.STEP_PREFIX), and its other lines."""
+    if isinstance(text, bytes):
+        text = text.decode("utf-8", "replace")
+    last, rest = None, []
+    for line in (text or "").splitlines():
+        if line.startswith(workspace_upgrade.STEP_PREFIX):
+            last = line[len(workspace_upgrade.STEP_PREFIX):].split(" ", 1)[0] or last
+        else:
+            rest.append(line)
+    return last, "\n".join(rest)
+
+
 class NewEngine:
     """The freshly installed release, always in a new process of its own.
 
@@ -945,25 +1018,38 @@ class NewEngine:
     the child imports the installed package and not a checkout that happens to
     be nearby — the point is to test what was installed."""
 
-    def __init__(self, home: Path, python: str = sys.executable, runner=subprocess.run):
+    def __init__(self, home: Path, python: str = sys.executable, runner=run_bounded):
         self.home, self.python, self.runner = home, python, runner
         self.env = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "OBSERVATORY_ROOT"}}
         self.cwd = tempfile.gettempdir()
 
-    def _run(self, argv: list[str], timeout: int = 1800) -> tuple[int, str, str]:
+    def _run(self, argv: list[str], timeout: int = UPGRADE_FLOOR_S) -> tuple[int, str, str]:
         try:
             p = self.runner([self.python, "-P", *argv], capture_output=True, text=True,
                             timeout=timeout, env=self.env, cwd=self.cwd)
-        except (OSError, subprocess.TimeoutExpired) as exc:
+        except subprocess.TimeoutExpired as exc:
+            # Which step the limit stopped (OBS-626), from the lines the command said before it.
+            step, _ = _steps(exc.stderr)
+            return 125, "", f"TimeoutExpired after {timeout} s" + (f" in step {step}" if step else "")
+        except OSError as exc:
             return 125, "", type(exc).__name__
         return p.returncode, p.stdout, p.stderr
 
-    def _full(self, *args: str) -> tuple[int, str, str]:
-        return self._run(["-m", "observatory", "--home", str(self.home), "full", *args])
+    def _full(self, *args: str, timeout: int = UPGRADE_FLOOR_S) -> tuple[int, str, str]:
+        return self._run(["-m", "observatory", "--home", str(self.home), "full", *args], timeout=timeout)
 
-    def upgrade(self) -> tuple[int, str]:
-        code, out, err = self._full("upgrade", "--apply", "--writers-stopped")
-        return code, redact_tail(err or out)
+    def upgrade(self, *, timeout: int = UPGRADE_FLOOR_S, snapshot: Path | None = None) -> tuple[int, str]:
+        """`full upgrade --apply` of the new release within `timeout` seconds, reusing the update's
+        `snapshot` when given (OBS-626); a release older than that option is asked again without it."""
+        base = ("upgrade", "--apply", "--writers-stopped")
+        code, out, err = self._full(*base, *(("--snapshot", str(snapshot)) if snapshot else ()), timeout=timeout)
+        if snapshot and code == 2 and "unrecognized arguments" in (err or "") and "--snapshot" in (err or ""):
+            code, out, err = self._full(*base, timeout=timeout)
+        if code == 125 and not out and (err or "").startswith("TimeoutExpired"):
+            return code, err
+        step, said = _steps(err)
+        detail = redact_tail(said.strip() or out)
+        return code, (f"{detail} (in step {step})" if code and step and detail else detail)
 
     def version(self) -> str | None:
         code, out, _ = self._full("version")
@@ -1210,6 +1296,8 @@ class Dependencies:
     free_space: Callable[[Path], int] = free_space
     #: The static feed's host for `--check`; None derives it (github.com for the organization's API).
     feed: str | None = None
+    #: Seconds, for the snapshot's measured time that sets the staged upgrade's limit (OBS-626).
+    clock: Callable[[], float] = time.monotonic
 
 
 # --- the workspace side ---------------------------------------------------------
@@ -1683,18 +1771,35 @@ class Transaction:
             self.stop_writers()
             self.stage = "snapshot"
             snapshot = before = None
+            limit = UPGRADE_FLOOR_S
             try:
                 if self.has_ws:
                     wait_idle(self.base, self.deps.idle_timeout)
                     # The rollback stage is a plaintext copy under the home's own backups that undo()
                     # restores, then handed to backup_vault like the managed snapshots: it opts in to
                     # holding the vault in plaintext while the update runs (OBS-389).
+                    started = self.deps.clock()
                     receipt = workspace_upgrade.snapshot(
                         self.base, self.base / "backups" / f"before-update-{uuid.uuid4().hex}", writers_stopped=True,
                         update=True, plaintext=True)
+                    seconds = max(0.0, self.deps.clock() - started)
                     snapshot = Path(receipt["snapshot"])
                     before = state(self.base)
-                    self.step("snapshot", files=receipt["files"])
+                    limit = upgrade_limit(seconds)
+                    size = int(receipt.get("bytes") or 0)
+                    self.step("snapshot", files=receipt["files"], bytes=size, seconds=round(seconds, 1),
+                              upgrade_limit=limit)
+                    if limit > UPGRADE_CEILING_S:
+                        # Before the point of change: nothing is installed, so this snapshot is no way
+                        # back from anything; it is removed and the jobs start again (below).
+                        self.stage = "upgrade-limit"
+                        shutil.rmtree(snapshot, ignore_errors=True)
+                        rate = size / 1e6 / seconds if seconds else 0.0
+                        raise UpdateError(
+                            f"Not updated, nothing was installed: the workspace snapshot took {seconds:.0f} s for "
+                            f"{size / 1e6:.0f} MB ({rate:.1f} MB/s on this machine now), so staging the workspace "
+                            f"upgrade may need up to {limit} s, past the {UPGRADE_CEILING_S} s an update keeps the "
+                            "jobs stopped. The jobs run again; retry when the machine has more free disk and memory")
             except BaseException:
                 self.start_writers()
                 raise
@@ -1710,7 +1815,9 @@ class Transaction:
                 return self.undo(f"install failed: {exc}", rollback, snapshot, before)
             if self.has_ws:
                 self.stage = "workspace-upgrade"
-                code, detail = self.deps.engine(self.base).upgrade()
+                # The update's own snapshot is the upgrade's way back (OBS-626): no second copy of the
+                # home, and a limit derived from how long that copy took on this machine now.
+                code, detail = self.deps.engine(self.base).upgrade(timeout=limit, snapshot=snapshot)
                 if code:
                     self.install_failed("timeout" if code == 125 and "TimeoutExpired" in detail else "failed")
                     return self.undo(f"the new release's workspace upgrade failed (exit {code}): {detail}",

@@ -63,6 +63,11 @@ if os.name != "nt":
         except OSError:
             return None
 
+    def ioctl(fd: int, request: int, arg) -> None:
+        """`fcntl.ioctl`, here because this module is the engine's one door to `fcntl` (a
+        Linux reflink clone, OBS-626). Raises OSError where the request is refused."""
+        _fcntl.ioctl(fd, request, arg)
+
 else:  # pragma: no cover - exercised by the Windows CI row
     import ctypes
     import msvcrt

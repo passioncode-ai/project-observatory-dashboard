@@ -1102,7 +1102,9 @@ class WhatAgentsAreTold(unittest.TestCase):
     def test_the_instructions_and_the_skill_name_the_tool(self):
         server = (ROOT / "mcp" / "server.py").read_text(encoding="utf-8")
         block = server.split("instructions=(", 1)[1].split("),\n)", 1)[0]
-        self.assertIn("observatory_secret_request", block)
+        # `_x` is the tool `observatory_x`, as the instructions' first line says (OBS-613).
+        self.assertIn("`_x` names the tool `observatory_x`.", block)
+        self.assertIn("`_secret_request`", block)
         skill = (ROOT / "skill" / "plugins" / "observatory-log" / "skills" / "handling-secrets" /
                  "SKILL.md").read_text(encoding="utf-8")
         self.assertIn("observatory_secret_request", skill)

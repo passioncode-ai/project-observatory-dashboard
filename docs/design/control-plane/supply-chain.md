@@ -58,7 +58,7 @@ Supply chain
 
 - MCP: `observatory_mcp_supply` (read: `risky`, `changes`, `pins`, `pinned_servers`, `scanners`, `rules`, `degraded`) and
   `observatory_mcp_accept(server?, tool?)` (write, idempotent: `{accepted, servers, degraded}`; invalid names are a typed
-  `invalid_argument`). The page button is the key server's `mcp-accept` action, the same function
+  `invalid-argument`). The page button is the key server's `mcp-accept` action, the same function
   (`mcp_supply.accept_pending`); parity entry `mcp-accept` is `covered`.
 - Buttons are built disabled, enabled by the page script only when the control server serves the page; opened as a file
   they say why. No shell command on a row.

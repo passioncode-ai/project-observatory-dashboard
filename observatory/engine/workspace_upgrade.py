@@ -20,6 +20,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
 import uuid
 
 import backup_vault
@@ -80,6 +81,38 @@ def excluded(path: Path) -> bool:
             or path.name.endswith(('.upgrade.lock', '-shm')) or PurePosixPath(*path.parts).as_posix() in EXCLUDED_FILES)
 
 
+#: DIGESTS THIS PROCESS ALREADY TOOK (OBS-626). An update hashed the whole home seven times in the
+#: release that stages it and four in the one that calls it, so on 2026-11-17 a loaded machine spent
+#: most of its 1800 s limit reading files that had not moved. A file is read again unless its identity
+#: (device, inode, size, mtime, ctime) is the one it had when it was hashed AND that ctime was older
+#: than the hash by RACY_NS: any write moves the ctime, which no `utime` can set back, and a change in
+#: the same timestamp tick as the hash is caught by the window (git's "racily clean" rule). Windows
+#: keeps no status-change time, so there every call reads the file as before.
+_DIGESTS: dict[tuple[int, int], tuple[tuple[int, int, int], int, str]] = {}
+RACY_NS = 2_000_000_000
+_DIGESTS_MAX = 200_000
+
+
+def _identity(info: os.stat_result) -> tuple[int, int, int] | None:
+    return None if os.name == 'nt' else (info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def known_digest(file: Path, info: os.stat_result | None = None) -> str:
+    """`digest(file)`, read only when the file moved since this process last hashed it (OBS-626)."""
+    info = info or file.stat()
+    ident, key = _identity(info), (info.st_dev, info.st_ino)
+    seen = _DIGESTS.get(key)
+    if ident is not None and seen is not None and seen[0] == ident and max(ident[1], ident[2]) + RACY_NS < seen[1]:
+        return seen[2]
+    hashed_at = time.time_ns()
+    value = digest(file)
+    if ident is not None:
+        if len(_DIGESTS) >= _DIGESTS_MAX:
+            _DIGESTS.clear()
+        _DIGESTS[key] = (ident, hashed_at, value)
+    return value
+
+
 def inventory(base: Path) -> dict[str, tuple[int, int, str]]:
     """Detect movement while copying; refuse links and special files rather than follow them."""
     result = {}
@@ -104,7 +137,7 @@ def inventory(base: Path) -> dict[str, tuple[int, int, str]]:
             if not stat.S_ISREG(file.stat().st_mode):
                 raise config.ConfigurationError('Snapshot refuses special files')
             info = file.stat()
-            result[rel.as_posix()] = (info.st_size,info.st_mtime_ns,digest(file))
+            result[rel.as_posix()] = (info.st_size,info.st_mtime_ns,known_digest(file, info))
     return result
 
 
@@ -226,6 +259,118 @@ def copy_database(source: Path, target: Path) -> None:
             raise
 
 
+#: macOS `clonefile` flags (sys/clonefile.h) and Linux's FICLONE ioctl (linux/fs.h).
+CLONE_NOFOLLOW, CLONE_NOOWNERCOPY = 0x0001, 0x0002
+FICLONE = 0x40049409
+_CLONEFILE: list = []
+
+
+def _clonefile():
+    """libc's `clonefile`, looked up once; None where there is none."""
+    if not _CLONEFILE:
+        fn = None
+        try:
+            import ctypes
+            fn = ctypes.CDLL(None, use_errno=True).clonefile
+            fn.argtypes, fn.restype = [ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint32], ctypes.c_int
+        except (OSError, AttributeError, ImportError):
+            fn = None
+        _CLONEFILE.append(fn)
+    return _CLONEFILE[0]
+
+
+def _clone(source: Path, dest: Path) -> bool:
+    """A copy-on-write clone of `source` at the new path `dest` (APFS `clonefile`, a reflink on Linux
+    filesystems that offer one): no data is read or written, and a later write to either file does
+    not reach the other. False, with nothing left at `dest`, where the volume cannot clone."""
+    if sys.platform == 'darwin':
+        fn = _clonefile()
+        return fn is not None and fn(os.fsencode(source), os.fsencode(dest), CLONE_NOFOLLOW | CLONE_NOOWNERCOPY) == 0
+    if not sys.platform.startswith('linux'):
+        return False
+    import oslocks
+    src = osprivacy.open(source, os.O_RDONLY | osprivacy.NOFOLLOW)
+    try:
+        dst = osprivacy.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | osprivacy.NOFOLLOW, 0o600)
+        try:
+            oslocks.ioctl(dst, FICLONE, src)
+            return True
+        except OSError:
+            os.close(dst)
+            dst = None
+            dest.unlink(missing_ok=True)
+            return False
+        finally:
+            if dst is not None:
+                os.close(dst)
+    finally:
+        os.close(src)
+
+
+def _stream(source: Path, dest: Path) -> str:
+    """One pass: read `source` once, write `dest` (created private), hash what was written."""
+    h = hashlib.sha256()
+    with os.fdopen(osprivacy.open(source, os.O_RDONLY | osprivacy.NOFOLLOW), 'rb') as inp:
+        with os.fdopen(osprivacy.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | osprivacy.NOFOLLOW, 0o600),
+                       'wb') as out:
+            for block in iter(lambda: inp.read(1024 * 1024), b''):
+                h.update(block)
+                out.write(block)
+    return h.hexdigest()
+
+
+def _copy_file(source: Path, dest: Path) -> str:
+    """Copy one regular file of the home for a snapshot or a stage and return its SHA-256 (OBS-626).
+
+    `workspace.copy_private` read every byte four times (the copy, then both files again to compare)
+    and the snapshot then read the copy a fifth time for its manifest. Here a clone costs no data at
+    all, and its digest is the one this process already holds when the source has not moved since;
+    otherwise the file is streamed once and hashed as it is written. A source that moved during the
+    copy (its status-change time says so) is copied again, then refused as before. The copy is 0600
+    and keeps the source's times (0.20.1). Windows keeps the earlier copy-and-compare."""
+    if os.path.lexists(dest):
+        raise config.ConfigurationError('Snapshot destination must not exist')
+    dest.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    if os.name == 'nt':
+        workspace.copy_private(source, dest)
+        return digest(dest)
+    for _ in range(COPY_ATTEMPTS):
+        before = os.stat(source, follow_symlinks=False)
+        if not stat.S_ISREG(before.st_mode):
+            raise config.ConfigurationError('Snapshot refuses special files')
+        try:
+            cloned = _clone(source, dest)
+            value = None if cloned else _stream(source, dest)
+            after = os.stat(source, follow_symlinks=False)
+            if _identity(after) != _identity(before):
+                dest.unlink(missing_ok=True)
+                continue
+            if cloned:
+                # The clone is the source as it was: no read when this process hashed it unmoved.
+                value = known_digest(source, after)
+            os.chmod(dest, 0o600)
+            os.utime(dest, ns=(after.st_atime_ns, after.st_mtime_ns))
+            return value
+        except BaseException:
+            dest.unlink(missing_ok=True)
+            raise
+    raise config.ConfigurationError('Source changed during copy; retry after stopping writers')
+
+
+def _copy_tree(source: Path, dest: Path) -> int:
+    """`_copy_file` for every regular file under `source` (folders 0700); links and special files refuse."""
+    if source.is_symlink():
+        raise config.ConfigurationError('Snapshot refuses symbolic links')
+    if source.is_file():
+        _copy_file(source, dest)
+        return 1
+    if not source.is_dir():
+        return 0
+    dest.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return sum(_copy_tree(child, dest / child.name) for child in sorted(source.iterdir())
+               if child.name not in {'.git', '__pycache__', '.venv'})
+
+
 def require_stopped(writers_stopped: bool) -> None:
     if not writers_stopped:
         raise config.ConfigurationError('Stop foreground/background writers, then pass --writers-stopped for a cross-file snapshot')
@@ -292,9 +437,11 @@ def _snapshot(base: Path, output: Path, *, carry_stores: bool = False,
             source, dest = base / name, stage / 'data' / name
             if name in databases:
                 copy_database(source, dest)
+                sha = digest(dest)
             else:
-                workspace.copy_private(source, dest)
-            entries.append({'path':name, 'sha256':digest(dest), 'size':dest.stat().st_size,
+                # A clone, or one pass that hashes what it writes (OBS-626).
+                sha = _copy_file(source, dest)
+            entries.append({'path':name, 'sha256':sha, 'size':dest.stat().st_size,
                             'kind':'sqlite' if name in databases else 'file'})
         # WHAT MUST HOLD STILL is everything but the databases and the append-only logs.
         # Session MCP servers and the Stop hook keep writing to both while the tick and server
@@ -343,6 +490,7 @@ def _snapshot(base: Path, output: Path, *, carry_stores: bool = False,
         os.rename(stage, output)
         sync_directory(output.parent)
         return {'status':'snapshot-created','snapshot':str(output),'files':len(entries),
+                'bytes':sum(e['size'] for e in entries),
                 'external_sources_included':manifest['external_sources_included'],
                 'secret_store':secret_store_carry.summary(externals)}
     except BaseException:
@@ -549,7 +697,7 @@ def verify_snapshot(source: Path) -> dict:
         expected.add(name)
         file = source / 'data' / name
         workspace.reject_symlinks(file)
-        if not file.is_file() or file.stat().st_size != row.get('size') or digest(file) != row.get('sha256'):
+        if not file.is_file() or file.stat().st_size != row.get('size') or known_digest(file) != row.get('sha256'):
             raise config.ConfigurationError('Snapshot file does not match its SHA256 manifest')
         if row.get('kind') == 'sqlite':
             with contextlib.closing(sqlite3.connect(file.as_uri() + '?mode=ro&immutable=1', uri=True)) as conn:
@@ -1353,7 +1501,57 @@ def _migrate(home: Path) -> str:
     return ''
 
 
-def upgrade(base: Path, *, apply: bool = False, writers_stopped: bool = False) -> dict:
+#: Each step of a staged upgrade is said on stderr as it starts (OBS-626), so the update that runs it
+#: under a time limit can name the step a limit stopped, instead of a bare `TimeoutExpired`.
+STEP_PREFIX = 'Observatory: upgrade step '
+#: What the stage holds (OBS-626): what `prepare_upgrade` writes (the settings' defaults and the
+#: marker) and migrates (the store), and the registry a migration may read (`_drop_foreign_events`).
+#: It held a copy of the whole home, the vault, archives and logs included, to change these.
+STAGED = ('workspace.json', 'config', 'registry', 'store/observatory.db')
+
+
+def _step(name: str, **facts) -> None:
+    detail = ' '.join(f'{k}={v}' for k, v in facts.items())
+    print(STEP_PREFIX + name + (f' {detail}' if detail else ''), file=sys.stderr, flush=True)
+
+
+def _update_holds(base: Path) -> bool:
+    """An update holds this home's update lock: it took its own snapshot before it installed, and it
+    exports that one once this upgrade answers (`engine_update`). A probe that cannot answer is no."""
+    try:
+        import engine_update
+        return engine_update.update_lock_held(base)
+    except Exception:  # noqa: BLE001: unknown reads as "no update", the safe side (the snapshot is kept)
+        return False
+
+
+def _reused_snapshot(base: Path, snapshot: Path, before: dict, databases: set[str]) -> dict:
+    """The snapshot the update took a moment ago, used as this upgrade's way back (OBS-626).
+
+    It must be one of this home's own backups, verify whole, and hold every file that must hold
+    still exactly as the home holds it now; anything else refuses, naming what differs."""
+    snapshot = Path(snapshot)
+    workspace.reject_symlinks(snapshot)
+    if not snapshot.resolve().is_relative_to((base / 'backups').resolve()):
+        raise config.ConfigurationError("--snapshot names a snapshot outside this workspace's backups")
+    manifest = verify_snapshot(snapshot)
+    held = {row['path']: row['sha256'] for row in manifest['files']}
+    kept = databases | {row['path'] for row in manifest['files'] if row.get('kind') == 'sqlite'}
+    foreign = foreign_runtime_receipts(base)
+    names = {k for k in set(before) | set(held) if not volatile(k, kept) or k in foreign}
+    moved = sorted(k for k in names if (before[k][2] if k in before else None) != held.get(k))
+    moved += sorted(set(manifest['directories']) ^ directories(base))
+    if moved:
+        more = f' and {len(moved) - 5} more' if len(moved) > 5 else ''
+        raise config.ConfigurationError("The update's snapshot no longer matches the workspace; stop all writers "
+                                        f"(changed: {', '.join(moved[:5])}{more})")
+    return {'snapshot': str(snapshot), 'files': len(held)}
+
+
+def upgrade(base: Path, *, apply: bool = False, writers_stopped: bool = False,
+            snapshot: Path | None = None) -> dict:
+    """`snapshot`: the update's own snapshot of this home, taken with the writers stopped, reused as
+    the way back instead of a second one (OBS-626; `full upgrade --snapshot`)."""
     managed_layout(base)
     marker = preflight(base)
     preview = {'status':'preview','application_version':config.VERSION,
@@ -1363,7 +1561,9 @@ def upgrade(base: Path, *, apply: bool = False, writers_stopped: bool = False) -
         return preview
     require_stopped(writers_stopped)
     with operation_lock(base):
+        _step('preflight')
         preflight(base)
+        _step('inventory')
         before = inventory(base)
         # THE STORE IS MIGRATED IN PLACE, NOT SWAPPED (2026-10-07). It was replaced by the
         # staged copy, so a single write by any of the session MCP servers or Stop hooks
@@ -1376,16 +1576,32 @@ def upgrade(base: Path, *, apply: bool = False, writers_stopped: bool = False) -
         # way back.
         databases = {name for name in before if not name.endswith(('-wal', '-journal', '-shm'))
                      and sqlite_file(base / name)}
-        receipt = _snapshot(base,base / 'backups' / ('before-upgrade-' + uuid.uuid4().hex),
-                            not_carried='update-snapshot')
+        # UNDER AN UPDATE, ONE SNAPSHOT (OBS-626). On 2026-11-17 the release staging 0.41.0 took a
+        # second whole snapshot of the home, committed at 20:28:51Z, and then spent 23 minutes
+        # encrypting and exporting that snapshot and a copy an earlier attempt had left, until the
+        # update's 1800 s limit rolled the committed upgrade back. The update's own snapshot is the
+        # way back: reused when it is named, and otherwise this one is removed instead of exported.
+        updating = snapshot is None and _update_holds(base)
+        if snapshot is not None:
+            _step('snapshot', reused=True)
+            receipt = _reused_snapshot(base, snapshot, before, databases)
+        else:
+            _step('snapshot', files=len(before), bytes=sum(v[0] for v in before.values()))
+            receipt = _snapshot(base,base / 'backups' / ('before-upgrade-' + uuid.uuid4().hex),
+                                not_carried='update-snapshot')
+        own = snapshot is None
         stage = Path(tempfile.mkdtemp(prefix='.upgrade-',dir=base.parent))  # paths-check: allow — removed by the finally below on every path
         rollback = base / 'backups' / ('rollback-' + uuid.uuid4().hex)
         replaced = []
         committed = False
         try:
-            workspace.copy_private(Path(receipt['snapshot']) / 'data',stage)
+            _step('stage')
+            for name in STAGED:
+                _copy_tree(Path(receipt['snapshot']) / 'data' / name, stage / name)
+            _step('migrate-staged')
             changed = [name for name in prepare_upgrade(stage) if name not in databases]
             # Read once, after staging: the server receipt as it is now decides whether its move counts.
+            _step('stillness')
             foreign = foreign_runtime_receipts(base)
             steady = lambda inv: {k: v for k, v in inv.items() if not volatile(k, databases) or k in foreign}  # noqa: E731
             held, now = steady(before), steady(inventory(base))
@@ -1399,9 +1615,11 @@ def upgrade(base: Path, *, apply: bool = False, writers_stopped: bool = False) -
             # The live store first, before the interrupted-upgrade marker exists (the code
             # that migrates refuses a workspace mid-upgrade): one SQLite transaction, so a
             # failure changes nothing and no file has been swapped yet.
+            _step('migrate-live')
             failure = _migrate(base)
             if failure:
                 raise config.ConfigurationError(f'Database migration failed; nothing was changed: {failure}')
+            _step('commit', files=len(changed))
             rollback.mkdir(mode=0o700,parents=True)
             workspace.write_json(base / JOURNAL,{'application_version':config.VERSION,'snapshot':receipt['snapshot'],
                                                  'recovery':'Restore snapshot into a new home with this compatible release'})
@@ -1429,12 +1647,19 @@ def upgrade(base: Path, *, apply: bool = False, writers_stopped: bool = False) -
             committed = True
             # Cleanup cannot turn a committed upgrade into an attempted rollback.
             shutil.rmtree(rollback,ignore_errors=True)
-            # Nor can the backup export: the upgrade is done, the snapshot exists
-            # either way, and the result says where it ended up and why.
-            try:
-                backup = backup_vault.after_snapshot(base,Path(receipt['snapshot']),'before-upgrade')
-            except Exception as exc:  # noqa: BLE001 — reported, never raised past a commit
-                backup = {'snapshot':receipt['snapshot'],'encrypted':False,'export_error':f'{type(exc).__name__}: {exc}'}
+            if not own:
+                # The update exports its own snapshot once this answers.
+                backup = {'snapshot':receipt['snapshot'],'encrypted':False,'kept_by':'update'}
+            elif updating:
+                backup = {'snapshot':None,'encrypted':False,'kept_by':'update'}
+            else:
+                # Nor can the backup export: the upgrade is done, the snapshot exists
+                # either way, and the result says where it ended up and why.
+                _step('export')
+                try:
+                    backup = backup_vault.after_snapshot(base,Path(receipt['snapshot']),'before-upgrade')
+                except Exception as exc:  # noqa: BLE001: reported, never raised past a commit
+                    backup = {'snapshot':receipt['snapshot'],'encrypted':False,'export_error':f'{type(exc).__name__}: {exc}'}
             return {'status':'upgraded','version':config.VERSION,'snapshot':backup['snapshot'],
                     'files_updated':len(changed),'store_migrated_in_place':True,
                     'scheduler_activated':False,'backup':backup}
@@ -1454,6 +1679,10 @@ def upgrade(base: Path, *, apply: bool = False, writers_stopped: bool = False) -
             raise
         finally:
             shutil.rmtree(stage,ignore_errors=True)
+            # This upgrade's own copy of the home is redundant beside the update's (a plaintext copy
+            # of the vault besides), unless an interrupted commit's marker still names it.
+            if own and updating and not (base / JOURNAL).exists():
+                shutil.rmtree(receipt['snapshot'],ignore_errors=True)
 
 
 def parser() -> argparse.ArgumentParser:
@@ -1479,6 +1708,9 @@ def parser() -> argparse.ArgumentParser:
     up = commands.add_parser('upgrade', prog='project-observatory full upgrade')
     up.add_argument('--apply',action='store_true')
     up.add_argument('--writers-stopped',action='store_true')
+    up.add_argument('--snapshot',type=Path,
+                    help="the update's own snapshot of this workspace under its backups, taken with the "
+                         "writers stopped: reused as the way back instead of a second snapshot (OBS-626)")
     res = commands.add_parser('restore', prog='project-observatory full restore')
     res.add_argument('snapshot',type=Path,nargs='?')
     res.add_argument('--latest',action='store_true',
@@ -1533,7 +1765,7 @@ def main(argv: list[str]) -> int:
         elif args.command == 'backup':
             result = snapshot(base,args.output,writers_stopped=args.writers_stopped,plaintext=args.plaintext)
         elif args.command == 'upgrade':
-            result = upgrade(base,apply=args.apply,writers_stopped=args.writers_stopped)
+            result = upgrade(base,apply=args.apply,writers_stopped=args.writers_stopped,snapshot=args.snapshot)
             # An update from a release before 0.17.0 runs that release's transaction, which
             # knows nothing of the maintenance job; this new code schedules it when it may
             # touch the machine (a person's terminal, or OBSERVATORY_SYSTEM_SETUP=1).

@@ -156,6 +156,9 @@ async def run() -> None:
                   len(disc.instructions or "") <= 1800
                   and "WRITE:" in (disc.instructions or "") and "SPENDS:" in (disc.instructions or ""),
                   f"{len(disc.instructions or '')} characters")
+            # OBS-613: they sat 5 characters under it, so the next tool named on a line would have cut a rule.
+            check("and keep 150 characters of headroom under that limit",
+                  len(disc.instructions or "") <= 1650, f"{len(disc.instructions or '')} characters")
 
             listed = await session.list_tools()
             machine_tool = next(t for t in listed.tools if t.name == "observatory_machine")
@@ -250,8 +253,10 @@ async def run() -> None:
             paged_part, _, rest = read.partition("`limit` only:")
             import re as _re
             schema = {t.name: (t.input_schema or {}).get("properties", {}) for t in listed.tools}
-            paged = _re.findall(r"`(observatory_[a-z_]+)`", paged_part)
-            limit_only = _re.findall(r"`(observatory_[a-z_]+)`", rest.split("Also", 1)[0])
+            # `_x` is the tool `observatory_x`, as the instructions' first line says (OBS-613).
+            paged = ["observatory" + n for n in _re.findall(r"`(?:observatory)?(_[a-z_]+)`", paged_part)]
+            limit_only = ["observatory" + n for n in _re.findall(r"`(?:observatory)?(_[a-z_]+)`",
+                                                                 rest.split("Also", 1)[0])]
             check("every tool the instructions call paged takes a cursor",
                   bool(paged) and all("cursor" in schema.get(n, {}) for n in paged), str(paged))
             check("and the ones bounded by limit alone take none",
@@ -582,7 +587,7 @@ async def run_credentials() -> None:
                   and isinstance(data.get("degraded"), list), json.dumps(data)[:200])
             data = payload(await session.call_tool("observatory_configure", {"action": "apply", "digest": "nope"}))
             check("observatory_configure apply without a plan is a typed refusal",
-                  data.get("error") in ("plan_unknown", "workspace_refused") and data.get("degraded") == [],
+                  data.get("error") in ("plan-unknown", "workspace-refused") and data.get("degraded") == [],
                   json.dumps(data)[:200])
 
 
