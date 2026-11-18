@@ -23,6 +23,7 @@ import osprivacy  # noqa: E402
 import osproc
 import configuration
 import paths
+import runtime_receipts as rr  # noqa: E402  OBS-610: declared runtime files
 import workspace
 import jobs
 import interop
@@ -264,7 +265,7 @@ def _account_port():
 
 def _port():
     try:
-        state=json.loads((paths.SCRATCH/'serverd.json').read_text())
+        state=json.loads(rr.SERVERD.at(paths.SCRATCH).read_text())
         port=state.get('port') or _account_port()
     except FileNotFoundError:port=_account_port()
     except (ValueError,OSError,AttributeError):raise AssistantError('dashboard-unavailable') from None

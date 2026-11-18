@@ -569,6 +569,11 @@ TRACED: dict[tuple[str, str], str] = {
 }
 
 
+#: A runtime receipt's path -> its constant in `runtime_receipts` (OBS-610).
+import runtime_receipts as _receipts  # noqa: E402
+DECLARED_RECEIPTS = {value.path: key for key, value in vars(_receipts).items() if isinstance(value, _receipts.Receipt)}
+
+
 def test_the_declaration_is_not_a_comment() -> None:
     """Every declared path appears literally in the step's own script.
 
@@ -589,6 +594,11 @@ def test_the_declaration_is_not_a_comment() -> None:
         src = (ROOT / script).read_text(encoding="utf-8") + "\n".join(argv)
         for path in io["writes"] + io["reads"]:
             name = pathlib.Path(path.rstrip("/")).name
+            # A runtime receipt is named by its declaration (OBS-610): the script takes the path from
+            # `runtime_receipts.<NAME>`, so the declaration is code either way.
+            declared = DECLARED_RECEIPTS.get(path)
+            if declared and f".{declared}." in src:
+                continue
             if name not in src and (step, path) not in TRACED:
                 missing.append(f"{step} declares {path}, which its script never names")
     check("every declared artefact is named in the step's script", not missing,

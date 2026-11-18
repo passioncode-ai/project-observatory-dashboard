@@ -89,7 +89,8 @@ def test_the_gate_watches_the_ignored_half() -> None:
     # observation.
     check("a foreign writer has its own container",
           "FOREIGN_WRITES_IGNORED" in src
-          and re.search(r'FOREIGN_WRITES_IGNORED = \{[^}]*store/raw/record-turn\.json',
+          # The receipt's path comes from its declaration (OBS-610, `runtime_receipts`).
+          and re.search(r'FOREIGN_WRITES_IGNORED = \{[^}]*rr\.RECORD_TURN\.path',
                         src, re.S) is not None,
           "the companion's receipt is written by another session, not by a step")
     check("and the verdict excludes both",

@@ -93,6 +93,7 @@ import time
 
 import configuration as config
 import backup_vault
+import runtime_receipts as rr  # OBS-610: the files the check job writes while an update stages
 import update_events
 
 STATE_FILE = "maintenance.json"
@@ -227,15 +228,11 @@ def read_switch(base: Path) -> str | None:
     """`on` or `off` from the switch file, or None when there is none.
 
     Only the word `off` (any case, surrounding space ignored) turns updates off; anything
-    else a person wrote reads as on. A link or a folder in its place is not a switch."""
-    file = switch_path(base)
-    try:
-        if file.is_symlink() or not file.is_file():
-            return None
-        text = file.read_text(encoding="utf-8", errors="replace")[:64]
-    except OSError:
-        return None
-    return "off" if text.strip().lower() == "off" else "on"
+    else a person wrote reads as on. A link or a folder in its place is not a switch. The
+    configuration door's reading of a switch file (OBS-612), where the switch is the setting
+    `updates.auto`."""
+    import configuration_door
+    return configuration_door.switch_word(switch_path(base))
 
 
 def legacy_off(base: Path) -> bool:
@@ -245,11 +242,14 @@ def legacy_off(base: Path) -> bool:
 
 def auto_enabled(base: Path) -> bool:
     """On unless a person turned it off: the switch file decides; without one, an older
-    install's `updates.auto: false` still reads as off (D1, LC-16)."""
-    word = read_switch(base)
-    if word is not None:
-        return word != "off"
-    return not legacy_off(base)
+    install's `updates.auto: false` still reads as off (D1, LC-16). Read through the
+    configuration door (`updates.auto`, OBS-612); a settings file it cannot read is raised
+    as before, never read as on."""
+    import configuration_door
+    value = configuration_door.read("updates.auto", base=base)
+    if value is None:
+        return not legacy_off(base)
+    return value
 
 
 def switch_status(base: Path) -> dict:
@@ -340,11 +340,11 @@ def state_path(base: Path) -> Path:
 
 #: The check job's own record (`check_pass`). Never maintenance.json: the job holds no pass lock, so
 #: a read-modify-write of the pass's record from beside a running pass would undo what the pass wrote.
-CHECK_FILE = "update-check.json"
+CHECK_FILE = rr.UPDATE_CHECK.name
 
 
 def check_path(base: Path) -> Path:
-    return base / "store" / CHECK_FILE
+    return rr.UPDATE_CHECK.of(base)
 
 
 def read_check(base: Path) -> dict:
@@ -369,7 +369,9 @@ def read_state(base: Path, file: Path | None = None) -> dict:
 def write_state(base: Path, doc: dict, file: Path | None = None) -> None:
     file = file or state_path(base)
     file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    fd, tmp = tempfile.mkstemp(dir=file.parent, prefix=".maintenance-")
+    # `.<name>.<random>.tmp`: the temporary file a declaration in `runtime_receipts` covers beside its file
+    # (OBS-610), and a `.tmp` the daily doctor clears when a crash leaves it.
+    fd, tmp = tempfile.mkstemp(dir=file.parent, prefix=f".{file.name}.", suffix=".tmp")
     try:
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as out:
@@ -531,10 +533,9 @@ OUTPUT_TAIL_LINES, OUTPUT_LINE_CHARS = 40, 300
 
 
 def redact_line(line: str) -> str:
-    """One output line, bounded, with a password in a URL and every credential shape replaced."""
-    import credential_shape
-    text = re.sub(r"(https?://)[^\s/@]+@", r"\1***@", str(line or ""))
-    return credential_shape.redact(text, uuids=False)[:OUTPUT_LINE_CHARS]
+    """One output line through the one redactor (`memory_redact.redact`, OBS-602), bounded."""
+    import memory_redact
+    return memory_redact.redact(str(line or ""), uuids=False)[:OUTPUT_LINE_CHARS]
 
 
 def output_tail(text: str, lines: int = OUTPUT_TAIL_LINES) -> list[str]:
@@ -610,7 +611,7 @@ def live_clients(base: Path, at: datetime.datetime) -> list[str]:
     store/logs/access.jsonl. A receipt older than the age the server itself calls silent
     is a server that is not running, and so has no client to interrupt."""
     reasons = []
-    receipt = base / "store" / "raw" / "serverd.json"  # paths-check: allow — the receipt of the workspace `base` passed in, which need not be this process's paths.HOME; a test redirects it through `base`
+    receipt = rr.SERVERD.of(base)  # the receipt of the workspace `base` passed in, which need not be this process's paths.HOME; a test redirects it through `base`
     try:
         doc = json.loads(receipt.read_text(encoding="utf-8")) if receipt.is_file() and not receipt.is_symlink() else {}
     except (OSError, ValueError):
@@ -1612,7 +1613,7 @@ def _kick_wanted(state: dict, latest: str, at: datetime.datetime) -> bool:
 def check_lock(base: Path):
     """One check job at a time per workspace. Its own lock, never the pass's: holding the pass lock
     made the 15-minute pass find it busy and skip the guard, the backup and the app (review H1)."""
-    file = base / "store" / "update-check.lock"
+    file = rr.UPDATE_CHECK_LOCK.of(base)
     file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = osprivacy.open(file, os.O_CREAT | os.O_RDWR | osprivacy.NOFOLLOW, 0o600)
     try:

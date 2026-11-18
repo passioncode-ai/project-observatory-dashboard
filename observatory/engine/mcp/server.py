@@ -836,7 +836,8 @@ def observatory_configure(
                                         "`digest` names; undo restores what `journalId` changed.")] = "list",
     changes: Annotated[dict[str, Any] | None, Field(
         description="plan: {key: value} for keys `list` names, typed as `list` says (true/false, a number, one of "
-                    "the choices, an absolute path, a list of vendor/model ids); null is back to the default.")] = None,
+                    "the choices, an absolute path, a list of vendor/model ids, one line of text, a JSON list or "
+                    "object); null is back to the default.")] = None,
     digest: Annotated[str | None, Field(description="apply: the `digest` the plan answered.")] = None,
     journalId: Annotated[str | None, Field(validation_alias=AliasChoices("journalId", "journal_id"),
                                            description="undo: the `journal` id an apply answered.")] = None,
@@ -858,7 +859,7 @@ def observatory_configure(
     (store/logs/configure.jsonl); a change that needs the person also needs their words as `decision`. `undo`
     restores the values an apply found, only while the files still hold what it wrote (else `undo_refused`).
     Refusals are typed (`unknown_key`, `invalid_value`, `secret_refused`, `plan_stale`, `plan_unknown`,
-    `operator_decision_required`, `decision_invalid`, `journal_unknown`, `already_undone`) and never echo a refused
+    `operator-decision-required`, `decision-invalid`, `journal_unknown`, `already_undone`) and never echo a refused
     value; a credential is never configuration (`observatory_secret_request`)."""
     import configuration_door as D
     words = decision if decision is not None else _meta_decision(ctx)
@@ -980,7 +981,10 @@ def observatory_machine(
 
     `section="skills"`: every skill and plugin here with version, scope and agent, a plugin's
     enabled state and its marketplace's newest LOCAL version, findings (`plugin-behind`), `open`
-    (OBS-359) and `degraded`; from the last harness scan; 100 rows a page (`cursor`).
+    (OBS-359) and `degraded`; from the last harness scan; 100 rows a page (`cursor`). It is the Installed tools
+    page's inventory (OBS-600): each plugin and skill row also carries its source `tier` and the engine's `findings`
+    beside it, and `tooling` holds the agents with their versions and findings, the hooks, the findings about the
+    setup as a whole (`other`) and the page's counts.
     """
     if section == "accounts" and explainPid is None:
         # OBS-354: the account count and this account's ports, read only; no account name.
@@ -992,15 +996,24 @@ def observatory_machine(
                              if n["code"] in ("claims-folder-unreadable", "port-record-stale")],
                 "accounts": shown}
     if section == "skills" and explainPid is None:
-        import machine_view
-        skills = machine_view.skills_section(limit=limit or SKILLS_PAGE, cursor=cursor)
+        # OBS-600: the Installed tools page's inventory (`tooling_view.summary`, one function for both), paged.
+        import tooling_view
+        view = tooling_view.summary(limit=limit or SKILLS_PAGE, cursor=cursor)
+        skills = view["skills"]
         # Bounded for the host: `degraded` and `measuredAt` once, at the top; rows without their empty fields.
-        degraded = skills.pop("degraded")
-        skills["spaces"] = [{**space, "skills": [_present_fields(r) for r in space.get("skills") or []],
-                             "plugins": [_present_fields(r) for r in space.get("plugins") or []]}
+        skills.pop("degraded")
+        skills.pop("measuredAt")
+        skills["spaces"] = [{**space, "skills": [_item_fields(r) for r in space.get("skills") or []],
+                             "plugins": [_item_fields(r) for r in space.get("plugins") or []]}
                             for space in skills["spaces"]]
         skills["findings"] = [_present_fields(r) for r in skills.get("findings") or []]
-        return {"measuredAt": skills.pop("measuredAt"), "degraded": degraded, "skills": skills}
+        # What the page shows beside the rows: each agent with its version and own findings, the hooks with theirs,
+        # the findings about the setup as a whole, and the page's counts (its tiles).
+        tooling = {"agents": [{k: a.get(k) for k in ("id", "name", "installed", "version", "findings")}
+                              for a in view["agents"]],
+                   "hooks": [{**_item_fields(h), "agent": a["id"]} for a in view["agents"] for h in a["hooks"]],
+                   "other": view["other"], "counts": view["counts"]}
+        return {"measuredAt": view["measuredAt"], "degraded": view["degraded"], "skills": skills, "tooling": tooling}
     if section == "move" and explainPid is None:
         # The agent's path to the checklist (decision D13): the CLI's own function and peers.
         import machine_backup
@@ -1111,8 +1124,11 @@ def observatory_sessions(
     """Every coding session on this machine as one count in three facets (OBS-550): `processes`
     per agent (what runs), `managed` (of them, run by the account manager, Fabric Switchboard),
     `active_hour` (of them, with a turn recorded in the last hour); then each session with its
-    agent, project id, folder name, pid, managed or not, launch id, account group, last turn
-    and state (working or quiet), and where each number came from (`sources`).
+    agent, project id, folder name, pid, managed or not, launch id, account group, last turn,
+    `active` (the one rule for "working": it runs and its project recorded a turn in the last hour;
+    null when the ledger was not read; `active_hour` counts these rows) and `state` (the account
+    manager's own word, quiet after 30 silent minutes), and where each number came from (`sources`).
+    A project's `counts.working` counts its `active` rows.
 
     Read-only. A source that could not be read is null with its reason in `degraded`, never 0:
     `managed: null` means the account manager is not installed or did not answer. No folder path
@@ -1365,6 +1381,15 @@ def _present_fields(row: Any) -> Any:
     if not isinstance(row, dict):
         return row
     return {k: v for k, v in row.items() if v is not None}
+
+
+def _item_fields(row: Any) -> Any:
+    """An inventory row as `_present_fields` gives it, and without an empty `findings`: a row the page shows with no
+    finding beside it reads the same in fewer characters."""
+    row = _present_fields(row)
+    if isinstance(row, dict) and row.get("findings") == []:
+        row = {k: v for k, v in row.items() if k != "findings"}
+    return row
 
 
 # Publish the additive bounded coverage contract on the actual tool, not only prose.

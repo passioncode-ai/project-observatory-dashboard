@@ -22,6 +22,7 @@ import webbrowser
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+import runtime_receipts as rr  # noqa: E402  OBS-610: declared runtime files
 import configuration  # noqa: E402
 import osproc  # noqa: E402
 
@@ -201,7 +202,7 @@ def start_server(port: int, wait: float = 45.0) -> dict:
             # EX_TEMPFAIL from the instance lock: this workspace already has a
             # server, on another port. Say where it answers instead of "exited".
             try:
-                running = json.loads((paths.SCRATCH / "serverd.json").read_text(encoding="utf-8")).get("port")
+                running = json.loads(rr.SERVERD.at(paths.SCRATCH).read_text(encoding="utf-8")).get("port")
             except (OSError, ValueError, AttributeError):
                 running = None
             where = f"http://127.0.0.1:{running}/" if running else "another port"
@@ -270,7 +271,7 @@ def served_port() -> int | None:
     `--serve --port N` then a bare `--stop` used to look on the default port and
     report someone else's server, or none; the receipt names where this one is."""
     try:
-        port = json.loads((_paths().SCRATCH / "serverd.json").read_text(encoding="utf-8")).get("port")
+        port = json.loads(rr.SERVERD.at(_paths().SCRATCH).read_text(encoding="utf-8")).get("port")
     except (OSError, ValueError, AttributeError):
         return None
     return port if type(port) is int and 0 < port < 65536 else None

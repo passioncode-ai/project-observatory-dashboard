@@ -38,8 +38,6 @@ import contextlib
 import contextvars
 import dataclasses
 import json
-import os
-import osprivacy
 import pathlib
 from datetime import datetime, timezone
 from typing import Any, Iterator, Mapping
@@ -480,12 +478,9 @@ def _journal(binding: AB.Binding | None, tool: str, scope: str, effect: str,
            "principal": None if binding is None else binding.principal, "tool": tool,
            "scope": scope, "effect": effect, "projectId": project_id,
            "workflowId": workflow_id, "allowed": allowed, "reason": reason}
-    target_file = pathlib.Path(paths.STATE) / "logs" / JOURNAL
+    import journal_writer
     try:
-        target_file.parent.mkdir(parents=True, exist_ok=True)
-        fd = osprivacy.open(target_file, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
-        with os.fdopen(fd, "a", encoding="utf-8") as f:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        journal_writer.append(pathlib.Path(paths.STATE) / "logs" / JOURNAL, [row])
     except OSError:
         # The decision stands either way; a lost journal line is the smaller failure
         # than refusing a call because a log could not be written.

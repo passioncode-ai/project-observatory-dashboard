@@ -49,9 +49,10 @@ sys.path.insert(0, str(ROOT))
 import osprivacy  # noqa: E402
 sys.path.insert(1, str(pathlib.Path(__file__).resolve().parent))   # turn_state
 import paths              
+import runtime_receipts as rr  # noqa: E402  OBS-610: the files this writes while an update stages
 import safe_git           
 
-SEEN = paths.SCRATCH / "sessions-seen.jsonl"
+SEEN = rr.SESSIONS_SEEN.at(paths.SCRATCH)
 HOOK_LOG = paths.STATE / "logs" / "hooks.jsonl"
 GIT = "/opt/homebrew/bin/git" if pathlib.Path("/opt/homebrew/bin/git").exists() else "git"
 
@@ -62,10 +63,8 @@ def now() -> str:
 
 def log(row: dict) -> None:
     try:
-        HOOK_LOG.parent.mkdir(parents=True, exist_ok=True)
-        with HOOK_LOG.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"at": now(), "hook": "session-start", **row}, ensure_ascii=False) + "\n")
-        HOOK_LOG.chmod(0o600)
+        import journal_writer
+        journal_writer.append(HOOK_LOG, [{"at": now(), "hook": "session-start", **row}])
     except OSError:
         pass
 
@@ -290,12 +289,9 @@ def unknown_line(top: pathlib.Path, remote: str, session_id: str, declaration: d
     state = declaration.get("status") or "unobserved"
     reason = declaration.get("reason") or ""
     try:
-        SEEN.parent.mkdir(parents=True, exist_ok=True)
-        with SEEN.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps({"at": now(), "cwd": str(top), "remote": nwo(remote) or remote or None,
-                                 "session_id": session_id or None, "state": state, "reason": reason or None},
-                                ensure_ascii=False) + "\n")
-        SEEN.chmod(0o600)
+        import journal_writer
+        journal_writer.append(SEEN, [{"at": now(), "cwd": str(top), "remote": nwo(remote) or remote or None,
+                                      "session_id": session_id or None, "state": state, "reason": reason or None}])
     except OSError:
         pass
     inside = False

@@ -295,7 +295,8 @@ class Paths(Scratch):
                 patch.object(digitalocean, "_current", lambda r: FAKE_VALUE), \
                 patch.object(digitalocean, "token_ok", lambda v: True), \
                 patch.object(digitalocean, "revoke_and_prove", lambda v: proved.append(1) or True), \
-                patch.object(digitalocean, "consumer_sources", lambda r: [ValueSource(held=FAKE_VALUE)]):
+                patch.object(key_consumers, "consumer_sources",
+                             lambda slot=None, exclude=None: [ValueSource(held=FAKE_VALUE)]):
             with self.assertRaises(digitalocean.DoorError) as cm:
                 digitalocean._revoke_locked("alpha-read", False)
         self.assertEqual(proved, [])

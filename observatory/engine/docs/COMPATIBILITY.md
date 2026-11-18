@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The application release is **0.41.0**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
+The application release is **0.42.0**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
 
 ## SQLite runtime prerequisite
 
@@ -390,6 +390,48 @@ change that needs the person). No file changes shape: `settings.json`, `local.js
 `integrations.github_issues` (`configuration.DEFAULT_ON`); an older engine does not know either name and reads
 neither. Downgrade: an older engine has no door and no tool and never reads the journal or the plans. Tests:
 `tests/test_configure.py`.
+
+## One operator-decision check (OBS-611)
+
+Every door that takes the operator's relayed words (contract DEC-0121 AP-2: `observatory_configure`,
+`observatory_key_act`, `observatory_ops`, `observatory_org_selection`, the secret prompt's `secret.decline` and
+`share.open`, and the own-share acts of `full share`) checks them with one function, `node/actions.decided`. What an
+agent sees change:
+
+- **One spelling.** The configuration door answered `operator_decision_required` and `decision_invalid`; it now answers
+  the contract's `operator-decision-required` and `decision-invalid`, as every other door already did. The door still
+  reads the earlier spelling where a code is passed to it (`node/actions.refusal_code`), and answers only the
+  contract's. A client that compared the configuration door's `error` with the earlier spelling compares with the
+  contract's, or accepts both.
+- **A decision names its object.** The words carry `target`, the object they decide (a digest, a journal id, a key,
+  an organization, a request id, a share id), at every door. The secret prompt's decline and the own-share acts read
+  a decision without one as valid before; it is now `decision-invalid` (OM-1.3 already said the own-share acts need
+  it). `share.open` carries its object, the link, in the words, and needs no `target`.
+- **Null is no decision.** A `decision` that is JSON `null` is answered `operator-decision-required`, as an absent one,
+  at every door (the secret prompt answered `decision-invalid`).
+- **What a record keeps verbatim is checked.** Words shaped like a credential are `decision-invalid` at every door
+  (the secret prompt's decline and the own-share acts kept them before), a `sha256:` digest and the act's own object
+  aside (the key acts refused a digest before); words that are not valid Unicode are `decision-invalid` everywhere
+  (only the organization selection refused them before; elsewhere the journal write failed).
+- **A person's caller.** `person:cli` and `person:page` without words are the person's own act, as before. Words they
+  do carry are now read like any others (the configuration door ignored them).
+
+No file, journal line or answer field changes shape. Downgrade: an older engine answers as before. Tests:
+`tests/test_decision_check.py` (suite `decision_check`), whose matrix keeps each changed answer
+with the answer before and why. Design: [decisions-and-settings.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/control-plane/decisions-and-settings.md).
+
+## Every setting through the one door (OBS-612)
+
+The configuration door now also declares the settings that had files of their own: the switch files `auto-update`
+(`updates.auto`) and `analytics` (`analytics.send`) in the workspace home, and `config/meter.json`, `retention.json`,
+`machine.json`, `review-policy.json`, `machine-backup.json`, `relay.json`, `tracked.json` and `organizations.json`
+(their keys, types, defaults and gates are listed by `configure --list` and in
+[decisions-and-settings.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/control-plane/decisions-and-settings.md)). No file moves or changes shape: an
+existing install reads the same values, `full auto-update`, `full relay`, `full review policy` and the other commands
+keep writing the same files, and an older engine reads files the door wrote. A file the door creates holds its
+reader's whole document. One reading changed: with no `config/retention.json` the events collector windows at the
+shipped 365 days instead of reading every event. Downgrade: an older engine lists fewer keys and never reads the
+journal lines that name the new ones. Tests: `tests/test_configure.py` (`EverySettingThroughTheDoor`).
 
 ## Ports per OS account (OBS-354)
 
@@ -1367,3 +1409,17 @@ code's path constants, so a path built another way is not seen (OBS-182).
 | `node/shares/sent/<id>/share.json` | 0.30.0 | a share this machine sent; its `usage` holds what the recipient reported. From 0.31.0 (OBS-291, contract DEC-0147): each report's day and slot replaces the one held, but only inside that report's window (its `iat` day and the 35 before it, not before `claimedAt`, the time the claim was read; a record without it uses `createdAt`), read with the window of the latest `iat` already read (`lastIat`) when a report's own is earlier, and what falls outside, or names a slot the share does not carry, is counted in `outOfWindow` (`backdated`, `unknownSlots`); at most 40,000 day and slot entries; `exportTimes` is the set of `{slot, at}` the reports named, at most 400 of one slot on one day and 10,000 in all (past that the ones older than the window are dropped and counted in `exportsDropped`), `consumers` at most 1,000, and `exports` the set's size plus `exportsDropped`, where 0.30 added each report's exports to a running count | a record 0.30 wrote reads as it is (0.30 had no export button, so its counts are 0); an older engine reading a record this one wrote keeps its numbers and adds the exports of each new report again, so a restated export would count twice there (none exists while no export button ships) |
 | `node/shares/received/<id>/` | 0.30.0 | a share sent to this machine: its record, keys, sealed copies, `uses.jsonl`. From 0.31.0 (OBS-291): `uses.jsonl` keeps the 35 UTC days before the last report's day, which each report restates; `exports.jsonl` (the export button's journal; nothing writes it yet); the states `handed-over`, `lapsed` and `refused` (the person's `differ`) with `handedOverAt` and `lapsesAt`, at most 20 handed over at once, and a `link` file (owner-only, the link an agent handed over until the claim spends it, it lapses 7 days later or the person refuses it) | an older engine reports only the days since its last report and trims `uses.jsonl` to today, which loses nothing it needs; it cannot accept a `handed-over` share (its pass records that share as failed and its `accept` answers `already-opened`): accept it, or remove its folder, before going back |
 | `<state>/secret-requests/decisions.jsonl` | 0.31.0 | the node's own audit record of the operator's decisions relayed to `secret.decline` and `share.open` (contract DEC-0121 AP-2): the decision with the operator's words, a share link's fragment replaced by the share id, one line per decision acted on (a repeated `share.open` adds none), kept two days (a decision's 24 h validity and a day's margin) and pruned at each write; owner-only, never in the journal, an answer or the events feed. A queue request answered `declined` carries `declinedBy` (`person` or `operator`) | an older engine ignores the file and the member, and reads every `declined` as the person's |
+
+## Answers: refusals and session counts (wave R1 and R2, OBS-594, OBS-597, OBS-599, OBS-601)
+
+- The key server answers every refusal as `{"error": {"code", "message"}}`; before, `error` was a string. A revoke refusal
+  keeps `code`, `consumers` and `unread` beside it. The dashboard reads both shapes; an outside caller that read `error`
+  as text reads `error.message`. CLI exit codes are unchanged.
+- A revoke refuses with `consumer-in-use`, `consumer-source-unreadable` or `consumer-source-unknown` when it cannot prove
+  no consumer reads the key; a missing OpenRouter scan is `consumer-source-unreadable` (code `scan-missing`), where it
+  used to skip the check. The MCP key act answers these codes instead of `invalid-argument`.
+- `observatory_sessions`: `active_hour` counts running sessions with a ledger turn in the last hour (a subset of
+  running), null with `needs-session-list` when no session list was read; `ledger_hour` keeps the ledger's own count.
+  Each running row carries `active` (true, false, or null when the ledger was not read), and a project's
+  `counts.working` counts active rows. The account manager's `quiet` and `state` stay in the data and no surface reads
+  them as "working".

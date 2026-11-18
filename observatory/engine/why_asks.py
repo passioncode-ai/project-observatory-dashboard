@@ -52,14 +52,15 @@ from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import paths                                                          # noqa: E402
+import runtime_receipts as rr  # noqa: E402  OBS-610: the files this writes while an update stages
 
 #: One JSON document per line, appended by the Stop hook's recorder in every session
 #: on the machine — so `observatory.py` declares it a foreign write to the gate and
-#: `workspace_upgrade.SESSION_RECEIPTS` lets it change while an update is staged.
-JOURNAL = paths.SCRATCH / "why-asks.jsonl"
+#: `runtime_receipts` declares it, so it may change while an update is staged.
+JOURNAL = rr.WHY_ASKS.at(paths.SCRATCH)
 
 #: The previous generation, read beside the current one.
-PREVIOUS = JOURNAL.with_name(JOURNAL.name + ".1")
+PREVIOUS = rr.WHY_ASKS_PREVIOUS.at(paths.SCRATCH)
 
 #: The size at which the current journal becomes the previous generation. At about
 #: 150 bytes a line, some seven thousand asks.
@@ -158,7 +159,7 @@ def _rotate() -> None:
         if JOURNAL.stat().st_size <= ROTATE_BYTES:
             return
         import oslocks
-        with open(JOURNAL.with_name(JOURNAL.name + ".lock"), "a") as lock:
+        with open(JOURNAL.with_name(rr.WHY_ASKS_LOCK.name), "a") as lock:
             try:
                 oslocks.flock(lock.fileno(), oslocks.LOCK_EX | oslocks.LOCK_NB)
             except OSError:

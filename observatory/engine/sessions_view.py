@@ -18,6 +18,9 @@ project counts at most its running sessions and at most its sessions with a rece
 the manager's rows (the survey counts processes, it lists none) nothing can be joined, and
 `active_hour` is None with `needs-session-list` in `degraded`. `ledger_hour` keeps the ledger's own
 count, every session with a turn in the last hour, under its own name.
+Each session row carries the same rule as `active` (OBS-599, `mark_active`): True when it counts, None
+when the ledger was not read. It is the one meaning of "working" on the Agents page; `quiet` and
+`state` stay what the manager said (its transcript silent 30 minutes).
 
 The page used to show only the third, under the name of the first. A source that could not
 be read is `None` with its reason in `degraded`, never 0: "the manager manages nothing" and
@@ -46,6 +49,10 @@ from typing import Callable
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import paths                                                                       # noqa: E402
+# The clock and the stored form of an instant are the pages' own (OBS-598); appended, so no
+# dashboard module shadows a name this module imports.
+sys.path.append(str(pathlib.Path(__file__).resolve().parent / "dashboard"))
+from page_util import iso as _iso, now as _now                                    # noqa: E402
 
 #: Seconds the manager's CLI may take before it reads as `timeout`.
 MANAGER_TIMEOUT = 10
@@ -60,14 +67,6 @@ SURVEY_FRESH_SECONDS = 1800
 MAX_SESSIONS = 500
 
 _UNSET = object()
-
-
-def _now() -> datetime:
-    return datetime.now(timezone.utc).replace(microsecond=0)
-
-
-def _iso(at: datetime) -> str:
-    return at.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _epoch_iso(value) -> str | None:
@@ -203,18 +202,42 @@ def _ledger(db: pathlib.Path, now: datetime, degraded: list[dict]) -> list[dict]
         return None
 
 
-def _active_running(sessions: list[dict], recent: list[dict]) -> int:
-    """The running sessions that also have a ledger turn in the last hour (OBS-597): per project,
-    the smaller of its running sessions and its sessions with a recent turn. A session in no
-    project pairs with a turn recorded in no project, the same way."""
-    running: dict[str | None, int] = {}
+def mark_active(sessions: list[dict], recent: list[dict] | None) -> list[dict]:
+    """The running sessions, each with `active` (OBS-597, OBS-599): the one rule for "working". A ledger
+    row names a project, never a process, so the join is per project: a project's sessions with a turn
+    in the last hour make at most that many of its running sessions active, the ones written to most
+    recently first. A session in no project pairs with a turn recorded in no project, the same way.
+    `recent` None (the ledger was not read) marks every session None, never inactive. New rows; the
+    rows passed in are not changed."""
+    out = [dict(s) for s in sessions]
+    if recent is None:
+        for s in out:
+            s["active"] = None
+        return out
     turned: dict[str | None, int] = {}
-    for s in sessions:
-        running[s.get("project")] = running.get(s.get("project"), 0) + 1
     for s in recent:
         pid = s.get("projectId") if isinstance(s.get("projectId"), str) and s.get("projectId") else None
         turned[pid] = turned.get(pid, 0) + 1
-    return sum(min(n, turned.get(pid, 0)) for pid, n in running.items())
+    order = sorted(range(len(out)), key=lambda i: (str(out[i].get("last_turn_at") or ""), -i), reverse=True)
+    for i in order:
+        pid = out[i].get("project") if isinstance(out[i].get("project"), str) and out[i].get("project") else None
+        out[i]["active"] = turned.get(pid, 0) > 0
+        if out[i]["active"]:
+            turned[pid] -= 1
+    return out
+
+
+def session_rows(doc: dict | None, ledger: list[dict] | None) -> list[dict]:
+    """The running sessions of a summary, each with `active` (OBS-599): as `summary` wrote it, or, for a file
+    written before the rule, joined now with `ledger` (`agents_view.recent_sessions` rows; None when the ledger
+    was not read) by `mark_active`. Every surface that says "working" reads these rows: the Agents page, the
+    Projects page and the tool's per-project counts (`by_project`); the manager's `quiet` and `state` are kept
+    in the file and read by none of them as "working"."""
+    rows = [r for r in ((doc or {}).get("sessions") or []) if isinstance(r, dict)]
+    if all("active" in r for r in rows):
+        return rows
+    recent = None if ledger is None else [s for s in ledger if isinstance(s, dict) and s.get("active")]
+    return mark_active(rows, recent)
 
 
 def _row(raw, attribute, degraded_attribution: list[str]) -> dict | None:
@@ -301,9 +324,10 @@ def summary(home: pathlib.Path | None = None, *, now: datetime | None = None,
         processes_source = {"at": survey_at, "from": "machine-survey" if survey is not None else None}
 
     recent = _ledger(db, now, degraded)
+    sessions = mark_active(sessions, recent)
     active = None
     if recent is not None and data is not None:
-        active = _active_running(sessions, recent)
+        active = sum(1 for s in sessions if s["active"])
     elif recent is not None:
         degraded.append(_gap("active_hour", "needs-session-list",
                              "which running sessions recorded a turn in the last hour needs the account manager's "
@@ -399,11 +423,11 @@ def by_project(doc: dict | None, ledger: list[dict] | None, workflows: list[dict
     def block(pid: str) -> dict:
         return out.setdefault(pid, {"live": [], "recent": [], "workflows": []})
 
-    for s in (doc or {}).get("sessions") or []:
-        pid = s.get("project") if isinstance(s, dict) else None
+    for s in session_rows(doc, ledger):
+        pid = s.get("project")
         if isinstance(pid, str) and pid:
             block(pid)["live"].append({k: s.get(k) for k in (
-                "agent", "folder_name", "managed", "account_group", "launch_id", "state", "last_turn_at")})
+                "agent", "folder_name", "managed", "account_group", "launch_id", "state", "last_turn_at", "active")})
     flows: dict[str, dict] = {}
     for w in workflows or []:
         if not isinstance(w, dict) or not isinstance(w.get("workflowId"), str):
@@ -426,10 +450,10 @@ def by_project(doc: dict | None, ledger: list[dict] | None, workflows: list[dict
                 {"workflowId": s["workflowId"]} if s.get("workflowId") else None)})
     for b in out.values():
         b["live"].sort(key=lambda r: r.get("last_turn_at") or "", reverse=True)
-        b["live"].sort(key=lambda r: r.get("state") != "working")
+        b["live"].sort(key=lambda r: r.get("active") is not True)
         b["recent"].sort(key=lambda r: r.get("lastTurnAt") or "", reverse=True)
         b["workflows"].sort(key=lambda r: r.get("stepAt") or "", reverse=True)
-        b["counts"] = {"live": len(b["live"]), "working": sum(1 for r in b["live"] if r.get("state") == "working"),
+        b["counts"] = {"live": len(b["live"]), "working": sum(1 for r in b["live"] if r.get("active") is True),
                        "recent": len(b["recent"]), "workflows": len(b["workflows"])}
         for k in ("live", "recent", "workflows"):
             b[k] = b[k][:MAX_PROJECT_ROWS]

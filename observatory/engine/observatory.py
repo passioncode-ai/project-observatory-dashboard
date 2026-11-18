@@ -73,6 +73,7 @@ sys.path.insert(0, str(ROOT))
 import configuration
 try:
     import paths              
+    import runtime_receipts as rr  # OBS-610: the session hooks' and the server's declared files
 except configuration.ConfigurationError as _exc:
     print(f"Observatory: {_exc}", file=sys.stderr)
     raise SystemExit(2) from None
@@ -1159,25 +1160,25 @@ FOREIGN_WRITES_IGNORED = {
         "appended by whatever catches a store error — the tick's `agent` and "
         "`index` steps among them. Append-only by design, so a tick landing "
         "mid-gate adds a line the group did not write",
-    "store/raw/companion-faults.jsonl":
+    rr.COMPANION_FAULTS.path:
         "appended by the companion's Stop hook whenever a turn could not be "
         "recorded — in every session of every watched project, concurrently "
         "with the gate, for the same reason its receipt is exempted below. "
         "Append-only by design, so a neighbouring session losing a "
         "turn mid-gate adds a line this tree did not write",
-    "store/raw/why-asks.jsonl":
+    rr.WHY_ASKS.path:
         "appended by the companion's Stop hook the first time it asks about a record's "
         "`why` — in every session of every watched project, concurrently with the gate, "
         "like the receipt below. Append-only by design, so a neighbouring session's "
         "ask mid-gate adds a line this tree did not write",
-    "store/raw/why-asks.jsonl.1":
+    rr.WHY_ASKS_PREVIOUS.path:
         "the previous generation of the journal above, renamed into place by whichever "
         "session's hook first finds the journal past its size — concurrently with the "
         "gate, for the same reason",
-    "store/raw/why-asks.jsonl.lock":
+    rr.WHY_ASKS_LOCK.path:
         "the lock that journal rotation takes so two sessions do not rotate at once; "
         "created by the first session's hook to rotate, concurrently with the gate",
-    "store/raw/record-turn.json":
+    rr.RECORD_TURN.path:
         "written by the companion's Stop hook — in EVERY session of EVERY watched "
         "project on this machine, concurrently with the gate. Forty-nine Claude "
         "processes were running when that was measured, so another "
@@ -1185,7 +1186,7 @@ FOREIGN_WRITES_IGNORED = {
         "report a neighbour's turn as this tree's impurity. The suites that drive "
         "the recorder redirect OBSERVATORY_SCRATCH and are checked for it "
         "separately in tests/test_gate_purity.py",
-    "store/raw/serverd.json":
+    rr.SERVERD.path:
         "the always-on server's heartbeat receipt, rewritten on change and at "
         "least every five minutes for as long as launchd keeps the daemon alive — which is "
         "concurrently with any gate that outlives that interval, i.e. every "

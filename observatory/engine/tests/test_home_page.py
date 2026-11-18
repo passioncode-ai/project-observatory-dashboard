@@ -103,7 +103,7 @@ class StateBand(unittest.TestCase):
         disk = text(tile(out, "disk"))
         self.assertIn("8 GB free", disk)
         self.assertIn("memory 10 of 16 GB", disk)
-        self.assertIn("measured 2026-10-26 17:20 UTC", disk)
+        self.assertIn("measured 2026-10-26 17:20:00 UTC", disk)
         self.assertIn('data-state="bad"', tile(out, "disk"), "8 GB is under the guard's critical line")
         keys = text(tile(out, "keys"))
         self.assertIn("3 leaked, not rotated", keys)
@@ -114,7 +114,7 @@ class StateBand(unittest.TestCase):
         self.assertIn("3 managed", agents)
         self.assertIn("2 active in the last hour", agents)
         self.assertIn("1 workflow stalled now", agents)
-        self.assertIn("read 2026-10-26 17:24 UTC", agents)
+        self.assertIn("read 2026-10-26 17:24:00 UTC", agents)
         for key, page in (("sites", "domains"), ("apps", "heroku"), ("disk", "machine"), ("agents", "agents")):
             self.assertRegex(tile(out, key), r'^<a[^>]*href="' + page + r'\.html')
 
@@ -179,7 +179,7 @@ class NeedsYouFirst(unittest.TestCase):
         payload = {"findings": findings([])}
         out = text(home_page.needs_html(payload, EN))
         self.assertIn("Nothing needs you", out)
-        self.assertIn("last checked 2026-10-26 17:26 UTC", out)
+        self.assertIn("last checked 2026-10-26 17:26:00 UTC", out)
 
     def test_never_built_findings_hand_over_the_command(self):
         out = home_page.needs_html({"runtime": {"home": "/example/workspace"}}, EN)

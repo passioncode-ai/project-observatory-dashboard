@@ -12,7 +12,7 @@ session to a project; this cut groups it by project and joins it with the projec
 
 | Part | Source | What it says |
 |---|---|---|
-| `live` | the account manager's rows (`switchboard sessions --machine --json`), as the tick's `coding-sessions` step wrote them (`sessions_view.load()`) | who runs in the project now: agent, folder name, managed or not, account group, launch id, `working` or `quiet`, last turn |
+| `live` | the account manager's rows (`switchboard sessions --machine --json`), as the tick's `coding-sessions` step wrote them (`sessions_view.load()`) | who runs in the project now: agent, folder name, managed or not, account group, launch id, `active` (working by the one rule, OBS-599) and the manager's `state`, last turn |
 | `recent` | the ledger's session rows of the last day (`agents_view.recent_sessions`) | which sessions recorded turns for the project, how many, and the workflow each carried |
 | `workflows` | the store's open workflows (`store.workflow.workflow_list`) | the project's open workflows, their last step, status, time, goal and holder |
 
@@ -25,7 +25,9 @@ two facts about the same project, shown side by side.
 
 The live row keeps the account manager's own field names and meanings (`agent`, `managed`, `quiet` as `state`,
 `last_write_at` as `last_turn_at`, `launch_id`, the account group), so Switchboard, Fabric Dashboards, Inbox and this
-page read one row the same way. Never in a row: a pid, a full folder path, a lease token or a checkpoint body.
+page read one row the same way. Beside them each row carries `active` (OBS-599, `sessions_view.session_rows`): it
+runs and its project recorded a turn in the last hour. `active` alone makes a row "working" and feeds
+`counts.working`; the manager's `state` stays in the row as its own word. Never in a row: a pid, a full folder path, a lease token or a checkpoint body.
 
 ## Surfaces
 

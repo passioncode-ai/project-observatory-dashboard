@@ -57,6 +57,7 @@ from typing import Callable
 import configuration as config
 import oslocks
 import osprivacy
+import runtime_receipts as rr  # OBS-610: the files this writes while an update stages
 
 HOST = "https://analytics.sshlg.me"
 ENDPOINT = HOST + "/api/v0/events"
@@ -86,7 +87,7 @@ REPLACE_PAUSE_SECONDS = 0.05
 WRITE_PROBLEM: str | None = None
 #: Where a failed counter update is kept for another process (`full analytics status` runs in its own and never
 #: writes counters): the reason only, cleared by the next update that is written.
-PROBLEM_FILE = "counters-problem.json"
+PROBLEM_FILE = rr.ANALYTICS_PROBLEM.name
 #: One request's timeout, and how many times a batch is tried (the first try included).
 TIMEOUT_SECONDS = 5.0
 ATTEMPTS = 3
@@ -201,15 +202,10 @@ def _read_json(path: Path) -> dict:
 
 def read_switch(base: Path | None = None) -> str | None:
     """`on` or `off` from the switch file, or None when there is none. Only `off` is off; a
-    link or a folder in its place is not a switch."""
-    file = switch_path(base)
-    try:
-        if file.is_symlink() or not file.is_file():
-            return None
-        text = file.read_text(encoding="utf-8", errors="replace")[:64]
-    except OSError:
-        return None
-    return "off" if text.strip().lower() == "off" else "on"
+    link or a folder in its place is not a switch. The configuration door's reading of a switch
+    file (OBS-612), where the switch is the setting `analytics.send`."""
+    import configuration_door
+    return configuration_door.switch_word(switch_path(base))
 
 
 def env_off(environ: dict | None = None) -> str | None:
@@ -276,9 +272,9 @@ def write_switch(base: Path, on: bool) -> None:
     waiting is sent, and turning it on again starts a new install id."""
     _private_write(switch_path(base), "on\n" if on else "off\n")
     if not on:
-        for name in ("install-id", "queue.jsonl"):
+        for receipt in (rr.ANALYTICS_INSTALL_ID, rr.ANALYTICS_QUEUE):
             try:
-                (folder(base) / name).unlink()
+                receipt.at(folder(base)).unlink()
             except OSError:
                 pass
 
@@ -288,7 +284,7 @@ def write_switch(base: Path, on: bool) -> None:
 def install_id(base: Path | None = None, *, create: bool = True) -> str | None:
     """This workspace's random install id: a UUID4 made for analytics only, never derived from
     the machine, an account or a person."""
-    file = folder(base) / "install-id"
+    file = rr.ANALYTICS_INSTALL_ID.at(folder(base))
     try:
         value = file.read_text(encoding="utf-8").strip().lower()
         if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", value):
@@ -338,9 +334,9 @@ def _update_counters(base: Path | None, what: str, change: Callable[[dict], None
     global WRITE_PROBLEM
     lock_fd = None
     try:
-        file = folder(base) / "counters.json"
+        file = rr.ANALYTICS_COUNTERS.at(folder(base))
         file.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        lock_fd = osprivacy.open(file.with_name(".counters.lock"),
+        lock_fd = osprivacy.open(rr.ANALYTICS_COUNTERS_LOCK.at(file.parent),
                                  os.O_RDWR | os.O_CREAT | osprivacy.NOFOLLOW, 0o600)
         deadline = time.monotonic() + COUNTERS_LOCK_SECONDS
         while True:
@@ -389,7 +385,7 @@ def note_send(base: Path | None, *, ok: bool, at: datetime.datetime | None = Non
 
 
 def counters(base: Path | None = None) -> dict:
-    return _read_json(folder(base) / "counters.json")
+    return _read_json(rr.ANALYTICS_COUNTERS.at(folder(base)))
 
 
 # --- recording -----------------------------------------------------------------------
@@ -447,7 +443,7 @@ def record(name: str, base: Path | None = None, environ: dict | None = None, **p
     except Exception:  # noqa: BLE001
         return False
     try:
-        queue = folder(base) / "queue.jsonl"
+        queue = rr.ANALYTICS_QUEUE.at(folder(base))
         try:
             if queue.stat().st_size >= QUEUE_LIMIT_BYTES:
                 count(base, "dropped_queue_full")
@@ -581,7 +577,7 @@ def flush(base: Path | None = None, *, transport: Transport | None = None, envir
             if env.get("OBSERVATORY_TEST_SANDBOX"):
                 return {"result": "test-sandbox"}
             transport = _urllib_transport
-        queue = folder(base) / "queue.jsonl"
+        queue = rr.ANALYTICS_QUEUE.at(folder(base))
         if not queue.is_file() or queue.is_symlink():
             return {"result": "empty", "sent": 0}
         # Taken aside first: events recorded while this runs go to a fresh queue.
@@ -680,7 +676,7 @@ def flush(base: Path | None = None, *, transport: Transport | None = None, envir
 def write_switch_safe_drop(base: Path | None) -> None:
     """Off: whatever is still queued is dropped, never sent later."""
     try:
-        (folder(base) / "queue.jsonl").unlink()
+        (rr.ANALYTICS_QUEUE.at(folder(base))).unlink()
     except OSError:
         pass
 
@@ -688,7 +684,7 @@ def write_switch_safe_drop(base: Path | None) -> None:
 # --- the first-run notice ------------------------------------------------------------
 
 def notice_state(base: Path | None = None) -> dict:
-    return _read_json(folder(base) / "notice.json")
+    return _read_json(rr.ANALYTICS_NOTICE.at(folder(base)))
 
 
 def mark_notice(base: Path | None, surface: str, at: datetime.datetime | None = None,
@@ -705,7 +701,7 @@ def mark_notice(base: Path | None, surface: str, at: datetime.datetime | None = 
             return False
         doc[surface] = (at or _now()).isoformat(timespec="seconds").replace("+00:00", "Z")
         doc["version"] = config.VERSION
-        _private_write(folder(base) / "notice.json", json.dumps(doc, sort_keys=True) + "\n")
+        _private_write(rr.ANALYTICS_NOTICE.at(folder(base)), json.dumps(doc, sort_keys=True) + "\n")
     except Exception:  # noqa: BLE001
         return False
     record("analytics_notice_shown", base, environ, surface=surface)
@@ -781,7 +777,7 @@ def status(base: Path | None = None, environ: dict | None = None) -> dict:
     if problem:
         out["degraded"] = [{"source": "analytics-counters", "reason": problem}]
     try:
-        out["queued"] = sum(1 for _ in (folder(base) / "queue.jsonl").open(encoding="utf-8"))
+        out["queued"] = sum(1 for _ in (rr.ANALYTICS_QUEUE.at(folder(base))).open(encoding="utf-8"))
     except OSError:
         out["queued"] = 0
     if key is None:

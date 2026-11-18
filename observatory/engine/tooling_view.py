@@ -7,6 +7,11 @@ was not), and the hooks (H11). Each harness finding the engine raised (`harness.
 row stays silent here as on the Findings page) is placed beside the plugin, skill, hook or agent it is about; one that
 names none of them is listed apart, never dropped. Nothing is scanned here, and an unread or partial scan is named in
 `degraded`, never shown as nothing installed.
+
+One inventory for people and agents (OBS-600): the page renders `summary(findings)` and
+`observatory_machine(section="skills")` answers `summary(limit=..., cursor=...)`, a page of the same rows (each plugin
+and skill carrying the tier and findings the page shows beside it) with the same agents, hooks, other findings,
+counts and `degraded`.
 """
 from __future__ import annotations
 
@@ -133,12 +138,24 @@ def build(harness: dict | None, skills: dict, findings: list[dict] | None) -> di
     # Codex's skills carry their tier in their own list (scan_harness.codex_skills, OBS-572).
     tiers.update({("codex", s.get("name")): s["tier"] for s in doc.get("codex_skills") or []
                   if isinstance(s, dict) and isinstance(s.get("tier"), int)})
+    # The section's spaces with each row replaced, one for one and in its order, by the row the page shows: the tool
+    # pages these, so a row it answers is the row the page draws. A row naming no agent is kept and counted apart.
+    spaces: list[dict] = []
+    agentless = 0
     for space in skills.get("spaces") or []:
+        shown = {**space, "plugins": [], "skills": []}
+        spaces.append(shown)
         for p in space.get("plugins") or []:
             if isinstance(p, dict) and isinstance(p.get("agent"), str):
-                agent(p["agent"])["plugins"].append({**p, "findings": []})
+                row = {**p, "findings": []}
+                agent(p["agent"])["plugins"].append(row)
+            else:
+                row, agentless = p, agentless + 1
+            shown["plugins"].append(row)
         for s in space.get("skills") or []:
             if not (isinstance(s, dict) and isinstance(s.get("agent"), str)):
+                shown["skills"].append(s)
+                agentless += 1
                 continue
             scope = s.get("scope") if isinstance(s.get("scope"), str) else "other"
             if s["agent"] == "claude-code" and scope == "user":
@@ -151,7 +168,12 @@ def build(harness: dict | None, skills: dict, findings: list[dict] | None) -> di
                 tier = tiers.get(("codex", s.get("name")))
             else:
                 tier = None
-            agent(s["agent"])["skills"].setdefault(scope, []).append({**s, "tier": tier, "findings": []})
+            row = {**s, "tier": tier, "findings": []}
+            agent(s["agent"])["skills"].setdefault(scope, []).append(row)
+            shown["skills"].append(row)
+    if agentless:
+        degraded.append({"source": "inventory", "code": "no-agent",
+                         "reason": f"{agentless} inventory rows name no coding agent, so no agent lists them"})
     for h in doc.get("hooks") or []:
         if isinstance(h, dict):
             agent("claude-code")["hooks"].append({**h, "findings": []})
@@ -181,11 +203,33 @@ def build(harness: dict | None, skills: dict, findings: list[dict] | None) -> di
                        "hooks": sum(len(a["hooks"]) for a in rows),
                        "findings": sum(1 for f in findings or [] if isinstance(f, dict)
                                        and str(f.get("type", "")).startswith("harness."))},
-            "open": skills.get("open") or [], "degraded": degraded}
+            "open": skills.get("open") or [], "spaces": spaces, "degraded": degraded}
 
 
-def summary(findings: list[dict] | None = None) -> dict:
-    """`build` over this workspace's scan, read without scanning."""
+def open_findings() -> list[dict] | None:
+    """The engine's open findings as the Findings page carries them (registry/findings.json without the acknowledged
+    rows); None when they were not built or cannot be read, which `build` names in `degraded`."""
+    try:
+        doc = json.loads((paths.REGISTRY / "findings.json").read_text(encoding="utf-8"))
+        return [f for f in doc.get("findings") or [] if isinstance(f, dict) and not f.get("acked")]
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+#: `summary`'s default: read the open findings from the registry.
+READ = object()
+
+
+def summary(findings: list[dict] | None | object = READ, limit: int | None = None,
+            cursor: str | None = None) -> dict:
+    """`build` over this workspace's scan, read without scanning: the page's answer, and with `limit` also `skills`, one
+    page of the section (`machine_view.skills_page`) over the rows `build` placed, for `observatory_machine`. A cursor
+    the page refuses is named in the same `degraded`."""
     import machine_view
     harness, _problem = machine_view._load("harness.json", "scan-harness")
-    return build(harness, machine_view.skills_section(), findings)
+    section = machine_view.skills_read()
+    view = build(harness, section, open_findings() if findings is READ else findings)
+    if limit is None:
+        return view
+    page = machine_view.skills_page({**section, "spaces": view["spaces"]}, limit, cursor)
+    return {**view, "degraded": [*view["degraded"], *page["degraded"][len(section["degraded"]):]], "skills": page}

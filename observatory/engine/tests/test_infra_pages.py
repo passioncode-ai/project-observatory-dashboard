@@ -30,6 +30,7 @@ import pathlib
 import subprocess
 import sys
 import unittest
+from unittest.mock import patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -250,8 +251,9 @@ class Door(unittest.TestCase):
         quiet(self.m.cmd_issue, "inventory-read", None, None)
         self.assertEqual([self.m.label_of(p) for p in self.m.issued()], ["inventory/example-account"])
         # No copy of the token anywhere else (OBS-561); test_rotation_consumers drives the finder.
-        self.m.consumer_sources = lambda path: []
-        rc, out, err = quiet(self.m.cmd_rotate, "inventory/example-account", False)
+        import key_consumers
+        with patch.object(key_consumers, "consumer_sources", lambda slot=None, exclude=None: []):
+            rc, out, err = quiet(self.m.cmd_rotate, "inventory/example-account", False)
         self.assertEqual(rc, 0, err)
         meta = json.loads((self.m.INVENTORY_STORE / "example-account.meta.json").read_text())
         self.assertEqual(meta["rotations"], 1)

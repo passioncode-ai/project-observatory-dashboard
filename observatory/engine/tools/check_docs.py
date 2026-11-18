@@ -40,6 +40,7 @@ sys.path.insert(0, str(ROOT))
 # works from one directory is a checker that stops working the first time
 # somebody runs it from another.
 import paths              
+import runtime_receipts as rr  # noqa: E402  OBS-610: declared runtime files
 
 #: (file, phrase, why it is false now). Absence is the assertion.
 RETIRED_CLAIMS = [
@@ -102,7 +103,7 @@ PATH_PREFIX_ALLOWLIST = {
 }
 
 PATH_ALLOWLIST = {
-    "store/update-check.json": "the update check job's record, written into the workspace by "
+    rr.UPDATE_CHECK.path: "the update check job's record, written into the workspace by "
                                "maintenance.check_pass (OBS-333 names its `available` key)",
     "store/scrub-watermark.json": "written into the workspace by tools/scrub_companion.py",
     "store/tick-rotation.json": "written into the workspace by tools/tick.py, a per-collector record of start, finish, outcome, not-started streak and last run",

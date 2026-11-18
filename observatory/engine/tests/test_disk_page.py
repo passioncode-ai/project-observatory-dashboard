@@ -403,10 +403,10 @@ class Route(unittest.TestCase):
     def test_an_unknown_key_and_a_key_this_page_does_not_offer_are_refused(self):
         code, said = self.post({"op": "plan", "changes": {"guard.nothing": 1}})
         self.assertEqual(code, 400, said)
-        self.assertIn("not a setting", said["error"])
+        self.assertIn("not a setting", said["error"]["message"])
         code, said = self.post({"op": "plan", "changes": {"integrations.vulnerabilities": False}})
         self.assertEqual(code, 400, said)
-        self.assertIn("observatory_configure", said["error"])
+        self.assertIn("observatory_configure", said["error"]["message"])
         code, said = self.post({"op": "plan", "changes": {"cleanup.auto.merged_branch_idle_days": "soon"}})
         self.assertEqual(code, 400, said)
         code, said = self.post({"op": "erase"})

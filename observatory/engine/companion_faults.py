@@ -17,7 +17,7 @@ actually suffers is the opposite: ten transient database errors in a single day,
 
 **Three properties, and they are the whole design.**
 
-1. **Pure append.** One `open(..., "a")`, one `write`. No read-modify-write:
+1. **Pure append.** One line through the journal writer (`journal_writer.append`, one `write`). No read-modify-write:
    `store_faults.py` already argued this for the same hazard — reading the file
    back to trim it "is both a second chance to fail and a way to lose a
    concurrent writer's line". A carry-forward inside the slot would have been
@@ -51,11 +51,12 @@ from datetime import datetime, timezone
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import paths                                                          # noqa: E402
+import runtime_receipts as rr  # noqa: E402  OBS-610: the files this writes while an update stages
 
 #: One JSON document per line, appended. Under `store/raw/`, which is gitignored
 #: and written by runs — and by EVERY session on the machine, which is why
 #: `observatory.py` has to declare it a foreign write to the gate.
-LOG = paths.SCRATCH / "companion-faults.jsonl"
+LOG = rr.COMPANION_FAULTS.at(paths.SCRATCH)
 
 #: How many of the most recent lines a reader consults. The newest are kept,
 #: because a diagnosis reads forward from the last thing that worked.
@@ -80,9 +81,8 @@ def append(row: dict) -> dict | None:
         doc = {k: row.get(k) for k in FIELDS if row.get(k) is not None}
         doc.setdefault("at", _iso())
         doc.setdefault("pid", os.getpid())
-        LOG.parent.mkdir(parents=True, exist_ok=True)
-        with LOG.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(doc, ensure_ascii=False) + "\n")
+        import journal_writer
+        journal_writer.append(LOG, [doc])
         return doc
     except Exception:                                                 # noqa: BLE001
         # DELIBERATELY BARE, for the same reason `store_faults.record` is: every

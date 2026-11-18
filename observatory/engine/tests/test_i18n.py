@@ -645,7 +645,9 @@ class EngineText(unittest.TestCase):
 
     def test_the_page_translates_what_the_server_refused(self):
         template = _template_source()
-        self.assertIn("const refused = Kind => Object.assign(new Kind(KNOWN(said)), {refusal: said});", template)
+        # A typed refusal (OBS-601): the message is translated and kept as `refusal`, the code rides beside it.
+        self.assertIn('const said = (e && typeof e === "object" ? e.message : e)', template)
+        self.assertIn("const refused = Kind => Object.assign(new Kind(KNOWN(said)), {refusal: said, code});", template)
         for shown in ("E(KNOWN(g.reason))", "E(KNOWN(d.reason))"):
             self.assertIn(shown, template)
         known_js = template[template.index("function KNOWN(text)"):template.index("// T(\"{n} projects\"")]

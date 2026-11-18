@@ -93,33 +93,24 @@ def _decided(action: str, target: str, decision: Any) -> dict:
 
 def decided(act: str, title: str, tool: str, target: str, decision: Any, *, label: str,
             why: str = "spends money or cannot be undone") -> dict:
-    """The operator's words for the act `act` on `target`, checked by `node/actions.py` as every relayed act is; the
-    record the journal keeps, or a refusal. Shared with `ops_acts.py` (OBS-559, the operations verbs)."""
-    if decision is None:
-        raise Refusal("operator-decision-required",
+    """The operator's words for the act `act` on `target`, checked by the engine's one decision check
+    (`node/actions.decided`, OBS-611) as every relayed act is; the record the journal keeps, or a refusal. Shared with
+    `ops_acts.py` (OBS-559, the operations verbs)."""
+    import engine_node
+    actions = engine_node.module("actions")
+    answer = actions.decided(
+        action={"id": act, "title": title, "tool": tool, "gate": "relayed"}, target=target, caller=CALLER,
+        decision=decision, now=_now())
+    if answer.get("ok") is True:
+        return answer["record"]
+    reason = answer.get("why")
+    if reason == "absent":
+        raise Refusal(answer["code"],
                       f"{label} {why}: ask the person, then call again with their words "
                       f"as `decision` (by operator, via relayed-instruction, action {act}, target {target}, the words "
                       "verbatim, when they said them)", action=act, target=target)
-    if not isinstance(decision, dict):
-        raise Refusal("decision-invalid", "the decision is not one JSON object in contract DEC-0121's shape",
-                      action=act)
-    kept = [decision.get("instruction"), decision.get("target"),
-            *((decision.get("source") or {}).values() if isinstance(decision.get("source"), dict) else [])]
-    if any(isinstance(v, str) and credential_shape.shaped(v, uuids=False) for v in kept):
-        raise Refusal("decision-invalid", "the decision carries something shaped like a credential; send it without",
-                      action=act)
-    import engine_node
-    answer = engine_node.module("actions").action_decision(
-        action={"id": act, "title": title, "tool": tool, "gate": "relayed"}, tier="T0",
-        caller=CALLER, decision=decision, target=target, now=_now())
-    if answer.get("ok") is not True or decision.get("target") != target:
-        raise Refusal("decision-invalid", "the decision is not the operator's for this action and object, or is "
-                                          "older than 24 hours: ask again and send their words as they said them",
-                      action=act, target=target)
-    record = {k: decision[k] for k in ("by", "via", "action", "target", "instruction", "at", "source")
-              if k in decision}
-    record["caller"] = CALLER
-    return record
+    raise Refusal(answer["code"], actions.REASONS.get(reason, actions.REASONS["contract"]), action=act,
+                  **({"target": target} if reason in ("contract", "target") else {}))
 
 
 def _raises_ceiling(ks, name: str, limit: float) -> bool:
@@ -140,23 +131,19 @@ def _run(ks_action: str, body: dict, record: dict | None) -> dict:
     caller, relayed = ks._CALLER.set(CALLER), ks._RELAYED.set(record)
     try:
         return ks.ACTIONS[ks_action](body)
-    except ks.key_consumers.RevokeRefused as exc:
-        # The consumer guard's own code (OBS-594): consumer-in-use, consumer-source-unreadable, -unknown.
-        raise Refusal(exc.code, str(exc)[:500], consumers=exc.consumers, unread=exc.unread) from None
-    except ValueError as exc:
-        raise Refusal("invalid-argument", str(exc)[:500]) from None
-    except LookupError as exc:
-        text = str(exc)
-        code = ("held" if text.startswith("held:") else
-                "provider-refused" if text.startswith("the provider refused") else "not-found")
-        raise Refusal(code, text[:500]) from None
-    except urllib.error.HTTPError as exc:
-        raise Refusal("provider-refused", f"the provider refused: HTTP {exc.code}") from None
-    except RuntimeError as exc:
-        raise Refusal("unconfirmed", str(exc)[:500]) from None
-    except Exception as exc:                                       # noqa: BLE001  the route's 500, typed
-        raise Refusal("failed", f"the act failed ({type(exc).__name__}); inspect the local service "
-                                "configuration") from None
+    except Exception as exc:                                       # noqa: BLE001  typed by the route's own mapping
+        # The code is the key server's (`keyserver.refusal`, OBS-601), so the page's route and this tool name one
+        # refusal the same way: the consumer guard's own code (OBS-594), invalid-argument, held, provider-refused,
+        # not-found, unconfirmed, failed.
+        _status, code = ks.refusal(exc)
+        if isinstance(exc, ks.key_consumers.RevokeRefused):
+            raise Refusal(code, str(exc)[:500], consumers=exc.consumers, unread=exc.unread) from None
+        if isinstance(exc, urllib.error.HTTPError):
+            raise Refusal(code, f"the provider refused: HTTP {exc.code}") from None
+        if isinstance(exc, (ValueError, LookupError, RuntimeError)):
+            raise Refusal(code, str(exc)[:500]) from None
+        raise Refusal(code, f"the act failed ({type(exc).__name__}); inspect the local service "
+                            "configuration") from None
     finally:
         ks._RELAYED.reset(relayed)
         ks._CALLER.reset(caller)

@@ -19,8 +19,8 @@ of a single correlation.
 
 1. **It does not depend on the store.** Nothing here opens the database or
    imports `store_db`: an instrument that needs the failing component cannot run
-   at the moment it is needed. `paths` is the only local import, for the file
-   locations.
+   at the moment it is needed. `paths` (the file locations) and `journal_writer`
+   (the line, OBS-614) are the only local imports.
 
 2. **It cannot raise.** `record()` returns the row it wrote, or `None` when it
    could not write â€” never an exception. A recorder that raises inside an
@@ -39,8 +39,8 @@ it is what separates `SQLITE_IOERR` from `SQLITE_CORRUPT` from `SQLITE_NOTADB` â
 where the incidents above are five different English strings for what may be
 three different causes.
 
-**Pure append, no read-modify-write.** One line, one `open(..., "a")`, one
-`write`. Trimming would mean reading the file back during a failure, which is
+**Pure append, no read-modify-write.** One line, one append through the
+journal writer (`journal_writer.append`, one `write`). Trimming would mean reading the file back during a failure, which is
 both a second chance to fail and a way to lose a concurrent writer's line. The
 READER caps instead, and says so. At roughly 400 bytes a fault and four faults in
 three days, the file is not a growth problem; when it becomes one, the cap
@@ -136,9 +136,8 @@ def record(op: str, exc: BaseException | None = None, *, detail: str = "") -> di
             row["holders_why"] = holders_why
         if detail and exc is not None:
             row["detail"] = str(detail)[:200]
-        LOG.parent.mkdir(parents=True, exist_ok=True)
-        with LOG.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+        import journal_writer
+        journal_writer.append(LOG, [row])
         return row
     except Exception:                                                               
         # DELIBERATELY BARE. Every branch above can fail on a machine whose disk

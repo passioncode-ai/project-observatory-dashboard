@@ -15,6 +15,7 @@ sys.path.insert(0, str(ROOT))
 import atomic
 sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent))                       
 import paths                                                                    
+import runtime_receipts as rr  # noqa: E402  OBS-610: declared runtime files
 import i18n
 import finding_types
 import subject_links
@@ -529,7 +530,7 @@ def from_store() -> dict:
         # absent (never ran here / turned off) — the page says which, because
         # "no row" would read as "no server exists" on a machine where one is
         # supposed to be up.
-        sd = paths.SCRATCH / "serverd.json"
+        sd = rr.SERVERD.at(paths.SCRATCH)
         if sd.is_file():
             try:
                 beat = json.loads(sd.read_text(encoding="utf-8"))
@@ -3254,6 +3255,7 @@ function detail(id) {
     ${(() => {
       // Sessions per project: the account manager's live rows attributed here, the ledger's
       // sessions of the last day with the step their workflow last wrote, and the open workflows.
+      // A live row is "working" by `active` alone (OBS-599, sessions_view.session_rows), never by `state`.
       const PS = D.project_sessions || {};
       const ps = (PS.projects || {})[r.id];
       if (!ps) {
@@ -3265,7 +3267,7 @@ function detail(id) {
           (w.stalled ? ` ${chip(T("stalled"), "warn")}` : "") + (w.goal ? `<span class="none"> · ${E(w.goal)}</span>` : "")
         : (w && w.workflowId ? `<span class="mono">${E(w.workflowId)}</span>` : `<span class="none">${T("no workflow")}</span>`);
       const live = list(ps.live, T("no coding session runs in this project now"),
-        s => `<li>${E(s.agent || "?")} · ${s.state === "working" ? chip(T("working")) : chip(T("quiet"), "warn")}` +
+        s => `<li>${E(s.agent || "?")} · ${s.active === true ? chip(T("working")) : s.active === false ? chip(T("quiet"), "warn") : chip(T("not read"), "warn")}` +
              ` ${s.managed ? chip(T("managed")) : chip(T("not managed"), "warn")}` +
              `<span class="none">${s.folder_name ? " · " + E(s.folder_name) : ""}${s.account_group ? " · " + E(s.account_group) : ""}` +
              `${s.last_turn_at ? " · " + T("last turn") + " " + E(s.last_turn_at) : ""}</span></li>`);
@@ -3693,8 +3695,12 @@ async function call(action, body, ms = CALL_TIMEOUT_MS) {
   // The server refuses in English, which stays the refusal's identity
   // (`err.refusal`); the reader sees its translation where the catalog holds
   // one (L10N-04).
-  const said = (d && d.error) || ("HTTP " + r.status);
-  const refused = Kind => Object.assign(new Kind(KNOWN(said)), {refusal: said});
+  // A refusal is typed, `{error: {code, message}}` (OBS-601); its message is
+  // the sentence, its code what a caller branches on.
+  const e = d && d.error;
+  const said = (e && typeof e === "object" ? e.message : e) || ("HTTP " + r.status);
+  const code = e && typeof e === "object" ? e.code : undefined;
+  const refused = Kind => Object.assign(new Kind(KNOWN(said)), {refusal: said, code});
   // 502 is the provider's own refusal, relayed; any other 5xx is a fault that
   // may have struck after the action took effect.
   if (r.status >= 500 && r.status !== 502) throw refused(Uncertain);
@@ -5150,7 +5156,7 @@ if (PAGE === "agents" && typeof document !== "undefined" && document.addEventLis
     "invalid-question": T("Write a question first."),
     "unknown-job": T("That question is no longer followed."),
   };
-  const why = err => (err && err.refusal && REFUSED[err.refusal]) || (err instanceof Uncertain
+  const why = err => (err && REFUSED[err.code || err.refusal]) || (err instanceof Uncertain
     ? T("the outcome is unknown: {why}", {why: err.message}) : T("refused: {why}", {why: err ? err.message : ""}));
   // THE DOCTOR'S UNDO, beside each fix still applied.
   if (LIVE && document.querySelectorAll) {
@@ -5168,8 +5174,8 @@ if (PAGE === "agents" && typeof document !== "undefined" && document.addEventLis
         if (out) out.textContent = kept ? T("Put back: {n}; kept aside, a newer file is there: {kept}", {n: back, kept})
                                          : T("Put back: {n}", {n: back});
       } catch (err) {
-        if (out) out.textContent = err && err.refusal === "already-undone" ? T("Already undone.") : why(err);
-        btn.disabled = !(err instanceof Uncertain) && err && err.refusal === "already-undone";
+        if (out) out.textContent = err && (err.code || err.refusal) === "already-undone" ? T("Already undone.") : why(err);
+        btn.disabled = !(err instanceof Uncertain) && err && (err.code || err.refusal) === "already-undone";
       }
     });
   }

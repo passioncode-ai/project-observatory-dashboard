@@ -2173,23 +2173,6 @@ def label_of(p: pathlib.Path) -> str:
     return f"inventory/{p.name}" if p.parent == INVENTORY_STORE else p.name
 
 
-def consumer_sources(path: pathlib.Path) -> list:
-    """Where the copies of an issued token's value are looked for before a roll (OBS-561); tests replace it."""
-    import key_consumers
-    return key_consumers.default_sources(None, exclude=(str(path),))
-
-
-def _roll_guard(path: pathlib.Path) -> tuple[list[str], list[str]]:
-    """(lines that refuse rolling this token, services to restart after it). Delivering to the copies found is
-    later work (docs/design/control-plane/rotation.md)."""
-    import key_consumers
-    try:
-        old, why = (private_io.read(path).strip() or None), None
-    except (OSError, RuntimeError) as exc:
-        old, why = None, f"the token file could not be read ({type(exc).__name__})"
-    return key_consumers.roll_guard(old, consumer_sources(path) if not why else [], why)
-
-
 def cmd_rotate(label: str | None, leaked: bool, force: bool = False) -> int:
     targets = issued()
     if leaked:
@@ -2219,7 +2202,10 @@ def cmd_rotate(label: str | None, leaked: bool, force: bool = False) -> int:
                   f"managed one over it", file=sys.stderr)
             bad += 1
             continue
-        refuse, restart = _roll_guard(p)
+        # (lines that refuse rolling this token, services to restart after it), from the one roll guard every door
+        # calls (OBS-601). Delivering to the copies found is later work (docs/design/control-plane/rotation.md).
+        import key_consumers
+        refuse, restart = key_consumers.guard_roll(path=p)
         if refuse and not force:
             print(f"  {label_of(p)}: HELD, not rolled: a roll kills the old value at once, and a copy of it would "
                   f"be cut (`--force` rolls anyway)", file=sys.stderr)

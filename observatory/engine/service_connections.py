@@ -58,6 +58,7 @@ import datetime
 import json
 from pathlib import Path
 import re
+import runtime_receipts as rr  # noqa: E402  OBS-610: declared runtime files
 from typing import Callable
 
 import credential_shape
@@ -254,7 +255,7 @@ def _hub(scratch: Path, now: datetime.datetime | None = None) -> dict:
 
 
 def _release_feed(base: Path) -> dict:
-    path = base / "store" / "update-check.json"
+    path = rr.UPDATE_CHECK.of(base)
     try:
         check = (json.loads(path.read_text(encoding="utf-8")) or {}).get("check") or {}
     except (OSError, ValueError, AttributeError):
@@ -367,8 +368,8 @@ def extension(base: Path | None = None, scratch: Path | None = None, settings: d
 
 def signature_files(base: Path, scratch: Path) -> list[Path]:
     """The files the declaration reads, for the local server's change check."""
-    files = [scratch / "fabric-attribution.json", base / "store" / "update-check.json",
-             base / "config" / "settings.json", base / "analytics", base / "store" / "analytics" / "counters.json"]
+    files = [scratch / "fabric-attribution.json", rr.UPDATE_CHECK.of(base),
+             base / "config" / "settings.json", base / "analytics", rr.ANALYTICS_COUNTERS.of(base)]
     for _, _, _, receipts, _ in PROVIDERS:
         files += [scratch / name for name in receipts]
     return files

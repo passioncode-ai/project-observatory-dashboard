@@ -28,6 +28,7 @@ import machine_identity
 import secret_store_carry
 import workspace
 from store import compatibility
+import runtime_receipts
 
 SNAPSHOT_FORMAT = 1
 JOURNAL = 'upgrade-in-progress.json'
@@ -230,93 +231,34 @@ def require_stopped(writers_stopped: bool) -> None:
         raise config.ConfigurationError('Stop foreground/background writers, then pass --writers-stopped for a cross-file snapshot')
 
 
-LOG_SUFFIXES = ('.log', '.err', '.out', '.jsonl')
-#: What the session hooks write on every agent turn, whether or not the tick and the
-#: server are stopped: the Stop hook's receipt (`tools/record_turn.py`), the folders a
-#: session opened in (`tools/session_start.py`), a hook's fault log
-#: (`companion_faults.py`) and the journal of requests for a why (`why_asks.py`). Before 0.19.2 a write to any of them while an update was
-#: staged refused the update, though no update reads them. They are copied, never
-#: required to hold still; `test_every_receipt_a_session_hook_writes_is_exempt` keeps
-#: this set equal to what those modules write.
-SESSION_RECEIPTS = frozenset({'store/raw/record-turn.json', 'store/raw/sessions-seen.jsonl',
-                              'store/raw/companion-faults.jsonl', 'store/raw/why-asks.jsonl',
-                              'store/raw/why-asks.jsonl.1', 'store/raw/why-asks.jsonl.lock'})
-
-
-#: What the five-minute update check job writes (`maintenance.check_pass`): its own record and
-#: lock. The daily snapshot stops the tick and the server but not this job, so a snapshot that
-#: took longer than five minutes always met one of its writes and failed three times in a row
-#: with the server down meanwhile (seen live 2026-11-10 and 11; the last daily was 11-09).
-JOB_RECEIPTS = frozenset({'store/update-check.json', 'store/update-check.lock'})
-
-#: What the usage analytics of every running process writes (`usage_analytics`): the event queue,
-#: the counters and their lock, the notice record. An MCP server a coding session runs is not stopped
-#: for an update or the daily snapshot and records each call, so the 0.35.13 update on a machine with
-#: live sessions failed with "Workspace changed during snapshot (store/analytics/queue.jsonl)" and
-#: rolled back (2026-11-11). Copied, never required to hold still; an event appended after the copy
-#: is lost if the snapshot is restored, which a usage count can afford.
-ANALYTICS_RECEIPTS = frozenset({'store/analytics/queue.jsonl', 'store/analytics/counters.json',
-                                'store/analytics/.counters.lock', 'store/analytics/notice.json'})
-
-
-#: What the local server writes about itself (`tools/serverd.py`, RECEIPT): its pid, port and
-#: heartbeat, rewritten whenever a server of this workspace runs and again by the next one at its
-#: start. An update and the daily snapshot boot the server out, but its launchd job can be loaded
-#: again meanwhile by a process the update does not control: on 2026-11-17 a 0.40.0 server started
-#: while the 0.39.1 to 0.40.0 upgrade was staged, rewrote this receipt and rolled the update back
-#: (OBS-591). Copied, never required to hold still, but only while it is this workspace's own
-#: server receipt (`foreign_runtime_receipts`): anything else written there still refuses.
-#: `test_the_runtime_receipts_are_the_files_the_server_writes` keeps it equal to serverd's RECEIPT.
-RUNTIME_RECEIPTS = frozenset({'store/raw/serverd.json'})
-
-
-def _runtime_receipt(name: str) -> bool:
-    """A runtime receipt, or the atomic writer's temporary file for one (`.<name>.<random>.tmp`)."""
-    if name in RUNTIME_RECEIPTS:
-        return True
-    path = PurePosixPath(name)
-    return path.suffix == '.tmp' and any(
-        path.parent == PurePosixPath(receipt).parent and path.name.startswith(f'.{PurePosixPath(receipt).name}.')
-        for receipt in RUNTIME_RECEIPTS)
+#: WHAT MAY CHANGE WHILE AN UPDATE STAGES is declared by its writer in `runtime_receipts` (OBS-610):
+#: the session hooks' receipts, the update-check job's record, the usage analytics of a session's MCP
+#: server, the local server's receipt and the append-only logs. Each was a list of its own here, kept
+#: by hand, and each writer found missing from it rolled an update back (the check job 2026-11-10,
+#: the analytics queue 2026-11-11, the server's receipt 2026-11-17). These views are the registry's,
+#: kept for their readers; the stillness checks below read `runtime_receipts` itself.
+LOG_SUFFIXES = runtime_receipts.LOG_SUFFIXES
+SESSION_RECEIPTS = runtime_receipts.by_writer(runtime_receipts.SESSION_HOOK)
+JOB_RECEIPTS = runtime_receipts.by_writer(runtime_receipts.CHECK_JOB)
+ANALYTICS_RECEIPTS = runtime_receipts.by_writer(runtime_receipts.SESSION_MCP)
+RUNTIME_RECEIPTS = runtime_receipts.by_writer(runtime_receipts.SERVER)
 
 
 def foreign_runtime_receipts(base: Path) -> set[str]:
-    """The runtime receipts present in BASE that are not its own server's: a file that is no JSON
-    object, or one whose `workspace` is not BASE. Those keep the stillness check: a server of this
-    workspace writes `workspace` as its own home, whatever port it listens on (one workspace has
-    one server, behind its instance lock), so a receipt naming another home was written by
-    something else."""
-    foreign = set()
-    for name in RUNTIME_RECEIPTS:
-        file = base / name
-        if not file.is_file():
-            continue
-        try:
-            doc = json.loads(file.read_text(encoding='utf-8'))
-            home = doc.get('workspace') if isinstance(doc, dict) else None
-            ours = isinstance(home, str) and bool(home) and os.path.realpath(home) == os.path.realpath(base)
-        except (OSError, ValueError):
-            ours = False
-        if not ours:
-            foreign.add(name)
-    return foreign
+    """The declared files in BASE their own writer did not write (`runtime_receipts.foreign`): a
+    server receipt naming another home, or no JSON object at all. Those keep the stillness check."""
+    return runtime_receipts.foreign(base)
 
 
 def volatile(name: str, databases: set[str]) -> bool:
     """A path the snapshot copies without requiring it to hold still: a database and its
-    WAL companions, an append-only log (with its rotated generations) under store/logs,
-    a receipt the session hooks write (SESSION_RECEIPTS), the check job's (JOB_RECEIPTS), the
-    usage analytics' (ANALYTICS_RECEIPTS) or the local server's (RUNTIME_RECEIPTS, which the
-    stillness checks hold still again when `foreign_runtime_receipts` names it)."""
+    WAL companions, or a file a live writer declared (`runtime_receipts.live`: the append-only
+    logs and every declared receipt, which the stillness checks hold still again when
+    `foreign_runtime_receipts` names it). Anything else, settings, registry, vault and the
+    store's other files, must hold still, and its change refuses with its name."""
     if name in databases or (name.endswith(('-wal', '-journal', '-shm')) and name.rsplit('-', 1)[0] in databases):
         return True
-    if name in SESSION_RECEIPTS or name in JOB_RECEIPTS or name in ANALYTICS_RECEIPTS or _runtime_receipt(name):
-        return True
-    path = PurePosixPath(name)
-    if path.parts[:2] != ('store', 'logs'):
-        return False
-    stem, _, tail = path.name.rpartition('.')
-    return path.suffix in LOG_SUFFIXES or (tail.isdigit() and PurePosixPath(stem).suffix in LOG_SUFFIXES)
+    return runtime_receipts.live(name)
 
 
 def _snapshot(base: Path, output: Path, *, carry_stores: bool = False,

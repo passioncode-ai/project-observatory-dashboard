@@ -426,5 +426,59 @@ class PageTable(unittest.TestCase):
             self.assertIn(f"docs/dashboard/{name}.html", cli.IGNORED_WRITES_ALLOWED)
 
 
+class OneTimeEveryPage(unittest.TestCase):
+    """OBS-598: one page helper module (`dashboard/page_util.py`); an instant reads the same on every page,
+    the way the page header writes "Measured"."""
+    AT = "2026-10-26T17:20:05Z"
+    SHOWN = "2026-10-26 17:20:05 UTC"
+
+    def test_the_helpers(self):
+        from datetime import datetime, timezone
+        import page_util
+        self.assertEqual(page_util.stamp(self.AT), self.SHOWN)
+        self.assertEqual(page_util.stamp("2026-10-26T17:20:05.123+00:00"), self.SHOWN)
+        self.assertEqual(page_util.stamp("2026-10-26T17:20Z"), "2026-10-26 17:20:00 UTC")
+        self.assertEqual(page_util.stamp("2026-10-26T17:20:05"), "2026-10-26 17:20:05")
+        self.assertEqual(page_util.stamp("2026-10-26"), "2026-10-26", "a date stays a date")
+        self.assertEqual(page_util.stamp("not a time"), "not a time")
+        self.assertEqual(page_util.stamp(None), "")
+        self.assertEqual(page_util.stamp("", missing="n/a"), "n/a")
+        self.assertEqual(page_util.escape(None), "")
+        self.assertEqual(page_util.escape('<a href="x">&'), "&lt;a href=&quot;x&quot;&gt;&amp;")
+        at = datetime(2026, 10, 26, 17, 20, 5, tzinfo=timezone.utc)
+        self.assertEqual(page_util.iso(at), self.AT)
+        now = page_util.now()
+        self.assertEqual((now.tzinfo, now.microsecond), (timezone.utc, 0))
+
+    def test_no_page_keeps_its_own_copy(self):
+        own = {"_e", "_stamp", "stamp", "_now", "_iso", "escape", "now", "iso"}
+        files = [p for p in (ROOT / "dashboard").glob("*.py") if p.name != "page_util.py"]
+        files += [ROOT / "agents_view.py", ROOT / "sessions_view.py"]
+        for path in files:
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            defined = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)} & own
+            self.assertEqual(defined, set(), f"{path.name} keeps its own {sorted(defined)}")
+
+    def test_one_instant_reads_the_same_on_every_page(self):
+        import agents_page
+        import home_page
+        import key_sweep_page
+        import machine_page
+        import tools_page
+        from i18n import Translator
+        t = Translator("en")
+        pages = {
+            "home": home_page.disk_tile({"machine": {"measuredAt": self.AT,
+                                                     "disk": {"volume": {"free_gb": 80}}}}, t)["at"],
+            "agents": agents_page.agents_html({"agents": {"measuredAt": self.AT}}, t),
+            "tools": tools_page.tools_html({"tooling": {"measuredAt": self.AT}}, t),
+            "key sweep": key_sweep_page.key_sweep_html(
+                {"key_sweep": {"state": "ran", "at": self.AT, "rows": []}}, t),
+            "machine": machine_page.machine_html({"machine": {"measuredAt": self.AT}}, t),
+        }
+        for name, page in pages.items():
+            self.assertIn(self.SHOWN, text(page), f"the {name} page writes the time another way")
+
+
 if __name__ == "__main__":
     unittest.main()

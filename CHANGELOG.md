@@ -3,6 +3,64 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.42.0 (2026-11-18)
+
+The control plane refactor, waves R1 to R3 (`docs/design/control-plane/refactor-plan.md`): one guard before every key
+revoke, one secret-shape detector and one redactor, one rule for a "working" session on every page and tool, one
+tooling inventory, one journal writer, one operator-decision check, every setting through the configuration door, and
+an update that no longer rolls back because a live writer touched a file or someone loaded the server while it was
+staged. Also a Prowl key door. The observatory-log plugin moves to 0.42.0 with the release.
+
+### Added
+
+- **Prowl key door** (OBS-592, #582): `tools/prowl.py issue NAME --user EMAIL --daily-usd N`, on the pattern of the
+  OpenRouter door, keys into the vault by name.
+- **One runtime-receipt registry** (OBS-610): every file a never-stopped writer touches (session hooks, analytics, the
+  update-check job, the server's receipt) is declared once with its owner and reason; writers and the update's
+  stillness checks read the same declarations. The analytics install id and two temporary files, missing from the old
+  hand-kept list, are declared.
+- **A syntax-warning gate**: a root test compiles every Python file and fails on a `SyntaxWarning`.
+
+### Changed
+
+- **Every revoke runs one consumer guard** (OBS-594): `consumer-in-use`, `consumer-source-unreadable` or
+  `consumer-source-unknown`; a missing OpenRouter scan now refuses instead of skipping the check. `tools/revoke_key.py`
+  and the DigitalOcean token revoke run it too.
+- **One secret-shape detector** (OBS-595): `credential_shape` with three readings (engine, contract, strict); the
+  detectors of the env scan, service connections, the operations digest, folder attribution, the secret lint and the
+  OpenRouter checks call it. Their old misses are pinned as tests.
+- **One redactor** (OBS-602) and **one journal writer** (OBS-614, 19 modules; private mode, no symlink follow, one line
+  per record).
+- **Sessions** (OBS-597, OBS-599): "active in the last hour" counts only running sessions with a recent turn; one rule
+  for "working" on the Agents and Projects pages and in `observatory_sessions` (`active` per row, `counts.working`,
+  `ledger_hour`). The Agents page shows one session list.
+- **Pages** (OBS-596, OBS-598): no em dash on any page in either locale; one helper module, so one instant reads the
+  same everywhere (Home now shows seconds).
+- **Installed tools** (OBS-600): the page and `observatory_machine(section="skills")` read one inventory; the tool's
+  rows gain `tier` and `findings`, and a `tooling` block.
+- **Key doors** (OBS-601): shared consumer finder and roll guard; a `code` on every degraded entry; the key server
+  answers typed refusals `{error: {code, message}}`.
+- **Operator decisions** (OBS-611): one `decided()` check for the configuration door, key acts, organisation selection,
+  the secret prompt and own shares; refusals are spelled `operator-decision-required` and `decision-invalid` (the old
+  spelling is still accepted on input).
+- **Settings** (OBS-612): the auto-update and analytics switches and `meter.json`, `retention.json`, `machine.json`,
+  `review-policy.json`, `machine-backup.json`, `relay.json`, `tracked.json`, `organizations.json` are door keys;
+  files and formats unchanged.
+
+### Fixed
+
+- **An update rolled back by the server's receipt** (OBS-591): only this workspace's server receipt may change while an
+  update stages.
+- **An update rolled back by someone loading the server** (OBS-593): the server now waits while an update or the
+  daily snapshot holds the update lock. The 2026-11-17 rollback was another agent following a doctor's `kickstart`
+  advice; the outside half is asked on the board.
+- Windows: four server-receipt checks join the snapshot defect's known list (OBS-278).
+
+### Compatibility
+
+See `docs/COMPATIBILITY.md`, section "Answers: refusals and session counts": the key server's `error` is an object,
+the revoke refusal codes, and the session count fields.
+
 ## 0.41.0 (2026-11-17)
 
 The control plane's fourth wave: every vault key says where it came from, a daily doctor puts right what it safely can

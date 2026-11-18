@@ -1,5 +1,11 @@
 # The local server's receipt during an update (OBS-591)
 
+What loaded the job (an agent session acting on a doctor's `fail` row) and the server's wait for the update lock are
+in [runtime-receipts.md](runtime-receipts.md#the-server-loaded-again-during-an-update-obs-593) (OBS-593).
+
+Since OBS-610 the receipt is declared in `runtime_receipts.py` (`SERVERD`, with `belongs` doing what
+`foreign_runtime_receipts` did) and the stillness checks read that registry: [runtime-receipts.md](runtime-receipts.md).
+
 ## What happened
 
 On one machine the automatic update from 0.39.1 to 0.40.0 rolled back (2026-11-17, UTC). The workspace's

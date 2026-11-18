@@ -75,7 +75,7 @@ LEGACY = (
 BOUNDARY = (
     'open_unlinked',
     'heroku_scoped', 'holder_capture',
-    'workspace', 'workspace_upgrade', 'workspace_boundaries', 'dashboard_shell',
+    'workspace', 'workspace_upgrade', 'runtime_receipts', 'workspace_boundaries', 'dashboard_shell',
     'workspace_scheduler', 'schema_compatibility', 'keyserver_boundary',
     'private_sources', 'public_contracts', 'vault_boundaries', 'provider_secret_boundaries', 'cli_compatibility', 'handed_commands', 'dashboard_portability',
     'agent_plugin', 'audit_regressions', 'identity_map', 'zone_accounts', 'deployed_commit', 'scrub_incremental', 'leak_scan_incremental', 'tick_health', 'accounts', 'environments', 'credential_bindings', 'local_keys', 'trap_anchors', 'leak_coverage', 'backup_vault', 'organizations', 'org_selection', 'machine', 'local_folders', 'config_locations', 'dashboard_stop',
@@ -167,6 +167,10 @@ BOUNDARY += ('provider_deadline',)
 BOUNDARY += ('credential_shape',)
 # OBS-595: every site that asks whether text is credential-shaped asks that rule.
 BOUNDARY += ('secret_shape_sites',)
+# OBS-602: every site that redacts text for a record calls one redactor.
+BOUNDARY += ('redact_sites',)
+# OBS-614: one append-only journal writer.
+BOUNDARY += ('journal_writer',)
 # PROJECT is the folder name; the registry id names the same folder.
 BOUNDARY += ('vault_project',)
 # The product lifecycle contract: bounded steps, idle server, rotated logs, the watch.
@@ -238,6 +242,8 @@ BOUNDARY += ('node_peer_share', 'shares', 'share_cli')
 # OBS-291: the relayed decision a button's agent twin carries (contract DEC-0121 AP-2, the port of `actionDecision`
 # over the contract's vectors), for the twins of the secret prompt's Decline and of Open a share (DEC-0147).
 BOUNDARY += ('node_actions',)
+# OBS-611: one operator-decision check (`node/actions.decided`) and the five wrappers that call it.
+BOUNDARY += ('decision_check',)
 # OBS-263: the share mailbox as a Cloudflare Worker (cloud/worker.mjs) against the stores, and `full cloud deploy`.
 BOUNDARY += ('cloud_worker', 'cloud_deploy')
 # ENG-018: a manifest never pins a tag its release does not have.
@@ -355,6 +361,9 @@ BOUNDARY += ('rotation_consumers',)
 # OBS-594 (CP-11): every revoke runs one consumer guard, refusing typed when a consumer holds the key or a source
 # cannot be read (the OpenRouter door, the key server, the MCP key act, tools/revoke_key.py, the DigitalOcean door).
 BOUNDARY += ('revoke_guard',)
+# OBS-601: the doors' consumer helpers in one place (key_consumers), a code on every degraded entry, and the key
+# server's typed refusals, with the MCP key acts taking the same codes.
+BOUNDARY += ('door_helpers',)
 # OBS-552 (CP-05): the Installed tools page, coding agents, skills, plugins and hooks with their findings.
 BOUNDARY += ('tools_page',)
 # OBS-555 (CP-09): the supply-chain watch over MCP servers: command-line rules, tool definition pins, the scanners switch.
@@ -422,12 +431,14 @@ ROOT_FILES = (
     'mcp_supply.py',
     # The Installed tools page's view (OBS-552).
     'tooling_view.py',
-    'log_policy.py', 'code_freshness.py', 'session_reload.py', 'access_binding.py', 'embedding_policy.py',
+    'log_policy.py', 'journal_writer.py', 'code_freshness.py', 'session_reload.py', 'access_binding.py', 'embedding_policy.py',
     'memory_access.py', 'retrieval_audit.py',
     # The companion's request for a why: journal, measurement, reach (M-8).
     'why_asks.py',
     # Updates that arrive by themselves and data that survives a reinstall (2026-10-05).
     'maintenance.py', 'app_update.py', 'update_events.py', 'usage_analytics.py',
+    # What a live writer may change while an update stages, declared by its writer (OBS-610).
+    'runtime_receipts.py',
     # The machine's agent setup in one encrypted bundle, and its restore (OBS-157).
     'machine_backup.py',
     # The machine id, the placement file and a job's move between two machines (OBS-283, OBS-284).
