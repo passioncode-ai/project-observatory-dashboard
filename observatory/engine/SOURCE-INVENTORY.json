@@ -1088,8 +1088,8 @@
       "path": "engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b68492199e24e3b235255d59297d24018d8cc85c6ae870c28146288896345b20",
-      "bytes": 106716
+      "export_sha256": "6e4a52832b136d19da8267c49bb22fbb0e4d3f55bba0cb98e880162c02a4d99f",
+      "bytes": 106451
     },
     {
       "path": "estate.py",
@@ -3565,8 +3565,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "abdb887070f57b90acf3fd1fde3cc172dea17943338c3f616f9282f97706e89b",
-      "bytes": 171850,
+      "export_sha256": "a5307a1d0839627f175d0db8bd193257839e9728b0ee96f13002bcf7f6048fc5",
+      "bytes": 171870,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -3943,8 +3943,8 @@
       "path": "oslocks.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "143085049d948d2285f499cfa6d4c1c797f1dfc7540806d0c98779d4f052c404",
-      "bytes": 6081
+      "export_sha256": "b0a23a89a94e130cd6d091d80df3c813ce9b3c04e81c37188dcaffdcf0e03e68",
+      "bytes": 6349
     },
     {
       "path": "osprivacy.py",
@@ -8491,8 +8491,8 @@
     {
       "path": "workspace_upgrade.py",
       "source_sha256": "d9816f9711b69badae87382cbae34e5a303e0942823587aecf4361026828277d",
-      "export_sha256": "7960f4b3be25c398a57d9653c2a19927bc32187096664499f5660f73d6e6bbc5",
-      "bytes": 105244,
+      "export_sha256": "bcef82619ea5b4121a90c643ad39ceead84efeb8c98ddd49f12cf146cb26a660",
+      "bytes": 105248,
       "python_comments_removed": 5,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,

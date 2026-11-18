@@ -64,6 +64,7 @@ import dataclasses
 import datetime
 import email.parser
 import oslocks
+import osproc
 import osprivacy
 import hashlib
 import http.client
@@ -959,10 +960,7 @@ def system_setup_refused(env=None) -> bool:
 def _end_group(proc: subprocess.Popen) -> None:
     """End `proc` and every process it started: its process group (POSIX), its tree (Windows)."""
     try:
-        if os.name == "nt":
-            subprocess.run(["taskkill", "/F", "/T", "/PID", str(proc.pid)], capture_output=True, timeout=30)
-        else:
-            os.killpg(proc.pid, signal.SIGKILL)
+        osproc.stop_group(proc.pid, 2.0)
     except (OSError, subprocess.SubprocessError):
         pass
     try:
@@ -982,10 +980,8 @@ def run_bounded(argv: list[str], *, capture_output: bool = False, text: bool = F
     process group (a session on POSIX, a new group on Windows) that a timeout, a Ctrl-C or any other
     exception here ends whole. A timeout raises `TimeoutExpired` carrying what the command printed."""
     pipe = subprocess.PIPE if capture_output else None
-    extra = ({"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if os.name == "nt"
-             else {"start_new_session": True})
     proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=pipe, stderr=pipe, text=text, env=env, cwd=cwd,
-                            **extra)
+                            **osproc.new_group())
     try:
         out, err = proc.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:

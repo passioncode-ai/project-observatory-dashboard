@@ -120,7 +120,7 @@ server = InteropServer(
     instructions=(
         "`_x` names the tool `observatory_x`.\n"
         "SPENDS: `_assistant_ask` (configured model; private dialogue/job: `fabric.job.get`/`.cancel`). "
-        "`_search` stays local (lexical; `degraded` says so).\n"
+        "`_search` stays local (embedding-policy/1, lexical; `degraded` says so).\n"
         "WRITE: `_record`, `_learn`, `_lesson`, `_propose` append PROPOSALS below confidence 1; only "
         "the operator or independent corroboration promotes one. `_org_selection` and gated "
         "`_configure`/`_key_act`/`_ops` need the operator's `decision`; `_ops` is a job. `_checkpoint_write` after "

@@ -288,12 +288,12 @@ def _clone(source: Path, dest: Path) -> bool:
         return fn is not None and fn(os.fsencode(source), os.fsencode(dest), CLONE_NOFOLLOW | CLONE_NOOWNERCOPY) == 0
     if not sys.platform.startswith('linux'):
         return False
-    import fcntl
+    import oslocks
     src = osprivacy.open(source, os.O_RDONLY | osprivacy.NOFOLLOW)
     try:
         dst = osprivacy.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL | osprivacy.NOFOLLOW, 0o600)
         try:
-            fcntl.ioctl(dst, FICLONE, src)
+            oslocks.ioctl(dst, FICLONE, src)
             return True
         except OSError:
             os.close(dst)
