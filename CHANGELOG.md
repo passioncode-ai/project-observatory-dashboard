@@ -3,6 +3,28 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.42.1 (2026-11-18)
+
+An update no longer rolls back for being slow on a healthy workspace, and the MCP surface states itself. The
+observatory-log plugin moves to 0.42.1 with the release.
+
+### Fixed
+
+- **An update rolled back for being slow** (OBS-626): on 2026-11-17 the upgrade itself took 7 minutes, but the
+  update's own snapshot, a second whole snapshot inside the upgrade and two exports ran past the fixed 1800 s limit.
+  The update now passes its snapshot to the upgrade (`full upgrade --snapshot PATH`, checked unchanged), an upgrade
+  started by an update exports nothing, staging copies only the marker, settings, registry and store, files are cloned
+  where the disk allows and hashed once, and the limit is four times the measured snapshot time (at least 1800 s; over
+  4 hours the update refuses before installing and says why). A timeout ends the whole process group it started and
+  names the step. Design: `docs/design/control-plane/update-staging.md`.
+
+### Changed
+
+- **The MCP surface states itself** (OBS-613): the server instructions name every tool that writes and stay well under
+  their limit; every tool declares `read_only_hint`; every read tool's description says it answers `degraded`; refusal
+  codes are spelled with hyphens everywhere (`plan-stale`, `invalid-argument`, ...), the old spelling accepted on input.
+  This also changes the `configure` CLI's JSON codes; exit codes are unchanged. A test keeps all of this true.
+
 ## 0.42.0 (2026-11-18)
 
 The control plane refactor, waves R1 to R3 (`docs/design/control-plane/refactor-plan.md`): one guard before every key
