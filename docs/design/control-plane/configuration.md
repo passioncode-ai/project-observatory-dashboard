@@ -28,10 +28,10 @@ journalled. Modules M8, M9, M11 and M13 write configuration only through it.
 
 - `plan(changes) -> {digest, changes, before, after, effects, needsPerson, degraded}`: writes no configuration. The
   digest covers the changes and the hash of every file they touch.
-- `apply(digest, actor, decision?)`: under the workspace lock, refused `plan_stale` when a touched file changed since
-  the plan; writes every change, restoring the files on a failure; journals; the plan is spent (`plan_unknown` after).
-- `undo(journal_id, actor, decision?)`: refused `undo_refused` (with the keys) when a file no longer holds what the
-  apply wrote, `already_undone`, `journal_unknown`.
+- `apply(digest, actor, decision?)`: under the workspace lock, refused `plan-stale` when a touched file changed since
+  the plan; writes every change, restoring the files on a failure; journals; the plan is spent (`plan-unknown` after).
+- `undo(journal_id, actor, decision?)`: refused `undo-refused` (with the keys) when a file no longer holds what the
+  apply wrote, `already-undone`, `journal-unknown`.
 - Gate per key: `safe` (reversible, the engine's own behaviour) or the person's (`on`, `set`, `raise`, `lower`,
   `always`, `values`): an integration that sends data out, a feature that deletes or spends, a cleanup that removes
   sooner, a budget raised, the model chain, the secret sources and the backups root. `person:cli` passes it; an agent
@@ -40,10 +40,10 @@ journalled. Modules M8, M9, M11 and M13 write configuration only through it.
 
 ## Failure behaviour
 
-Refusals are typed and never echo a refused value: `unknown_key`, `invalid_value`, `secret_refused` (any value shaped
-like a credential; a path may hold a system's random temporary folder name), `no_changes`, `file_unreadable`,
-`plan_stale`, `plan_unknown`, `operator-decision-required`, `decision-invalid` (the contract's spelling since OBS-611,
-[decisions-and-settings.md](decisions-and-settings.md)), `journal_unknown`, `already_undone`, `undo_refused`. A file that cannot be read is named in `degraded` and its keys read `null`, never the default. A journal
+Refusals are typed and never echo a refused value: `unknown-key`, `invalid-value`, `secret-refused` (any value shaped
+like a credential; a path may hold a system's random temporary folder name), `no-changes`, `file-unreadable`,
+`plan-stale`, `plan-unknown`, `operator-decision-required`, `decision-invalid` (the contract's spelling since OBS-611,
+[decisions-and-settings.md](decisions-and-settings.md); every other code since OBS-613, [mcp-surface.md](mcp-surface.md)), `journal-unknown`, `already-undone`, `undo-refused`. A file that cannot be read is named in `degraded` and its keys read `null`, never the default. A journal
 line that cannot be written is named in `degraded` (`journal-unwritten`); the change stands.
 
 ## Tests

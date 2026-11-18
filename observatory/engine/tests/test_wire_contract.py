@@ -274,26 +274,26 @@ def test_the_served_instructions_describe_the_served_surface() -> None:
           "integrations OBS-557, health OBS-577, the daily doctor OBS-558, the key page's acts and the operations "
           "verbs OBS-559)",
           tools == 44, str(tools))
+    import ast
+    # The instructions as served, with `_x` read as the tool `observatory_x`, as their first line says (OBS-613).
+    said = _expanded(_served_instructions(ast.parse(src)))
     check("the instructions name the operations verbs' write rule and their job",
-          "`_ops` is a job" in src.split("instructions=(", 1)[1][:2600])
-    check("the instructions name the key acts' write rule",
-          "_key_act" in src.split("instructions=(", 1)[1][:2600])
+          "`observatory_ops` is a job" in said)
+    check("the instructions name the key acts' write rule", "`observatory_key_act`" in said)
     check("the instructions name the coding sessions beside the machine",
-          "`observatory_machine` (`section`, `move`, `explainPid`); `_sessions`" in src.split("instructions=(", 1)[1][:2600])
-    check("the instructions name the configuration door's write rule",
-          "_configure" in src.split("instructions=(", 1)[1][:2600])
-    check("the instructions name the organization selection's write rule",
-          "_org_selection" in src.split("instructions=(", 1)[1][:2600])
+          "`observatory_machine` (`section`, `move`, `explainPid`); `observatory_sessions`" in said)
+    check("the instructions name the configuration door's write rule", "`observatory_configure`" in said)
+    check("the instructions name the organization selection's write rule", "`observatory_org_selection`" in said)
     check("the instructions name the organization views",
-          "observatory_org_accounts" in src.split("instructions=(", 1)[1][:2600])
-    check("the instructions name observatory_ssh_keys", "observatory_ssh_keys" in src.split("instructions=(", 1)[1][:2500])
+          "`observatory_org_accounts`" in said and "`observatory_org_keys`" in said)
+    check("the instructions name observatory_ssh_keys", "`observatory_ssh_keys`" in said)
     manifest = json.loads((ROOT / "fabric-agent.json").read_text(encoding="utf-8"))
     served = set(re.findall(r'@server\.capability\("([^"]+)"\)', src))
     import interop
     wanted = {c["name"] for c in interop.mcp_capabilities(manifest) if not interop.is_job(c)}
     check("and a handler for every capability that is not a job",
           served == wanted, f"served {sorted(served)} declared {sorted(wanted)}")
-    block = src.split("instructions=(", 1)[1].split("),", 1)[0]
+    block = said
     check("assistant readiness, conversation and paid ask are named", all(name in block for name in
           ("observatory_assistant_status", "observatory_assistant_conversation", "observatory_assistant_ask")))
     check("the workflow tools an executor must call are named", all(name in block for name in
@@ -306,6 +306,108 @@ def test_the_served_instructions_describe_the_served_surface() -> None:
     check("they warn that search spends", "SPENDS" in block,
           "an LLM client decides what to call from this string")
     check("and that nothing here can promote", "promote" in block)
+
+
+#: What a host keeps of the instructions is about 2,048 characters; the wire test holds them under 1,800. This much
+#: more stays free, so the next tool named on a line does not push a rule past the cut (OBS-613: they sat 5 under).
+INSTRUCTIONS_HEADROOM = 150
+#: A refusal code in the shape of an identifier: the contract spells it with hyphens (`operator-decision-required`).
+SNAKE_CODE = re.compile(r"^[a-z]+(?:_[a-z]+)+$")
+
+
+def _served_instructions(tree) -> str:
+    import ast
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "InteropServer":
+            for kw in node.keywords:
+                if kw.arg == "instructions":
+                    return ast.literal_eval(kw.value)
+    return ""
+
+
+def _expanded(text: str) -> str:
+    """The instructions with each `_x` written out as the tool `observatory_x`, as their first line defines it."""
+    return re.sub(r"`_([a-z][a-z_]*)`", r"`observatory_\1`", text)
+
+
+def _tools_and_hints(tree) -> dict[str, tuple]:
+    """Every `@server.tool` function: (its declared `read_only_hint`, or None when it declares none; its docstring)."""
+    import ast
+    out = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for deco in node.decorator_list:
+            if not (isinstance(deco, ast.Call) and isinstance(deco.func, ast.Attribute) and deco.func.attr == "tool"):
+                continue
+            hint = None
+            for kw in deco.keywords:
+                if kw.arg == "annotations" and isinstance(kw.value, ast.Call):
+                    for inner in kw.value.keywords:
+                        if inner.arg == "read_only_hint" and isinstance(inner.value, ast.Constant):
+                            hint = inner.value.value
+            out[node.name] = (hint, ast.get_docstring(node) or "")
+    return out
+
+
+def _refusal_codes(path: pathlib.Path) -> list[tuple[int, str]]:
+    """The refusal codes a module answers: the value of an `error` or `code` key in a dict literal, and the first
+    argument of a `Refusal(...)`, where it is a string constant."""
+    import ast
+    out = []
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Dict):
+            for key, value in zip(node.keys, node.values):
+                if isinstance(key, ast.Constant) and key.value in ("error", "code") \
+                        and isinstance(value, ast.Constant) and isinstance(value.value, str):
+                    out.append((value.lineno, value.value))
+        elif isinstance(node, ast.Call) and node.args and isinstance(node.args[0], ast.Constant) \
+                and isinstance(node.args[0].value, str) \
+                and (getattr(node.func, "id", None) == "Refusal" or getattr(node.func, "attr", None) == "Refusal"):
+            out.append((node.lineno, node.args[0].value))
+    return out
+
+
+def test_the_surface_states_itself() -> None:
+    """OBS-613: what the instructions and the docstrings say of the tools is what the tools do.
+
+    Every `observatory_*` tool declares whether it writes (`read_only_hint`); every one that writes is named on the
+    WRITE line, which an LLM client reads to decide what it may call unattended; every one that only reads says in its
+    docstring that it answers `degraded`, the field the DEGRADED rule tells the client to require. The instructions
+    keep headroom under what a host keeps, and a refusal code is spelled one way, the contract's (with hyphens)."""
+    import ast
+    tree = ast.parse((ROOT / "mcp/server.py").read_text(encoding="utf-8"))
+    text = _served_instructions(tree)
+    tools = _tools_and_hints(tree)
+    undeclared = sorted(name for name, (hint, _) in tools.items() if hint is None)
+    check("every tool declares whether it writes (read_only_hint)", not undeclared, str(undeclared))
+    check("the first line defines the short names the others use",
+          text.startswith("`_x` names the tool `observatory_x`.\n"), text[:60])
+    write_line = next((line for line in text.splitlines() if line.startswith("WRITE:")), "")
+    named = {"observatory" + short for short in re.findall(r"`(?:observatory)?(_[a-z_]+)`", write_line)}
+    writers = sorted(name for name, (hint, _) in tools.items() if hint is False)
+    check("the WRITE line names every tool that writes", bool(writers) and not set(writers) - named,
+          f"not named: {sorted(set(writers) - named)}")
+    check("and names no tool that only reads", not named & {n for n, (h, _) in tools.items() if h is True},
+          str(sorted(named & {n for n, (h, _) in tools.items() if h is True})))
+    silent = sorted(name for name, (hint, doc) in tools.items() if hint is True and "degraded" not in doc)
+    check("every read tool's docstring says it answers `degraded`", not silent, str(silent))
+    check(f"the instructions keep {INSTRUCTIONS_HEADROOM} characters of headroom under 1,800",
+          0 < len(text) <= 1800 - INSTRUCTIONS_HEADROOM, f"{len(text)} characters")
+    snake = [f"{path.name}:{line} {code}" for path in (ROOT / "mcp/server.py", ROOT / "configuration_door.py")
+             for line, code in _refusal_codes(path) if SNAKE_CODE.match(code)]
+    check("every refusal code the tools answer is spelled with hyphens, as the contract spells it", not snake,
+          str(snake))
+    spelled = sorted({word for _, (_, doc) in tools.items()
+                      for word in re.findall(r"`([a-z]+(?:_[a-z]+)+)`", doc)
+                      if word in {code.replace("-", "_") for code in REFUSAL_WORDS}})
+    check("and no docstring names a refusal in the earlier spelling", not spelled, str(spelled))
+
+
+#: The configuration door's refusal codes, in the contract's spelling (OBS-613).
+REFUSAL_WORDS = ("unknown-key", "invalid-value", "secret-refused", "no-changes", "file-unreadable", "plan-stale",
+                 "plan-unknown", "journal-unknown", "already-undone", "undo-refused", "actor-refused",
+                 "invalid-argument", "workspace-refused", "operator-decision-required", "decision-invalid")
 
 
 
@@ -417,6 +519,7 @@ if __name__ == "__main__":
                test_search_cannot_spend_past_the_ceiling,
                test_the_ceiling_message_does_not_blame_the_wrong_spender,
                test_the_served_instructions_describe_the_served_surface,
+               test_the_surface_states_itself,
                test_every_fixture_validates_against_the_schema_it_accompanies,
                test_the_probe_runner_sends_the_fixture_verbatim):
         fn()

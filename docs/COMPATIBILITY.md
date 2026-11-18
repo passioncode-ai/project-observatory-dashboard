@@ -420,6 +420,25 @@ No file, journal line or answer field changes shape. Downgrade: an older engine 
 `observatory/engine/tests/test_decision_check.py` (suite `decision_check`), whose matrix keeps each changed answer
 with the answer before and why. Design: [decisions-and-settings.md](design/control-plane/decisions-and-settings.md).
 
+## The MCP surface states itself (OBS-613)
+
+- **One spelling for every refusal code.** The configuration door (`full configure`, `observatory_configure`) answered
+  `unknown_key`, `invalid_value`, `secret_refused`, `no_changes`, `file_unreadable`, `plan_stale`, `plan_unknown`,
+  `journal_unknown`, `already_undone`, `undo_refused`, `actor_refused`, `invalid_argument` and `workspace_refused`;
+  it now answers the same codes with hyphens (`plan-stale`), as every other tool and the contract do. So does
+  `observatory_mcp_accept` (`invalid-argument`). The door still reads the earlier spelling where a code is passed to
+  it (`configuration_door.refusal_code`). A client that compared `error` with the earlier spelling compares with the
+  hyphenated one, or accepts both. CLI exit codes are unchanged.
+- **The instructions** define `_x` as the tool `observatory_x` on their first line and use the short form after it;
+  the WRITE line names every tool that writes. A client that searched the text for a full tool name reads the short
+  one too.
+- **Annotations.** Every `observatory_*` tool now declares `readOnlyHint` (and a writer its `destructiveHint` and
+  `idempotentHint`) in `tools/list`.
+- `observatory_assistant_conversation` answers `degraded: []` beside a conversation read whole.
+
+No tool name, input schema or answer field is removed. Downgrade: an older engine answers the earlier spelling.
+Design: [mcp-surface.md](design/control-plane/mcp-surface.md).
+
 ## Every setting through the one door (OBS-612)
 
 The configuration door now also declares the settings that had files of their own: the switch files `auto-update`
