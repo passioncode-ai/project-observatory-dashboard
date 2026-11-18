@@ -7,6 +7,7 @@ import importlib
 from html.parser import HTMLParser
 import importlib.util
 from pathlib import Path
+import re
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -334,6 +335,30 @@ class MonitoringNavigation(unittest.TestCase):
         self.assertEqual(groups["system"], ("machine", "tools", "disk"))
         listed = [n for names in groups.values() for n in names if n not in shell.NAV_LINKS]
         self.assertEqual(sorted(listed), sorted(shell.NAMES), "every page is reachable, once")
+
+    def test_integrations_sits_inside_availability(self):
+        """CP-17 (OBS-619): Availability covers sites, apps and integrations, so the Integrations page is an entry
+        inside Availability, not a fourth entry beside it; its address stays `integrations.html`."""
+        self.assertEqual(shell.NAV_PARENTS, {"integrations": "availability"})
+        for page, t in (("index", None), ("integrations", RU)):
+            with self.subTest(page=page):
+                nav = shell.nav_html(page, {"availability": 1, "integrations": 2}, t)
+                monitoring = re.search(r'<section class="nav-group" aria-labelledby="nav-monitoring">.*?</section>',
+                                       nav, re.S).group(0)
+                sub = re.search(r'<div class="nav-sub" role="group" aria-label="([^"]+)"[^>]*>(.*?)</div>',
+                                monitoring, re.S)
+                self.assertTrue(sub, "Availability carries a group of its own entries")
+                self.assertEqual(sub.group(1), "Доступность" if t else "Availability")
+                self.assertEqual(re.findall(r'href="([^"]+)"', sub.group(2)), ["integrations.html"])
+                self.assertLess(monitoring.index('href="findings.html?group=availability"'), sub.start(),
+                                "the group follows its parent's entry")
+                self.assertEqual(nav.count('href="integrations.html"'), 1, "reachable once")
+                self.assertIn('<span class="n">2</span>', sub.group(2), "the page keeps its badge")
+        self.assertIn('href="integrations.html" aria-current="page"', shell.nav_html("integrations", {}))
+        css = (ROOT / "dashboard/workspace.css").read_text(encoding="utf-8")
+        self.assertIn(".nav-sub {", css)
+        self.assertRegex(css, r"body\[data-page\] \.nav-sub \{ display: contents; \}",
+                         "the phone grid keeps one cell per entry")
 
     def test_security_and_availability_open_the_findings_page_narrowed(self):
         items = [{"id": "s1", "type": "secret.leaked_unrotated", "severity": "critical"},

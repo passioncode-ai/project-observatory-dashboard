@@ -743,8 +743,8 @@
       "path": "dashboard/page_table.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2bae60f6866aea97867719e10145e14077cd5cf671a2271c5f5232305fc75dbb",
-      "bytes": 7721
+      "export_sha256": "e9e2903bd6ae1a59c62263afcb643383e0a07f97c85568a429454f9be9fd69cc",
+      "bytes": 8007
     },
     {
       "path": "dashboard/page_util.py",
@@ -756,8 +756,8 @@
     {
       "path": "dashboard/shell.py",
       "source_sha256": "d4249174d8cbd7296825e38c520b3d841a13573022239d559b7d06f342218d30",
-      "export_sha256": "dec910ead12942cd7367d4c855cc40913dda2a776f952be4b611a8a54b655211",
-      "bytes": 30133,
+      "export_sha256": "b8c1c46d512056d10b799b0799294e8f75ddb8723ad6c6df61d129b6dc89ea1c",
+      "bytes": 30757,
       "python_comments_removed": 38,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,
@@ -798,8 +798,8 @@
       "path": "dashboard/workspace.css",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2d22c5bff949b7047320ec3a3a1608ca4234ed760e734d180f2a42367b7170de",
-      "bytes": 21807
+      "export_sha256": "5fdfd51a88b8371bf311a7bad7101918c8e323a851712d47facd9f8caf36bd6c",
+      "bytes": 22045
     },
     {
       "path": "dashboard_stamp.py",
@@ -1059,8 +1059,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "6353629308a87def076aa8fe92de8fa62b9a5a49aedec0ce537fd037661735c2",
-      "bytes": 274067,
+      "export_sha256": "94546b7dc1e98d099ac8bf4720fa1eb84e0dd0609a74e6f0a12b1cf3727d21f0",
+      "bytes": 274118,
       "upstream_modified": true
     },
     {
@@ -5221,8 +5221,8 @@
       "path": "tests/test_dashboard_shell.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "890402667efbc9f09c82fbc7c93e40185a552c7eb17f2a6a572517973f7c2046",
-      "bytes": 29351
+      "export_sha256": "421f839e3c49e42ef22a52e5af1826b3ddbe878cf1e2f1c14681c7ac09bc48ab",
+      "bytes": 31277
     },
     {
       "path": "tests/test_dashboard_stop.py",
@@ -5752,8 +5752,8 @@
       "path": "tests/test_integrations_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "eb692263c5df4e212827534f68c1ef4e56b3538c843d59be61035c2f59a91703",
-      "bytes": 10193
+      "export_sha256": "8d8d921248c1f8432d8e2562e4cf17c0ae30a799bcd06cf21be4dd7f8317761f",
+      "bytes": 10309
     },
     {
       "path": "tests/test_interop.py",

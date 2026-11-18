@@ -127,6 +127,7 @@ class Banner(unittest.TestCase):
 class Navigation(unittest.TestCase):
     def test_the_page_is_in_monitoring_and_has_a_question_and_a_card(self):
         self.assertIn("integrations", [n for g, _l, names in shell.NAV_GROUPS if g == "monitoring" for n in names])
+        self.assertEqual(shell.NAV_PARENTS["integrations"], "availability", "inside Availability (CP-17, OBS-619)")
         self.assertIn("integrations", shell.QUESTIONS)
         cards = shell.cards_html(payload(), {"projects": 1, "findings": 0, "domains": 0, "heroku": 0, "creds": 0,
                                              "env": 0, "mcp": 0}, Translator("en"))
