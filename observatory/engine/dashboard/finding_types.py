@@ -88,6 +88,7 @@ LABELS: dict[str, str] = {
     "dep.vulnerable": "Dependency with a known vulnerability",
     "doctor.backup_stale": "Workspace backup out of date",
     "doctor.fix_failed": "Daily doctor fix not applied",
+    "doctor.registry_never_built": "Project registry never built",
     "doctor.step_failing": "Maintenance step failing",
     "doctor.vault_meta_unreadable": "Vault metadata unreadable",
     "dep.watch_stale": "Vulnerability watch out of date",

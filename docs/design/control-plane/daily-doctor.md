@@ -25,6 +25,7 @@ a short summary only when the day's result differs from the previous run's, insi
 | `backup_stale` | `store/maintenance.json` `snapshot` | the newest backup is 48 hours old or none is recorded | `doctor.backup_stale` |
 | `step_failing` | `store/maintenance.json` `step_streaks` | a step answered `error` or `failed` on its last 4 passes | `doctor.step_failing`, one per step |
 | `vault_meta` | the vault's `*.meta.json` only | a slot's metadata does not parse to an object | `doctor.vault_meta_unreadable` |
+| `registry_built` | `registry/projects.json`, `store/maintenance.json` `registry` | the registry is missing or holds no project (OBS-624) | `doctor.registry_never_built`, with the pass's last registry answer |
 | `scan_fresh` | `store/observatory.db` `scans` (read-only) | no scan for 3 hours | covered by `scan.stale` |
 | `mcp_doors` | `store/raw/lifecycle.json` | a session server runs replaced code | covered by `lifecycle.stale_servers` |
 | `plugin_behind` | `store/raw/harness.json` | an installed plugin is behind its marketplace | covered by `harness.plugin_behind` |
@@ -83,7 +84,7 @@ Health of the engine, 2026-11-16                          summary (only when it 
 
 `test_doctor.py`: a safe fix runs, journals and undoes (CP-15); an undo refuses a replaced file; `--undo-last`
 takes the newest first; a dry run moves nothing; the quarantine is pruned after its keep; a stale backup, a failing
-step and unreadable metadata only report and change nothing; covered checks add no row; absent sources are
+step, unreadable metadata and a registry never built only report and change nothing; covered checks add no row; absent sources are
 `unknown` and named; the summary runs only on a change and is off without a key; the pass runs the doctor once a day
 and retries a failed run. The MCP wire test reads the empty view and an unknown undo; the parity test pins the CLI
 verbs to `observatory_doctor`.

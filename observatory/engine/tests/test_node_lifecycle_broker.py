@@ -1049,9 +1049,27 @@ class EngineTests(BrokerFixture, unittest.TestCase):
     # -- deliberate starts do not spend the crash circuit's budget
 
     def test_stop_and_start_cycles_by_a_caller_never_open_the_circuit(self):
-        for i in range(4):
-            self.assertEqual(self.wait(self.broker.ensure(self.agent, self.args(f's-{i}')), self.agent)['state'], 'ready')
-            self.assertEqual(self.wait(self.broker.stop(self.agent, self.args(f'x-{i}')), self.agent)['state'], 'stopped')
+        # OBS-622: on the real-time clock each cycle's two-second deadline was the runner's, and a loaded Windows
+        # runner crossed one. Here the wall clock jumps three seconds inside every identity check (a runner that
+        # stalls longer than the whole budget) and the answer must not change: the broker's deadlines read its own
+        # clock, which moves only when the test moves it (as OBS-586 did for the restart budget).
+        self.broker.close()
+        self.clock = ManualClock()
+        self.broker = self.make_broker()
+        real, wall = time.time, [0.0]
+
+        def stalls(target, *, deadline=None):
+            wall[0] += 3
+            return True
+
+        self.adapter.identity_matches = stalls
+        with mock.patch.object(time, 'time', lambda: real() + wall[0]):
+            for i in range(4):
+                got = self.wait(self.broker.ensure(self.agent, self.args(f's-{i}')), self.agent)
+                self.assertEqual(got['state'], 'ready', got)
+                got = self.wait(self.broker.stop(self.agent, self.args(f'x-{i}')), self.agent)
+                self.assertEqual(got['state'], 'stopped', got)
+        self.assertGreater(wall[0], 2 * 4, 'the wall clock really crossed every deadline')
 
     def test_restarts_never_open_the_circuit(self):
         self.wait(self.broker.ensure(self.agent, self.args('s-1')), self.agent)

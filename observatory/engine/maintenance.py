@@ -25,7 +25,10 @@ timer on Linux — and each pass does only what is due:
    `full share sync --due`, in a process of its own (`step_shares`): the sender reads reports,
    seals again before a sealed copy ends or after a rotation, and hands the mailbox a revocation
    it did not take; the recipient renews and reports at least daily. A failed pass is recorded as
-   `shares.unsynced` and retried at the next hour.
+   `shares.unsynced` and retried at the next hour;
+7. when `registry/projects.json` is missing, does not parse, holds no project or was last built more than a day
+   ago (a workspace whose only jobs are this pass and the check, OBS-624): one tick (`step_registry`), under the
+   tick's own supervisor and lease and a ceiling of its own, tried again at most hourly.
 
 The scheduler runs the pass every 15 minutes and at load; launchd passes `--first-check-delay 90`
 so the first check waits 90 seconds after the job starts (a login, a boot), and the
@@ -1460,9 +1463,93 @@ def step_doctor(base: Path, state: dict, at: datetime.datetime, runner=None) -> 
     return result
 
 
+#: THE REGISTRY PASS (OBS-624). A workspace whose only jobs are this pass and the check (no tick job) never built its
+#: registry: `registry/projects.json` stayed the empty one `init` wrote, and every reader of it had nothing. When that
+#: file is missing, does not parse, holds no project, or the registry was last built more than REGISTRY_EVERY ago,
+#: the pass runs one tick (`tools/tick.py`, under the tick's own supervisor and lease, so a tick already running makes
+#: it stand down) with REGISTRY_CEILING as its ceiling, at most once every REGISTRY_RETRY.
+REGISTRY_EVERY = datetime.timedelta(hours=24)
+REGISTRY_RETRY = datetime.timedelta(hours=1)
+REGISTRY_CEILING = 900
+#: The tick stops itself at its ceiling; this is the ceiling plus the supervisor's and a step's grace, with room.
+REGISTRY_TIMEOUT = REGISTRY_CEILING + 60
+REGISTRY_LOG = "registry-pass.log"
+
+
+def registry_now(base: Path, at: datetime.datetime) -> dict:
+    """What the workspace's registry is now: `state` missing, unreadable, empty, stale or fresh, and `built`, the
+    newest moment it was built: the file's own time, or the last tick's end when that tick refreshed it (an unchanged
+    document keeps its old file)."""
+    path = Path(os.environ.get("OBSERVATORY_REGISTRY") or base / "registry") / "projects.json"
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        written = datetime.datetime.fromtimestamp(path.stat().st_mtime, tz=datetime.timezone.utc)
+    except FileNotFoundError:
+        return {"state": "missing", "built": None}
+    except (OSError, ValueError):
+        return {"state": "unreadable", "built": None}
+    projects = doc.get("projects") if isinstance(doc, dict) else None
+    if not isinstance(projects, list) or not projects:
+        return {"state": "empty", "built": None}
+    moments = [written]
+    scratch = Path(os.environ.get("OBSERVATORY_SCRATCH") or base / "store" / "raw")  # paths-check: allow: the maintained workspace
+    try:
+        tick = json.loads((scratch / "tick.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        tick = None
+    if isinstance(tick, dict) and tick.get("registry_refreshed") is not False and parse_iso(tick.get("finished_at")):
+        moments.append(parse_iso(tick.get("finished_at")))
+    built = max(moments)
+    return {"state": "stale" if at - built > REGISTRY_EVERY else "fresh", "built": iso(built)}
+
+
+def step_registry(base: Path, state: dict, at: datetime.datetime, runner=None) -> dict:
+    """The registry pass (OBS-624): one tick when the registry was never built or is a day old. A failed tick is
+    recorded and tried again after REGISTRY_RETRY; never raises. A process that may not touch the machine (a test's
+    workspace) runs none."""
+    before = registry_now(base, at)
+    if before["state"] == "fresh":
+        return {"result": "fresh", "built": before["built"]}
+    tried = parse_iso((state.get("registry") or {}).get("tried"))
+    if tried and at - tried < REGISTRY_RETRY:
+        return {"result": "not-due", "registry": before["state"], "tried": iso(tried)}
+    if runner is None and not system_setup_allowed(base):
+        return {"result": "not-allowed", "registry": before["state"]}
+    environ = {k: v for k, v in os.environ.items() if k not in {"PYTHONPATH", "OBSERVATORY_ROOT"}}
+    environ["OBSERVATORY_HOME"] = str(base)
+    environ[IN_PASS_ENV] = "1"
+    import tick_budget
+    environ[tick_budget.CEILING_ENV] = str(REGISTRY_CEILING)
+    run = runner or subprocess.run
+    log = base / "store" / "logs" / REGISTRY_LOG
+    log.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with _private_file(log) as out:
+            p = run([engine_python(), "-P", str(Path(__file__).resolve().parent / "tools" / "tick.py")],
+                    stdout=out, stderr=subprocess.STDOUT, timeout=REGISTRY_TIMEOUT, env=environ,
+                    cwd=tempfile.gettempdir(), stdin=subprocess.DEVNULL)
+        code = p.returncode
+    except subprocess.TimeoutExpired:
+        code = 124
+    except OSError:
+        code = 125
+    after = registry_now(base, at)
+    if after["state"] == "fresh":
+        result = {"result": "built", "exit": code, "built": after["built"]}
+    else:
+        try:
+            last = (log.read_text(encoding="utf-8", errors="replace").strip().splitlines() or [""])[-1]
+        except OSError:
+            last = ""
+        result = {"result": "failed", "exit": code, "registry": after["state"],
+                  "detail": redact_line(last)[:300] or f"the tick exited {code} and left the registry {after['state']}"}
+    state["registry"] = {"tried": iso(at), **result}
+    return result
+
+
 def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Commands | None = None,
              services=..., store=None, app=None, sleep=time.sleep, first_check_delay: float = 0,
-             clock=time.monotonic, guard=step_guard, machine=None, hung=None) -> dict:
+             clock=time.monotonic, guard=step_guard, machine=None, hung=None, registry=step_registry) -> dict:
     """One pass of everything that is due. Never raises for a step's own failure: each
     is recorded in store/maintenance.json and named in the answer.
 
@@ -1521,6 +1608,14 @@ def run_pass(base: Path, *, at: datetime.datetime | None = None, commands: Comma
                 report["jobs"] = step_jobs(base=base)
         if not report["update"]["result"].startswith("updated"):
             report["opsDigests"] = step_ops_digests(base)
+            # Before the key sweep, which has no repository to sweep until the registry names one (OBS-624).
+            if update_running(base):
+                report["registry"] = {"result": "waiting-for-engine-update"}
+            else:
+                try:
+                    report["registry"] = registry(base, state, at)
+                except Exception as exc:  # noqa: BLE001: the registry pass never stops the pass
+                    report["registry"] = {"result": "error", "detail": f"{type(exc).__name__}: {str(exc)[:200]}"}
             try:
                 report["keySweep"] = step_key_sweep(base, state, at)
             except Exception as exc:  # noqa: BLE001: a sweep never stops the pass
