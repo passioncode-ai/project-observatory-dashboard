@@ -3893,21 +3893,32 @@ function keepCred(c, q, section) {
   return true;
 }
 
-// WHERE A SLOT'S VALUE CAME FROM (OBS-556, CP-10): issued by a door, handed over by a sender a person named,
-// the same value as another project's slot, or unknown. Names and records only, as the registry row carries them.
+// WHERE A SLOT'S VALUE CAME FROM (OBS-556, OBS-604, CP-10): issued by a door, handed over by a sender a person named,
+// shared out to another party, the same value as another project's slot (copied), or unknown; and whose it is.
+// Names and records only, as the registry row carries them. A row built before OBS-604 says `shared` for a copy.
 function keySourceOf(c) {
   if (!c.key_source) return "";
   const x = c.key_source_context || {};
+  const cls = c.key_source === "shared" && !(c.key_source_shared_to || []).length ? "copied" : c.key_source;
+  const copies = c.key_source_copied_with || c.key_source_shared_with || [];
   const KIND = {issued: [T("issued by a door"), "ok"], received: [T("handed over"), "ok"],
-                shared: [T("shared with another project"), "warn"], unknown: [T("source unknown"), "warn"]};
-  const [label, tone] = KIND[c.key_source] || KIND.unknown;
-  const said = c.key_source === "issued" ? [x.door, x.account].filter(Boolean).map(E).join(" · ")
-    : c.key_source === "received" ? T("from {who}", {who: E(x.from || "")})
-    : c.key_source === "shared" ? T("same value as {slots}", {slots: E((x.with || []).join(", "))})
+                shared: [T("shared out to another party"), "warn"],
+                copied: [T("shared with another project"), "warn"], unknown: [T("source unknown"), "warn"]};
+  const [label, tone] = KIND[cls] || KIND.unknown;
+  const said = cls === "issued" ? [x.door, x.account].filter(Boolean).map(E).join(" · ")
+    : cls === "received" ? T("from {who}", {who: E(x.from || "")})
+    : cls === "shared" ? T("handed to {who}", {who: E((x.to || []).join(", "))})
+    : cls === "copied" ? T("same value as {slots}", {slots: E((x.with || copies).join(", "))})
     : T("put by hand; nobody recorded who handed it over");
-  const also = c.key_source !== "shared" && (c.key_source_shared_with || []).length
-    ? `<div class="anchor">${T("same value as {slots}", {slots: E(c.key_source_shared_with.join(", "))})}</div>` : "";
-  return `<div class="tier">${chip(label, tone)}</div><div class="anchor">${said}</div>${also}`;
+  const also = cls !== "copied" && copies.length
+    ? `<div class="anchor">${T("same value as {slots}", {slots: E(copies.join(", "))})}</div>` : "";
+  const out = cls !== "shared" && (c.key_source_shared_to || []).length
+    ? `<div class="anchor">${T("handed to {who}", {who: E([...new Set(c.key_source_shared_to.map(s => s.to))].join(", "))})}</div>` : "";
+  const k = c.key_context || {};
+  const WHOSE = {personal: T("personal"), "not-ours": T("not ours"), undecided: T("organization undecided")};
+  const whose = !k.kind ? "" : `<div class="anchor">${k.kind === "organization"
+    ? T("organization: {name}", {name: E(k.label || k.organization || "")}) : (WHOSE[k.kind] || E(k.kind))}</div>`;
+  return `<div class="tier">${chip(label, tone)}</div><div class="anchor">${said}</div>${also}${out}${whose}`;
 }
 
 function renderCreds() {

@@ -1,5 +1,8 @@
 # Keys by source (M7, OBS-556, CP-10)
 
+OBS-604 renamed the copy class to `copied`, gave `shared` its outward meaning and added each key's context and
+consumers from every revoke-guard source: [keys-by-organization.md](keys-by-organization.md).
+
 ## What
 
 Every vault slot is classed by where its value came from, so a person or an agent knows whom to ask and what a

@@ -568,8 +568,8 @@ class RulesPart2(Base):
 STAND_IN_VALUE = "synthetic-not-a-value"
 
 
-class Views(Base):
-    """OBS-411 and OBS-415: `full org accounts` and `full org keys`, read-only and without a value."""
+class ViewsFixture(Base):
+    """The synthetic estate the organization views read: registry documents, door records and a vault."""
 
     def setUp(self):
         super().setUp()
@@ -667,6 +667,11 @@ class Views(Base):
         for path in self.secrets.rglob("*"):
             if path.is_file() and not path.name.endswith((".json", ".jsonl")):
                 path.chmod(0)
+
+
+
+class Views(ViewsFixture):
+    """OBS-411 and OBS-415: `full org accounts` and `full org keys`, read-only and without a value."""
 
     def test_every_account_once_under_one_organization_or_a_decision(self):
         v = self.view.accounts()
@@ -1036,6 +1041,171 @@ class Views(Base):
         with contextlib.redirect_stderr(err):
             self.assertEqual(org_cli.main(["keys", "--org", "company", "--json"]), 1)
         self.assertEqual(json.loads(err.getvalue())["error"], "no-organizations")
+
+
+class HerokuUsers(ViewsFixture):
+    """OBS-628: `match.heroku_users` names the Heroku user (by the email or the id its admin stash records) whose keys
+    are an organization's, so a key that user issued for the organization's project is attributed, not ambiguous."""
+
+    def setUp(self):
+        super().setUp()
+        self.private("heroku-admin/me", STAND_IN_VALUE)
+        self.private("heroku-admin/me.meta.json", json.dumps(
+            {"kind": "admin", "account_id": "00000000-aaaa-4aaa-8aaa-000000000001", "email": "ops@example.com"}))
+        self.private("heroku-issued.json", json.dumps({"issued": {
+            "co-web/prod/DEPLOY_HEROKU_TOKEN": {"team": "co-apps"},
+            "co-web/prod/HEROKU_USER_TOKEN": {"team": None, "admin": "me"}}}))
+        self.private("projects/co-web/prod/HEROKU_USER_TOKEN", STAND_IN_VALUE)
+
+    def name_user(self, *values):
+        orgs = json.loads(self.home.joinpath("config", "organizations.json").read_text())
+        orgs["organizations"]["company"]["match"]["heroku_users"] = list(values)
+        self.write("organizations.json", orgs)
+
+    def test_without_the_rule_the_user_s_key_stays_ambiguous_and_the_user_personal(self):
+        self.seal_values()
+        k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
+        self.assertEqual(k["co-web/prod/HEROKU_USER_TOKEN"]["class"], "ambiguous")
+        self.assertEqual(k["co-web/prod/HEROKU_USER_TOKEN"]["issuer"]["source"], "default")
+        rows = {r["id"]: r for r in self.view.accounts()["accounts"]}
+        self.assertEqual((rows["heroku:user"]["organization"], rows["heroku:user"]["source"]), ("person", "default"))
+
+    def test_the_rule_by_email_attributes_the_key_and_the_account(self):
+        self.name_user("OPS@example.com")
+        self.seal_values()
+        v = self.view.keys("company")
+        k = {r["slot"]: r for r in v["keys"]}
+        user = k["co-web/prod/HEROKU_USER_TOKEN"]
+        self.assertEqual((user["class"], user["selected"]), ("organization", True))
+        self.assertEqual((user["issuer"]["accountId"], user["issuer"]["organization"], user["issuer"]["source"]),
+                         ("heroku:user", "company", "rule"))
+        rows = {r["id"]: r for r in self.view.accounts()["accounts"]}
+        self.assertEqual((rows["heroku:user"]["organization"], rows["heroku:user"]["source"]), ("company", "rule"))
+        self.assertIn("match.heroku_users", rows["heroku:user"]["why"])
+        heroku = next(n for n in v["notMovable"] if n["provider"] == "heroku")
+        self.assertEqual(heroku["accounts"][0], {"account": "your Heroku user", "organization": "company",
+                                                 "source": "rule"})
+        self.assertNotIn(STAND_IN_VALUE, json.dumps(v) + json.dumps(self.view.accounts()))
+        self.assertEqual(self.orgs.validate(json.loads(self.home.joinpath("config", "organizations.json").read_text())),
+                         [])
+
+    def test_the_rule_by_id_reads_the_same(self):
+        self.name_user("00000000-aaaa-4aaa-8aaa-000000000001")
+        k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
+        self.assertEqual(k["co-web/prod/HEROKU_USER_TOKEN"]["class"], "organization")
+
+    def test_a_ledger_row_with_no_admin_reads_every_stashed_user(self):
+        self.private("heroku-issued.json", json.dumps({"issued": {
+            "co-web/prod/HEROKU_USER_TOKEN": {"team": "personal"}}}))
+        self.name_user("ops@example.com")
+        k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
+        self.assertEqual(k["co-web/prod/HEROKU_USER_TOKEN"]["issuer"]["organization"], "company")
+
+    def test_a_user_two_organizations_name_is_shared_and_decides_nothing(self):
+        self.name_user("ops@example.com")
+        orgs = json.loads(self.home.joinpath("config", "organizations.json").read_text())
+        orgs["organizations"]["person"]["match"]["heroku_users"] = ["ops@example.com"]
+        self.write("organizations.json", orgs)
+        rows = {r["id"]: r for r in self.view.accounts()["accounts"]}
+        self.assertEqual((rows["heroku:user"]["source"], rows["heroku:user"]["claimedBy"]),
+                         ("conflict", ["company", "person"]))
+        k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
+        self.assertEqual(k["co-web/prod/HEROKU_USER_TOKEN"]["class"], "ambiguous")
+
+    def test_the_rule_validates_and_a_non_list_is_named(self):
+        orgs = json.loads(json.dumps(ORGS))
+        orgs["organizations"]["company"]["match"]["heroku_users"] = ["ops@example.com"]
+        self.assertEqual(self.orgs.validate(orgs), [])
+        orgs["organizations"]["company"]["match"]["heroku_users"] = "ops@example.com"
+        self.assertTrue(any("match.heroku_users must be a list of strings" in p for p in self.orgs.validate(orgs)))
+        self.assertIn("heroku_users", self.orgs.MATCH_RULES)
+
+
+class ForeignIssuers(ViewsFixture):
+    """OBS-627: a key whose issuer belongs to another organization than its project, or to an account no organization
+    claims, is the finding `org.foreign_issuer`, unless that organization declares the issuer shared on purpose
+    (`match.shared_issuers`) or the project names it a partner (`partners`)."""
+
+    def rows(self):
+        got = self.view.foreign_issuers()
+        self.assertNotIn(STAND_IN_VALUE, json.dumps(got))
+        return {r["slot"]: r for r in got["rows"]}, got
+
+    def config(self, edit):
+        orgs = json.loads(self.home.joinpath("config", "organizations.json").read_text())
+        edit(orgs)
+        self.write("organizations.json", orgs)
+
+    def test_a_key_from_another_organization_s_account_is_named_both_ways(self):
+        self.seal_values()
+        rows, got = self.rows()
+        stage = rows["co-web/stage/OPENROUTER_API_KEY"]
+        self.assertEqual((stage["project"], stage["projectOrganization"]), ("project:co-web", "company"))
+        self.assertEqual((stage["issuer"]["account"], stage["issuer"]["organization"]), ("main", "person"))
+        self.assertIn("openrouter.py\" issue --account company-or", stage["step"])
+        self.assertIn("vault:co-web/stage/OPENROUTER_API_KEY", stage["step"])
+        mine = rows["mine/local/OPENROUTER_API_KEY"]
+        self.assertEqual((mine["issuer"]["organization"], mine["projectOrganization"]), ("company", "person"))
+        self.assertNotIn("co-web/prod/OPENROUTER_API_KEY", rows, "the organization's own account: not foreign")
+        self.assertNotIn("both/prod/OPENROUTER_API_KEY", rows, "a project in conflict has no organization to compare")
+        self.assertNotIn("co-web/prod/HAND_PUT", rows, "a key put by hand has no known issuer")
+        self.assertEqual(got["degraded"], [d for d in got["degraded"] if d.get("code")])
+
+    def test_an_issuer_shared_on_purpose_is_not_a_finding(self):
+        self.config(lambda o: o["organizations"]["company"]["match"].update(
+            shared_issuers=["openrouter:account:company-or"]))
+        rows, _ = self.rows()
+        self.assertNotIn("mine/local/OPENROUTER_API_KEY", rows, "company shares its own account on purpose")
+        self.assertIn("co-web/stage/OPENROUTER_API_KEY", rows, "another account's key is still named")
+        self.config(lambda o: o["organizations"]["company"]["match"].update(
+            shared_issuers=["openrouter:account:main"]))
+        rows, _ = self.rows()
+        self.assertIn("co-web/stage/OPENROUTER_API_KEY", rows,
+                      "an organization cannot declare another organization's account shared")
+
+    def test_an_account_no_organization_claims_is_named_unless_it_is_the_project_s_partner(self):
+        self.private("openrouter-issued.json", json.dumps({"issued": {
+            "co-web-partner": {"account": "partner-co", "destination": "vault:co-web/prod/PARTNER_LLM"}}}))
+        self.private("projects/co-web/prod/PARTNER_LLM", STAND_IN_VALUE)
+        rows, _ = self.rows()
+        partner = rows["co-web/prod/PARTNER_LLM"]
+        self.assertEqual((partner["issuer"]["organization"], partner["issuer"]["source"]), (None, "none"))
+        self.config(lambda o: o.update(partners=[{"issuer": "openrouter:account:partner-co",
+                                                  "projects": ["project:co-web"], "why": "the partner runs it"}]))
+        rows, _ = self.rows()
+        self.assertNotIn("co-web/prod/PARTNER_LLM", rows)
+        self.config(lambda o: o.update(partners=[{"issuer": "openrouter:account:partner-co",
+                                                  "projects": ["project:mine"], "why": "another project"}]))
+        rows, _ = self.rows()
+        self.assertIn("co-web/prod/PARTNER_LLM", rows, "a partner of another project covers nothing here")
+
+    def test_the_findings_board_carries_the_row_and_never_a_value(self):
+        import organization_findings
+        importlib.reload(organization_findings)
+        rows = organization_findings.foreign_issuer_findings(self.view.foreign_issuers())
+        stage = next(f for f in rows if f["subject"] == "credential:vault/co-web/stage/OPENROUTER_API_KEY")
+        self.assertEqual((stage["type"], stage["severity"]), ("org.foreign_issuer", "warning"))
+        self.assertIn("main", stage["detail"])
+        self.assertIn("openrouter.py\" issue", stage["action"])
+        self.assertIn("match.shared_issuers", stage["action"])
+        self.assertEqual(stage["title_id"], "{slot} was issued in another organization's account")
+        self.assertIn("org.foreign_issuer", organization_findings.TYPES)
+        self.assertNotIn(STAND_IN_VALUE, json.dumps(rows))
+
+    def test_silent_without_organizations_and_the_new_entries_validate(self):
+        self.write("organizations.json", {"organizations": {}, "projects": {}})
+        self.assertEqual(self.view.foreign_issuers()["rows"], [])
+        orgs = json.loads(json.dumps(ORGS))
+        orgs["organizations"]["company"]["match"]["shared_issuers"] = ["openrouter:account:company-or"]
+        orgs["partners"] = [{"issuer": "openrouter:account:partner-co", "projects": ["project:x"], "why": "w"}]
+        self.assertEqual(self.orgs.validate(orgs), [])
+        orgs["organizations"]["company"]["match"]["shared_issuers"] = ["company-or"]
+        orgs["partners"] = [{"issuer": "openrouter:account:p", "projects": ["x"]}, "not an object"]
+        problems = self.orgs.validate(orgs)
+        self.assertTrue(any("match.shared_issuers" in p and "account id" in p for p in problems), problems)
+        self.assertTrue(any("partners[0]" in p and "project" in p for p in problems), problems)
+        self.assertTrue(any("partners[0]" in p and "why" in p for p in problems), problems)
+        self.assertTrue(any("partners[1]" in p for p in problems), problems)
 
 
 if __name__ == "__main__":

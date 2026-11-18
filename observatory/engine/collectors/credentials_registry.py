@@ -650,7 +650,13 @@ def records(scan: dict, store: pathlib.Path, projects: list[dict]) -> tuple[list
                 c["key_source"] = got.get("source", "unknown")
                 c["key_source_context"] = got.get("sourceContext") or {}
                 if got.get("sharedWith"):
-                    c["key_source_shared_with"] = got["sharedWith"]
+                    c["key_source_shared_with"] = got["sharedWith"]          # the copies, by its published name
+                if got.get("copiedWith"):
+                    c["key_source_copied_with"] = got["copiedWith"]
+                if got.get("sharedTo"):
+                    c["key_source_shared_to"] = got["sharedTo"]               # handed to another party (OBS-604)
+                if got.get("context"):
+                    c["key_context"] = got["context"]                          # personal or an organization's
     signatures = load_annotations()
     for c in creds:
         sig = signatures.get(c["id"])

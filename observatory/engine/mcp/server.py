@@ -516,12 +516,18 @@ def observatory_credentials(
     issued on a credential request carries `issuedOnRequest` (the request id, its
     context, agent, door and account; `credential_requests.py show ID` has the rest).
 
-    Each vault row says where its value came from (OBS-556): `source` is `issued` (a door's ledger or record, or a
-    credential request, with `sourceContext` naming the door and account), `received` (`vault.py put --from LABEL`:
-    the sender as a person typed it), `shared` (the same keyed digest under another project's folder) or `unknown`
-    (put by hand; never read as issued). `sharedWith` names the other slots holding the value, `consumers` the
-    services started from the slot, and `consumersTool` the tool that finds every other copy by the value.
-    A source it could not read (the vault, a door's ledger, an unknown project) is named in `degraded`.
+    Each vault row says where its value came from (OBS-556, OBS-604): `source` is `issued` (a door's ledger or
+    record, or a credential request, with `sourceContext` naming the door and account), `received` (`vault.py put
+    --from LABEL`: the sender as a person typed it), `shared` (handed to another party: a sent peer share, a
+    credential request into an organization's context, an organization selection's hand-over), `copied` (the same
+    keyed digest under another project's folder of this vault; `shared` before 0.43) or `unknown` (put by hand;
+    never read as issued). `copiedWith` (and `sharedWith`, its earlier name) names the other slots holding the
+    value, `sharedTo` each party it was handed to, `context` whose the key is (`personal`, `organization` with its
+    name, `not-ours`, `undecided`), `consumers` who reads it from every source the revoke guard reads (the
+    OpenRouter scan, Heroku config vars, env files, services started from the slot; the value compared in memory,
+    never returned), and `consumersTool` the tool that answers the same for one slot.
+    A source it could not read (the vault, a door's ledger, a share record, an unknown project) is named in
+    `degraded`.
     """
     bad = _project_id_refusal(projectId, bare=True)
     if bad:
@@ -706,7 +712,7 @@ def observatory_org_accounts() -> dict[str, Any]:
     Heroku teams and the Heroku user, OpenRouter accounts), each under exactly one organization (the default
     Personal, another of `config/organizations.json`, or Not ours) with `source` (`rule`: a `match` rule names it;
     `default`: a repository owner of yours no rule names, whose projects take the default organization, the Heroku
-    user, which no rule kind names, or every account when no organizations are configured; `external`: a
+    user when no `match.heroku_users` names it, or every account when no organizations are configured; `external`: a
     repository owner outside `config/ownership.json`), or listed in `needsDecision` with the reason: `conflict`
     (two organizations claim it), `none` (a provider account no rule names, which decides no project until a rule
     in `config/organizations.json` does), or seen and not connected (with the door's command that connects it).
@@ -718,7 +724,8 @@ def observatory_org_accounts() -> dict[str, Any]:
     context is compared with the stashed tokens in memory by the DigitalOcean door, as `digitalocean.py teams`
     does). The same answer as `project-observatory full org accounts --json` (schema `org-accounts/1`). Saying which organization an account
     belongs to is a rule in `organizations.json` (`match.github_owners`, `digitalocean_teams`,
-    `cloudflare_accounts`, `heroku_teams`, `openrouter_accounts`)."""
+    `cloudflare_accounts`, `heroku_teams`, `heroku_users` (by the email or id its admin stash records),
+    `openrouter_accounts`)."""
     import org_view
     return org_view.accounts()
 

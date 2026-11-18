@@ -907,16 +907,17 @@ def credentials(project_id: str) -> dict:
                             "use": (f"python \"$(project-observatory full-path)/tools/use_secret.py\" "
                                     f"run --env {envdir.name} {name} {slot.name} -- <command>")})
 
-    # WHERE EACH VALUE CAME FROM (OBS-556, CP-10): issued by a door, received from a sender a person named,
-    # shared with another project's folder, or unknown; with its context and the services started from it.
-    # Names, records and keyed digests only; `observatory_key_consumers` finds the other copies by the value.
+    # WHERE EACH VALUE CAME FROM (OBS-556, OBS-604, CP-10): issued by a door, received from a sender a person
+    # named, shared out to another party, copied to another project's folder, or unknown; whose it is (personal or
+    # an organization's), and who reads it, from every source the revoke guard reads (the value held in memory).
     if out["vault"]:
         import key_source
         classes = key_source.classify([f"{r['project']}/{r['env']}/{r['name']}" for r in out["vault"]],
                                       out["degraded"], root=root)
+        readers = key_source.ConsumerReader(out["degraded"])
         for row in out["vault"]:
             row.update(classes.get(f"{row['project']}/{row['env']}/{row['name']}") or {"source": "unknown"})
-            row["consumers"] = key_source.consumers(row["project"], row["env"], row["name"], out["degraded"])
+            row["consumers"] = readers.of(row["project"], row["env"], row["name"])
             row["consumersTool"] = key_source.CONSUMERS_TOOL
 
     # WHICH MACHINES HOLD EACH SLOT (OBS-194): this one, and every peer whose digest manifest

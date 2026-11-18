@@ -145,12 +145,16 @@ def heroku_tokens() -> tuple[list[str], str | None, str | None]:
 
 
 class HerokuSource:
+    """`memo`: read the applications' config vars once and compare every later value against that reading (the keys
+    page's consumers, OBS-604, ask about many slots in one pass). A door's guard keeps the default: it reads fresh."""
     name = "heroku"
 
-    def __init__(self, tokens=heroku_tokens, api=None):
+    def __init__(self, tokens=heroku_tokens, api=None, memo: bool = False):
         self._tokens = tokens
         self._api = api
         self._token_of: dict[str, str] = {}
+        self.memo = memo
+        self._read: tuple | None = None
 
     @property
     def api(self):
@@ -159,12 +163,25 @@ class HerokuSource:
         return self._api
 
     def find(self, old: str) -> tuple[list[dict], list[dict], list[dict]]:
+        if self.memo and self._read is None:
+            self._read = self._configs()
+        configs, degraded, skipped = self._read if self.memo else self._configs()
+        found = []
+        for app_id, app_name, tok, config in configs:
+            for var, value in sorted(config.items()):
+                if same(value, old):
+                    self._token_of[app_id] = tok
+                    found.append({"kind": "heroku", "app": app_name, "app_id": app_id, "var": var})
+        return found, [dict(d) for d in degraded], [dict(d) for d in skipped]
+
+    def _configs(self) -> tuple[list[tuple], list[dict], list[dict]]:
+        """([(app id, app name, token, config vars)], degraded, skipped): every application's config, read fresh."""
         tokens, skip, bad = self._tokens()
         if skip:
             return [], [], [{"source": self.name, "code": "not-in-use", "reason": skip}]
         if bad or not tokens:
             return [], [{"source": self.name, "code": "token-unreadable", "reason": bad or "no Heroku token"}], []
-        found, degraded, apps = [], [], {}
+        configs, degraded, apps = [], [], {}
         for tok in tokens:
             try:
                 for app in self.api.list("/apps", tok):
@@ -184,11 +201,8 @@ class HerokuSource:
                 degraded.append({"source": self.name, "app": app_name, "code": "config-unshaped",
                                  "reason": f"config vars of {app_name} came back in no known shape"})
                 continue
-            for var, value in sorted(config.items()):
-                if same(value, old):
-                    self._token_of[app_id] = tok
-                    found.append({"kind": "heroku", "app": app_name, "app_id": app_id, "var": var})
-        return found, degraded, []
+            configs.append((app_id, app_name, tok, config))
+        return configs, degraded, []
 
     def deliver(self, c: dict, new: str) -> None:
         tok = self._token_of.get(c["app_id"])
@@ -248,13 +262,18 @@ def _atomic_replace(path: pathlib.Path, text: str) -> None:
 
 
 class EnvFileSource:
+    """`memo`: read the inventoried files once and compare every later value against that reading (OBS-604); a
+    door's guard keeps the default and reads them fresh."""
     name = "env-file"
 
-    def __init__(self, inventory: pathlib.Path | None = None, exclude: tuple = (), projects: pathlib.Path | None = None):
+    def __init__(self, inventory: pathlib.Path | None = None, exclude: tuple = (), projects: pathlib.Path | None = None,
+                 memo: bool = False):
         self.inventory = inventory or ENV_INVENTORY
         self.projects = projects or paths.DATA
         self.exclude = {str(pathlib.Path(p)) for p in exclude}
         self._env = None
+        self.memo = memo
+        self._read: tuple | None = None
 
     @property
     def env(self):
@@ -263,6 +282,19 @@ class EnvFileSource:
         return self._env
 
     def find(self, old: str) -> tuple[list[dict], list[dict], list[dict]]:
+        if self.memo and self._read is None:
+            self._read = self._files()
+        files, degraded, skipped = self._read if self.memo else self._files()
+        found = []
+        for path, rec, pairs in files:
+            for var, value in pairs:
+                if same(value, old):
+                    found.append({"kind": "env-file", "path": str(path), "var": var,
+                                  "git": rec.get("git"), "project": rec.get("project")})
+        return found, [dict(d) for d in degraded], [dict(d) for d in skipped]
+
+    def _files(self) -> tuple[list[tuple], list[dict], list[dict]]:
+        """([(path, inventory record, parsed pairs)], degraded, skipped): every inventoried file, read fresh."""
         if not pathlib.Path(self.inventory).exists() and not pathlib.Path(self.projects).is_dir():
             # No projects folder on this machine, so no inventory to take: not in use, not unread.
             return [], [], [{"source": self.name, "code": "not-in-use",
@@ -276,7 +308,7 @@ class EnvFileSource:
             return [], [{"source": self.name, "code": "inventory-unreadable",
                          "reason": f"the local env inventory could not be read ({type(exc).__name__}); run "
                                    f"`project-observatory full env`"}], []
-        found, degraded = [], []
+        files_read, degraded = [], []
         unread = [d for d in (doc.get("degraded") or []) if isinstance(d, dict)]
         if unread:
             degraded.append({"source": self.name, "code": "inventory-incomplete",
@@ -296,11 +328,8 @@ class EnvFileSource:
                                  "reason": f"{path} could not be read ({type(exc).__name__})"})
                 continue
             pairs, _ = self.env.parse(text)
-            for var, value in pairs:
-                if same(value, old):
-                    found.append({"kind": "env-file", "path": str(path), "var": var,
-                                  "git": rec.get("git"), "project": rec.get("project")})
-        return found, degraded, []
+            files_read.append((path, rec, pairs))
+        return files_read, degraded, []
 
     def deliver(self, c: dict, new: str, old: str) -> None:
         if c.get("git") == "tracked":
