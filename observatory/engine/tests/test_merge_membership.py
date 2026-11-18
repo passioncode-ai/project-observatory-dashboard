@@ -459,6 +459,85 @@ def test_404_is_driven_without_previous_answer() -> None:
           d['source']=='transfer:unknown/gone' for d in model.get('degraded', [])), out[-300:])
 
 
+def ssh_stub(root: pathlib.Path, hosts: dict[str, str]) -> pathlib.Path:
+    """An `ssh` on the fixture PATH that answers only `ssh -G <alias>`, as OpenSSH prints it (`hostname` line among
+    the others), from `hosts`; a name it does not know resolves to itself, as OpenSSH answers for a real host. It
+    records every call and never connects anywhere."""
+    calls = root / "ssh-calls.jsonl"
+    script = f'''#!{sys.executable}
+import json, sys
+with open({str(calls)!r}, 'a') as f: f.write(json.dumps(sys.argv[1:])+'\\n')
+args = sys.argv[1:]
+if len(args) != 2 or args[0] != '-G':
+    print('Unexpected fixture ssh request', file=sys.stderr); sys.exit(70)
+hosts = {hosts!r}
+print('user git')
+print('hostname ' + hosts.get(args[1], args[1].lower()))
+print('port 22')
+'''
+    stub = root / "bin" / "ssh"
+    stub.write_text(script, encoding="utf-8")
+    stub.chmod(0o700)
+    return calls
+
+
+def aliased(raw: pathlib.Path, rows: list[dict]) -> None:
+    doc = json.loads((raw / "local.json").read_text(encoding="utf-8"))
+    doc["folders"] += rows
+    (raw / "local.json").write_text(json.dumps(doc), encoding="utf-8")
+
+
+def test_an_ssh_config_alias_is_classified_by_its_real_host() -> None:
+    """OBS-623: a deploy key per repository is an `~/.ssh/config` Host alias (`git@gh-alpha:owner/name.git`). The
+    merge read the alias as the host, called the remote "not inventoried here" and gave the clone no repository
+    row. It asks `ssh -G` for the alias's hostname (no connection), once per alias per pass."""
+    raw = raw_copy()
+    calls = ssh_stub(raw.parent, {"gh-alpha": "github.com", "gh-beta": "github.com"})
+    aliased(raw, [
+        merge_fixture.local("fixture-alias-a", f"git@gh-alpha:{OWNER}/fixture-module-a.git"),
+        merge_fixture.local("fixture-alias-b", f"ssh://git@gh-beta/{OWNER}/fixture-module-b.git"),
+        merge_fixture.local("fixture-alias-a2", f"git@gh-alpha:{OWNER}/fixture-module-a.git"),
+        merge_fixture.local("fixture-forge", "git@forge.example:team/tool.git"),
+    ])
+    rc, out, doc = merge(raw)
+    check("the alias fixture merges", rc == 0, out[-300:])
+    if rc:
+        return
+    for name in ("fixture-module-a", "fixture-module-b"):
+        row = doc["repositories"].get(f"{OWNER}/{name}") or {}
+        check(f"{name} is a GitHub repository with its clone",
+              row.get("host") == "github" and (row.get("local") or {}).get("folder", "").startswith("fixture-alias"),
+              json.dumps(row)[:300])
+    rules = json.dumps(doc["projects"])
+    check("no aliased clone is called not inventoried",
+          "gh-alpha, which is not inventoried" not in rules and "gh-beta, which is not inventoried" not in rules,
+          rules[:300])
+    check("a real host nothing inventories still is",
+          "remote is on forge.example, which is not inventoried here" in rules, rules[:300])
+    asked = ([json.loads(line) for line in calls.read_text(encoding="utf-8").splitlines()]
+             if calls.is_file() else [])
+    check("each alias is asked once per pass, never connected to",
+          sorted(a[1] for a in asked) == ["forge.example", "gh-alpha", "gh-beta"]
+          and all(a[0] == "-G" for a in asked), str(asked))
+    check("an answered alias is no degradation",
+          not [d for d in doc["degraded"] if d["source"].startswith("ssh-alias:")], str(doc["degraded"])[:300])
+
+
+def test_an_alias_ssh_cannot_resolve_is_named_not_guessed() -> None:
+    """Without `ssh` on PATH the alias stays what it reads as, and the model says it could not ask."""
+    raw = raw_copy()
+    aliased(raw, [merge_fixture.local("fixture-alias-a", f"git@gh-alpha:{OWNER}/fixture-module-a.git")])
+    rc, out, doc = merge(raw)
+    check("the merge runs without ssh", rc == 0, out[-300:])
+    if rc:
+        return
+    check("the alias is not guessed to be GitHub",
+          ((doc["repositories"].get(f"{OWNER}/fixture-module-a") or {}).get("local") or {}).get("folder")
+          != "fixture-alias-a", "")
+    check("and the gap is a degradation naming the alias",
+          any(d["source"] == "ssh-alias:gh-alpha" for d in doc["degraded"]), str(doc["degraded"])[:300])
+
+
 if __name__ == "__main__":
     print("the merge — what decides that a project exists\n")
     for fn in (test_a_transfer_that_cannot_be_checked_is_not_called_unmoved,
@@ -473,7 +552,9 @@ if __name__ == "__main__":
                test_a_submodule_is_measured_composition_and_dissolves_the_phantom,
                test_a_recorded_copy_stands_apart_from_its_source,
                test_session_dates_pass_through_real_merge,
-               test_404_is_driven_without_previous_answer):
+               test_404_is_driven_without_previous_answer,
+               test_an_ssh_config_alias_is_classified_by_its_real_host,
+               test_an_alias_ssh_cannot_resolve_is_named_not_guessed):
         fn()
     print()
     if FAILURES:

@@ -87,13 +87,57 @@ SESSIONS_BY_SLUG={k.split(":",1)[1]: v for k, v in SESSIONS.items()}
 
 REMOTES=_optional("remotes.json", "repositories", {})
 BB={r["full_name"]: r for r in _optional("bitbucket.json", "repositories", [])}
-def nwo(remote):
-    if not remote: return None
+def _nwo(remote):
     m=re.search(r"github\.com[:/]([\w.-]+)/([\w.-]+?)(?:\.git)?$", remote)
     if m: return ("github", f"{m.group(1)}/{m.group(2)}")
     m=re.search(r"bitbucket\.org[:/]([\w.-]+)/([\w.-]+?)(?:\.git)?$", remote)
     if m: return ("bitbucket", f"{m.group(1)}/{m.group(2)}")
     return None
+# AN SSH HOST MAY BE AN ALIAS (OBS-623). A deploy key per repository is an
+# `~/.ssh/config` Host entry (`Host gh-alpha`, `HostName github.com`), so the
+# clone's remote reads `git@gh-alpha:owner/name.git` and names no host this
+# merge keys. `ssh -G <alias>` prints the configuration OpenSSH would use and
+# exits without connecting; its `hostname` line is the real host. Asked once
+# per alias per pass. A name that is not an alias answers with itself.
+_SSH_REMOTE=(re.compile(r"^(?:git\+)?ssh://(?:[^@/]+@)?([^/:@]+)(?::\d+)?/(.+)$"),
+             re.compile(r"^(?:[^@/:]+@)?([^/:@]{2,}):(?!/)(.+)$"))
+_SSH_NAME=re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]*")
+SSH_HOSTS: dict[str, str] = {}
+def ssh_hostname(alias):
+    """The host `alias` stands for in the SSH configuration, or "" when ssh could not say."""
+    if alias in SSH_HOSTS: return SSH_HOSTS[alias]
+    real, why = "", ""
+    if not _SSH_NAME.fullmatch(alias):
+        why = "not a host name ssh is asked about"
+    else:
+        try:
+            out = subprocess.run(["ssh", "-G", alias], capture_output=True, text=True, timeout=5,
+                                 stdin=subprocess.DEVNULL)
+        except FileNotFoundError:
+            out, why = None, "`ssh` is not installed"
+        except (OSError, subprocess.SubprocessError) as exc:
+            out, why = None, type(exc).__name__
+        if out is not None and out.returncode != 0:
+            why = f"`ssh -G` exited {out.returncode}"
+        elif out is not None:
+            real = next((v.strip().lower() for k, _, v in (l.partition(" ") for l in out.stdout.splitlines())
+                         if k.lower() == "hostname" and v.strip()), "")
+            why = "" if real else "`ssh -G` printed no hostname"
+    if why:
+        degraded.append({"source": f"ssh-alias:{alias}", "reason":
+            f"could not resolve the SSH host {alias} through the SSH configuration ({why}); a clone whose remote "
+            f"names it is classified by that name as written"})
+    SSH_HOSTS[alias] = real
+    return real
+def nwo(remote):
+    if not remote: return None
+    found=_nwo(remote)
+    if found: return found
+    m=next((m for rx in _SSH_REMOTE for m in [rx.match(remote.strip())] if m), None)
+    if not m: return None
+    real=ssh_hostname(m.group(1))
+    if not real or real==m.group(1).lower(): return None
+    return _nwo(f"git@{real}:{m.group(2)}")
 # ---------- repositories ----------
 repos={}
 for k,r in gh.items():
