@@ -3,6 +3,17 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.45.1 (2026-11-18)
+
+The 0.45.0 changes, published: its tag's check timed out on one slow test suite, so 0.45.0 stays tagged and unpublished
+and everything in it ships here.
+
+### Fixed
+
+- **A slow test suite no longer holds a release** (OBS-639): the `engine_update` suite ran 100 to 112 s on macOS under
+  the portable runner's default 120 s and passed it on the v0.45.0 tag's check, which the release guard reads. It now
+  has 300 s, like the other suites measured past the default.
+
 ## 0.45.0 (2026-11-18)
 
 Wave R6 and R7 of the control plane refactor: no page shows a command a person would copy, and the longest door and
