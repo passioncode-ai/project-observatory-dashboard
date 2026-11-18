@@ -3025,5 +3025,20 @@
   "few": "{n} сессии записали ход; какие из них ещё работают, знает только менеджер аккаунтов",
   "many": "{n} сессий записали ход; какие из них ещё работают, знает только менеджер аккаунтов",
   "other": "{n} сессии записали ход; какие из них ещё работают, знает только менеджер аккаунтов"
- }
+ },
+ "Read from the project's lockfiles.": "Определён по lock-файлам проекта.",
+ "Read from the project's lockfiles; some kinds from marker files, because no lockfile shows them.": "Определён по lock-файлам проекта; часть видов по файлам-признакам, потому что ни один lock-файл их не показывает.",
+ "Read from marker files: no lockfile of this project was read.": "Определён по файлам-признакам: ни один lock-файл этого проекта не прочитан.",
+ "Set by hand in the project overrides.": "Задан вручную в правках проекта.",
+ "Packages": "Пакеты",
+ "No lockfile or manifest of this project was read, so its packages are not known.": "Ни один lock-файл или манифест этого проекта не прочитан, поэтому его пакеты неизвестны.",
+ "local dependency": "локальная зависимость",
+ "direct dependency": "прямая зависимость",
+ "transitive dependency": "транзитивная зависимость",
+ "Package": "Пакет",
+ "Ecosystem": "Экосистема",
+ "Dependency": "Зависимость",
+ "Advisories": "Уязвимости",
+ "Direct {direct} · transitive {transitive} · local {local} · with advisories {vulnerable}": "Прямые {direct} · транзитивные {transitive} · локальные {local} · с уязвимостями {vulnerable}",
+ "{shown} of {total} shown, the vulnerable first; an agent reads them all with observatory_dependencies.": "Показано {shown} из {total}, уязвимые первыми; агент читает все через observatory_dependencies."
 }

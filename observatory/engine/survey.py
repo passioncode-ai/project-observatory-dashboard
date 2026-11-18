@@ -460,6 +460,10 @@ def survey(scope: dict | None = None, include_external: bool = False,
         else:
             degraded.extend(_collector_degradation("domains_live.json"))
 
+    # A STACK READ FROM MARKER FILES (OBS-603): the lockfiles named no ecosystem for it, so it is a guess.
+    import project_stack
+    degraded.extend(project_stack.survey_degraded(selected, one_project=kind == "project"))
+
     # THE GITHUB LISTING, which nothing had ever reported. Its failures are
     # per-owner and the collector keeps the previous file when one fails, so the
     # answer is not wrong — it is OLDER than it looks, and a caller comparing
@@ -557,6 +561,11 @@ def project_detail(project_id: str, timeline_limit: int = 10,
         derived, copies, rdeg = derivations.relations_of(ddoc, repo_ids)
         out["project"]["derived_from"], out["project"]["copies"] = derived, copies
         out["degraded"] += [d for d in rdeg if d not in out["degraded"]]
+    # WHERE THE STACK WAS READ (OBS-603): the lockfiles, marker files or a hand-set value, with the evidence per kind.
+    # On the detail only: the survey's item schema is closed, so the survey keeps `stack` and its degraded line.
+    import project_stack
+    out["project"].update(project_stack.detail_fields(
+        next((p for p in _load("projects.json")["projects"] if p.get("id") == out["project"]["id"]), None)))
     if timeline_limit:
         tl = timeline(project_id, limit=timeline_limit)
         out["recentEvents"] = tl["events"]

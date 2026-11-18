@@ -407,6 +407,8 @@ ARTEFACTS: dict[str, dict[str, list[str]]] = {
                             "registry/findings.json", "registry/domain-liveness.json",
                             # the Integrations page (OBS-557): key validity, drift, untracked, and the issue map
                             "store/raw/integration-health.json", "store/state/issues.json",
+                            # the project panel's packages (OBS-603): the inventory and the vulnerability watch
+                            "registry/dependencies.json", "store/raw/vulnerabilities.json",
                             "store/wallet.json", "store/provider-health.json",
                             "plugins"]},
     "smoke":     {"writes": [], "reads": ["docs/projects-dashboard.html"]},

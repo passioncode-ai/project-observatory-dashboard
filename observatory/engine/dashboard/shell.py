@@ -407,6 +407,7 @@ def slice_for(page: str, payload: dict) -> dict:
     # index to 133 KB before this line.
     if page != "projects":
         out["keys"] = None
+        out["packages"] = None                      # the project panel's package lists (OBS-603)
     if page != "projects":
         out["rows"] = [{k: r.get(k) for k in LITE_ROW_KEYS} for r in payload.get("rows") or []]
     for key, owner in heavy.items():

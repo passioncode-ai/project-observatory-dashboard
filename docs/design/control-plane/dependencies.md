@@ -80,7 +80,8 @@ no scan time, so the registry changes only when its content does); `store/raw/vu
   using it would need a filter over its own extraction first.
 - The Fabric connections declaration (`service_connections.PROVIDERS`) does not list OSV and CISA yet: its staleness
   rule reads the tick's `stale()` gates, and this watch decides its own day.
-- No dashboard section shows the inventory yet (M2 consumes the contract).
+- The project panel lists each project's packages and its stack follows from this inventory since OBS-603
+  ([project-stack.md](project-stack.md)).
 - Version ordering per ecosystem (npm semver, PEP 440, Ruby) is not applied to `fixed`; OSV's own matching decides
   which versions are affected.
 

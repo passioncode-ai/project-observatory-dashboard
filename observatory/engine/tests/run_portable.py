@@ -218,6 +218,8 @@ BOUNDARY += ('node_ceremony',)
 BOUNDARY += ('ssh_keys',)
 # OBS-553: lockfile readers, the OSV and known-exploited watch, `dep.vulnerable`, `observatory_dependencies`.
 BOUNDARY += ('dependencies',)
+# OBS-603 (CP-06): a project's stack read from its dependency inventory, and the packages on its panel.
+BOUNDARY += ('project_stack',)
 # OBS-557: key validity once a day, drift of a collector's answer, untracked providers, `integration.*` findings.
 BOUNDARY += ('integrations', 'issue_filer', 'integrations_page')
 # OBS-554: the key sweep over working trees and histories, its findings, page section and MCP read and settle.
@@ -429,6 +431,8 @@ ROOT_FILES = (
     'ops_acts.py',
     # The supply-chain watch over MCP servers (OBS-555).
     'mcp_supply.py',
+    # A project's stack from its dependency inventory, and its panel's packages (OBS-603).
+    'project_stack.py',
     # The Installed tools page's view (OBS-552).
     'tooling_view.py',
     'log_policy.py', 'journal_writer.py', 'code_freshness.py', 'session_reload.py', 'access_binding.py', 'embedding_policy.py',

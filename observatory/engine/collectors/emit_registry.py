@@ -278,6 +278,16 @@ def add_rel(rid,typ,frm,to,refs,rule=None,extra=None):
     rel.update(extra)
     relations.append(rel)
     seen_rel.add(rid); seen_edge.add(key)
+# THE STACK FOLLOWS FROM THE DEPENDENCY INVENTORY (OBS-603, CP-06): the lockfiles the
+# `scan-dependencies` step read (`store/raw/dependencies.json`, the same input the
+# dependency document below is built from) name the ecosystems and the frameworks; a
+# marker file stands in only where no lockfile was read, and the row says so.
+import project_stack
+try:
+    _STACK_INV = project_stack.inventory_by_project(
+        json.loads((paths.SCRATCH / "dependencies.json").read_text(encoding="utf-8")))
+except (OSError, ValueError):
+    _STACK_INV = {}
 cleared: list[str] = []
 for key in sorted(projs):
     p=projs[key]; i=pid(key); prev=old_projects.get(i,{})
@@ -300,7 +310,8 @@ for key in sorted(projs):
     e={"id":i,"name":p["name"],"anchor":p["anchor"],"ownership":p["ownership"],
        "owners":p["owners"],"lifecycle":"archived" if p["archived"] else "active",
        "description":p["description"] or "",
-       "stack":p["kinds"],"local_folders":p["folders"],"last_activity_on":p["last_activity"],
+       **project_stack.registry_fields(project_stack.derive(p["kinds"], _STACK_INV.get(i))),
+       "local_folders":p["folders"],"last_activity_on":p["last_activity"],
        # Observed, beside the DECLARED `lifecycle` rather than inside it. Derived
        # on every emit and never carried forward: the validator re-derives it and
        # fails on a value that disagrees with the date next to it.
@@ -314,6 +325,9 @@ for key in sorted(projs):
     if p.get("last_session_on"):
         e["last_session_on"]=p["last_session_on"]
         e["source_refs"]=sorted(set(e["source_refs"])|{"SRC-0012"})
+    # A stack read from lockfiles cites the dependency scan that read them (OBS-603).
+    if e["stack_source"].startswith("dependencies"):
+        e["source_refs"]=sorted(set(e["source_refs"])|{"SRC-0024"})
     cp=("vault:"+p["vault"]["overview"]) if p["vault"] else None
     if cp and cp.startswith("../"): cp="vault:"+cp[3:]                                             
     if cp and (paths.VAULT/cp.split(":",1)[1]).exists(): e["canonical_page"]=cp
@@ -324,6 +338,8 @@ for key in sorted(projs):
             if k=="why": continue
             e[k]=sorted(set(e.get(k) or [])|set(v)) if k=="source_refs" else v
         e["curated_fields"]=sorted(k for k in ov if k!="why")
+        if "stack" in ov:
+            e["stack_source"]="curated"; e.pop("stack_degraded",None)
     # THE ORGANIZATION, after the curated overrides so an accepted proposal's
     # `organization` wins, and absent entirely when organizations.json is not
     # configured — a workspace that never set it up sees no new field.
