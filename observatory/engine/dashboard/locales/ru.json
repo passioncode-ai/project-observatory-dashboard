@@ -2898,6 +2898,8 @@
  "an agent asks with {refresh}.": "агент запрашивает её через {refresh}.",
  "Workspace backup out of date": "Резервная копия рабочего пространства устарела",
  "Daily doctor fix not applied": "Исправление ежедневного доктора не применено",
+ "Project registry never built": "Реестр проектов ни разу не собран",
+ "The project registry was never built": "Реестр проектов ни разу не был собран",
  "Maintenance step failing": "Шаг обслуживания сбоит",
  "Vault metadata unreadable": "Метаданные хранилища не читаются",
  "The newest workspace backup is {hours} hours old": "Последней резервной копии рабочего пространства {hours} ч.",

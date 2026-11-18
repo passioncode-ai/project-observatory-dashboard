@@ -6,6 +6,8 @@
 - `doctor.step_failing`: a maintenance step failed on its last passes in a row, one row per step.
 - `doctor.vault_meta_unreadable`: vault slot metadata that does not parse; names the slots, never a value.
 - `doctor.fix_failed`: a safe fix the doctor could not apply (a file it could not move aside).
+- `doctor.registry_never_built`: `registry/projects.json` is missing or holds no project (OBS-624), with the maintenance
+  pass's last registry answer.
 
 A check an existing rule already raises (`scan.stale`, `lifecycle.stale_servers`, `harness.plugin_behind`) is named
 by that rule in the doctor's record and gets no second row here. Silent until the doctor has run once.
@@ -20,7 +22,8 @@ if _DASHBOARD not in _sys.path:
     _sys.path.append(_DASHBOARD)  # `finding_types.titled`: a title is a message id
 from finding_types import titled  # noqa: E402
 
-TYPES = ("doctor.backup_stale", "doctor.step_failing", "doctor.vault_meta_unreadable", "doctor.fix_failed")
+TYPES = ("doctor.backup_stale", "doctor.step_failing", "doctor.vault_meta_unreadable", "doctor.fix_failed",
+         "doctor.registry_never_built")
 EVIDENCE = ["store/state/doctor.json"]
 UNDO = "`project-observatory full doctor-daily --undo {journal_id}`"
 
@@ -68,6 +71,20 @@ def findings(doc: dict | None) -> list[dict]:
                 "action": "record the slot's metadata again through its door (`vault.py put` with its source), or "
                           "move the broken file aside if the slot is retired",
                 "evidence": EVIDENCE, "slots": c.get("items") or []})
+        elif kind == "doctor.registry_never_built":
+            last = c.get("last_pass") or {}
+            tried = (f" The maintenance pass last tried on {last.get('tried')}: {last.get('result')}"
+                     + (f", exit {last['exit']}" if last.get("exit") is not None else "")
+                     + (f", {last['detail']}" if last.get("detail") else "") + "."
+                     if last else " The maintenance pass has not tried to build it yet.")
+            out.append({
+                "type": "doctor.registry_never_built", "subject": "doctor:registry", "severity": "warning",
+                **titled("The project registry was never built"),
+                "detail": f"Checked by the daily doctor on {day}: {c.get('detail')}, so no project, repository or "
+                          f"finding reaches a reader." + tried,
+                "action": "`project-observatory full maintain run` builds it (one tick, when no tick job does); "
+                          "`project-observatory full maintain status` shows the pass's last answer",
+                "evidence": EVIDENCE + ["store/maintenance.json", "registry/projects.json"]})
         elif kind == "doctor.fix_failed":
             jid = (c.get("fix") or {}).get("journal_id")
             out.append({
