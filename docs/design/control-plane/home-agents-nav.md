@@ -100,7 +100,10 @@ problem row wrap under it.
 ## Tests
 
 - `observatory/engine/tests/test_home_page.py` `ControlPlaneHome`: the four groups in order, each fact once
-  (no card for a page a tile or group covers), no command text in any state.
+  (no card for a page a tile or group covers, and no shown value twice: `test_no_value_is_shown_twice_on_home`), no
+  command text in any state.
+- Viewport screenshots of Home at 1440x900 and 390x844, both languages, WebKit, with the command that makes them:
+  [shots/](shots/README.md) (OBS-608).
 - `observatory/engine/tests/test_agents_page.py` `ControlPlaneAgents`: sessions first, grouped by agent and project,
   over managed, unmanaged and quiet sessions; one row per workflow with its worst state, its button disabled with
   the tool name; `HandoffRoute`: the route offers a silent workflow and refuses bad input.

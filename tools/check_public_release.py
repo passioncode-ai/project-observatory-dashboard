@@ -64,6 +64,11 @@ PUBLIC_IMAGES = {
     "site/assets/dashboard-overview-en.png": {"7ebedff4e0f9c0c1377edc722c9695cc01019dbab5649050b5176ed9cf93082c", "b1498815bc5728a8f99883a36bd95d9a7c34bb8b22d5489af105aebdbe728015"},
     "docs/images/dashboard-overview-ru.png": {"32f33bcc34375cc046f5af75214ed5770d83e2fb503dc765f560bb8e980a1eb3", "3a5f1c34649fc56b7d31735b74ad84796b34b64e07a61775004b07b2f6655ebe"},
     "docs/images/dashboard-projects-en.png": {"6e6c683647e48cb1d55911c57805302d7beb4bd6c564c3918ce956cb90a296d5", "d1eb9983ab58d7588e2fe36a6bdd2be4855a561eebc169debe0c12ac20145d91"},
+    # Home's CP-01 viewport screenshots (OBS-608), the same fictional demo estate, reviewed: no private data.
+    "docs/design/control-plane/shots/home-en-1440.png": {"e1277dc02fb920eae19d7a90451eec066af1e65210d13a49daeb1ff836d54f10"},
+    "docs/design/control-plane/shots/home-en-390.png": {"a6808fd9914e6987e5381665b89664c08203dd13ae3a180f37b8eb937604f437"},
+    "docs/design/control-plane/shots/home-ru-1440.png": {"d992279ca25588c87de2abc6cb153511c90bcc127e8a0a45189739424012b1a4"},
+    "docs/design/control-plane/shots/home-ru-390.png": {"ccee420bb4487f80655c59e4b999964efe1f6136432c2663980f3e4b12cb1d83"},
 }
 
 

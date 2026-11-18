@@ -1,7 +1,7 @@
 # M1: one session count (OBS-550)
 
 Module M1 of [CONTROL-PLANE.md](../CONTROL-PLANE.md): requirements CP-03 and CP-04, decision D1, contract
-`sessions_view.summary()`. Status: built on branch `feat/sessions-view`, 2026-11-14.
+`sessions_view.summary()`. Status: released in 0.37.0 (#542).
 
 ## What
 

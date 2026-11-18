@@ -1,6 +1,6 @@
 # Sessions per project
 
-Status: built (branch `feat/obs-sessions-view`), 2026-11-16.
+Status: released in 0.40.0 (#558).
 
 ## The question it answers
 

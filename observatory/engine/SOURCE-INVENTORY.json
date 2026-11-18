@@ -5654,8 +5654,8 @@
       "path": "tests/test_home_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "34406402a79a485d29a6d1781ade817386c9e62ef6129d883de399120350d0ba",
-      "bytes": 25547
+      "export_sha256": "8fed9895d5820422afee0a988758aab1522c4360e5db071805d1744dd946a559",
+      "bytes": 30519
     },
     {
       "path": "tests/test_honest_absence.py",
