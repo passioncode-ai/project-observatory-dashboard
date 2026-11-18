@@ -7685,8 +7685,8 @@
       "path": "tools/digitalocean.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "7e141d2e50cc97c10ecacaf024b634af8b38b982c978bf1362d7c619b57c2503",
-      "bytes": 92267
+      "export_sha256": "1c3859659e4acb02a07b10c9e5fe76c4fe8609f81e2fbe1237477a7738e1eb14",
+      "bytes": 94442
     },
     {
       "path": "tools/digitalocean_findings.py",
@@ -8187,8 +8187,8 @@
     {
       "path": "tools/scan_leaks.py",
       "source_sha256": "a6dead1ccdd505ddbdb6efabe884d1cc2acc8be744930c70cf1b1223eb39bc1e",
-      "export_sha256": "056f1a8b7f5fd44c147cfeca252fa013f1e6a1675fe59d6b8f927f390978840f",
-      "bytes": 87656,
+      "export_sha256": "69ca63b77daadd794aa4108683d434c01941d09d55bc5d06cc471dfc1b36dd4b",
+      "bytes": 91834,
       "python_comments_removed": 25,
       "python_docstrings_removed": 6,
       "tool_descriptions_retained": 0,
@@ -8324,8 +8324,8 @@
       "path": "tools/ssh_keys.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d2ef354049e9acc5a92d3b9913583d3041944b256b8d2cc9d5ff6424b55f8526",
-      "bytes": 103934
+      "export_sha256": "f9e2e9e8e7408d4add2fdeaee466be39faef58c4f1afdb4bd36c0f4823721abc",
+      "bytes": 108305
     },
     {
       "path": "tools/sweep_fixtures.py",
@@ -8429,8 +8429,8 @@
     {
       "path": "tools/vault.py",
       "source_sha256": "1df9030175654ff330cee02d22de11b3b515188918216509cadbbc4f8a510f49",
-      "export_sha256": "0cba6dbf1674dfbda59e145799dfbf6c1cf640fd82f13cfa0b319ae86819935c",
-      "bytes": 90209,
+      "export_sha256": "584aa9ccb586919ad4e526d107d5842726c626d89b72557fe0c2f79b1b26106b",
+      "bytes": 92673,
       "python_comments_removed": 19,
       "python_docstrings_removed": 7,
       "tool_descriptions_retained": 0,
