@@ -33,9 +33,6 @@ EDITED_AFTER_TAG = {
                "67a77d9c0d5c7877872f23f69b16ed6cdc0b508fd3b1343d248a945502cbef65"),
     "0.24.1": ("the OBS-52 collector rotation entry added after the tag",
                "c9bcfd8d239dc8e6ed9958f3bb1b53533b92d4a71e547fd1a6a250f920855514"),
-    "0.43.0": ("the heading says the tag was never published and is included in 0.44.0 (OBS-631: its "
-               "check rerun could not pass once v0.44.0 existed)",
-               "fe91a8c9b1cba64bc202b33041c9caec4768296b47f3f6bf896da87ac24890ff"),
 }
 
 
