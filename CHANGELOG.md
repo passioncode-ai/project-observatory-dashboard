@@ -3,6 +3,16 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Fixed
+
+- **A check rerun on an older tag passes again** (OBS-631): the test that keeps released CHANGELOG sections as
+  tagged compared every tag in the checkout, so check.yml run again on the v0.43.0 commit read "0.44.0: the section
+  is gone" once v0.44.0 existed, and the release guard could not turn green. It now compares only the tags reachable
+  from the checked-out commit. 0.43.0 stays tagged and unpublished: every change in it ships in 0.44.0. Its
+  released section keeps its text as tagged.
+
 ## 0.44.0 (2026-11-18)
 
 Waves R5 and the first board fixes of the control plane refactor: the documents say what the code does, Integrations
