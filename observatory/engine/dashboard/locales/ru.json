@@ -3066,5 +3066,7 @@
  "MCP server {server} is remote: only its endpoint is recorded": "MCP-сервер {server} удалённый: записан только его адрес",
  "MCP server {server} is reached over plain HTTP": "MCP-сервер {server} доступен по открытому HTTP",
  "MCP server {server} runs a container image named by a tag": "MCP-сервер {server} запускает образ контейнера, указанный по тегу",
- "MCP server {server} comes from a plugin with no recorded version": "MCP-сервер {server} поставляется плагином без записанной версии"
+ "MCP server {server} comes from a plugin with no recorded version": "MCP-сервер {server} поставляется плагином без записанной версии",
+ "This machine has not been surveyed yet.": "Эта машина ещё не обследована.",
+ "Not read yet; its page says why.": "Ещё не прочитано, причина на странице раздела."
 }

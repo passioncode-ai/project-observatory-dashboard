@@ -2,7 +2,7 @@
 
 CP-01 asks that Home answer "is everything fine, and what needs me first" in one screen at 1440x900, and read at
 390x844. These are viewport screenshots of `index.html` over the demo estate (`tools/demo_estate.py`, a fictional
-estate), WebKit, in both languages, taken on 2026-11-18 at `fe47dd94` (OBS-608). Each is reviewed and pinned by its
+estate), WebKit, in both languages, taken on 2026-11-18 (OBS-608). Each is reviewed and pinned by its
 digest in `tools/check_public_release.py` (`PUBLIC_IMAGES`): a new render is a new review.
 
 | File | Language | Viewport |
@@ -41,8 +41,12 @@ for l in en ru; do
 done
 ```
 
-## What they show that CP-01 does not yet hold
+## What they showed that CP-01 did not hold
 
-- The Disk and memory tile of a machine never surveyed prints the survey's reason as it is: English on the Russian
-  page, with the command `project-observatory full machine` in the row (`machine_view.py:24`). CP-01 says no command
-  text in a row; the page test covers the full, fresh and unbuilt states, not this one.
+- The first render (commit `6d99bd12`) showed the Disk and memory tile of a machine never surveyed printing the
+  survey's English reason with the command `project-observatory full machine`. Home now says "This machine has not
+  been surveyed yet." in the page's language, and a reason of any other tile that names a command is replaced by
+  "Not read yet; its page says why." (`home_page._reason_html`). The reason with its command stays in the machine
+  survey's JSON and MCP answer (`machine_view.py`), where agents read it. Tests: `test_home_page.py` `StateBand`,
+  `test_a_machine_never_surveyed_says_so_in_the_readers_language_with_no_command` and
+  `test_a_reason_that_holds_a_command_is_not_shown_on_home`.

@@ -680,8 +680,8 @@
       "path": "dashboard/home_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b58d90b854f30c18a1ae16d7b18218549d7d45eb4000c681e8662cece3b5b9aa",
-      "bytes": 26343
+      "export_sha256": "163d1e641044419ae71709e831f6a0f547f657a6512e8605a4b8e20cc793a268",
+      "bytes": 27337
     },
     {
       "path": "dashboard/i18n.py",
@@ -722,8 +722,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5594ebe4f8670d2de9f251e7a3164a581d0a96d8a94daec05c21e7d6103e041e",
-      "bytes": 258964
+      "export_sha256": "cba5bd9cb9dedd67373ea0844ded8a5ca62f39f32abd18ab55227529ea429fe4",
+      "bytes": 259192
     },
     {
       "path": "dashboard/machine_page.py",
@@ -5654,8 +5654,8 @@
       "path": "tests/test_home_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "8fed9895d5820422afee0a988758aab1522c4360e5db071805d1744dd946a559",
-      "bytes": 30519
+      "export_sha256": "770934b46d790c6eb5ecd57f9af4f91ee169115ac2ce48177e6d756cd3f2ed3a",
+      "bytes": 33114
     },
     {
       "path": "tests/test_honest_absence.py",

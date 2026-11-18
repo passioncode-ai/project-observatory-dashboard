@@ -89,6 +89,10 @@ def full_payload() -> dict:
     }
 
 
+#: The smallest estate that draws the state band: one project, nothing measured.
+ONE_ROW = {"rows": [{"id": "project:alpha-web", "name": "alpha-web", "sites": []}]}
+
+
 class StateBand(unittest.TestCase):
     def test_six_tiles_in_order_each_with_its_time_and_measured_ones_link(self):
         out = home_page.home_html(full_payload(), EN)
@@ -139,6 +143,38 @@ class StateBand(unittest.TestCase):
         self.assertIn("the provider refused the token", apps)
         self.assertIn("not measured since 2026-10-26", apps)
         self.assertIn("3 leaked, not rotated", text(tile(out, "keys")))
+
+    def test_a_machine_never_surveyed_says_so_in_the_readers_language_with_no_command(self):
+        """CP-01, OBS-608: machine_view's reason names the command that runs the survey; that is for agents (MCP,
+        JSON). The tile says it in a sentence of the page's language, and no command."""
+        source = (ROOT / "machine_view.py").read_text(encoding="utf-8")
+        self.assertIn("or run `project-observatory full {command}`", source, "agents keep the command")
+        reason ={"source": "machine.json", "code": "not-surveyed",
+                  "reason": "not surveyed yet: enable features.machine_watch, or run `project-observatory full machine`"}
+        for t, sentence in ((EN, "This machine has not been surveyed yet."),
+                            (RU, "Эта машина ещё не обследована.")):
+            with self.subTest(locale=t.locale):
+                cell = tile(home_page.home_html(dict(ONE_ROW, machine={"degraded": [reason]}), t), "disk")
+                self.assertIn('data-state="unmeasured"', cell)
+                self.assertIn(sentence, text(cell))
+                for word in ("project-observatory", "`", "full machine", "features.machine_watch"):
+                    self.assertNotIn(word, cell)
+
+    def test_a_reason_that_holds_a_command_is_not_shown_on_home(self):
+        """Any other source's reason that carries a command (backticks or the CLI's name) is replaced, never shown."""
+        reason = "not read: run `project-observatory full agents` first"
+        for t in (EN, RU):
+            with self.subTest(locale=t.locale):
+                cell = tile(home_page.home_html(dict(ONE_ROW, agents={"degraded": [reason]}), t), "agents")
+                self.assertIn('data-state="unmeasured"', cell)
+                self.assertNotIn("project-observatory", cell)
+                self.assertNotIn("`", cell)
+        cell = tile(home_page.home_html(dict(ONE_ROW, agents={"degraded": [reason]}), EN), "agents")
+        self.assertIn("Not read yet; its page says why.", text(cell))
+        plain = tile(home_page.home_html({**ONE_ROW, "heroku": {"scanned_on": "2026-10-26", "apps": [],
+                                                     "degraded": [{"reason": "the provider refused the token"}]}},
+                                         EN), "apps")
+        self.assertIn("the provider refused the token", text(plain), "a reason without a command stays as written")
 
     def test_the_personal_cloud_is_not_connected_and_no_link(self):
         cloud = tile(home_page.home_html(full_payload(), EN), "cloud")

@@ -65,10 +65,15 @@ PUBLIC_IMAGES = {
     "docs/images/dashboard-overview-ru.png": {"32f33bcc34375cc046f5af75214ed5770d83e2fb503dc765f560bb8e980a1eb3", "3a5f1c34649fc56b7d31735b74ad84796b34b64e07a61775004b07b2f6655ebe"},
     "docs/images/dashboard-projects-en.png": {"6e6c683647e48cb1d55911c57805302d7beb4bd6c564c3918ce956cb90a296d5", "d1eb9983ab58d7588e2fe36a6bdd2be4855a561eebc169debe0c12ac20145d91"},
     # Home's CP-01 viewport screenshots (OBS-608), the same fictional demo estate, reviewed: no private data.
-    "docs/design/control-plane/shots/home-en-1440.png": {"e1277dc02fb920eae19d7a90451eec066af1e65210d13a49daeb1ff836d54f10"},
-    "docs/design/control-plane/shots/home-en-390.png": {"a6808fd9914e6987e5381665b89664c08203dd13ae3a180f37b8eb937604f437"},
-    "docs/design/control-plane/shots/home-ru-1440.png": {"d992279ca25588c87de2abc6cb153511c90bcc127e8a0a45189739424012b1a4"},
-    "docs/design/control-plane/shots/home-ru-390.png": {"ccee420bb4487f80655c59e4b999964efe1f6136432c2663980f3e4b12cb1d83"},
+    # The second digest of each is the render before the Disk tile stopped showing a command, in branch history.
+    "docs/design/control-plane/shots/home-en-1440.png": {"de77980ded6d360b1ca7e1d35960331589e4831a08c08dc96245cd9348d8ea47",
+        "e1277dc02fb920eae19d7a90451eec066af1e65210d13a49daeb1ff836d54f10"},
+    "docs/design/control-plane/shots/home-en-390.png": {"c24b66e5dcc156084d7a85f56e80ec0d11c5a7388d74e0b10328557815d88c95",
+        "a6808fd9914e6987e5381665b89664c08203dd13ae3a180f37b8eb937604f437"},
+    "docs/design/control-plane/shots/home-ru-1440.png": {"2d4f8b7be05b511a2a3ac230d1569d2474bd48e16b1cdc736af9f09a402681eb",
+        "d992279ca25588c87de2abc6cb153511c90bcc127e8a0a45189739424012b1a4"},
+    "docs/design/control-plane/shots/home-ru-390.png": {"f092811726758eddc63a5c3e97ec834493aec7d9a33b70a8860b95d5810ee12d",
+        "ccee420bb4487f80655c59e4b999964efe1f6136432c2663980f3e4b12cb1d83"},
 }
 
 

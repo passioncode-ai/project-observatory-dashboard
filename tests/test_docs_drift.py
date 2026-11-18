@@ -507,6 +507,17 @@ class ControlPlaneTruth(unittest.TestCase):
                 self.assertNotRegex(head, r"Status: built[^.]*(on branch|on `|\(branch)",
                                     "a released module names its release, not the branch it was built on")
 
+    def test_home_shows_a_source_reason_only_through_the_filter_that_drops_commands(self):
+        """CP-01 says no command text in a row. A source's own words reach Home through one function, which replaces
+        a reason naming a command; a second `t.known` would show one as written (OBS-608, the Disk tile)."""
+        self.assertIn("no `<code>` holding a command on Home", requirement(self.text, "CP-01"))
+        source = (ENGINE / "dashboard/home_page.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        callers = sorted({fn.name for fn in ast.walk(tree) if isinstance(fn, ast.FunctionDef)
+                          for node in ast.walk(fn) if isinstance(node, ast.Call)
+                          and isinstance(node.func, ast.Attribute) and node.func.attr == "known"})
+        self.assertEqual(callers, ["_reason_html"])
+
     def test_home_has_its_viewport_screenshots(self):
         row = requirement(self.text, "CP-01")
         self.assertIn("control-plane/shots/", row)
