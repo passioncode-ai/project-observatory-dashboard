@@ -1151,11 +1151,28 @@ def observatory_sessions(
     `managed: null` means the account manager is not installed or did not answer. No folder path
     is returned, only its last component and the project it belongs to. Unmanaged sessions are
     the `session.unmanaged` finding; start them through the account manager or an application's
-    embedded agent so their limits and hand-over are managed."""
+    embedded agent so their limits and hand-over are managed.
+
+    The watch (OBS-630): a session in a group folder the account manager routes to its proxy, or one
+    it launched, reads `managed: true` with its `account_group`; each row also carries `route`
+    (`launch`, `folder-route` or null), `folder_group`, `manager_state`, `busy` and `quiet_minutes`.
+    `host` is the tick's host sample (load per core, memory pressure, swap, free disk, live sessions
+    of the cap, the board's share, groups with an account with room), `capacity` and `groups` the
+    manager's answers, `monitor` their source (its sessions feed, or its CLI) and the thresholds, and
+    `findings` the watch's rows (`host.overloaded`, `pool.no_room`, `session.wrong_group`,
+    `session.stalled`, `session.unmanaged`), each with its `owner` and `action`."""
     import sessions_view
     doc = sessions_view.load()
     if refresh or any(d.get("code") == "not-collected" for d in doc.get("degraded") or []):
-        doc = sessions_view.summary()
+        doc = sessions_view.summary(monitor=True)
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))
+    import coding_session_findings
+    try:
+        doc = {**doc, "findings": coding_session_findings.findings(doc)}
+    except Exception as exc:  # noqa: BLE001: the rows are a view; a failing rule is named, never a failed read
+        doc = {**doc, "findings": [], "degraded": [*(doc.get("degraded") or []),
+                                                   {"source": "findings", "code": "failed",
+                                                    "reason": f"the watch's findings failed: {type(exc).__name__}"}]}
     if projectId is not None:
         if not isinstance(projectId, str) or not projectId.startswith("project:") or len(projectId) > 200:
             return {**doc, "error": "InvalidInput", "detail": "projectId must be a 'project:<slug>' id"}

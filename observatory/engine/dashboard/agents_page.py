@@ -157,6 +157,82 @@ def _session_rows(doc: dict, ledger: list[dict] | None) -> list[dict]:
     return [r for r in sessions_view.session_rows(doc, ledger) if r.get("agent")]
 
 
+def _value(t: Translator, label: str, msgid: str, **args) -> str:
+    """One measured part of the host line, or its label and the not-read mark when a value was not read (never 0)."""
+    if any(v is None for v in args.values()):
+        return f"{t.mark(label)} {NOT_READ}"
+    return t.mark(msgid, **args)
+
+
+#: The host line's parts (OBS-630): each value's sentence, and its label when it was not read.
+HOST_PARTS = ("load {value} per core", "swap {value} GB", "{value} GB free on the disk",
+              "live sessions {used} of {cap}", "the board {used} of {share}")
+HOST_LABELS = ("load per core", "swap", "free disk", "live sessions", "the board")
+PRESSURE_WORDS = {"normal": "pressure@@normal", "warning": "pressure@@raised", "critical": "pressure@@critical"}
+
+
+def _host_line(doc: dict, t: Translator) -> str:
+    """The host as the sessions watch sampled it this tick (OBS-630, sessions_monitor.host_sample): load per core,
+    memory pressure, swap, free disk, the live sessions against the account manager's cap and the board's share,
+    and the groups with an account with room. Shown only when the watch ran; a value not read is a dash."""
+    h = doc.get("host")
+    if not isinstance(h, dict):
+        return ""
+    pressure = h.get("memory_pressure")
+    groups = h.get("groups_with_room")
+    room = (" ".join(f'<span class="mono">{_e(g)}</span>' for g in groups) if groups else t.mark("none")) \
+        if isinstance(groups, list) else NOT_READ
+    parts = [_value(t, "load per core", "load {value} per core", value=h.get("load_per_core")),
+             t.mark("memory pressure") + " " + (t.mark(PRESSURE_WORDS[pressure]) if pressure in PRESSURE_WORDS
+                                                else NOT_READ),
+             _value(t, "swap", "swap {value} GB", value=h.get("swap_gb")),
+             _value(t, "free disk", "{value} GB free on the disk", value=h.get("free_disk_gb")),
+             _value(t, "live sessions", "live sessions {used} of {cap}", used=h.get("sessions_used"),
+                    cap=h.get("sessions_cap")),
+             _value(t, "the board", "the board {used} of {share}", used=h.get("board_used"),
+                    share=h.get("board_share")),
+             t.mark("groups with an account with room:") + " " + room]
+    return (f'<p class="machine-hint" id="agents-host">{t.mark("Host", tag="b")} '
+            f'{t.mark("read {at}", at=stamp(h.get("at"), NO_VALUE))}: {"; ".join(parts)}.</p>')
+
+
+#: Who fixes a watch finding, in a reader's words.
+OWNER_WORDS = {"operator": "owner@@you", "account-manager": "owner@@the account manager"}
+SEVERITY_TONES = {"critical": "danger", "warning": "warn", "info": ""}
+
+
+def _watch(doc: dict, t: Translator) -> str:
+    """What the sessions watch found (OBS-630, tools/coding_session_findings.py), each row with its owner and its fix.
+    The rows are the ones the Findings page lists and the notifier sends once; the fix names a tool or a page, never a
+    shell command, so `session.unmanaged`'s row points at the Findings page instead of its action."""
+    import sys
+    import pathlib
+    tools = str(pathlib.Path(__file__).resolve().parents[1] / "tools")
+    if tools not in sys.path:
+        sys.path.append(tools)
+    try:
+        import coding_session_findings
+        rows = coding_session_findings.findings(doc)
+    except Exception:  # noqa: BLE001: the list is a view; a failing rule never fails the page
+        return ""
+    if not rows:
+        return ""
+    order = {"critical": 0, "warning": 1, "info": 2}
+    items = []
+    for f in sorted(rows, key=lambda f: (order.get(f.get("severity"), 3), str(f.get("type")), str(f.get("subject")))):
+        title = t.mark(f["title_id"], **(f.get("title_args") or {})) if f.get("title_id") else _e(f.get("title"))
+        owner = OWNER_WORDS.get(f.get("owner"))
+        fix = (f'<a href="findings.html">{t.mark("Open the findings")}</a>' if f.get("type") == "session.unmanaged"
+               else _e(f.get("action")))
+        items.append(f'<li class="agents-need" data-finding="{_e(f.get("type"))}" data-subject="{_e(f.get("subject"))}">'
+                     f'<div>{_chip(t, f.get("severity") or "warning", SEVERITY_TONES.get(f.get("severity"), "warn"))} '
+                     f'{title}</div><div class="machine-hint">'
+                     + (f'{t.mark("Owner")}: {t.mark(owner)}. ' if owner else "")
+                     + f'{fix}</div></li>')
+    return (f'<div id="agents-watch">{t.mark("What the watch found", tag="h3", attrs=" class=\"agents-project\"")}'
+            f'<ul class="agents-needs">{"".join(items)}</ul></div>')
+
+
 def _machine_sessions(sessions: dict | None, t: Translator, names: dict | None = None,
                       ledger: list[dict] | None = None) -> str:
     """Every coding session running here (sessions_view, CP-02): the three counts with their sources, then the
@@ -167,7 +243,8 @@ def _machine_sessions(sessions: dict | None, t: Translator, names: dict | None =
     doc = sessions if isinstance(sessions, dict) else {}
     f = sessions_view.facets(doc)
     parts = [f'<section class="card panel" id="agents-sessions">'
-             f'{t.mark("Sessions on this machine", tag="h2", attrs=HEADING)}', _tiles(_session_tiles(f, t), t)]
+             f'{t.mark("Sessions on this machine", tag="h2", attrs=HEADING)}', _tiles(_session_tiles(f, t), t),
+             _host_line(doc, t), _watch(doc, t)]
     rows = _session_rows(doc, ledger)
     if not rows:
         if f["managerState"] == "read":
@@ -382,6 +459,8 @@ def signature(a: dict, sessions: dict | None = None) -> str:
         import sessions_view
         f = sessions_view.facets(sessions)
         said["sessionCount"] = (f["running"], f["managed"], f["activeHour"], f["managerState"])
+        host = sessions.get("host") if isinstance(sessions.get("host"), dict) else {}
+        said["host"] = (host.get("memory_pressure"), host.get("groups_with_room"))
         said["machineSessions"] = sorted((str(r.get("agent")), str(r.get("pid")), r.get("managed"), r.get("active"))
                                          for r in _session_rows(sessions, a.get("sessions")))
     return hashlib.sha256(json.dumps(said, sort_keys=True, default=str).encode()).hexdigest()[:16]
@@ -457,6 +536,9 @@ DYNAMIC = (DOT_TITLE, *DOT_TITLES.values(), "Sessions running", "Managed", "Acti
            "working", "session@@quiet", DISABLED, "answer@@yes", "answer@@no",
            *NEED_WORDS.values(),
            "Project", "Folder", "Managed", "Account group", "Last turn", "State",
+           # The host line and the watch's rows (OBS-630).
+           *HOST_PARTS, *HOST_LABELS, *PRESSURE_WORDS.values(),
+           *OWNER_WORDS.values(), "critical", "warning", "info",
            *(f"handoff@@{r}" for r in ("limit", "plan_route", "operator", "crash", "restart")),
            *(f"step@@{x}" for x in ("in_progress", "done", "blocked", "failed")),
            *(f"key-state@@{x}" for x in ("vault", "env-only", "missing", "unknown")),

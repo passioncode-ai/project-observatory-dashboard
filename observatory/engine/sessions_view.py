@@ -101,7 +101,8 @@ def find_manager(which: Callable[[str], str | None] = shutil.which,
 
 
 def _run(argv: list[str], timeout: float) -> tuple[int, str]:
-    p = subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="replace",
+    import osproc
+    p = subprocess.run(osproc.program(argv), capture_output=True, text=True, encoding="utf-8", errors="replace",
                        timeout=timeout, stdin=subprocess.DEVNULL)
     return p.returncode, p.stdout
 
@@ -240,7 +241,7 @@ def session_rows(doc: dict | None, ledger: list[dict] | None) -> list[dict]:
     return mark_active(rows, recent)
 
 
-def _row(raw, attribute, degraded_attribution: list[str]) -> dict | None:
+def _row(raw, attribute, degraded_attribution: list[str], view: dict | None = None) -> dict | None:
     if not isinstance(raw, dict):
         return None
     pid, agent = raw.get("pid"), raw.get("agent")
@@ -255,24 +256,38 @@ def _row(raw, attribute, degraded_attribution: list[str]) -> dict | None:
             degraded_attribution.append(type(exc).__name__)
     group = raw.get("pool") if isinstance(raw.get("pool"), str) else raw.get("account_group")
     quiet = raw.get("quiet") is True
-    return {"agent": agent, "project": project if isinstance(project, str) else None,
-            "folder_name": _folder_name(folder), "pid": pid, "managed": raw.get("managed") is True,
-            "launch_id": raw.get("launch_id") if isinstance(raw.get("launch_id"), str) else None,
-            "account_group": group if isinstance(group, str) else None,
-            "last_turn_at": _epoch_iso(raw.get("last_write_at")), "quiet": quiet,
-            "state": "quiet" if quiet else "working"}
+    out = {"agent": agent, "project": project if isinstance(project, str) else None,
+           "folder_name": _folder_name(folder), "pid": pid, "managed": raw.get("managed") is True,
+           "launch_id": raw.get("launch_id") if isinstance(raw.get("launch_id"), str) else None,
+           "account_group": group if isinstance(group, str) else None,
+           "last_turn_at": _epoch_iso(raw.get("last_write_at")), "quiet": quiet,
+           "state": "quiet" if quiet else "working"}
+    if view is not None:
+        # OBS-630: the manager's own answer says how it reaches the session (a launch, or a group folder's route
+        # to its proxy) and which group serves it; `sessions --machine` alone named neither.
+        import sessions_monitor
+        routed = sessions_monitor.route(raw, view)
+        out.update(routed, managed=out["managed"] or routed["managed"],
+                   account_group=routed["account_group"] or out["account_group"])
+    return out
 
 
 def summary(home: pathlib.Path | None = None, *, now: datetime | None = None,
             runner: Callable[[list[str], float], tuple[int, str]] | None = None,
-            manager=_UNSET, attribute=_UNSET) -> dict:
+            manager=_UNSET, attribute=_UNSET, monitor: bool = False, feed: pathlib.Path | None = None,
+            host: Callable | None = None) -> dict:
     """The contract `sessions_view.summary()` (CONTROL-PLANE.md): processes per agent, of them
     managed, of them with a turn in the last hour, the sessions, the sources and `degraded`.
 
     `home` is a workspace (its `store/`); None reads this engine's own. `runner`, `manager`
     (the CLI's path, None for not installed) and `attribute` (folder -> project id) are
     injected by tests; by default the CLI is found, run once, and folders are attributed by
-    the contract's path rules."""
+    the contract's path rules.
+
+    `monitor` (OBS-630, `sessions_monitor`): also read the manager's sessions feed, or its CLI
+    answers until the feed exists, so each session says how the manager reaches it and which
+    group serves it, and add `host` (one host sample), `capacity`, `groups` and `monitor` (where
+    they came from). `feed` names the feed file and `host` measures the sample (both for tests)."""
     now = now or _now()
     scratch = pathlib.Path(home) / "store" / "raw" if home else paths.SCRATCH  # paths-check: allow: a workspace home the caller names, not this engine's
     db = pathlib.Path(home) / "store" / "observatory.db" if home else paths.DB  # paths-check: allow: a workspace home the caller names, not this engine's
@@ -281,6 +296,10 @@ def summary(home: pathlib.Path | None = None, *, now: datetime | None = None,
     data, manager_source = _manager(binary, runner or _run, degraded)
     survey, survey_at = _survey(scratch, degraded)
 
+    view = None
+    if monitor:
+        import sessions_monitor
+        view = sessions_monitor.manager_view(binary, runner or _run, now, degraded, feed=feed)
     sessions: list[dict] = []
     if data is not None:
         if attribute is _UNSET:
@@ -293,7 +312,7 @@ def summary(home: pathlib.Path | None = None, *, now: datetime | None = None,
         failed: list[str] = []
         raw = data["sessions"]
         for item in raw[:MAX_SESSIONS]:
-            r = _row(item, attribute, failed)
+            r = _row(item, attribute, failed, view)
             if r is not None:
                 sessions.append(r)
         skipped = min(len(raw), MAX_SESSIONS) - len(sessions)
@@ -332,6 +351,13 @@ def summary(home: pathlib.Path | None = None, *, now: datetime | None = None,
         degraded.append(_gap("active_hour", "needs-session-list",
                              "which running sessions recorded a turn in the last hour needs the account manager's "
                              "session list: the process survey counts sessions and lists none"))
+    extra = {}
+    if view is not None:
+        import sessions_monitor
+        sample = (host or sessions_monitor.host_sample)(view, now, degraded, scratch=scratch)
+        extra = {"host": sample, "capacity": view.get("capacity"), "groups": view.get("groups"),
+                 "monitor": {"source": view.get("source"), "at": view.get("at"),
+                             "settings": sessions_monitor.settings()}}
     return {
         "schema": SCHEMA, "measuredAt": _iso(now),
         "processes": processes,
@@ -342,7 +368,7 @@ def summary(home: pathlib.Path | None = None, *, now: datetime | None = None,
         "sessions": sessions,
         "sources": {"processes": processes_source, "manager": manager_source,
                     "ledger": {"at": _iso(now) if recent is not None else None}},
-        "degraded": degraded,
+        "degraded": degraded, **extra,
     }
 
 
@@ -513,7 +539,14 @@ def projects(home: pathlib.Path | None = None, *, doc: dict | None = None,
 def main(argv: list[str]) -> int:
     """`sessions_view.py [OUT]`: read the three sources now and write the summary (the tick's step)."""
     out = pathlib.Path(argv[1]) if len(argv) > 1 else paths.SCRATCH / FILE
-    doc = summary()
+    doc = summary(monitor=True)
+    # The history (OBS-630): one host sample and each session's state a tick, bounded. A write that fails is named.
+    import sessions_monitor
+    try:
+        sessions_monitor.record(doc)
+    except OSError as exc:
+        doc["degraded"].append(_gap("history", "unwritable", f"the sessions history could not be written: "
+                                                               f"{type(exc).__name__}"))
     write(doc, out)
     f = facets(doc)
     print(f"coding-sessions: {f['running'] if f['running'] is not None else 'unknown'} running, "

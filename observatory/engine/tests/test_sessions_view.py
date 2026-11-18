@@ -362,13 +362,15 @@ class Finding(unittest.TestCase):
         import coding_session_findings
         self.rule = coding_session_findings
 
-    def test_unmanaged_sessions_are_one_info_finding(self) -> None:
+    def test_unmanaged_sessions_are_one_warning_sent_once(self) -> None:
+        """OBS-630: a session outside the account manager is sent to the operator once (warning, notify_findings);
+        the count is still one row."""
         doc = sessions_view.summary(self.ws.home, now=NOW, runner=Runner(manager_answer(SESSIONS)),
                                     manager="/usr/local/bin/switchboard", attribute=attribute)
         rows = self.rule.findings(doc)
         self.assertEqual(len(rows), 1)
         f = rows[0]
-        self.assertEqual((f["type"], f["severity"]), ("session.unmanaged", "info"))
+        self.assertEqual((f["type"], f["severity"], f["owner"]), ("session.unmanaged", "warning", "operator"))
         self.assertEqual(f["title"], "3 coding sessions run outside a lifecycle owner")
         self.assertIn("account manager", f["action"])
         self.assertIn("switchboard launch", f["action"])

@@ -1780,7 +1780,9 @@ def collect() -> list[dict]:
     import lifecycle_findings
     out.extend(lifecycle_findings.from_file(paths.SCRATCH / "lifecycle.json"))
     # CODING SESSIONS OUTSIDE A LIFECYCLE OWNER (OBS-550, tools/coding_session_findings.py): one
-    # info row with their count, from what the tick's `coding-sessions` step read. Silent until it ran.
+    # row with their count, from what the tick's `coding-sessions` step read; and the sessions watch
+    # (OBS-630): a critical host, a group with no account with room, a session served by another
+    # group, a stalled session. Silent until it ran.
     import coding_session_findings
     out.extend(coding_session_findings.from_file(paths.SCRATCH / "coding-sessions.json"))
     # THE MACHINE'S SSH KEYS: no passphrase, weak, readable, unused, registered nowhere or only on

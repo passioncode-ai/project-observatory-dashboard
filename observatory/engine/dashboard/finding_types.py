@@ -224,6 +224,11 @@ LABELS: dict[str, str] = {
     "secret.suppression_not_applied": "Leak suppression not applied",
     "server.silent": "Local server silent",
     "session.unmanaged": "Coding sessions outside a lifecycle owner",
+    # The sessions watch (OBS-630, sessions_monitor.py).
+    "host.overloaded": "Host overloaded",
+    "pool.no_room": "Account group with no account with room",
+    "session.wrong_group": "Session served by another account group",
+    "session.stalled": "Session busy with no turn",
     "site.dead": "Project site does not answer",
     "skill.stale_session": "Session runs an old skill",
     "ssh.folder_permissions": "SSH folder open to other accounts",

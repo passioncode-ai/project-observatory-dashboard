@@ -684,8 +684,9 @@ def steps(t: Tick, SCRATCH: Path, DASHBOARD: Path) -> None:
     # jobs past their interval, logs past their cap. Reads the process table; starts nothing.
     step("lifecycle", PY, "collectors/scan_lifecycle.py", SCRATCH / "lifecycle.json")
     # The coding sessions in three facets (OBS-550): what runs, what the account manager manages,
-    # what recorded a turn in the last hour. One call to the manager's CLI, bounded at 10 s; the
-    # pages and the `session.unmanaged` finding read the file it writes.
+    # what recorded a turn in the last hour. One call to the manager's CLI, bounded at 10 s, then the
+    # watch (OBS-630): its sessions feed, or four more CLI answers bounded at 5 s each, one host sample
+    # kept in the bounded history; the pages and the sessions findings read the file it writes.
     step("coding-sessions", PY, "sessions_view.py", SCRATCH / "coding-sessions.json")
     step("cleanup", PY, "tools/cleanup.py", "--auto")
     rotation.run_in_turn()

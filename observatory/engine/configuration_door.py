@@ -305,6 +305,12 @@ MACHINE_KEYS = (
     ("free_space_warning_percent", "number", 100, "free space (percent) below which the disk is a warning"),
     ("free_space_critical_percent", "number", 100, "free space (percent) below which the disk is critical"),
     ("memory_group_warning_mb", "int", 10_000_000, "memory (MB) one process group may hold before a warning"),
+    # The sessions watch (OBS-630, sessions_monitor.py).
+    ("sessions_load_per_core_critical", "number", 1000, "load per core at or above which the host is overloaded"),
+    ("sessions_memory_pressure_critical", "int", 4,
+     "memory pressure level at or above which the host is overloaded (2 warning, 4 critical)"),
+    ("sessions_stall_minutes", "int", 10080,
+     "minutes a busy session may write nothing before it is stalled (never under the account manager's 30)"),
 )
 
 

@@ -8,6 +8,9 @@
  "free_space_warning_percent": 15,
  "free_space_critical_percent": 5,
  "memory_group_warning_mb": 4096,
+ "sessions_load_per_core_critical": 2.0,
+ "sessions_memory_pressure_critical": 4,
+ "sessions_stall_minutes": 30,
  "locations": [
   {
    "path": "~/Library/Caches",
