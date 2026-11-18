@@ -232,6 +232,10 @@ def classify(name: str, cfg: dict, agent: str = "claude", home: pathlib.Path | N
         # OBS-555: the supply-chain rules the command line trips, as ids. Judged here, beside the redaction, so
         # the command line itself goes no further than this function.
         "risky": mcp_supply.judge(cmd, args, str(HOME if home is None else home)) if cmd and not url else [],
+        # OBS-606: what the server is pinned to (a remote's host, transport and auth kind; a command's version, digest
+        # or installation). Judged here too, so the URL's query, its user part and every argument stop at this line.
+        "supply": (mcp_supply.judge_remote(str(url), cfg, wire_of(agent, cfg)) if url
+                   else mcp_supply.judge_command(cmd, args) if cmd else None),
         # Switched off in its own config: opencode `enabled: false`, Codex
         # `enabled = false`, Kiro and Gemini `disabled: true`.
         "disabled": cfg.get("enabled") is False or cfg.get("disabled") is True,
@@ -304,6 +308,73 @@ def read_sources(home: pathlib.Path | None = None) -> tuple[list[dict], list[dic
                                      "scope": f"project:{_tilde(proj, home)}",
                                      "declared_in": f"{shown}#projects"})
     return rows, sources
+
+
+def plugin_declarations(home: pathlib.Path) -> tuple[list[dict], list[dict]]:
+    """(rows, degraded): the MCP servers each ENABLED Claude Code plugin ships (OBS-606), from its `.mcp.json` and its
+    `.claude-plugin/plugin.json` `mcpServers` (an object, or a file in the plugin named by a string), classified like a
+    declaration and judged with the plugin's recorded version. The plugin's folder is read and never recorded; a file
+    that cannot be read is named in `degraded` by the plugin and the file's name only."""
+    claude = home / ".claude"
+    rows: list[dict] = []
+    degraded: list[dict] = []
+
+    def read(path: pathlib.Path, what: str, plugin: str | None = None) -> dict | None:
+        try:
+            doc = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError) as exc:
+            degraded.append({"source": f"claude:plugins:{plugin or what}",
+                             "reason": f"{what} unreadable: {type(exc).__name__}"})
+            return None
+        return doc if isinstance(doc, dict) else None
+
+    settings = read(claude / "settings.json", "settings.json") or {}
+    enabled = {k for k, v in (settings.get("enabledPlugins") or {}).items() if v is True}
+    if not enabled:
+        return rows, degraded
+    installed = read(claude / "plugins" / "installed_plugins.json", "installed_plugins.json")
+    if installed is None:
+        return rows, degraded
+    for key in sorted(enabled):
+        records = (installed.get("plugins") or {}).get(key)
+        record = records[0] if isinstance(records, list) and records else records
+        if not isinstance(record, dict) or not record.get("installPath"):
+            continue
+        root = pathlib.Path(str(record["installPath"]))
+        version = record.get("version")
+        version = version if isinstance(version, str) and re.fullmatch(r"[0-9A-Za-z][0-9A-Za-z.+-]{0,63}", version) \
+            else None
+        tables = []
+        mcp = read(root / ".mcp.json", ".mcp.json", key)
+        if mcp is not None:
+            tables.append(mcp.get("mcpServers") if isinstance(mcp.get("mcpServers"), dict) else mcp)
+        manifest = read(root / ".claude-plugin" / "plugin.json", "plugin.json", key) or {}
+        declared = manifest.get("mcpServers")
+        if isinstance(declared, str):
+            target = (root / declared.replace(mcp_supply.PLUGIN_ROOT, "").lstrip("/")).resolve()
+            if target.is_relative_to(root.resolve()):
+                inner = read(target, "mcpServers file", key) or {}
+                tables.append(inner.get("mcpServers") if isinstance(inner.get("mcpServers"), dict) else inner)
+        elif isinstance(declared, dict):
+            tables.append(declared)
+        for table in tables:
+            for name, cfg in (table or {}).items():
+                if not isinstance(cfg, dict) or not (cfg.get("command") or cfg.get("url") or cfg.get("httpUrl")):
+                    continue
+                row = {**classify(str(name), cfg, "claude", home), "agent": "claude", "scope": f"plugin:{key}",
+                       "declared_in": "plugin", "plugin": key, "plugin_version": version}
+                if row.get("command") and not (cfg.get("url") or cfg.get("httpUrl")):
+                    cmd = cfg["command"]
+                    argv = [str(a) for a in cfg.get("args") or []]
+                    if isinstance(cmd, list):
+                        cmd, argv = (str(cmd[0]) if cmd else ""), [str(a) for a in cmd[1:]] + argv
+                    row["supply"] = mcp_supply.judge_command(str(cmd), argv, version, plugin=True)
+                    expanded = str(cmd).replace(mcp_supply.PLUGIN_ROOT, str(root))
+                    row["command_present"] = bool(shutil.which(expanded) or pathlib.Path(expanded).is_file())
+                rows.append(row)
+    return rows, degraded
 
 
 def launch_specs(home: pathlib.Path | None = None) -> dict[str, tuple[str, list[str]]]:
@@ -509,6 +580,11 @@ def scan(home: pathlib.Path | None = None, probe=None, *, declarations_only: boo
     rows, sources = read_sources(home)
     note = None
     degraded: list[dict] = []
+    # OBS-606: the servers enabled plugins ship, read from their files (nothing started), judged and pinned to the
+    # plugin's version. A server the probe hears under the same name is then the same row, not a second one.
+    plugin_rows, plugin_degraded = plugin_declarations(home)
+    rows += plugin_rows
+    degraded += plugin_degraded
     if declarations_only:
         heard, complete, probed_at = carried(previous)
         probe_doc = {"state": "carried" if probed_at else "never", "probed_at": probed_at,

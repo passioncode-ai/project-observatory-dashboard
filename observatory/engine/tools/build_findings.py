@@ -3104,6 +3104,30 @@ def collect() -> list[dict]:
             "action": "read the server's change, then accept the new definitions on the MCP page or with "
                       "`observatory_mcp_accept`",
             "evidence": ["store/state/mcp-pins.json"]})
+    # WHAT A REMOTE, PLUGIN OR CONTAINER SERVER IS NOT PINNED TO (OBS-606): a remote server's code is its provider's, a
+    # container image named by a tag can be moved, a plugin with no recorded version pins nothing. Named by the server
+    # and the code; never a URL, a key, an image or a command line.
+    for _u in _sc.get("unpinned") or []:
+        _code = _u["code"]
+        out.append({
+            "type": "mcp.unpinned_server", "subject": f"mcp:{_u['agent']}/{_u['server']}/{_code}",
+            "severity": mcp_supply.UNPINNED[_code][0],
+            **(titled("MCP server {server} is remote: only its endpoint is recorded", server=_u["server"])
+               if _code == "remote-endpoint" else
+               titled("MCP server {server} is reached over plain HTTP", server=_u["server"])
+               if _code == "plain-http" else
+               titled("MCP server {server} runs a container image named by a tag", server=_u["server"])
+               if _code == "image-tag" else
+               titled("MCP server {server} comes from a plugin with no recorded version", server=_u["server"])),
+            "detail": (f"The {_u['agent']} declaration of `{_u['server']}` is not pinned (`{_code}`): "
+                       f"{mcp_supply.UNPINNED[_code][1]}. No URL, key or command line is shown here."),
+            "action": ("serve it over HTTPS" if _code == "plain-http" else
+                       "name the image by its digest (`image@sha256:...`)" if _code == "image-tag" else
+                       "reinstall the plugin from its marketplace so its version is recorded"
+                       if _code == "plugin-unversioned" else
+                       "nothing to pin: watch its tools when a probe lists them, and remove the server if you no "
+                       "longer use it"),
+            "evidence": ["registry/mcp-servers.json#supply"]})
 
     # A LEAKED SECRET THAT NOBODY ROTATED. `tools/vault.py leak` is the rule
     # the observatory's skill makes mandatory: an agent that sees a secret value
