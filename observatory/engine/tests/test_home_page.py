@@ -11,6 +11,7 @@ markup of its own here.
 from __future__ import annotations
 
 import html
+import json
 import pathlib
 import re
 import sys
@@ -88,6 +89,10 @@ def full_payload() -> dict:
     }
 
 
+#: The smallest estate that draws the state band: one project, nothing measured.
+ONE_ROW = {"rows": [{"id": "project:alpha-web", "name": "alpha-web", "sites": []}]}
+
+
 class StateBand(unittest.TestCase):
     def test_six_tiles_in_order_each_with_its_time_and_measured_ones_link(self):
         out = home_page.home_html(full_payload(), EN)
@@ -138,6 +143,38 @@ class StateBand(unittest.TestCase):
         self.assertIn("the provider refused the token", apps)
         self.assertIn("not measured since 2026-10-26", apps)
         self.assertIn("3 leaked, not rotated", text(tile(out, "keys")))
+
+    def test_a_machine_never_surveyed_says_so_in_the_readers_language_with_no_command(self):
+        """CP-01, OBS-608: machine_view's reason names the command that runs the survey; that is for agents (MCP,
+        JSON). The tile says it in a sentence of the page's language, and no command."""
+        source = (ROOT / "machine_view.py").read_text(encoding="utf-8")
+        self.assertIn("or run `project-observatory full {command}`", source, "agents keep the command")
+        reason ={"source": "machine.json", "code": "not-surveyed",
+                  "reason": "not surveyed yet: enable features.machine_watch, or run `project-observatory full machine`"}
+        for t, sentence in ((EN, "This machine has not been surveyed yet."),
+                            (RU, "Эта машина ещё не обследована.")):
+            with self.subTest(locale=t.locale):
+                cell = tile(home_page.home_html(dict(ONE_ROW, machine={"degraded": [reason]}), t), "disk")
+                self.assertIn('data-state="unmeasured"', cell)
+                self.assertIn(sentence, text(cell))
+                for word in ("project-observatory", "`", "full machine", "features.machine_watch"):
+                    self.assertNotIn(word, cell)
+
+    def test_a_reason_that_holds_a_command_is_not_shown_on_home(self):
+        """Any other source's reason that carries a command (backticks or the CLI's name) is replaced, never shown."""
+        reason = "not read: run `project-observatory full agents` first"
+        for t in (EN, RU):
+            with self.subTest(locale=t.locale):
+                cell = tile(home_page.home_html(dict(ONE_ROW, agents={"degraded": [reason]}), t), "agents")
+                self.assertIn('data-state="unmeasured"', cell)
+                self.assertNotIn("project-observatory", cell)
+                self.assertNotIn("`", cell)
+        cell = tile(home_page.home_html(dict(ONE_ROW, agents={"degraded": [reason]}), EN), "agents")
+        self.assertIn("Not read yet; its page says why.", text(cell))
+        plain = tile(home_page.home_html({**ONE_ROW, "heroku": {"scanned_on": "2026-10-26", "apps": [],
+                                                     "degraded": [{"reason": "the provider refused the token"}]}},
+                                         EN), "apps")
+        self.assertIn("the provider refused the token", text(plain), "a reason without a command stays as written")
 
     def test_the_personal_cloud_is_not_connected_and_no_link(self):
         cloud = tile(home_page.home_html(full_payload(), EN), "cloud")
@@ -377,6 +414,57 @@ def _section(page: str, sid: str) -> str:
     raise AssertionError(f"{sid} is not closed")
 
 
+#: Message ids Home draws once per SUBJECT, not once per page (CP-01): a tile's up and down (Sites, Apps), a problem
+#: kind's open count, an organization's projects and needs. Each sits in the holder kind named here, once per holder.
+PER_SUBJECT = {"{n} up": "tile", "{n} down": "tile", "open: {n}": "problem", "{n} projects": "organization",
+               "{n} need you": "organization"}
+HOLDERS = (("tile", r'<(?:a|div) [^>]*data-tile="'), ("problem", r'<li class="f"'),
+           ("organization", r'<li>\s*<a class="home-org"'), ("card", r'<a class="card mod"'))
+
+
+def _element(markup: str, start: int) -> int:
+    """Where the element that opens at START closes."""
+    tag = re.match(r"<([a-z]+)", markup[start:]).group(1)
+    depth = 0
+    for m in re.finditer(rf"<(/?){tag}\b[^>]*>", markup[start:]):
+        depth += -1 if m.group(1) else 1
+        if depth == 0:
+            return start + m.end()
+    raise AssertionError(f"<{tag}> at {start} is not closed")
+
+
+def shown_values(markup: str) -> list[tuple[str, dict, str, int]]:
+    """Every number the markup shows: (message id without its context, its arguments, the kind of holder it sits
+    in, where that holder starts). A value is a translated message with a numeric argument; a date alone is a
+    measurement stamp, not a value."""
+    holders = [(m.start(), _element(markup, m.start()), kind)
+               for kind, pattern in HOLDERS for m in re.finditer(pattern, markup)]
+    out = []
+    for m in re.finditer(r'data-t="([^"]+)" data-t-args="([^"]+)"', markup):
+        args = json.loads(html.unescape(m.group(2)))
+        if not any(isinstance(v, (int, float)) and not isinstance(v, bool) for v in args.values()):
+            continue
+        start, kind = next(((s, k) for s, e, k in holders if s <= m.start() < e), (-1, "group"))
+        out.append((html.unescape(m.group(1)).split("@@")[-1], args, kind, start))
+    return out
+
+
+def repeated_values(markup: str) -> list[str]:
+    """The values drawn twice: a message shown in two places (whatever its number), or a per-subject message
+    outside its holder kind or twice in one holder."""
+    seen: dict[str, list] = {}
+    per_holder = set()
+    problems = []
+    for msg, args, kind, start in shown_values(markup):
+        if msg in PER_SUBJECT:
+            if kind != PER_SUBJECT[msg] or (msg, start) in per_holder:
+                problems.append(f"{msg} {args} in a {kind}")
+            per_holder.add((msg, start))
+            continue
+        seen.setdefault(msg, []).append(args)
+    return problems + [f"{msg} shown {len(a)} times: {a}" for msg, a in seen.items() if len(a) > 1]
+
+
 class ControlPlaneHome(unittest.TestCase):
     """CP-01 (OBS-551, OSS-118): Home answers "is everything fine, and what needs me first" once per fact,
     grouped as state, needs you, work and estate, with no command text."""
@@ -410,6 +498,37 @@ class ControlPlaneHome(unittest.TestCase):
         for kept in ("env.html", "mcp.html", "traffic.html", "health.html", "tools.html"):
             self.assertIn(kept, cards, "a section no tile speaks for keeps its card")
         self.assertNotIn("<code", home)
+
+    def test_no_value_is_shown_twice_on_home(self):
+        """OBS-608: "each fact once" holds for the numbers shown, not only for the links. Home and the cards that
+        follow it on the index page carry every value once, in both languages, with every card filled."""
+        import build_dashboard
+        payload = dict(full_payload(),
+                       env={"files": [{"kind": "env", "variables": [{"name": "A", "class": "secret"},
+                                                                    {"name": "B", "class": "plain",
+                                                                     "available_in": ["beta-api"]}]}]},
+                       mcp={"servers": [{"name": "s1"}, {"name": "s2"}], "totals": {"distinct_servers": 2}},
+                       stats={"projects_active_7d": 2})
+        for locale, template in (("en", _template()),
+                                 ("ru", shell.split_template(build_dashboard.template_for("ru"))[0])):
+            with self.subTest(locale=locale):
+                page = shell.page_html(template, "index", payload)
+                shown = _section(page, "home") + _section(page, "mods")
+                values = shown_values(shown)
+                self.assertGreater(len(values), 15, "the check reads the tiles, the groups and the cards")
+                self.assertTrue({"{n} variables", "{n} sessions running", "{n} workflows open"}
+                                <= {msg for msg, *_r in values})
+                self.assertEqual(repeated_values(shown), [])
+
+    def test_the_value_check_sees_a_card_that_repeats_a_home_group(self):
+        """The check above is not vacuous: without HOME_COVERED the Agents card says "4 workflows open" again."""
+        page = home_page.home_html(full_payload(), EN) + shell.cards_html(
+            full_payload(), shell.counts_of(full_payload()), EN)
+        self.assertIn("{n} workflows open shown 2 times", " ".join(repeated_values(page)))
+        twice = home_page.home_html(full_payload(), EN).replace('data-tile="apps"', 'data-tile="sites"', 1)
+        self.assertEqual(repeated_values(twice), [], "Sites and Apps each say their own up and down")
+        moved = '<p><span data-t="home@@{n} up" data-t-args="{&quot;n&quot;: 1}">1 up</span></p>'
+        self.assertEqual(repeated_values(moved), ["{n} up {'n': 1} in a group"])
 
     def test_no_command_text_on_home_in_any_state(self):
         fresh = {"runtime": {"home": "/example/workspace", "projects_configured": False}, "rows": [],

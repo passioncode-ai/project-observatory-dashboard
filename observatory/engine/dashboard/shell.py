@@ -24,7 +24,7 @@ from pathlib import Path
 from i18n import LOCALE_NAMES, LOCALES, Translator
 # The page table lives in page_table.py (OBS-572); the names are re-exported because every reader says `shell.X`.
 from page_table import (BODIES, HOME_BODY, SECTIONS, NAV_GROUP_LABELS, NAV_GROUPS, NAV_LINKS, NAV_VIEWS,  # noqa: F401
-                        PAGE_MODULES, PAGE_TABLE, PAGES, QUESTIONS, SLOTS, Page)
+                        NAV_PARENTS, PAGE_MODULES, PAGE_TABLE, PAGES, QUESTIONS, SLOTS, Page)
 
 #: The product's name is never translated (docs/brand/locales/*.md).
 TITLE_SUFFIX = "Project Observatory"
@@ -123,16 +123,27 @@ def nav_html(page: str, counts: dict[str, int | str], t: Translator | None = Non
     titles = {name: title for name, title, _kind in PAGES}
     groups = []
     for key, label, names in NAV_GROUPS:
-        items = []
+        entries = {}
         for name in names:
             n = counts.get(name)
             badge = f' <span class="n">{n}</span>' if n not in (None, "") else ""
             if name in NAV_LINKS:
                 view, href = NAV_LINKS[name]
-                items.append(f'<a class="pg pg-view" href="{href}">{t.mark(view)}{badge}</a>')
+                entries[name] = f'<a class="pg pg-view" href="{href}">{t.mark(view)}{badge}</a>'
                 continue
             cur = ' aria-current="page"' if name == page else ""
-            items.append(f'<a class="pg" href="{name}.html"{cur}>{t.mark(titles[name])}{badge}</a>')
+            entries[name] = f'<a class="pg" href="{name}.html"{cur}>{t.mark(titles[name])}{badge}</a>'
+        # An entry with children (NAV_PARENTS, CP-17) is followed by a group of them, labelled with its title.
+        items = []
+        for name in names:
+            if name in NAV_PARENTS:
+                continue
+            items.append(entries[name])
+            children = [entries[c] for c in names if NAV_PARENTS.get(c) == name]
+            if children:
+                parent = NAV_LINKS[name][0] if name in NAV_LINKS else titles[name]
+                items.append(f'<div class="nav-sub" role="group"{t.attr("aria-label", parent)}>'
+                             + "".join(children) + "</div>")
         groups.append(f'<section class="nav-group" aria-labelledby="nav-{key}">'
                       + t.mark(label, tag="h2", attrs=f' class="nav-heading" id="nav-{key}"')
                       + "".join(items) + "</section>")

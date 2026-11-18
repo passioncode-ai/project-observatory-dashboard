@@ -3,6 +3,39 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.44.0 (2026-11-18)
+
+Waves R5 and the first board fixes of the control plane refactor: the documents say what the code does, Integrations
+sits inside Availability, the disk guard sees a virtual machine's disk and the swap before the host disk runs out, the
+cleanup plan proposes what an operator cleaned by hand, and three defects from the board are closed. The
+observatory-log plugin moves to 0.44.0 with the release.
+
+### Added
+
+- **VM disks and swap** (OBS-620): each Lima or Colima VM disk file is its own place in the disk section with its growth
+  over a day; swap on the same container is measured with who holds the memory (the agent sessions and their memory);
+  `disk.vm_growth` and `disk.swap_growth` fire above 2 GB a day (settings on the Disk page). Nothing changes a VM.
+- **Cleanup proposals** (OBS-621): manual-tier classes `repo-idle` (90 days without a commit, reflog or agent session,
+  all work on a remote), `deps-stale` (dependency and build folders unchanged 14 days, outside running services'
+  projects, never Git-tracked) and `checkout-merged`; applying them re-checks every rule and writes a restore record
+  first.
+- **A registry no job built** (OBS-624): `maintain` runs the registry pass when `registry/projects.json` is missing,
+  empty or older than a day; the daily doctor names a registry never built (`doctor.registry_never_built`).
+
+### Changed
+
+- **Integrations inside Availability** (OBS-619): the monitoring navigation groups it under Availability; the page
+  keeps its address.
+- **The documents tell the truth** (OBS-608): CP-07 and D2 say osv-scanner is not run, CP-14 that key findings are off
+  by default everywhere, M1 names `coding-sessions.json`, design notes name their release; a duplicate-value test and
+  viewport screenshots for Home; Home shows no command text, the JSON and MCP answers keep it for agents.
+
+### Fixed
+
+- **A remote behind an ssh Host alias** (OBS-623): the registry resolves the alias with `ssh -G` (never connecting), so
+  a deploy-key clone gets its repository row and its service its project.
+- **A broker test bound to the wall clock** (OBS-622): it runs on the broker's own clock.
+
 ## 0.43.0 (2026-11-18)
 
 Wave R4 of the control plane refactor: the halves the first audit found missing. A project's stack is read from its

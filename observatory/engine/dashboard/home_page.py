@@ -60,16 +60,36 @@ def _copy(command: str, t: Translator) -> str:
             f'{t.attr("title", "copy the command")}>{t.mark("Copy the command")}</button></p>')
 
 
-def _reason(degraded: object) -> str:
-    """The first recorded reason a source gave for not being read, as written."""
+#: A reason that names a command: the CLI's name or a backtick-quoted span. Agents read it (MCP, JSON); Home does not
+#: show it (CP-01, OBS-608).
+_COMMAND = re.compile(r"`|project-observatory")
+
+
+def _reason(degraded: object) -> dict | str:
+    """The first recorded reason a source gave for not being read: the entry itself when it carries a `code`,
+    else its text as written."""
     for d in degraded or []:
         if isinstance(d, str) and d:
             return d
         if isinstance(d, dict):
+            if d.get("code") in ("not-surveyed", "unreadable"):
+                return d
             text = d.get("reason") or d.get("text") or d.get("code")
             if text:
                 return str(text)
     return ""
+
+
+def _reason_html(reason: dict | str, t: Translator) -> str:
+    """A reason in the reader's language and with no command (CP-01): a coded one by its code, a free text that
+    names a command replaced by a sentence that sends the reader to the page, any other one as written."""
+    if isinstance(reason, dict):
+        if reason.get("code") == "not-surveyed":
+            return t.mark("This machine has not been surveyed yet.")
+        return t.mark("unreadable: {error}", error=reason.get("error", ""))
+    if _COMMAND.search(reason):
+        return t.mark("Not read yet; its page says why.")
+    return t.known(reason)
 
 
 # --- the state band ---------------------------------------------------------
@@ -79,8 +99,8 @@ def _tile(key: str, name: str, state: str, value: str, sub: str, at: str,
     return {"key": key, "name": name, "state": state, "value": value, "sub": sub, "at": at, "href": href}
 
 
-def _unmeasured(key: str, name: str, at: str, reason: str, href: str | None, t: Translator) -> dict:
-    return _tile(key, name, "unmeasured", t.mark("not measured"), t.known(reason) if reason else "", at, href, t)
+def _unmeasured(key: str, name: str, at: str, reason: dict | str, href: str | None, t: Translator) -> dict:
+    return _tile(key, name, "unmeasured", t.mark("not measured"), _reason_html(reason, t) if reason else "", at, href, t)
 
 
 def _site_hosts(payload: dict) -> dict[str, dict | None]:

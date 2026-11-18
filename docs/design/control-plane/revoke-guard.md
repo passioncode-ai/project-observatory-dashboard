@@ -1,6 +1,6 @@
 # The revoke guard (OBS-594, CP-11)
 
-Status: built 2026-11-17 on `refactor/r1-revoke-guard`. Row: OBS-594 of the refactor plan
+Status: released in 0.42.0. Row: OBS-594 of the refactor plan
 ([refactor-plan.md](refactor-plan.md), wave R1).
 
 ## What

@@ -15,6 +15,7 @@ import sqlite3
 import sys
 import time
 import unittest
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -70,13 +71,30 @@ class Workspace:
         self.scans(iso(AT - datetime.timedelta(minutes=20)))
         self.write("raw/lifecycle.json", json.dumps({"observations": []}))
         self.write("raw/harness.json", json.dumps({"inventory": {"findings": []}}))
+        self.registry([{"id": "project:alpha-web"}])
+
+    def registry(self, projects: list | None, *, mtime: float | None = None) -> pathlib.Path:
+        """`registry/projects.json` with these projects; None writes a file that does not parse."""
+        path = self.base / "registry" / "projects.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{torn" if projects is None else json.dumps({"schema_version": 2, "projects": projects}),
+                        encoding="utf-8")
+        if mtime is not None:
+            os.utime(path, (mtime, mtime))
+        return path
+
+    def env(self):
+        """The registry a pass and the doctor read is this workspace's, whatever the runner's environment names."""
+        return mock.patch.dict(os.environ, {"OBSERVATORY_REGISTRY": str(self.base / "registry"),
+                                            "OBSERVATORY_SCRATCH": str(self.store / "raw")})
 
     def run(self, **kw):
         kw.setdefault("vault_root", self.vault)
         kw.setdefault("alive", lambda pid: False)
         kw.setdefault("summarize", Recorder())
         kw.setdefault("clock", lambda: AT.timestamp())
-        return dd.run(self.base, at=kw.pop("at", AT), **kw)
+        with self.env():
+            return dd.run(self.base, at=kw.pop("at", AT), **kw)
 
     def journal(self) -> list[dict]:
         path = self.store / "logs" / "doctor.jsonl"
@@ -104,7 +122,7 @@ class Catalogue(unittest.TestCase):
     def test_the_catalogue_is_fixed_and_small(self):
         ids = [c.id for c in dd.CATALOGUE]
         self.assertEqual(len(ids), len(set(ids)))
-        self.assertTrue(5 <= len(ids) <= 8, ids)
+        self.assertTrue(5 <= len(ids) <= 9, ids)
         for check in dd.CATALOGUE:
             self.assertTrue(bool(check.fix) + bool(check.finding) + bool(check.covered_by) == 1, check.id)
 
@@ -276,6 +294,38 @@ class UnsafeOnlyReports(unittest.TestCase):
         self.assertEqual(dfn.findings(doc), [])
 
 
+    def test_a_registry_that_was_never_built_is_a_finding_with_the_passs_last_answer(self):
+        # OBS-624: a workspace whose only jobs are `maintain` and `check` kept the empty registry `init` wrote.
+        w = Workspace()
+        w.healthy()
+        maint = json.loads((w.store / "maintenance.json").read_text(encoding="utf-8"))
+        maint["registry"] = {"tried": iso(AT), "result": "failed", "exit": 1, "detail": "tick: merge failed"}
+        w.maintenance(maint)
+        for projects in ([], "absent"):
+            with self.subTest(projects=projects):
+                if projects == "absent":
+                    (w.base / "registry" / "projects.json").unlink()
+                else:
+                    w.registry(projects)
+                doc = w.run()
+                check = by_id(doc)["registry_built"]
+                self.assertEqual((check["state"], check["finding"]), ("finding", "doctor.registry_never_built"))
+                rows = [r for r in dfn.findings(doc) if r["type"] == "doctor.registry_never_built"]
+                self.assertEqual([r["subject"] for r in rows], ["doctor:registry"])
+                self.assertIn("merge failed", rows[0]["detail"])
+                self.assertIn("maintain run", rows[0]["action"])
+        w.registry([{"id": "project:alpha-web"}])
+        self.assertEqual(by_id(w.run())["registry_built"]["state"], "ok")
+
+    def test_a_registry_that_does_not_parse_is_unknown_and_named(self):
+        w = Workspace()
+        w.healthy()
+        w.registry(None)
+        doc = w.run()
+        self.assertEqual(by_id(doc)["registry_built"]["state"], "unknown")
+        self.assertIn("registry", {d["source"] for d in doc["degraded"]})
+
+
 class Degraded(unittest.TestCase):
     def test_absent_sources_are_unknown_and_named_never_ok(self):
         w = Workspace()
@@ -362,6 +412,107 @@ class Maintenance(unittest.TestCase):
         state: dict = {}
         self.assertEqual(maintenance.step_doctor(w.base, state, AT, runner=runner)["result"], "failed")
         self.assertNotIn("doctor", state)
+
+
+
+class Tick:
+    """The registry pass's runner: records each call and, when `builds`, writes a registry with one project, as a
+    tick that reached `emit` does."""
+
+    def __init__(self, w: Workspace, *, builds=True, code=0, raises=None):
+        self.w, self.builds, self.code, self.raises, self.calls = w, builds, code, raises, []
+
+    def __call__(self, argv, **kw):
+        self.calls.append((argv, kw))
+        if self.raises:
+            raise self.raises
+        if self.builds:
+            self.w.registry([{"id": "project:alpha-web"}])
+        out = kw.get("stdout")
+        if out is not None and hasattr(out, "write"):
+            out.write("tick: line one\ntick: the last line\n")
+
+        class P:
+            returncode, stdout, stderr = self.code, None, None
+        return P()
+
+
+class RegistryPass(unittest.TestCase):
+    """OBS-624: a workspace whose only jobs are `maintain` and `check` builds its registry."""
+
+    def step(self, w, state, at=AT, runner=None):
+        with w.env():
+            return maintenance.step_registry(w.base, state, at, runner=runner)
+
+    def test_an_empty_registry_is_built_by_one_tick_under_its_own_ceiling(self):
+        w = Workspace()
+        w.registry([])
+        tick, state = Tick(w), {}
+        out = self.step(w, state, runner=tick)
+        self.assertEqual(out["result"], "built", out)
+        self.assertEqual(len(tick.calls), 1)
+        argv, kw = tick.calls[0]
+        self.assertTrue(str(argv[-1]).endswith("tick.py"), argv)
+        self.assertEqual(kw["env"]["OBSERVATORY_HOME"], str(w.base))
+        self.assertEqual(kw["env"]["OBSERVATORY_TICK_CEILING_SECONDS"], str(maintenance.REGISTRY_CEILING))
+        self.assertEqual(kw["timeout"], maintenance.REGISTRY_TIMEOUT)
+        self.assertEqual(state["registry"]["result"], "built")
+        self.assertEqual(self.step(w, state, at=AT + datetime.timedelta(minutes=15), runner=tick)["result"], "fresh")
+        self.assertEqual(len(tick.calls), 1)
+
+    def test_a_missing_or_unreadable_registry_is_built_too(self):
+        for kind in ("missing", "unreadable"):
+            with self.subTest(kind=kind):
+                w = Workspace()
+                if kind == "unreadable":
+                    w.registry(None)
+                tick = Tick(w)
+                self.assertEqual(self.step(w, {}, runner=tick)["result"], "built")
+                self.assertEqual(len(tick.calls), 1)
+
+    def test_a_registry_built_within_a_day_is_left_alone_and_one_older_is_rebuilt(self):
+        w = Workspace()
+        w.registry([{"id": "project:alpha-web"}], mtime=(AT - datetime.timedelta(hours=2)).timestamp())
+        tick = Tick(w)
+        self.assertEqual(self.step(w, {}, runner=tick)["result"], "fresh")
+        w.registry([{"id": "project:alpha-web"}], mtime=(AT - datetime.timedelta(hours=30)).timestamp())
+        # A tick that refreshed the registry an hour ago counts, though emit left the unchanged file as it was.
+        w.write("raw/tick.json", json.dumps({"finished_at": iso(AT - datetime.timedelta(hours=1)),
+                                             "registry_refreshed": True}))
+        self.assertEqual(self.step(w, {}, runner=tick)["result"], "fresh")
+        self.assertEqual(tick.calls, [])
+        w.write("raw/tick.json", json.dumps({"finished_at": iso(AT - datetime.timedelta(hours=1)),
+                                             "registry_refreshed": False}))
+        self.assertEqual(self.step(w, {}, runner=tick)["result"], "built")
+        self.assertEqual(len(tick.calls), 1)
+
+    def test_a_failed_pass_is_recorded_and_tried_again_after_an_hour_not_every_pass(self):
+        w = Workspace()
+        w.registry([])
+        tick, state = Tick(w, builds=False, code=1), {}
+        out = self.step(w, state, runner=tick)
+        self.assertEqual((out["result"], out["exit"], out["registry"]), ("failed", 1, "empty"))
+        self.assertIn("the last line", out["detail"])
+        self.assertIn(out["result"], maintenance.FAILED_RESULTS, "four in a row reach the doctor's step_failing")
+        later = self.step(w, state, at=AT + datetime.timedelta(minutes=15), runner=tick)
+        self.assertEqual(later["result"], "not-due")
+        self.assertEqual(len(tick.calls), 1)
+        self.step(w, state, at=AT + maintenance.REGISTRY_RETRY + datetime.timedelta(minutes=1), runner=tick)
+        self.assertEqual(len(tick.calls), 2)
+
+    def test_a_tick_that_overruns_is_stopped_and_recorded(self):
+        import subprocess
+        w = Workspace()
+        out = self.step(w, {}, runner=Tick(w, raises=subprocess.TimeoutExpired("tick", 1)))
+        self.assertEqual((out["result"], out["exit"]), ("failed", 124))
+
+    def test_a_process_that_may_not_touch_the_machine_runs_no_tick(self):
+        w = Workspace()
+        w.registry([])
+        with mock.patch.object(maintenance, "system_setup_allowed", return_value=False), \
+                mock.patch.object(maintenance.subprocess, "run", side_effect=AssertionError("no tick here")):
+            out = self.step(w, {})
+        self.assertEqual((out["result"], out["registry"]), ("not-allowed", "empty"))
 
 
 if __name__ == "__main__":

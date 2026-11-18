@@ -14,7 +14,17 @@
  },
  "manual": {
   "unique_branch_idle_days": 14,
-  "dirty_worktree_idle_days": 7
+  "dirty_worktree_idle_days": 7,
+  "_why_proposals": "OBS-621: proposed, never removed by itself; `full cleanup --apply --include manual` checks each again and writes its restore record first. An idle repository: no commit, reflog or agent session (a folder under session_roots) in idle_repository_days, clean, no stash, every commit on a remote. A dependency folder (artifact_dirs and dependency_dirs): not tracked by Git, unchanged for dependency_unchanged_days, its project no running service's. A checkout under checkout_roots or a linked worktree: clean, merged into origin's default branch, index idle merged_checkout_idle_hours, no process inside. The tick plans them anew every plan_every_hours; a person's plan always does.",
+  "idle_repository_days": 90,
+  "dependency_unchanged_days": 14,
+  "merged_checkout_idle_hours": 24,
+  "dependency_dirs": [".venv", "venv", ".tox", ".build", ".dart_tool"],
+  "checkout_roots": ["{data}/_worktrees"],
+  "session_roots": ["~/.claude/projects"],
+  "plan_budget_seconds": 120,
+  "plan_every_hours": 6,
+  "max_proposals": 500
  },
  "artifact_dirs": ["node_modules", ".next", ".turbo", ".nuxt", ".svelte-kit", ".parcel-cache", ".expo",
                    "target", "DerivedData", "Pods", ".gradle", "build", "dist", ".output",
@@ -28,6 +38,8 @@
   "clone_min_age_hours": 1,
   "user_temp_hours": 12,
   "tmp_growth": {"entries_per_day": 1000, "gb_per_day": 1},
+  "vm_growth": {"gb_per_day": 2},
+  "swap_growth": {"gb_per_day": 2},
   "temp_roots": [
    {"path": "{tmpdir}", "depth": 1},
    {"path": "/private/tmp", "depth": 1},

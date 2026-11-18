@@ -1,7 +1,8 @@
 # M12: rotation never cuts a live consumer (OBS-561)
 
 Module M12 of [CONTROL-PLANE.md](../CONTROL-PLANE.md): requirement CP-11, decision D5 (deliver, read back, then
-revoke). Status: built on branch `fix/rotation-consumers`, 2026-11-14.
+revoke). Status: released in 0.37.0 (OpenRouter, #544); the Cloudflare and Heroku doors deliver before they revoke
+since 0.43.0 (OBS-607). Both are entries of `CHANGELOG.md`.
 
 ## What
 

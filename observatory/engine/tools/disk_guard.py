@@ -1303,10 +1303,21 @@ def vm_disks(at: float, globs=VM_DISK_GLOBS) -> list[dict]:
                 continue
             if not stat.S_ISREG(st.st_mode):
                 continue
-            out.append({"path": path, "allocated_gb": round(getattr(st, "st_blocks", 0) * 512 / GB, 1),
+            tool, vm, name = vm_name(path)
+            out.append({"path": path, "tool": tool, "vm": vm, "file": name, "key": f"{tool}/{vm}/{name}",
+                        "allocated_gb": round(getattr(st, "st_blocks", 0) * 512 / GB, 1),
                         "size_gb": round(st.st_size / GB, 1),
                         "written_minutes_ago": max(0, round((at - st.st_mtime) / 60))})
     return out
+
+
+def vm_name(path: str) -> tuple[str, str, str]:
+    """(tool, VM, file) of a VM disk file: Colima's VMs live in its own Lima home (`~/.colima/_lima`), Lima's in
+    `~/.lima`; a data disk is `_disks/<vm>/datadisk`, a VM's own disk `<vm>/disk` or `<vm>/diffdisk`."""
+    parts = pathlib.PurePath(path).parts
+    tool = "colima" if ".colima" in parts else "lima"
+    vm = parts[-2] if len(parts) >= 2 else ""
+    return tool, vm if VM_NAME.fullmatch(vm or "") else "unnamed", parts[-1] if parts else ""
 
 
 def vm_warnings(level: str, vms: list[dict]) -> list[dict]:
@@ -1318,6 +1329,103 @@ def vm_warnings(level: str, vms: list[dict]) -> list[dict]:
         return []
     return [{"code": "vm-disk-at-risk", "level": level, "vms": [v["path"] for v in writing],
              "allocated_gb": round(sum(v["allocated_gb"] for v in writing), 1)}]
+
+
+# What grows on the host disk (OBS-620): on 2026-11-17 a container log inside a Colima VM grew to 10.7 GB and filled
+# the host disk twice, while swap held about 15 GB of the same APFS container. Each pass records the space every VM
+# disk file and the swap take (tools/disk_growth_series.py) and says how much each grew over the last day; what grows
+# faster than its setting is a finding (tools/machine_findings.py). Nothing here acts on a VM or on the swap.
+#: Where macOS keeps its swap files: a volume of its own, in the same APFS container as the data volume.
+SWAP_VOLUME = "/System/Volumes/VM"
+
+
+def vm_growth(vms: list[dict], series: dict, at: float, threshold: float) -> list[dict]:
+    """Each VM disk row with `growth` (`{gb, window_hours, gb_per_day}` over the last day, None without a day's
+    history) and `growing` (faster than `threshold` GB a day)."""
+    import disk_growth_series
+    out = []
+    for v in vms:
+        grown = disk_growth_series.growth(series.get(v.get("key")) or [], at)
+        out.append({**v, "growth": grown,
+                    "growing": bool(grown) and grown["gb_per_day"] > threshold})
+    return out
+
+
+def swap_same_container(usage=None, platform: str | None = None, home: str | None = None) -> bool | None:
+    """Whether the swap takes space from the disk the guard watches. On macOS every APFS volume of one container
+    reports the container's size, so the swap volume and the home folder's volume answering the same total are
+    one container; None when that cannot be read, and on other systems (a swap partition is not this disk)."""
+    if (platform or sys.platform) != "darwin":
+        return None
+    usage = usage or shutil.disk_usage
+    try:
+        swap, mine = usage(SWAP_VOLUME), usage(home or str(pathlib.Path.home()))
+    except (OSError, ValueError):
+        return None
+    return swap.total == mine.total and abs(swap.free - mine.free) <= GB
+
+
+def swap_owner(machine: dict | None, sessions: dict | None) -> dict:
+    """Who holds the memory the swap writes: the coding-agent sessions running now (the coding-sessions reading,
+    `sessions_view`) and the memory their processes hold (the machine survey's `agent:` groups). A source that was
+    not read is None, never zero."""
+    import sessions_view
+    facets = sessions_view.facets(sessions)
+    groups = [g for g in (((machine or {}).get("processes") or {}).get("groups") or [])
+              if isinstance(g, dict) and str(g.get("origin", "")).startswith("agent:")]
+    rss = {}
+    for g in groups:
+        value = g.get("rss_mb")
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            agent = g["origin"].split(":", 1)[1]
+            rss[agent] = rss.get(agent, 0.0) + value
+    by_agent = facets.get("byAgent") or {}
+    agents = sorted(set(by_agent) | set(rss))
+    return {"sessions": facets.get("running"), "measured_at": facets.get("measuredAt"),
+            "rss_gb": round(sum(rss.values()) / 1024, 1) if machine and groups else None,
+            "agents": [{"agent": a, "sessions": by_agent.get(a),
+                        "rss_gb": round(rss[a] / 1024, 1) if a in rss else None} for a in agents][:8]}
+
+
+def swap_section(memory: dict | None, series: list, at: float, threshold: float, owner: dict,
+                 same: bool | None) -> dict:
+    """The swap in use with the free space (`vm.swapusage`, read by the memory snapshot), whether it sits on the
+    same disk, its growth over the last day and its owner. Growing counts only on the same disk: swap elsewhere
+    takes none of this disk's space."""
+    import disk_growth_series
+    gb = (memory or {}).get("swap_gb")
+    grown = disk_growth_series.growth(series, at) if isinstance(gb, (int, float)) else None
+    return {"gb": gb if isinstance(gb, (int, float)) and not isinstance(gb, bool) else None,
+            **({} if isinstance(gb, (int, float)) else {"reason": (memory or {}).get("swap_reason")
+                                                         or "missing-swap-measurement"}),
+            "same_container": same, "growth": grown,
+            "growing": bool(grown) and same is True and grown["gb_per_day"] > threshold, "owner": owner}
+
+
+def growth_report(cfg: dict, at: float, vms: list[dict], memory: dict | None, degraded: list) -> tuple[list, dict]:
+    """Record this pass's VM disk and swap readings and return the VM rows and the swap section with their growth.
+    A history that cannot be written is named and the rows carry no growth."""
+    import disk_growth_series
+    readings = {v["key"]: v["allocated_gb"] for v in vms if v.get("key")}
+    swap_gb = (memory or {}).get("swap_gb")
+    if isinstance(swap_gb, (int, float)) and not isinstance(swap_gb, bool):
+        readings["swap"] = swap_gb
+    try:
+        series = disk_growth_series.record(readings, at)
+    except OSError as exc:
+        degraded.append({"source": "growth-series", "reason": f"the VM disk and swap history could not be written "
+                                                              f"({type(exc).__name__}); no growth is measured"})
+        series = {}
+    machine = _read(paths.SCRATCH / "machine.json") or None
+    try:
+        import sessions_view
+        sessions = sessions_view.load()
+    except Exception:  # noqa: BLE001 - an owner not read is None, never a stopped report
+        sessions = None
+    swap = swap_section(memory, series.get("swap") or [], at,
+                        _number((cfg.get("swap_growth") or {}).get("gb_per_day"), 2.0),
+                        swap_owner(machine, sessions), swap_same_container())
+    return vm_growth(vms, series, at, _number((cfg.get("vm_growth") or {}).get("gb_per_day"), 2.0)), swap
 
 
 def vm_rows(argv: list[str], timeout: float, env: dict | None = None, run=None) -> list[dict] | None:
@@ -2326,7 +2434,7 @@ def _git_tier(apply: bool, level: str, seconds: float) -> dict:
             out["plan_seconds"] = value
     else:
         keys = {"branch-merged", "branch-pushed", "worktree-missing", "worktree-clean",
-                "build-artifacts", "branch-unique", "worktree-dirty"}
+                "build-artifacts", "branch-unique", "worktree-dirty", "repo-idle", "deps-stale", "checkout-merged"}
         counts = doc.get("counts")
         if not isinstance(counts, dict) or not counts or not set(counts) <= keys or not all(
                 integer(value) for value in counts.values()):
@@ -2541,6 +2649,13 @@ def run(argv: list[str]) -> dict:
                 doc["warnings"] = vm_warnings(level, doc["vms"])
             except Exception as exc:  # noqa: BLE001 - a VM that cannot be measured is named, never stops the report
                 doc["degraded"].append({"source": "vms", "reason": f"VM disks could not be read ({type(exc).__name__})"})
+            # What each VM disk and the swap grew over the last day, and who holds the swap (OBS-620).
+            try:
+                doc["vms"], doc["swap"] = growth_report(cfg, time.time(), doc.get("vms") or [], doc.get("memory"),
+                                                        doc["degraded"])
+            except Exception as exc:  # noqa: BLE001 - growth that cannot be measured is named, never stops the report
+                doc["degraded"].append({"source": "growth", "reason": f"VM disk and swap growth could not be "
+                                                                      f"measured ({type(exc).__name__})"})
             if acting:
                 try:
                     doc.setdefault("warnings", []).extend(vm_error_warnings(vm_kernel_errors(30)))

@@ -75,6 +75,9 @@ NAV_VIEWS: tuple[tuple[str, str, str, str, int], ...] = (
     ("security", "Security", "findings.html?group=security", "monitoring", 1),
     ("availability", "Availability", "findings.html?group=availability", "monitoring", 2),
 )
+#: Entries drawn INSIDE another entry of their group: page name -> parent entry (CP-17, OBS-619). Availability
+#: covers sites, apps and integrations, so the Integrations page sits under it; the page keeps its own address.
+NAV_PARENTS: dict[str, str] = {"integrations": "availability"}
 #: MONITORING FIRST (OBS-551, CP-17): what is wrong right now, then the work, then what it runs on.
 NAV_GROUP_LABELS = (
     ("monitoring", "Monitoring"),

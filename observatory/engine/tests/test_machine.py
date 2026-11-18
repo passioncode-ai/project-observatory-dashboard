@@ -12,6 +12,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -903,6 +904,296 @@ class Estate(Base):
         self.run_cleanup("--auto")
         self.assertIn("merged-one", self.branches(repo))
         self.assertTrue((self.base / "wt-clean").exists())
+
+
+DAY = 86400
+
+
+def dated_commit(repo, name, days):
+    """A commit made `days` ago, its author and committer dates both in the past."""
+    when = f"{int(time.time() - days * DAY)} +0000"
+    (Path(repo) / name).write_text(name)
+    git(repo, "add", name)
+    subprocess.run(["git", "-C", str(repo), "commit", "-qm", name], check=True, capture_output=True,
+                   env=git_env(GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.test", GIT_COMMITTER_NAME="t",
+                               GIT_COMMITTER_EMAIL="t@example.test", GIT_AUTHOR_DATE=when, GIT_COMMITTER_DATE=when))
+
+
+def aged(path, days):
+    """Make a path and everything under it look `days` old."""
+    t = time.time() - days * DAY
+    for dirpath, dirnames, filenames in os.walk(path, topdown=False):
+        for n in filenames + dirnames:
+            with contextlib.suppress(FileNotFoundError):
+                os.utime(os.path.join(dirpath, n), (t, t), follow_symlinks=False)
+    os.utime(path, (t, t), follow_symlinks=False)
+
+
+class ManualProposals(Base):
+    """OBS-621: the manual tier proposes what the operator cleaned by hand on 2026-11-17, each item with its rule and
+    its size, and removes it only on `--apply --include manual`, after a re-check, with its restore record first."""
+
+    build, survey, run_cleanup, branches = Estate.build, Estate.survey, Estate.run_cleanup, Estate.branches
+
+    def remote(self, name):
+        bare = self.base / f"{name}.git"
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(bare)], check=True)
+        return bare
+
+    def idle_repo(self, name, days=120, push=True):
+        """A repository under the data folder whose last commit, reflog and agent session are `days` old."""
+        repo = self.data / name
+        subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+        dated_commit(repo, "a", days)
+        git(repo, "remote", "add", "origin", str(self.remote(name)))
+        if push:
+            git(repo, "push", "-q", "-u", "origin", "main")
+        return repo
+
+    def settle(self, repo, days=120):
+        """Age the reflog and git's own files after the last git call, as an untouched checkout looks."""
+        aged(Path(repo) / ".git", days)
+
+    def plan(self, busy=None):
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(self.run_cleanup(busy=busy), 0)
+        return json.loads((self.home / "store/raw/cleanup-plan.json").read_text())
+
+    def items(self, plan, cls):
+        return {Path(a["target"]).name: a for a in plan["actions"] if a["class"] == cls}
+
+    def session(self, path, days):
+        folder = self.base / ".claude" / "projects" / re.sub(r"[^A-Za-z0-9]", "-", str(path))
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "s.jsonl").write_text("{}")
+        aged(folder, days)
+
+    def test_an_idle_repository_whose_work_is_all_on_a_remote_is_proposed_with_its_rule_and_size(self):
+        quiet = self.idle_repo("quiet")
+        self.settle(quiet)
+        fresh = self.idle_repo("fresh")
+        commit(fresh, "today")
+        git(fresh, "push", "-q")
+        talked = self.idle_repo("talked")
+        self.settle(talked)
+        self.session(talked, 3)                       # an agent session in it three days ago
+        stashed = self.idle_repo("stashed")
+        (stashed / "a").write_text("changed")
+        git(stashed, "stash", "-q")
+        self.settle(stashed)
+        ahead = self.idle_repo("ahead")
+        dated_commit(ahead, "b", 100)                 # a commit no remote has
+        self.settle(ahead)
+        dirty = self.idle_repo("dirty")
+        (dirty / "notes.txt").write_text("unsaved")
+        self.settle(dirty)
+        alone = self.idle_repo("alone", push=False)   # no remote holds its work
+        self.settle(alone)
+        plan = self.plan()
+        got = self.items(plan, "repo-idle")
+        self.assertEqual(sorted(got), ["quiet"])
+        item = got["quiet"]
+        self.assertEqual(item["tier"], "manual")
+        self.assertIn("90 days", item["rule"])
+        self.assertGreater(item["kb"], 0)
+        self.assertEqual(item["contained_in"], "origin/main")
+        self.assertEqual(item["branch"], "main")
+        self.assertEqual(len(item["head"]), 40)
+        self.assertEqual(plan["counts"]["repo-idle"], 1)
+
+    def test_a_repository_of_a_running_service_is_never_proposed(self):
+        quiet = self.idle_repo("quiet")
+        self.settle(quiet)
+        plan = self.plan(busy={4242: str(quiet / "src")})
+        self.assertEqual(self.items(plan, "repo-idle"), {})
+        import cleanup_safety
+        cleanup_safety._jobs = (0.0, None)
+        agents = self.base / "Library" / "LaunchAgents"
+        agents.mkdir(parents=True)
+        (agents / "org.example.quiet.plist").write_text(f"<string>{quiet}/run.sh</string>")
+        try:
+            self.assertEqual(self.items(self.plan(), "repo-idle"), {})
+        finally:
+            cleanup_safety._jobs = (0.0, None)
+
+    def test_applying_writes_the_restore_list_first_then_removes(self):
+        quiet = self.idle_repo("quiet")
+        # A remote whose URL carries a fake credential, assembled here so no file holds a credential-shaped URL.
+        url = "https://" + ":".join(("someone", "fake-token-value")) + "@example.test/quiet.git"
+        git(quiet, "remote", "add", "mirror", url)
+        self.settle(quiet)
+        plan = self.plan()
+        head = self.items(plan, "repo-idle")["quiet"]["head"]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.run_cleanup("--apply")
+        self.assertTrue(quiet.exists(), "the auto tier never removes a repository")
+        with contextlib.redirect_stdout(out):
+            self.run_cleanup("--apply", "--include", "manual")
+        self.assertFalse(quiet.exists())
+        lists = list((self.home / "archive" / "cleanup").glob("*/restore-list.jsonl"))
+        self.assertEqual(len(lists), 1)
+        rows = [json.loads(l) for l in lists[0].read_text().splitlines()]
+        self.assertEqual((rows[0]["folder"], rows[0]["commit"], rows[0]["branch"]), (str(quiet), head, "main"))
+        self.assertEqual(sorted(r["name"] for r in rows[0]["remotes"]), ["mirror", "origin"])
+        text = lists[0].read_text() + (self.home / "store/logs/cleanup.jsonl").read_text()
+        self.assertNotIn("fake-token-value", text, "a credential in a remote URL is never written")
+        self.assertIn("example.test/quiet.git", text)
+        journal = [json.loads(l) for l in (self.home / "store/logs/cleanup.jsonl").read_text().splitlines()]
+        row = [r for r in journal if r.get("class") == "repo-idle"][-1]
+        self.assertEqual(row["result"], "removed")
+        self.assertEqual(row["restore"]["commit"], head)
+        self.assertEqual(row["restore_list"], str(lists[0]))
+
+    def test_a_repository_that_changed_since_the_plan_is_kept(self):
+        """Every rule is checked again when the proposal is applied: work started since keeps the repository."""
+        import cleanup
+        quiet = self.idle_repo("quiet")
+        self.settle(quiet)
+        item = self.items(self.plan(), "repo-idle")["quiet"]
+        (quiet / "new.txt").write_text("work started")
+        archive = self.home / "archive" / "cleanup" / "today"
+        with patch.object(cleanup, "busy_now", return_value=False), \
+                patch.object(cleanup, "fresh_busy", return_value=False):
+            row = cleanup.act(item, archive)
+            self.assertEqual(row["result"], "skipped")
+            self.assertTrue((quiet / "new.txt").exists())
+            self.assertFalse((archive / cleanup.RESTORE_LIST).exists(), "nothing to restore: nothing was removed")
+            (quiet / "new.txt").unlink()
+            dated_commit(quiet, "c", 200)            # an old-dated commit, pushed: HEAD moved all the same
+            git(quiet, "push", "-q")
+            self.settle(quiet)
+            row = cleanup.act(item, archive)
+        self.assertEqual(row["result"], "skipped")
+        self.assertIn("HEAD moved", row["reason"])
+        self.assertTrue(quiet.exists())
+
+    def test_stale_dependency_folders_outside_running_projects_are_proposed_never_tracked_ones(self):
+        app = self.data / "svc"
+        subprocess.run(["git", "init", "-q", "-b", "main", str(app)], check=True)
+        (app / ".gitignore").write_text("node_modules/\ndist/\n.venv/\n")
+        commit(app, "main.py")
+        git(app, "add", ".gitignore"); git(app, "commit", "-qm", "ignore")
+        old = app / "node_modules" / "left-pad"
+        old.mkdir(parents=True)
+        (old / "index.js").write_text("x" * 5000)
+        aged(app / "node_modules", 20)
+        recent = app / "dist"
+        recent.mkdir()
+        (recent / "out.js").write_text("y")
+        aged(recent, 5)
+        venv = app / ".venv"
+        venv.mkdir()
+        (venv / "pyvenv.cfg").write_text("home = /usr/bin")
+        aged(venv, 30)
+        kept = app / "pkg" / "build"
+        kept.mkdir(parents=True)
+        (kept / "vendored.txt").write_text("kept in git")
+        git(app, "add", "-f", "pkg/build/vendored.txt"); git(app, "commit", "-qm", "vendored build")
+        aged(kept, 30)
+        live = self.data / "live"
+        subprocess.run(["git", "init", "-q", "-b", "main", str(live)], check=True)
+        commit(live, "x")
+        (live / "node_modules").mkdir()
+        (live / "node_modules" / "m.js").write_text("m")
+        aged(live / "node_modules", 40)
+        plan = self.plan(busy={77: str(live)})
+        got = {str(Path(a["target"]).relative_to(self.data)): a for a in plan["actions"] if a["class"] == "deps-stale"}
+        self.assertEqual(sorted(got), ["svc/.venv", "svc/node_modules"])
+        self.assertIn("14 days", got["svc/node_modules"]["rule"])
+        self.assertIn("not tracked", got["svc/node_modules"]["rule"])
+        self.assertGreaterEqual(got["svc/node_modules"]["kb"], 4)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.run_cleanup("--apply", "--include", "manual", busy={77: str(live)})
+        self.assertFalse((app / "node_modules").exists())
+        self.assertFalse(venv.exists())
+        self.assertTrue((kept / "vendored.txt").exists() and recent.exists() and (live / "node_modules").exists())
+        journal = [json.loads(l) for l in (self.home / "store/logs/cleanup.jsonl").read_text().splitlines()]
+        rows = [r for r in journal if r.get("class") == "deps-stale"]
+        self.assertEqual(sorted(r["result"] for r in rows), ["removed", "removed"])
+        self.assertTrue(all(isinstance(r.get("kb"), int) for r in rows))
+
+    def test_a_dependency_folder_tracked_after_the_plan_is_kept(self):
+        app = self.data / "svc"
+        subprocess.run(["git", "init", "-q", "-b", "main", str(app)], check=True)
+        commit(app, "main.py")
+        deps = app / "node_modules"
+        deps.mkdir()
+        (deps / "a.js").write_text("a")
+        aged(deps, 20)
+        self.assertEqual(len(self.items(self.plan(), "deps-stale")), 1)
+        git(app, "add", "-f", "node_modules/a.js")
+        aged(deps, 20)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.run_cleanup("--apply", "--include", "manual")
+        self.assertTrue((deps / "a.js").exists(), "git ls-files printed it: never removed")
+
+    def test_merged_idle_checkouts_are_proposed_and_removed_by_hand(self):
+        repo = self.build()
+        self.survey(idle_days=0)
+        clean = self.base / "wt-clean"
+        index = Path(git(clean, "rev-parse", "--absolute-git-dir").strip()) / "index"
+        aged(index, 2)
+        roots = self.data / "_worktrees"
+        roots.mkdir()
+        clone = roots / "merged-clone"
+        subprocess.run(["git", "clone", "-q", str(self.base / "remote.git"), str(clone)], check=True,
+                       capture_output=True)
+        aged(clone / ".git" / "index", 2)
+        side = roots / "side-clone"
+        subprocess.run(["git", "clone", "-q", str(self.base / "remote.git"), str(side)], check=True,
+                       capture_output=True)
+        git(side, "checkout", "-qb", "local-work"); commit(side, "only-here")
+        git(side, "checkout", "-q", "main")
+        aged(side / ".git" / "index", 2)
+        busy = roots / "busy-clone"
+        subprocess.run(["git", "clone", "-q", str(self.base / "remote.git"), str(busy)], check=True,
+                       capture_output=True)
+        aged(busy / ".git" / "index", 2)
+        plan = self.plan(busy={9: str(busy)})
+        got = self.items(plan, "checkout-merged")
+        self.assertEqual(sorted(got), ["merged-clone", "wt-clean"])
+        self.assertIn("merged into", got["wt-clean"]["rule"])
+        self.assertTrue(got["wt-clean"]["linked"])
+        self.assertFalse(got["merged-clone"]["linked"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.run_cleanup("--apply", "--include", "manual", busy={9: str(busy)})
+        self.assertFalse(clean.exists())
+        self.assertIn("clean-wt", self.branches(repo), "a linked worktree's branch stays")
+        self.assertFalse(clone.exists())
+        self.assertTrue(side.exists() and busy.exists())
+        rows = [json.loads(l) for l in
+                next((self.home / "archive" / "cleanup").glob("*/restore-list.jsonl")).read_text().splitlines()]
+        self.assertEqual([r["folder"] for r in rows], [str(clone)], "a clone is listed for restore first")
+
+    def test_the_tick_carries_proposals_younger_than_their_interval_and_a_person_plans_anew(self):
+        quiet = self.idle_repo("quiet")
+        self.settle(quiet)
+        first = self.plan()
+        self.assertIn("quiet", self.items(first, "repo-idle"))
+        commit(quiet, "today")                       # work started: a new walk would no longer propose it
+        git(quiet, "push", "-q")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.run_cleanup("--auto")
+        tick = json.loads((self.home / "store/raw/cleanup-plan.json").read_text())
+        self.assertIn("quiet", self.items(tick, "repo-idle"), "carried, not walked again")
+        self.assertEqual(tick["manual_planned_at"], first["manual_planned_at"])
+        self.assertEqual(self.items(self.plan(), "repo-idle"), {}, "a person's plan walks again")
+
+    def test_git_only_plans_no_manual_proposal(self):
+        quiet = self.idle_repo("quiet")
+        self.settle(quiet)
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.run_cleanup("--json", "--git-only")
+        plan = json.loads((self.home / "store/raw/cleanup-plan.json").read_text())
+        self.assertEqual(self.items(plan, "repo-idle"), {})
+        self.assertEqual(plan["counts"]["repo-idle"], 0)
 
 
 class Findings(Base):

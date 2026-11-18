@@ -783,6 +783,19 @@ class Pass(Base):
         named = {v for k, v in vars(M).items() if k.startswith("UPDATE_") and isinstance(v, int)}
         self.assertEqual(updater - named, set())
 
+    def test_the_pass_runs_the_registry_step_before_the_key_sweep(self):
+        # OBS-624: a workspace with no tick job builds its registry here, before the sweep that reads it.
+        order = []
+        with patch.object(M, "step_key_sweep", lambda *a, **k: order.append("keySweep") or {"result": "off"}):
+            report = M.run_pass(self.home, at=AT, commands=FakeCommands(check=0), services=None, store=self.store,
+                                app=NoApp(), sleep=lambda s: None,
+                                registry=lambda base, state, at: order.append("registry") or {"result": "built"})
+        self.assertEqual(report["registry"], {"result": "built"})
+        self.assertEqual(order, ["registry", "keySweep"])
+        with patch.object(M.subprocess, "run", side_effect=AssertionError("a test's workspace runs no tick")):
+            default = M.step_registry(self.home, {}, AT)
+        self.assertIn(default["result"], ("not-allowed", "fresh"), default)
+
     def test_up_to_date_checks_on_its_cadence_and_takes_the_daily_backup(self):
         commands = FakeCommands(check=0)
         report = self.run_pass(commands, services=FakeServices())

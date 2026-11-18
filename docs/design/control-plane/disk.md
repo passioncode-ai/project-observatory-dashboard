@@ -144,3 +144,103 @@ Last removed 2026-11-16 09:45 UTC: 820 entries, 0.4 GB by the disk's own count
 - Tests: `test_disk_guard.py` (`UserTemp`, `UserTempPlace`, `UserTempGrowth`), `test_machine_findings.py`
   (`TemporaryFolderGrowth`), `test_disk_page.py`
   (`test_the_temporary_folder_shows_its_size_fastest_growing_classes_and_last_removal`). Scenarios: OSS-133, OSS-134.
+
+## Virtual machine disks and swap growth (OBS-620)
+
+On 2026-11-17 a container log inside a Colima VM grew to 10.7 GB and filled the host disk twice, while swap held about
+15 GB of the same APFS container. Neither showed as growth: the free-space series keeps one number a day and the
+machine survey sizes its places every few weeks. The guard now measures both on every pass.
+
+- Data: `disk_guard.vm_disks` lists each Lima or Colima VM disk file (`_disks/<vm>/datadisk`, `<vm>/disk`,
+  `<vm>/diffdisk` under `~/.colima/_lima` and `~/.lima`) with its allocated size (blocks, not the length a sparse file
+  claims) and names it by `vm_name`: tool, VM and file, `key` `colima/<vm>/datadisk`. `growth_report` records each
+  key and the swap in use (`swap`, from the memory snapshot's `vm.swapusage`) into `tools/disk_growth_series.py`
+  (`store/disk-growth-series.json`: 48 hours of samples a key, at most 240 a key and 64 keys, numbers and keys only,
+  never a path) and returns each VM row with `growth` (`{gb, window_hours, gb_per_day}` from the oldest sample of the
+  last day; None under an hour of history) and `growing` (faster than `guard.vm_growth.gb_per_day`, 2).
+- Swap: `swap_section` puts the swap in use beside the free space with `same_container` (`swap_same_container`: on
+  macOS the swap volume and the home volume reporting one container size; None where that cannot be read and on other
+  systems), its growth, `growing` (faster than `guard.swap_growth.gb_per_day`, 2, and only on the same disk) and its
+  `owner` (`swap_owner`): the coding-agent sessions running now from the coding-sessions reading
+  (`sessions_view.facets`) and the memory their processes hold (the machine survey's `agent:` groups). A source not
+  read is None, never zero.
+- Report and view: `disk-guard.json` carries `vms` and `swap`; `machine_view` returns them as `guard.vmDisks` and
+  `guard.swap`, and adds each VM disk file to `disk.locations` as a place of its own (kind `vm`, label "Lima or Colima
+  virtual machine disk", `growth_gb_per_day`), so the Machine page's disk table and `observatory_machine`
+  (`section="disk"`) list it with the survey's places, largest first. The overview returns `guard.vmDisks` (ten rows)
+  and `guard.swap`.
+- Findings: `disk.vm_growth` (subject `machine:vm:<vm>`) and `disk.swap_growth` (subject `machine:swap`, naming the
+  sessions and their memory), both warnings (`machine_findings.vm_growth_findings`, `swap_growth_findings`).
+- Observatory never changes a VM: no VM tool is asked by these readings, and the finding's action is the VM owner's.
+
+```
+Virtual machine disks
+Each Lima or Colima virtual machine keeps its disk in a file on this disk; ...
+Virtual machine   File       Space taken   Last day          Growth
+colima colima     datadisk   23 GB         10.7 GB in 24 h   growing fast
+default lima      diffdisk   4 GB          measured from the next day
+Swap holds 15 GB . on the same disk . last day 10 GB in 24 h
+Swap is growing fast.
+Held by 38 agent sessions, their processes holding 32 GB of memory . claude 35
+```
+
+- Failure: a history that cannot be written is `degraded` source `growth-series` and the rows carry no growth; any
+  other failure is source `growth`; the report is always written. A guard that has not measured says "Not measured
+  yet", a machine with no VM says so.
+- Tests: `test_disk_guard.py` (`VmDiskGrowth`, `SwapOnTheSameDisk`), `test_machine_findings.py`
+  (`VirtualMachineGrowth`), `test_disk_page.py` (`test_vm_disks_and_swap_show_their_growth_and_who_holds_the_memory`).
+  Scenario: OSS-139.
+
+## The manual tier proposes what was cleaned by hand (OBS-621)
+
+On 2026-11-17 the operator had three kinds of things cleaned by hand from a full disk: repositories nobody had worked
+in for 90 days whose every commit was on a remote, dependency and build folders unchanged for two weeks outside the
+projects running services use, and checkouts merged into their default branch. The cleanup plan (`tools/cleanup.py`)
+now proposes the same in its manual tier: never on a tick, never from the guard (`--git-only` plans none of them),
+removed only when a person applies `--apply --include manual`, and each item checked again then.
+
+- Where it looks (`manual_roots`): every checkout the hygiene survey measured and every repository directly in the
+  data folder; every clean linked worktree the survey found and every checkout directly in a `manual.checkout_roots`
+  folder (default `{data}/_worktrees`). A checkout is judged as a checkout, never as an idle repository.
+- `repo-idle`: no commit on any ref, no reflog entry and no agent session (a folder under `manual.session_roots`,
+  default `~/.claude/projects`, named by the path) in `manual.idle_repository_days` (90); clean, no stash, no commit
+  that no remote branch holds, no linked worktree, HEAD contained in a remote branch (as of the last fetch); its
+  project no running service's. Applying it re-checks all of that, fetches the remote that holds HEAD and checks
+  again, refuses ignored files that are not build output, and writes the restore record (folder, remotes with any
+  credential stripped from the URL, commit, branch) to `archive/cleanup/<day>/restore-list.jsonl`, flushed to the
+  disk, BEFORE a fresh complete holder listing and the removal. The journal row carries the record and the list's
+  path (`UNDO_IN_JOURNAL`).
+- `deps-stale`: a folder named in `artifact_dirs` or `manual.dependency_dirs` (`.venv`, `venv`, `.tox`, `.build`,
+  `.dart_tool`) that `git ls-files` names nothing inside, with no entry changed in `manual.dependency_unchanged_days`
+  (14) (`disk_guard.inspect`, which also refuses sockets, protected entries and another account's), in a project no
+  process works inside and no launchd or systemd job names. Applying it checks the folder's identity, `ls-files`, the
+  age and the jobs again, and the whole project must be free in a fresh complete listing.
+- `checkout-merged`: clean, HEAD an ancestor of origin's default branch, its index unchanged for
+  `manual.merged_checkout_idle_hours` (24), no process inside; a clone (not a linked worktree) also no stash and no
+  commit off the remotes. A linked worktree goes with `git worktree remove` (its branch stays); a clone gets a restore
+  record first, like a repository.
+- Each item names its `rule` and its size (`kb`, allocated blocks; `size_complete` false when the walk stopped), and
+  the plan takes at most `manual.plan_budget_seconds` (120, and never past the tick step's deadline) and
+  `manual.max_proposals` (500), the largest first; what it could not read is in the plan's `degraded` (source
+  `manual-proposals`), which `machine_view` passes on. The tick (`cleanup.py --auto`, every half hour) carries the
+  previous plan's proposals while `manual_planned_at` is younger than `manual.plan_every_hours` (6), so the walk runs
+  a few times a day; a person's plan or apply always walks anew. A dependency folder of more than 500,000 entries is
+  not proposed. The restore list is written through `journal_writer` (owner-only, fsync).
+- Disk page: the classes table lists the three as `manual` ("proposed only; checked again and removed by hand"), and
+  "Proposed for removal by hand" lists the items, largest first, with their rule and size. No command line on a row.
+
+```
+Proposed for removal by hand
+Nothing here is removed by itself. When a person applies the manual tier, each item is checked again, ...
+What                     Item                          Rule                                              Size
+deps-stale               /data/alpha-web/node_modules  not tracked by Git, unchanged for 14 days, ...    2 GB
+repo-idle                /data/old-bot                 no commit, reflog or agent session in 90 days ... 0.33 GB
+checkout-merged          /data/_worktrees/fix-1        clean, merged into origin/main, index idle 24 ... 0.08 GB
+```
+
+- Failure: an unreadable repository, session folder or data folder proposes nothing for it and is named; a fetch that
+  fails, a restore list that cannot be written, a HEAD that moved, new work, a tracked file or a holder keeps the item
+  and says why in its journal row.
+- Tests: `test_machine.py` (`ManualProposals`), `test_disk_page.py`
+  (`test_manual_proposals_name_their_rule_and_size_and_are_never_removed_by_themselves`), `test_disk_guard.py`
+  (`test_git_child_envelope_is_typed_and_exit_status_wins`). Scenario: OSS-140.

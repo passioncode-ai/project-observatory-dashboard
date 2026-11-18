@@ -1,6 +1,6 @@
 # Keys by organization (OBS-604, OBS-627, OBS-628, CP-10)
 
-Status: built 2026-11-18 on `refactor/r4-org-keys`, wave R4 of the [refactor plan](refactor-plan.md). It finishes
+Status: released in 0.43.0, wave R4 of the [refactor plan](refactor-plan.md). It finishes
 the halves [keys-by-source.md](keys-by-source.md) (OBS-556) left: what `shared` means, whose each key is, and who
 reads it.
 

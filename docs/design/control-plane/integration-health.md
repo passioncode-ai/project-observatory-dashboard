@@ -11,7 +11,7 @@ issue fingerprint map of [CONTROL-PLANE.md](../CONTROL-PLANE.md). Public sources
 | Key validity, drift, untracked | `observatory/engine/tools/integration_health.py` | every tick (`integration-health`), asks each key at most once a UTC day; `full integration-health [--force]` |
 | Findings | `observatory/engine/tools/integration_findings.py`, called by `build_findings.py` | every findings build |
 | Issue filer | `observatory/engine/tools/issue_filer.py` | every tick after `findings` (`issues`); `full issues [--dry-run]` |
-| Page | `observatory/engine/dashboard/integrations_page.py` (`integrations.html`, Monitoring, after Availability) | every dashboard build |
+| Page | `observatory/engine/dashboard/integrations_page.py` (`integrations.html`, Monitoring, inside Availability since OBS-619) | every dashboard build |
 | Notice | `integrations_page.banner_html`, also on Home (`home_page.issues_notice_html`) | until dismissed |
 | Agent views | MCP `observatory_integrations`, `observatory_issues` | on request |
 

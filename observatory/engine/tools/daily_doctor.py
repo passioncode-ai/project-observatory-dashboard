@@ -76,6 +76,7 @@ CATALOGUE: tuple[Check, ...] = (
     Check("backup_stale", "The workspace backup is older than 48 hours", finding="doctor.backup_stale"),
     Check("step_failing", "A maintenance step failing pass after pass", finding="doctor.step_failing"),
     Check("vault_meta", "Vault metadata files that cannot be read", finding="doctor.vault_meta_unreadable"),
+    Check("registry_built", "The project registry was never built", finding="doctor.registry_never_built"),
     Check("scan_fresh", "No scan for three hours", covered_by="scan.stale"),
     Check("mcp_doors", "Engine servers running replaced code", covered_by="lifecycle.stale_servers"),
     Check("plugin_behind", "Installed plugins behind their marketplace", covered_by="harness.plugin_behind"),
@@ -220,6 +221,26 @@ def check_vault_meta(vault: pathlib.Path | None, reason: str | None) -> dict:
         if not isinstance(doc, dict):
             bad.append(path.relative_to(vault).as_posix()[:-len(".meta.json")])
     return {"state": "finding" if bad else "ok", "count": len(bad), "items": bad}
+
+
+def check_registry_built(base: pathlib.Path, maint: dict | None) -> dict:
+    """`registry/projects.json` missing or holding no project: no tick and no registry pass has built it (OBS-624), so
+    the survey, the key sweep and every MCP read have nothing. Carries the maintenance pass's last registry answer."""
+    path = pathlib.Path(os.environ.get("OBSERVATORY_REGISTRY") or pathlib.Path(base) / "registry") / "projects.json"
+    last = (maint or {}).get("registry")
+    last = {k: last[k] for k in ("tried", "result", "exit", "detail") if k in last} if isinstance(last, dict) else {}
+    try:
+        doc = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        doc = None
+    except (OSError, ValueError):
+        return {"state": "unknown", "count": 0,
+                "degraded": {"source": "registry", "reason": "registry/projects.json cannot be read or does not parse"}}
+    projects = doc.get("projects") if isinstance(doc, dict) else None
+    if isinstance(projects, list) and projects:
+        return {"state": "ok", "count": 0}
+    return {"state": "finding", "count": 1, "last_pass": last or None,
+            "detail": "registry/projects.json is missing" if doc is None else "registry/projects.json holds no project"}
 
 
 def check_scan_fresh(store: pathlib.Path, at: datetime.datetime) -> dict:
@@ -438,6 +459,7 @@ def run(base: pathlib.Path, *, at: datetime.datetime | None = None, vault_root: 
             "backup_stale": check_backup_stale(maint, at),
             "step_failing": check_step_failing(maint),
             "vault_meta": check_vault_meta(vault, vault_reason),
+            "registry_built": check_registry_built(base, maint),
             "scan_fresh": check_scan_fresh(store, at),
             "mcp_doors": check_mcp_doors(store),
             "plugin_behind": check_plugin_behind(store),

@@ -10,8 +10,9 @@
 - **Agents** opens with the sessions running on this machine (OBS-550), then the problems, one row per workflow with
   its worst state and a button, then the workflows with their counts, then the turns the ledger recorded.
 - **Navigation** starts with a Monitoring group: Health, Security, Availability. Security and Availability are not
-  pages: each opens the Findings page narrowed to its group. Then Work, Infrastructure, Access, System (Machine,
-  Installed tools, Disk).
+  pages: each opens the Findings page narrowed to its group. The Integrations page is an entry inside Availability
+  (`page_table.NAV_PARENTS`, OBS-619), drawn indented under it on a wide screen; its address stays
+  `integrations.html`. Then Work, Infrastructure, Access, System (Machine, Installed tools, Disk).
 
 ## Data
 
@@ -99,10 +100,13 @@ problem row wrap under it.
 ## Tests
 
 - `observatory/engine/tests/test_home_page.py` `ControlPlaneHome`: the four groups in order, each fact once
-  (no card for a page a tile or group covers), no command text in any state.
+  (no card for a page a tile or group covers, and no shown value twice: `test_no_value_is_shown_twice_on_home`), no
+  command text in any state.
+- Viewport screenshots of Home at 1440x900 and 390x844, both languages, WebKit, with the command that makes them:
+  [shots/](shots/README.md) (OBS-608).
 - `observatory/engine/tests/test_agents_page.py` `ControlPlaneAgents`: sessions first, grouped by agent and project,
   over managed, unmanaged and quiet sessions; one row per workflow with its worst state, its button disabled with
   the tool name; `HandoffRoute`: the route offers a silent workflow and refuses bad input.
 - `observatory/engine/tests/test_dashboard_shell.py` `MonitoringNavigation`: the group order, the narrowed links,
-  the group counts and the type groups.
+  the group counts and the type groups, and Integrations inside Availability in both languages.
 - `tests/test_agent_parity.py`: the new action has its tool.

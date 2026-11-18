@@ -66,6 +66,12 @@ body[data-page] .pages a.pg[aria-current="page"] {
   color: var(--link);
   font-weight: 600;
 }
+/* An entry inside another (CP-17): Integrations under Availability. */
+.nav-sub {
+  margin-left: var(--space-3);
+  padding-left: var(--space-2);
+  border-left: 1px solid var(--border);
+}
 body[data-page] .pages a.pg .n {
   font-size: var(--t-chip);
   font-weight: 400;
@@ -410,6 +416,7 @@ body[data-page] .finding-body .act { display: block; margin: var(--space-3) 0; f
   body[data-page] .nav-rail { display: grid; grid-template-columns: 1fr; gap: var(--space-2); }
   body[data-page] .pages { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-1); }
   body[data-page] .nav-group { display: contents; }
+  body[data-page] .nav-sub { display: contents; }
   body[data-page] .nav-heading { display: none; }
   body[data-page] .pages a.pg { padding: var(--space-2) var(--space-1); font-size: var(--t-label); }
   body[data-page] .locale-switch { justify-self: start; }

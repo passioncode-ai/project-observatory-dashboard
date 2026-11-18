@@ -32,12 +32,14 @@ it (a branch's sha, an archive path).
 """
 from __future__ import annotations
 
+import contextlib
 import fnmatch
 import hashlib
 import errno
 import json
 import os
 import pathlib
+import re
 import shutil
 import stat
 import subprocess
@@ -58,7 +60,16 @@ from cleanup_safety import protected_tree_reason, scheduled_job_reason, worktree
 from holders import FRESH_SECONDS, fresh_busy  # noqa: E402
 
 AUTO_CLASSES = ("branch-merged", "branch-pushed", "worktree-missing", "worktree-clean", "build-artifacts")
-MANUAL_CLASSES = ("branch-unique", "worktree-dirty")
+#: The manual tier: the only copy of somebody's work (archived first), and what the operator cleaned by hand on
+#: 2026-11-17 (OBS-621): idle repositories whose work is all on a remote, stale dependency folders, merged checkouts.
+MANUAL_CLASSES = ("branch-unique", "worktree-dirty", "repo-idle", "deps-stale", "checkout-merged")
+#: The manual proposals' settings (`cleanup.json` -> `manual`), for a workspace whose copy predates them.
+MANUAL_DEFAULTS = {"idle_repository_days": 90, "dependency_unchanged_days": 14, "merged_checkout_idle_hours": 24,
+                   "dependency_dirs": [".venv", "venv", ".tox", ".build", ".dart_tool"],
+                   "checkout_roots": ["{data}/_worktrees"], "session_roots": ["~/.claude/projects"],
+                   "plan_budget_seconds": 120, "plan_every_hours": 6, "max_proposals": 500}
+#: The classes the manual proposals make; the tick carries them between plans (`manual_proposals`).
+PROPOSED = ("repo-idle", "deps-stale", "checkout-merged")
 
 
 def artifact_names(cfg: dict) -> list[str]:
@@ -449,17 +460,419 @@ def plan_artifacts(cfg: dict, busy: set[str]) -> list[dict]:
     return out
 
 
-def build_plan(cfg: dict, busy: set[str], artifacts: bool = True) -> dict:
+def build_plan(cfg: dict, busy: set[str], artifacts: bool = True, carry: bool = False) -> dict:
     try:
         hygiene = json.loads((paths.SCRATCH / "git-hygiene.json").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         hygiene = {}
-    actions = plan_git(hygiene, cfg) + (plan_artifacts(cfg, busy) if artifacts else [])
+    degraded: list[dict] = []
+    # The manual proposals walk repositories and folders: never inside the guard's git tier (`--git-only`).
+    manual, manual_at = manual_proposals(hygiene, cfg, degraded, carry) if artifacts else ([], None)
+    actions = plan_git(hygiene, cfg) + (plan_artifacts(cfg, busy) + manual if artifacts else [])
     return {"schema_version": 1, "planned_at": now(), "survey_at": hygiene.get("measured_at"),
             "survey_partial": bool(hygiene.get("partial")), "carried": carried(hygiene),
             "auto_enabled": configuration.enabled("auto_cleanup", "features"),
             "counts": {k: sum(1 for a in actions if a["class"] == k) for k in AUTO_CLASSES + MANUAL_CLASSES},
-            "actions": actions}
+            "actions": actions, "manual_planned_at": manual_at, "degraded": degraded}
+
+
+def manual_proposals(hygiene: dict, cfg: dict, degraded: list, carry: bool) -> tuple[list[dict], str | None]:
+    """The manual proposals and when they were planned. The tick (`--auto`, every half hour) carries the previous
+    plan's proposals while they are younger than `manual.plan_every_hours`, so the walk runs a few times a day, not
+    every pass; a person's plan or apply always plans anew. A step's deadline bounds the walk."""
+    settings = manual_settings(cfg)
+    if carry:
+        try:
+            previous = json.loads((paths.SCRATCH / "cleanup-plan.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            previous = {}
+        stamp = previous.get("manual_planned_at") if isinstance(previous, dict) else None
+        try:
+            age = time.time() - datetime.strptime(str(stamp), "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=timezone.utc).timestamp()
+        except ValueError:
+            age = None
+        if age is not None and 0 <= age < float(settings["plan_every_hours"]) * 3600:
+            degraded += [d for d in previous.get("degraded") or []
+                         if isinstance(d, dict) and d.get("source") == "manual-proposals"]
+            return [a for a in previous.get("actions") or []
+                    if isinstance(a, dict) and a.get("class") in PROPOSED], stamp
+    import step_budget
+    room = min(float(settings["plan_budget_seconds"]), step_budget.remaining() - 30)
+    if room < 5:
+        degraded.append({"source": "manual-proposals", "reason": "no time was left in this step for the manual "
+                                                                  "proposals; the next plan makes them"})
+        return [], None
+    return plan_manual(hygiene, cfg, degraded=degraded, budget=room), now()
+
+
+# --- the manual proposals (OBS-621) ----------------------------------------------
+#
+# On 2026-11-17 the operator had three things cleaned by hand from a full disk: repositories nobody had worked in for
+# 90 days whose every commit was on a remote, dependency and build folders unchanged for two weeks outside the
+# projects running services use, and checkouts merged into their default branch. The manual tier proposes the same,
+# each item with the rule that chose it and its size; nothing here runs on a tick or from the guard, and every item is
+# checked again when a person applies the tier (`act`), with its restore record written before anything goes.
+
+def manual_settings(cfg: dict) -> dict:
+    return {**MANUAL_DEFAULTS, **{k: v for k, v in (cfg.get("manual") or {}).items() if k in MANUAL_DEFAULTS}}
+
+
+def _read_git(repo: str, *args: str, timeout: float = 30) -> str | None:
+    """stdout of a read through the engine's git door (no optional locks, no hooks), or None."""
+    try:
+        p = safe_git.run(args, repo=repo, timeout=timeout, extra_env={"LC_ALL": "C"})
+    except (OSError, subprocess.SubprocessError, UnicodeError):
+        return None
+    return p.stdout if p.returncode == 0 else None
+
+
+def _expand_root(raw) -> str | None:
+    if not isinstance(raw, str) or not raw:
+        return None
+    return os.path.expanduser(raw.replace("{data}", str(paths.DATA)))
+
+
+def _iso(epoch: float) -> str:
+    return datetime.fromtimestamp(epoch, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def tree_kb(root: str, deadline: float, limit: int = 500_000) -> tuple[int, bool]:
+    """(KB the tree takes on the disk, complete): allocated blocks, never following a link; a walk past `limit`
+    entries or the deadline is a lower bound."""
+    total, seen, stack = 0, 0, [root]
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as entries:
+                for e in entries:
+                    seen += 1
+                    if seen > limit or time.monotonic() > deadline:
+                        return total // 1024, False
+                    try:
+                        st = e.stat(follow_symlinks=False)
+                    except OSError:
+                        continue
+                    total += getattr(st, "st_blocks", 0) * 512 or st.st_size
+                    if stat.S_ISDIR(st.st_mode):
+                        stack.append(e.path)
+        except OSError:
+            return total // 1024, False
+    return total // 1024, True
+
+
+def session_last(path: str, roots: list) -> float | None:
+    """When a coding agent last wrote a session of this folder (Claude Code names a project's folder by its path with
+    every other character than a letter or digit made `-`), 0.0 for never, None when a sessions folder cannot be read.
+    A folder whose name starts with the path's (a subfolder, a sibling `-copy`) counts too: it only keeps more."""
+    name = re.sub(r"[^A-Za-z0-9]", "-", path)
+    newest = 0.0
+    for raw in roots or []:
+        root = _expand_root(raw)
+        if not root or not os.path.isdir(root):
+            continue
+        try:
+            with os.scandir(root) as entries:
+                matches = [e.path for e in entries if e.name == name or e.name.startswith(name + "-")]
+            for folder in matches:
+                newest = max(newest, os.lstat(folder).st_mtime)
+                with os.scandir(folder) as files:
+                    for n, f in enumerate(files):
+                        if n > 5000:
+                            break
+                        newest = max(newest, f.stat(follow_symlinks=False).st_mtime)
+        except OSError:
+            return None
+    return newest
+
+
+def repo_activity(repo: str) -> float | None:
+    """The newest of a repository's last commit on any ref and its reflog, or None when they cannot be read. Not the
+    index, FETCH_HEAD or a remote-tracking reflog: a survey's `git status` and a fetch rewrite those without anybody
+    working."""
+    last = _read_git(repo, "log", "-1", "--all", "--format=%ct")
+    gitdir = (_read_git(repo, "rev-parse", "--absolute-git-dir") or "").strip()
+    if last is None or not gitdir:
+        return None
+    stamps = [float(last.strip())] if last.strip().isdigit() else []
+    # The reflog of HEAD and of the local branches: a remote-tracking ref's log moves with every fetch.
+    logs = os.path.join(gitdir, "logs")
+    with contextlib.suppress(OSError):
+        stamps.append(os.lstat(os.path.join(logs, "HEAD")).st_mtime)
+    for dirpath, dirnames, filenames in os.walk(os.path.join(logs, "refs", "heads")):
+        for f in filenames:
+            with contextlib.suppress(OSError):
+                stamps.append(os.lstat(os.path.join(dirpath, f)).st_mtime)
+    return max(stamps) if stamps else 0.0
+
+
+def redact_url(url: str) -> str:
+    """A remote's URL without its user name and password: a token in an https remote is never written down."""
+    import urllib.parse
+    try:
+        parts = urllib.parse.urlsplit(url)
+    except ValueError:
+        return "(unreadable)"
+    if parts.scheme and parts.netloc and "@" in parts.netloc:
+        host = parts.netloc.rsplit("@", 1)[1]
+        return urllib.parse.urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment))
+    return url
+
+
+def remotes_of(repo: str) -> list[dict] | None:
+    text = _read_git(repo, "remote", "-v")
+    if text is None:
+        return None
+    out = {}
+    for line in text.splitlines():
+        bits = line.split()
+        if len(bits) >= 2 and bits[0] not in out:
+            out[bits[0]] = {"name": bits[0], "url": redact_url(bits[1])}
+    return list(out.values())
+
+
+def work_on_remotes(repo: str, clone: bool = True) -> dict | str:
+    """The facts that make removing a checkout lose nothing, or the reason it would lose something: no uncommitted
+    or untracked change, and for a whole clone also no stash, no commit that no remote branch has and no linked
+    worktree. `head`, `branch`, `remotes` and `contained_in` (a remote branch holding HEAD) as of the last fetch."""
+    status = _read_git(repo, "status", "--porcelain", "--untracked-files=normal")
+    if status is None:
+        return "git status could not be read"
+    if status.strip():
+        return "it has uncommitted or untracked changes"
+    head = (_read_git(repo, "rev-parse", "--verify", "HEAD") or "").strip()
+    if len(head) < 40:
+        return "HEAD could not be read"
+    if clone:
+        if _read_git(repo, "rev-parse", "-q", "--verify", "refs/stash") is not None:
+            return "it has a stash"
+        ahead = _read_git(repo, "rev-list", "--branches", "--tags", "--not", "--remotes", "-n", "1")
+        if ahead is None or ahead.strip():
+            return "it has commits no remote branch holds"
+        listed = _read_git(repo, "worktree", "list", "--porcelain")
+        if listed is None or listed.count("worktree ") > 1:
+            return "it has linked worktrees"
+    holding = _read_git(repo, "branch", "-r", "--contains", head, "--format=%(refname:short)")
+    branches = [b for b in (holding or "").split() if not b.endswith("/HEAD") and "/" in b]
+    if not branches:
+        return "HEAD is on no remote branch"
+    remotes = remotes_of(repo)
+    if not remotes:
+        return "it has no remote"
+    branch = (_read_git(repo, "branch", "--show-current") or "").strip() or None
+    return {"head": head, "branch": branch, "remotes": remotes, "contained_in": sorted(branches)[0]}
+
+
+def default_base(repo: str) -> str | None:
+    """The remote branch a checkout is measured against: what `origin/HEAD` names, else origin/main or master."""
+    head = (_read_git(repo, "symbolic-ref", "-q", "--short", "refs/remotes/origin/HEAD") or "").strip()
+    if head:
+        return head
+    for name in ("origin/main", "origin/master"):
+        if _read_git(repo, "rev-parse", "-q", "--verify", "refs/remotes/" + name) is not None:
+            return name
+    return None
+
+
+def live_projects():
+    """A reason a project is a running service's (a process works inside it, a launchd or systemd job names it), or
+    "". The process list is read once for the plan; the act checks again with a fresh, complete listing."""
+    import scan_machine
+    try:
+        cwds = [c for c in (scan_machine.working_dirs() or {}).values() if isinstance(c, str)]
+    except Exception:  # noqa: BLE001 - an unread process list proposes; the act refuses what a process holds
+        cwds = []
+
+    def reason(root: str) -> str:
+        if any(c == root or c.startswith(root.rstrip(os.sep) + os.sep) for c in cwds):
+            return "a process works inside it"
+        return scheduled_job_reason(root)
+    return reason
+
+
+def manual_roots(hygiene: dict, manual: dict, degraded: list) -> tuple[dict, dict]:
+    """(repositories, checkouts) the proposals look at: every checkout the hygiene survey measured and every
+    repository directly in the data folder; every linked worktree the survey found clean and every checkout directly
+    in a `checkout_roots` folder. A checkout is judged as a checkout, never as an idle repository."""
+    repos: dict[str, dict] = {}
+    checkouts: dict[str, dict] = {}
+    for c in hygiene.get("checkouts") or []:
+        if not isinstance(c, dict) or c.get("stale") or not isinstance(c.get("path"), str):
+            continue
+        if os.path.isdir(os.path.join(c["path"], ".git")) and not os.path.islink(c["path"]):
+            repos[os.path.realpath(c["path"])] = {"repository": c.get("repository")}
+        for w in c.get("worktrees") or []:
+            if isinstance(w, dict) and w.get("state") == "clean" and not w.get("locked") and isinstance(w.get("path"), str):
+                checkouts[os.path.realpath(w["path"])] = {"repository": c.get("repository")}
+    data = str(paths.DATA)
+    try:
+        with os.scandir(data) as entries:
+            for e in entries:
+                if e.is_dir(follow_symlinks=False) and os.path.isdir(os.path.join(e.path, ".git")) \
+                        and not os.path.islink(os.path.join(e.path, ".git")):
+                    repos.setdefault(os.path.realpath(e.path), {"repository": None})
+    except OSError:
+        degraded.append({"source": "manual-proposals", "reason": "the data folder could not be read"})
+    for raw in manual.get("checkout_roots") or []:
+        root = _expand_root(raw)
+        if not root or not os.path.isdir(root):
+            continue
+        try:
+            with os.scandir(root) as entries:
+                for e in entries:
+                    if e.is_dir(follow_symlinks=False) and os.path.lexists(os.path.join(e.path, ".git")):
+                        checkouts.setdefault(os.path.realpath(e.path), {"repository": None})
+        except OSError:
+            degraded.append({"source": "manual-proposals", "reason": "a checkout folder could not be read"})
+    for path in checkouts:
+        repos.pop(path, None)
+    return repos, checkouts
+
+
+def plan_manual(hygiene: dict, cfg: dict, at: float | None = None, live=None, degraded: list | None = None,
+                budget: float | None = None) -> list[dict]:
+    """The manual tier's proposals (OBS-621), within `budget` seconds (`plan_budget_seconds`); the largest first."""
+    manual = manual_settings(cfg)
+    degraded = degraded if degraded is not None else []
+    at = time.time() if at is None else at
+    live = live or live_projects()
+    deadline = time.monotonic() + float(manual["plan_budget_seconds"] if budget is None else budget)
+    repos, checkouts = manual_roots(hygiene, manual, degraded)
+    out = (plan_idle_repos(repos, manual, at, live, deadline, degraded)
+           + plan_merged_checkouts(checkouts, manual, at, live, deadline, degraded)
+           + plan_stale_deps(sorted(set(repos) | set(checkouts)), cfg, manual, at, live, deadline, degraded))
+    if time.monotonic() > deadline:
+        degraded.append({"source": "manual-proposals", "reason": "the plan's time ran out; the rest is proposed by "
+                                                                  "the next plan"})
+    return sorted(out, key=lambda a: -(a.get("kb") or 0))[: int(manual["max_proposals"])]
+
+
+def plan_idle_repos(repos: dict, manual: dict, at: float, live, deadline: float, degraded: list) -> list[dict]:
+    days = int(manual["idle_repository_days"])
+    out = []
+    for repo in sorted(repos):
+        if time.monotonic() > deadline:
+            break
+        if live(repo):
+            continue
+        last, spoken = repo_activity(repo), session_last(repo, manual["session_roots"])
+        if last is None or spoken is None:
+            degraded.append({"source": "manual-proposals", "reason": "a repository's activity or its agent sessions "
+                                                                      "could not be read; it is not proposed"})
+            continue
+        newest = max(last, spoken)
+        if newest > at - days * 86400:
+            continue
+        facts = work_on_remotes(repo)
+        if isinstance(facts, str):
+            continue
+        kb, complete = tree_kb(repo, deadline)
+        idle = int((at - newest) // 86400)
+        out.append({"class": "repo-idle", "tier": "manual", "target": repo, "repo": repo,
+                    "repository": repos[repo].get("repository"), **facts, "kb": kb, "size_complete": complete,
+                    "idle_days": days, "last_work": _iso(newest) if newest else None,
+                    "rule": (f"no commit, reflog or agent session in {days} days; clean, no stash, every commit on "
+                             f"a remote; HEAD on {facts['contained_in']}"),
+                    "why": f"no work for {idle} days; restored by cloning {facts['contained_in']}"})
+    return out
+
+
+def plan_merged_checkouts(checkouts: dict, manual: dict, at: float, live, deadline: float,
+                          degraded: list) -> list[dict]:
+    hours = float(manual["merged_checkout_idle_hours"])
+    out = []
+    for path in sorted(checkouts):
+        if time.monotonic() > deadline:
+            break
+        if live(path):
+            continue
+        linked = os.path.isfile(os.path.join(path, ".git"))
+        facts = work_on_remotes(path, clone=not linked)
+        if isinstance(facts, str):
+            continue
+        gitdir = (_read_git(path, "rev-parse", "--absolute-git-dir") or "").strip()
+        try:
+            idle = at - os.lstat(os.path.join(gitdir, "index")).st_mtime if gitdir else -1.0
+        except OSError:
+            idle = -1.0
+        if idle < hours * 3600:
+            continue
+        base = default_base(path)
+        if not base or _read_git(path, "merge-base", "--is-ancestor", "HEAD", base) is None:
+            continue
+        repo = None
+        if linked:
+            common = (_read_git(path, "rev-parse", "--path-format=absolute", "--git-common-dir") or "").strip()
+            if os.path.basename(common.rstrip(os.sep)) != ".git":
+                continue
+            repo = os.path.dirname(common.rstrip(os.sep))
+        kb, complete = tree_kb(path, deadline)
+        out.append({"class": "checkout-merged", "tier": "manual", "target": path, "repo": repo or path,
+                    "repository": checkouts[path].get("repository"), "linked": linked, "base": base, **facts,
+                    "kb": kb, "size_complete": complete, "idle_hours": hours,
+                    "rule": (f"clean, HEAD merged into {base}, index idle {hours:g} hours, no process inside"
+                             + ("" if linked else "; no stash, every commit on a remote")),
+                    "why": (f"its branch stays in {os.path.basename(repo)}" if linked
+                            else f"restored by cloning {facts['contained_in']}")})
+    return out
+
+
+#: Entries a dependency folder may hold and still be proposed whole (a large `node_modules` holds a few hundred
+#: thousand); a larger one, or one the time runs out on, is not proposed.
+INSPECT_LIMIT = 500_000
+
+
+def dependency_names(cfg: dict, manual: dict) -> set[str]:
+    return set(artifact_names(cfg)) | {n for n in manual.get("dependency_dirs") or [] if isinstance(n, str)}
+
+
+def tracked_inside(folder: str) -> bool | None:
+    """Whether Git tracks anything inside `folder` (`git ls-files` prints a name), None when Git cannot say."""
+    out = _read_git(os.path.dirname(folder), "ls-files", "-z", "--", folder)
+    return None if out is None else bool(out.strip("\0"))
+
+
+def plan_stale_deps(roots: list[str], cfg: dict, manual: dict, at: float, live, deadline: float,
+                    degraded: list) -> list[dict]:
+    import disk_guard
+    days = int(manual["dependency_unchanged_days"])
+    names = dependency_names(cfg, manual)
+    cutoff = at - days * 86400
+    out = []
+    for root in roots:
+        if time.monotonic() > deadline:
+            break
+        if live(root):
+            continue
+        others = [r for r in roots if r != root and r.startswith(root + os.sep)]
+        for dirpath, dirnames, _ in os.walk(root):
+            if time.monotonic() > deadline:
+                break
+            if any(dirpath == o or dirpath.startswith(o + os.sep) for o in others):
+                dirnames[:] = []
+                continue
+            depth = dirpath[len(root):].count(os.sep)
+            keep = []
+            for d in dirnames:
+                full = os.path.join(dirpath, d)
+                if d == ".git" or os.path.islink(full):
+                    continue
+                if d not in names:
+                    if depth < 6:
+                        keep.append(d)
+                    continue
+                if d == ".wrangler" or tracked_inside(full) is not False:
+                    continue
+                r = disk_guard.inspect(full, cutoff, deadline, limit=INSPECT_LIMIT)
+                if not r["complete"]:
+                    continue
+                out.append({"class": "deps-stale", "tier": "manual", "target": full, "project": root,
+                            "kb": r["size"] // 1024, "identity": r["identity"], "unchanged_days": days,
+                            "rule": f"{d}: not tracked by Git, unchanged for {days} days, no running service uses "
+                                    f"the project",
+                            "why": "regenerated by the project's install or build"})
+            dirnames[:] = keep
+    return out
 
 
 # --- acting, with a re-check ---------------------------------------------------
@@ -846,6 +1259,8 @@ def act(a: dict, archive: pathlib.Path) -> dict:
         done = git(repo, *args)
         return {**rec, "result": "removed" if done.returncode == 0 else "failed",
                 **({"reason": done.stderr.strip()[:200]} if done.returncode else {})}
+    if cls in ("repo-idle", "deps-stale", "checkout-merged"):
+        return act_manual(a, archive, rec)
     if cls == "build-artifacts":
         # Only disk_guard carries the action-time eligibility/identity contract.
         # A stale legacy plan cannot prove tracked/ignored/idle state here.
@@ -854,8 +1269,132 @@ def act(a: dict, archive: pathlib.Path) -> dict:
     return {**rec, "result": "skipped", "reason": "unknown class"}
 
 
-#: The classes whose undo is only in the journal: a deleted branch's sha, a retired registration's ref (OBS-539).
-UNDO_IN_JOURNAL = ("branch-merged", "branch-pushed", "branch-unique", "worktree-missing")
+#: The classes whose undo is only in the journal: a deleted branch's sha, a retired registration's ref (OBS-539), a
+#: removed repository's or checkout's restore record (OBS-621, also in the restore list).
+UNDO_IN_JOURNAL = ("branch-merged", "branch-pushed", "branch-unique", "worktree-missing", "repo-idle", "checkout-merged")
+
+
+#: The file beside the day's archives that names what a manual removal took and how to get it back (OBS-621).
+RESTORE_LIST = "restore-list.jsonl"
+
+
+def write_restore(archive: pathlib.Path, row: dict) -> pathlib.Path:
+    """Append one restore record (folder, remotes without credentials, commit, branch) and flush it to the disk,
+    BEFORE the removal it describes. Raises OSError, and then nothing is removed."""
+    import journal_writer
+    target = archive / RESTORE_LIST
+    journal_writer.append(target, [{"at": now(), **row}], fsync=True)
+    return target
+
+
+def _fetch_holder(a: dict) -> str:
+    """Fetch the remote whose branch held HEAD in the plan, so the re-check reads the remote as it is now."""
+    remote = str(a.get("contained_in") or "").split("/", 1)[0]
+    if not remote or remote not in {r.get("name") for r in a.get("remotes") or []}:
+        return "the plan names no remote to fetch"
+    try:
+        done = git(a["target"], "fetch", "--quiet", remote, timeout=120)
+    except (OSError, subprocess.SubprocessError):
+        return "the remote could not be fetched; nothing removed"
+    return "" if done.returncode == 0 else "the remote could not be fetched; nothing removed"
+
+
+def act_manual(a: dict, archive: pathlib.Path, rec: dict) -> dict:
+    """A manual proposal (OBS-621), applied by a person: every rule that chose it is checked again now, the restore
+    record is written before a repository or a clone goes, and the final holder check is a fresh, complete listing."""
+    cls, target = a["class"], a["target"]
+    rec["rule"] = a.get("rule")
+    if os.path.islink(target) or not os.path.isdir(target):
+        return {**rec, "result": "skipped", "reason": "it is gone or no longer a folder"}
+    if cls == "deps-stale":
+        return act_stale_deps(a, rec)
+    project = a.get("repo") or target
+    job = scheduled_job_reason(project)
+    if job:
+        return {**rec, "result": "skipped", "reason": job}
+    if busy_now(target):
+        return {**rec, "result": "skipped", "reason": "a process works inside it now"}
+    linked = cls == "checkout-merged" and a.get("linked") is True
+    facts = work_on_remotes(target, clone=not linked)
+    if isinstance(facts, str):
+        return {**rec, "result": "skipped", "reason": facts + " now; nothing removed"}
+    if facts["head"] != a.get("head"):
+        return {**rec, "result": "skipped", "reason": "HEAD moved since the plan; nothing removed"}
+    rec["head"] = facts["head"]
+    if cls == "repo-idle":
+        last, spoken = repo_activity(target), session_last(target, manual_settings(load_config())["session_roots"])
+        days = int(a.get("idle_days") or MANUAL_DEFAULTS["idle_repository_days"])
+        if last is None or spoken is None or max(last, spoken) > time.time() - days * 86400:
+            return {**rec, "result": "skipped", "reason": "somebody worked in it since the plan; nothing removed"}
+    else:
+        base = a.get("base") or ""
+        if _read_git(target, "merge-base", "--is-ancestor", "HEAD", base) is None:
+            return {**rec, "result": "skipped", "reason": f"HEAD is no longer merged into {base}; nothing removed"}
+    if not linked:
+        why = _fetch_holder(a)
+        if why:
+            return {**rec, "result": "skipped", "reason": why}
+        again = work_on_remotes(target)
+        if isinstance(again, str) or again["head"] != facts["head"]:
+            return {**rec, "result": "skipped", "reason": "after the fetch HEAD is on no remote branch; nothing removed"}
+        facts = again
+    keepers = ignored_keepers(target, set(artifact_names(load_config())))
+    if keepers:
+        return {**rec, "result": "skipped", "reason": f"it holds {len(keepers)} ignored file(s) that are not build "
+                                                      f"output, e.g. {keepers[0][:60]}; nothing removed"}
+    if not linked:
+        restore = {"folder": target, "remotes": facts["remotes"], "commit": facts["head"], "branch": facts["branch"]}
+        try:
+            rec["restore_list"] = str(write_restore(archive, restore))
+        except OSError as exc:
+            return {**rec, "result": "failed", "reason": f"the restore list could not be written "
+                                                         f"({type(exc).__name__}); nothing removed"}
+        rec["restore"] = restore
+    held = fresh_busy(target, FRESH_SECONDS)
+    if held is not False:
+        return {**rec, "result": "skipped", "reason": "it is held or holder coverage is unknown; nothing removed"}
+    rec["kb"] = a.get("kb")
+    if linked:
+        done = git(a["repo"], "worktree", "remove", target)
+        return {**rec, "result": "removed" if done.returncode == 0 else "failed",
+                **({"reason": done.stderr.strip()[:200]} if done.returncode else {})}
+    try:
+        shutil.rmtree(target)
+    except OSError as exc:
+        return {**rec, "result": "failed", "reason": f"removal stopped part way ({type(exc).__name__}); the restore "
+                                                     f"list names how to get it back"}
+    return {**rec, "result": "removed"}
+
+
+def act_stale_deps(a: dict, rec: dict) -> dict:
+    """A dependency or build folder: still the folder planned, still tracked by nothing, still unchanged, its project
+    still no running service's and nothing holding it; it is regenerated by the project's install or build."""
+    import disk_guard
+    target, project = a["target"], a.get("project") or os.path.dirname(a["target"])
+    try:
+        st = os.lstat(target)
+    except OSError:
+        return {**rec, "result": "skipped", "reason": "it is gone"}
+    if a.get("identity") and {"dev": st.st_dev, "ino": st.st_ino} != a["identity"]:
+        return {**rec, "result": "skipped", "reason": "another folder stands there now; nothing removed"}
+    if tracked_inside(target) is not False:
+        return {**rec, "result": "skipped", "reason": "git ls-files names something inside it; nothing removed"}
+    job = scheduled_job_reason(project)
+    if job:
+        return {**rec, "result": "skipped", "reason": job}
+    days = int(a.get("unchanged_days") or MANUAL_DEFAULTS["dependency_unchanged_days"])
+    r = disk_guard.inspect(target, time.time() - days * 86400, time.monotonic() + 120, limit=INSPECT_LIMIT)
+    if not r["complete"]:
+        return {**rec, "result": "skipped", "reason": (r["reason"] or "it could not be read whole") + "; nothing removed"}
+    held = fresh_busy(project, FRESH_SECONDS)
+    if held is not False:
+        return {**rec, "result": "skipped", "reason": "a process uses its project or holder coverage is unknown; "
+                                                      "nothing removed"}
+    try:
+        disk_guard.remove(target)
+    except OSError as exc:
+        return {**rec, "result": "failed", "reason": f"removal stopped part way ({type(exc).__name__})"}
+    return {**rec, "result": "removed", "kb": r["size"] // 1024}
 
 
 def journal(rows: list[dict]) -> None:
@@ -912,7 +1451,7 @@ def main(argv: list[str]) -> int:
         # plan budget collecting a machine-wide process table that cannot admit one.
         # The unknown snapshot preserves existing planning/refusal semantics.
         busy = holders.Holders.take(collect_hints=False)
-        plan = build_plan(cfg, busy, artifacts="--git-only" not in argv)
+        plan = build_plan(cfg, busy, artifacts="--git-only" not in argv, carry="--auto" in argv)
         plan["level"] = level or "normal"
         plan["plan_seconds"] = round(time.monotonic() - started, 1)
         out = paths.SCRATCH / "cleanup-plan.json"

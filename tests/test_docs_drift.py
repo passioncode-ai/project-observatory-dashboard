@@ -449,5 +449,86 @@ class NextIsNotAlreadyDone(unittest.TestCase):
             self.assertTrue(written_after(record, line, older), "written after v0.26.0")
 
 
+# ---- the control plane's design says what the code does (OBS-608) -----------------------------------
+
+CONTROL_PLANE = ROOT / "docs/design/CONTROL-PLANE.md"
+SHOTS = ROOT / "docs/design/control-plane/shots"
+
+
+def requirement(text: str, req: str) -> str:
+    """The table row of requirement REQ (`| CP-07 | ... |`)."""
+    m = re.search(rf"^\| {req} \|.*$", text, re.M)
+    assert m, f"{req} has no row"
+    return m.group(0)
+
+
+def png_size(path: Path) -> tuple[int, int]:
+    """(width, height) from a PNG's IHDR chunk."""
+    head = path.read_bytes()[:24]
+    if head[:8] != b"\x89PNG\r\n\x1a\n" or head[12:16] != b"IHDR":
+        raise AssertionError(f"{path.name} is not a PNG")
+    return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
+
+
+class ControlPlaneTruth(unittest.TestCase):
+    """The 2026-11-17 audit found the design saying what the code had decided against (refactor-plan.md, OBS-608)."""
+
+    def setUp(self):
+        self.text = CONTROL_PLANE.read_text(encoding="utf-8")
+
+    def test_the_vulnerability_watch_says_osv_scanner_is_not_run(self):
+        watch = (ENGINE / "tools/vuln_watch.py").read_text(encoding="utf-8")
+        self.assertIn("osv-scanner is not run", watch, "the code's decision this rule mirrors")
+        decision = re.search(r"^\*\*D2\..*?(?=^\*\*D3\.)", self.text, re.M | re.S).group(0)
+        for where, part in (("CP-07", requirement(self.text, "CP-07")), ("D2", decision)):
+            with self.subTest(where=where):
+                self.assertIn("osv-scanner is not run", " ".join(part.split()))
+                self.assertNotRegex(part, r"osv-scanner (is used|as an optional)")
+
+    def test_issues_say_key_findings_are_off_by_default_everywhere(self):
+        source = (ENGINE / "configuration.py").read_text(encoding="utf-8")
+        default_on = re.search(r"^DEFAULT_ON = .*?\n(?=\S)", source, re.M | re.S).group(0)
+        self.assertNotIn("github_issues_keys", default_on, "the code's default this rule mirrors")
+        self.assertIn('"github_issues_dependencies"', default_on)
+        row = requirement(self.text, "CP-14")
+        self.assertIn("off by default for key findings in every repository", row)
+        self.assertNotIn("off for key findings in a public repository", row)
+
+    def test_the_session_view_names_the_file_it_writes(self):
+        source = (ENGINE / "sessions_view.py").read_text(encoding="utf-8")
+        name = re.search(r'^FILE = "([^"]+)"', source, re.M).group(1)
+        row = re.search(r"^\| M1 \|.*$", self.text, re.M).group(0)
+        self.assertIn(f"`store/raw/{name}`", row)
+
+    def test_a_built_module_is_not_described_as_living_on_a_branch(self):
+        for doc in sorted((ROOT / "docs/design/control-plane").glob("*.md")):
+            head = "\n".join(doc.read_text(encoding="utf-8").split("\n")[:8])
+            with self.subTest(doc=doc.name):
+                self.assertNotRegex(head, r"Status: built[^.]*(on branch|on `|\(branch)",
+                                    "a released module names its release, not the branch it was built on")
+
+    def test_home_shows_a_source_reason_only_through_the_filter_that_drops_commands(self):
+        """CP-01 says no command text in a row. A source's own words reach Home through one function, which replaces
+        a reason naming a command; a second `t.known` would show one as written (OBS-608, the Disk tile)."""
+        self.assertIn("no `<code>` holding a command on Home", requirement(self.text, "CP-01"))
+        source = (ENGINE / "dashboard/home_page.py").read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        callers = sorted({fn.name for fn in ast.walk(tree) if isinstance(fn, ast.FunctionDef)
+                          for node in ast.walk(fn) if isinstance(node, ast.Call)
+                          and isinstance(node.func, ast.Attribute) and node.func.attr == "known"})
+        self.assertEqual(callers, ["_reason_html"])
+
+    def test_home_has_its_viewport_screenshots(self):
+        row = requirement(self.text, "CP-01")
+        self.assertIn("control-plane/shots/", row)
+        readme = (SHOTS / "README.md").read_text(encoding="utf-8")
+        for locale in ("en", "ru"):
+            for width, height in ((1440, 900), (390, 844)):
+                name = f"home-{locale}-{width}.png"
+                with self.subTest(shot=name):
+                    self.assertEqual(png_size(SHOTS / name), (width, height))
+                    self.assertIn(f"`{name}`", readme)
+
+
 if __name__ == "__main__":
     unittest.main()
