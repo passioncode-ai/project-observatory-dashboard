@@ -470,6 +470,10 @@ def png_size(path: Path) -> tuple[int, int]:
     return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
 
 
+#: The keys a source's own words come under, which a page shows only through `page_util.reason_html` (OBS-629).
+REASON_KEYS = ("reason", "unlinked_reason", "cost_note", "error")
+
+
 class ControlPlaneTruth(unittest.TestCase):
     """The 2026-11-17 audit found the design saying what the code had decided against (refactor-plan.md, OBS-608)."""
 
@@ -507,16 +511,50 @@ class ControlPlaneTruth(unittest.TestCase):
                 self.assertNotRegex(head, r"Status: built[^.]*(on branch|on `|\(branch)",
                                     "a released module names its release, not the branch it was built on")
 
-    def test_home_shows_a_source_reason_only_through_the_filter_that_drops_commands(self):
-        """CP-01 says no command text in a row. A source's own words reach Home through one function, which replaces
-        a reason naming a command; a second `t.known` would show one as written (OBS-608, the Disk tile)."""
+    def test_every_page_shows_a_source_reason_only_through_the_filter_that_drops_commands(self):
+        """CP-01 says no command text in a row. A source's own words reach every page through one function,
+        `page_util.reason_html`, which cuts or replaces a reason naming a command; a page's own `t.known`, `t.mark`
+        argument or escape of a reason would show one as written (OBS-608 on Home, OBS-629 on every page). The page
+        modules are the page table's, so a new page is held to it without an edit here."""
         self.assertIn("no `<code>` holding a command on Home", requirement(self.text, "CP-01"))
-        source = (ENGINE / "dashboard/home_page.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        callers = sorted({fn.name for fn in ast.walk(tree) if isinstance(fn, ast.FunctionDef)
-                          for node in ast.walk(fn) if isinstance(node, ast.Call)
-                          and isinstance(node.func, ast.Attribute) and node.func.attr == "known"})
-        self.assertEqual(callers, ["_reason_html"])
+        spec = importlib.util.spec_from_file_location("page_table_for_drift", ENGINE / "dashboard/page_table.py")
+        table = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(table)
+        self.assertIn("home_page", table.PAGE_MODULES)
+        util = ast.parse((ENGINE / "dashboard/page_util.py").read_text(encoding="utf-8"))
+        self.assertIn("reason_html", {n.name for n in util.body if isinstance(n, ast.FunctionDef)})
+        #: A place that shows a reason as written and is not this rule's to change, with why. The Agents page's
+        #: session list belongs to the sessions work (OBS-629 names it); remove the entry when it is moved.
+        waived = {("agents_page", "_machine_sessions")}
+
+        def names_a_reason(node: ast.AST) -> bool:
+            """NODE reads a reason, outside a call of the shared filter (`reason_html`, `plain`)."""
+            if isinstance(node, ast.Call) and getattr(node.func, "id", "") in ("reason_html", "plain"):
+                return False
+            if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value in REASON_KEYS \
+                    or isinstance(node, ast.Name) and node.id in ("reason", "why"):
+                return True
+            return any(names_a_reason(n) for n in ast.iter_child_nodes(node))
+
+        for module in table.PAGE_MODULES:
+            tree = ast.parse((ENGINE / f"dashboard/{module}.py").read_text(encoding="utf-8"))
+            shown = []
+            for fn in ast.walk(tree):
+                if not isinstance(fn, ast.FunctionDef) or (module, fn.name) in waived:
+                    continue
+                for node in ast.walk(fn):
+                    if not isinstance(node, ast.Call):
+                        continue
+                    name = node.func.attr if isinstance(node.func, ast.Attribute) else getattr(node.func, "id", "")
+                    args = (node.args if name in ("known", "_e", "escape")
+                            else [k.value for k in node.keywords] if name == "mark" else [])
+                    if any(names_a_reason(a) for a in args):
+                        shown.append(f"{fn.name}:{node.lineno}")
+            with self.subTest(module=module):
+                self.assertEqual(sorted(set(shown)), [], "a reason shown without page_util.reason_html")
+        home = ast.parse((ENGINE / "dashboard/home_page.py").read_text(encoding="utf-8"))
+        self.assertFalse([n for n in ast.walk(home) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                          and n.func.attr == "known"], "Home translates a source's words only through reason_html")
 
     def test_home_has_its_viewport_screenshots(self):
         row = requirement(self.text, "CP-01")

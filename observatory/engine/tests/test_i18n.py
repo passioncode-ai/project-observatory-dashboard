@@ -121,6 +121,8 @@ def source_ids() -> set[str]:
     ids, template = _python_ids(DASH / "build_dashboard.py")
     shell_ids, _ = _python_ids(DASH / "shell.py")
     ids |= shell_ids
+    # page_util.py: the words every page shows in place of a source's reason (`reason_html`, OBS-629).
+    ids |= _python_ids(DASH / "page_util.py")[0]
     for module in shell.PAGE_MODULES:
         ids |= page_module_ids(module)
     literal = r'(["\'])((?:\\.|(?!\1).)+?)\1'
