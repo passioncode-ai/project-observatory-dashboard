@@ -195,6 +195,36 @@ every agent and person who changes this repository, in every copy of it:
 - **Every change is logged.** Each change, by an agent or a person, has its `docs/backlog.md`
   row and its `CHANGELOG.md` line (written at the release) with its reason and basis.
 
+## A wait is improvement time
+
+Operator rule, 2026-11-16 (rule R33 O10 of the organization's agent templates), for every agent
+working in this repository and in every organization copy of the engine. The operator's words:
+«пока ждем переносим улучшения между агентами ПМ разны организаций, это сделай правило все наши
+агентов чтобы пока они ждут они обменивались информацией с агентом аритектором как они себя могут
+улучшить».
+
+When the agent waits (for a person, another agent, a build, a CI run, a release or an order) and
+no independent task is ready by priority, it:
+
+1. **Gives** the agent architect what it learned since its last exchange (a trap, a fix, a
+   pattern, a measured win) with its evidence (a commit, a `file:line`, a test): through the
+   `recording-insights` skill or an `agents.improve` request to the agents database's project on
+   the board; a solved tooling problem goes as an `agents_db.contribute` fix.
+2. **Asks** the architect's consult (`audit.py consult "<need>"` in the agents database,
+   `agents_db.consult`, or the board) what of the base and of the other copies of its template it
+   has not taken yet: the template version it follows against the current one (`estate-engine`
+   1.3.1, and `host-operations` 1.29.0 for the estate-registry variant, on 2026-11-18), new
+   patterns, new traps.
+3. **Takes** what applies as rows of `docs/backlog.md`, reserved and done by priority like any
+   other row.
+
+The architect advises and never holds: nothing waits on its answer, and the exchange never
+displaces a ready task. Copies of one template in different organizations exchange only through
+the architect: a fix in one copy becomes a feedback row of its template that the others take by
+the template update, never by copying another copy's code, and an organization's data (people,
+keys, clients, chats, records) never crosses. This repository carries no rendered template
+receipt yet, so the versions above are the ones the rule was rolled out with; tracked as OBS-638.
+
 ## How a change reaches `main`
 
 1. Branch from `main`; commit in small logical commits.
