@@ -8,9 +8,10 @@ generated refresh from an abandoned edit.
 
 Three rules keep a scheduled committer from being worse than the problem:
 
-* **Only the projection.** If anything outside `inventory/` is modified, this
-  stops and touches nothing: a scheduled job must never sweep up a human's work
-  in progress.
+* **Only the projection.** A scheduled job must never sweep up a human's work
+  in progress. On a branch with an upstream the commit is built from the
+  projection alone (below), so an edit outside `inventory/` is left alone and
+  named in the receipt; without an upstream it stops and touches nothing.
 * **Under a lease.** `inventory/` is a guarded path in that repository, and a
   background job is exactly the second writer the lease exists for.
 * **On origin, then pushed** (OBS-516). The wiki's source is its `origin`: a
@@ -92,6 +93,17 @@ def report(outcome: str, detail: str = "", **extra) -> None:
             "wiki_last_commit": last, **extra})
     except OSError as exc:
         print(f"could not write the commit report: {exc}", file=sys.stderr)
+
+
+def since_seen(outside: list[str]) -> str:
+    """When edits outside the projection were first seen without a break: the last receipt's time while it still
+    named some, else now. A finding reads it, so an operator mid-edit is not a fault until the edits stand."""
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        last = json.loads((paths.SCRATCH / "commit-projection.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return now
+    return last.get("outside_since") or now if isinstance(last, dict) and last.get("outside") else now
 
 
 class PushError(Exception):
@@ -223,7 +235,13 @@ def main() -> int:
         report("clean", "nothing to commit")
         return 0
     outside = [c for c in changed if not c.startswith(PROJECTION)]
-    if outside:
+    branch = upstream(vault)
+    # On a branch with an upstream the commit is built in a temporary index on top of origin and the local branch
+    # only follows by a fast forward that overwrites no local edit, so an edit outside the projection is never
+    # swept up: the projection goes ahead and the edit is reported by path (Fabric task e0bd0bb6). Without an
+    # upstream the commit is a local `git commit`, and a foreign change still refuses it.
+    foreign = {"outside": outside[:20], "outside_since": since_seen(outside)} if outside else {}
+    if outside and branch is None:
         print(f"NOT committing: {len(outside)} change(s) outside the projection — "
               f"{', '.join(outside[:4])}"
               + (f" and {len(outside) - 4} more" if len(outside) > 4 else "")
@@ -231,7 +249,11 @@ def main() -> int:
                 "or re-run once the tree holds only the projection.", file=sys.stderr)
         report("refused-foreign-changes",
                f"{len(outside)} change(s) outside the projection: "
-               f"{', '.join(outside[:6])}", outside=outside[:20])
+               f"{', '.join(outside[:6])}", **foreign)
+        return 0
+    if not [c for c in changed if c.startswith(PROJECTION)]:
+        print(f"the projection is clean; {len(outside)} change(s) outside it are left alone")
+        report("clean", "nothing to commit in the projection", **foreign)
         return 0
     if a.dry_run:
         print(f"would commit {len(changed)} projection file(s): {', '.join(changed)}")
@@ -267,7 +289,6 @@ def main() -> int:
                f"Committed automatically because the alternative — leaving three files dirty "
                f"every thirty minutes — makes a real abandoned edit in this directory "
                f"invisible among the generated ones.")
-        branch = upstream(vault)
         if branch is None:
             git("add", "--", PROJECTION, cwd=vault)
             code, out = git("commit", "-q", "-m", msg, cwd=vault)
@@ -281,11 +302,12 @@ def main() -> int:
                 outcome, said = push_on_origin(vault, branch, msg)
             except PushError as exc:
                 print(f"the projection was not pushed: {exc}", file=sys.stderr)
-                report("push-failed", str(exc), files=len(changed), pushed=False)
+                report("push-failed", str(exc), files=len(changed), pushed=False, **foreign)
             else:
-                print(f"{outcome}: {summary}{said}")
+                print(f"{outcome}: {summary}{said}"
+                      + (f"; {len(outside)} change(s) outside the projection left alone" if outside else ""))
                 report(outcome, summary + said, files=len(changed),
-                       pushed=outcome == "pushed")
+                       pushed=outcome == "pushed", **foreign)
     finally:
         if held and script:
             subprocess.run([sys.executable, str(script), "release", LEASE_KEY], cwd=vault,
