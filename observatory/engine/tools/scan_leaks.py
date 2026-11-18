@@ -994,47 +994,89 @@ def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, Se
     database a writer can wait for one such scan. Codex, opencode and Hermes run
     their stores in WAL mode by default, where a reader does not block a writer.
     """
-    since = since or {}
-    old_sig = signature or {}
     # The caller may hand its own dict: what is counted before a store stops stays counted.
-    hits: dict[tuple[SecretRef, str], int] = {} if hits is None else hits
-    high: dict[str, int] = {}
-    read = 0
+    hits = {} if hits is None else hits
     try:
         info = db.stat()
     except FileNotFoundError:
-        return hits, None, high, read, None
+        return hits, None, {}, 0, None
     except OSError as exc:
-        return hits, type(exc).__name__, high, read, None
+        return hits, type(exc).__name__, {}, 0, None
     if not stat.S_ISREG(info.st_mode):
-        return hits, None, high, read, None
-    same_file = old_sig.get("inode") == info.st_ino
-    new_sig: dict = {"inode": info.st_ino, "tables": {}}
+        return hits, None, {}, 0, None
     try:
         conn = sqlite3.connect(paths.sqlite_uri(db), uri=True)
     except sqlite3.Error as exc:
         # The type only, here as everywhere (round 5, F1): SQLite's message can quote text.
-        return hits, type(exc).__name__, high, read, None
-    # TEXT THAT IS NOT UTF-8 IS STILL READ. The default decoder raised on it, and the error
-    # message carried the cell's text; bytes kept as surrogates match as the bytes they are.
-    conn.text_factory = lambda b: b.decode("utf-8", "surrogateescape")
-    damaged: list[str] = []
+        return hits, type(exc).__name__, {}, 0, None
+    scan = _SqliteScan(conn, info.st_ino, pattern, by_value, since or {}, signature or {}, hits, tally, stop,
+                       resume, progress)
+    try:
+        tables = conn.execute("SELECT name, coalesce(sql, '') FROM sqlite_master "
+                              "WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()
+        # FTS mirrors are the same text again: `observations_fts` and its
+        # `_fts_*` shadow tables doubled every count on the first run.
+        for table, sql in tables:
+            if re.search(r"_fts(_|$)", table):
+                continue
+            try:
+                scan.read_table(table, sql)
+            except (sqlite3.Error, UnicodeError) as exc:
+                # A DAMAGED TABLE IS A HOLE, NEVER A CLEAN TABLE (round 3, N1): a damaged page,
+                # a missing module, a name that is not UTF-8 (round 4). Only the error's type
+                # is kept: SQLite's message can quote a cell. The other tables are still read,
+                # and their sightings stand.
+                scan.damaged.append(f"{_shown(table)} ({type(exc).__name__})")
+    except UnicodeError as exc:
+        return hits, type(exc).__name__, {}, scan.read, None
+    except sqlite3.Error as exc:
+        # The type only (round 5, F1): `malformed database schema (t) - unknown table option:
+        # '<text>'` quotes the stored CREATE statement, and that text can be anything.
+        return hits, type(exc).__name__, {}, scan.read, None
+    finally:
+        conn.close()
+    if scan.damaged:
+        return hits, PARTIAL + ", ".join(scan.damaged), scan.high, scan.read, None
+    return hits, None, scan.high, scan.read, scan.new_sig
 
-    def in_time() -> None:
-        if stop is not None and stop():
+
+class _SqliteScan:
+    """One read of one SQLite store for `scan_sqlite`, its steps named (OBS-609): `read_table` picks the whole or
+    the marked read, `pages` reads a rowid range a page at a time, `at_old_max` re-reads the rows edited at the
+    update column's old maximum, and `scan_rows` counts the values in a page."""
+
+    def __init__(self, conn, inode: int, pattern: list[bytes], by_value: dict[bytes, SecretRef],
+                 since: dict[str, int], old_sig: dict, hits: dict, tally: dict | None, stop,
+                 resume: dict[str, int] | None, progress: dict[str, int] | None) -> None:
+        self.conn = conn
+        self.pattern, self.by_value = pattern, by_value
+        self.since, self.old_sig = since, old_sig
+        self.hits, self.tally, self.stop = hits, tally, stop
+        self.resume, self.progress = resume, progress
+        self.same_file = old_sig.get("inode") == inode
+        self.new_sig: dict = {"inode": inode, "tables": {}}
+        self.high: dict[str, int] = {}
+        self.read = 0
+        self.damaged: list[str] = []
+        # TEXT THAT IS NOT UTF-8 IS STILL READ. The default decoder raised on it, and the error
+        # message carried the cell's text; bytes kept as surrogates match as the bytes they are.
+        conn.text_factory = lambda b: b.decode("utf-8", "surrogateescape")
+
+    def in_time(self) -> None:
+        if self.stop is not None and self.stop():
             raise step_budget.OutOfTime("the step's deadline is near")
 
-    def scan_rows(table: str, cols: list[str], rows) -> None:
-        nonlocal read
-        read += len(rows)
-        if tally is not None:
+    def scan_rows(self, table: str, cols: list[str], rows) -> None:
+        self.read += len(rows)
+        if self.tally is not None:
             # The caller's count too: a store that stops midway still says what it read (L5).
-            tally["rows"] = tally.get("rows", 0) + len(rows)
+            self.tally["rows"] = self.tally.get("rows", 0) + len(rows)
         blobs = [_cells(row[1:]) for row in rows]
         joined = b"\0".join(b for cells in blobs for b in cells if b)
-        present = [n for n in pattern if n in joined]
+        present = [n for n in self.pattern if n in joined]
         if not present:
             return
+        hits = self.hits
         for cells in blobs:
             for col, blob in zip(cols, cells):
                 if not blob:
@@ -1042,10 +1084,10 @@ def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, Se
                 for needle in present:
                     n = blob.count(needle)
                     if n:
-                        key = (by_value[needle], f"{table}.{col}")
+                        key = (self.by_value[needle], f"{table}.{col}")
                         hits[key] = hits.get(key, 0) + n
 
-    def pages(table: str, cols: list[str], low: int, top: int, extra: str = "", args: tuple = (),
+    def pages(self, table: str, cols: list[str], low: int, top: int, extra: str = "", args: tuple = (),
               rid: str = "rowid", track: bool = False) -> tuple[int, int, int]:
         """Read rowid in (low, top] page by page, each page a finished statement;
         (the rows read, their rowid sum modulo ROWID_MOD, their square sum modulo ROWID_SQ_MOD).
@@ -1053,20 +1095,20 @@ def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, Se
         sel = ", ".join(_q(c) for c in cols)
         n, total, squares, after = 0, 0, 0, low
         while True:
-            in_time()
-            rows = conn.execute(f'SELECT {rid}, {sel} FROM {_q(table)} WHERE {rid} > ? AND {rid} <= ?{extra} '
-                                f'ORDER BY {rid} LIMIT {PAGE}', (after, top, *args)).fetchall()
+            self.in_time()
+            rows = self.conn.execute(f'SELECT {rid}, {sel} FROM {_q(table)} WHERE {rid} > ? AND {rid} <= ?{extra} '
+                                     f'ORDER BY {rid} LIMIT {PAGE}', (after, top, *args)).fetchall()
             if not rows:
                 return n, total, squares
             n += len(rows)
             total += sum(_mod(r[0], ROWID_MOD) for r in rows)
             squares += sum(_mod(_mod(r[0], ROWID_SQ_MOD) ** 2, ROWID_SQ_MOD) for r in rows)
             after = rows[-1][0]
-            scan_rows(table, cols, rows)
-            if track and progress is not None:
-                progress[table] = after
+            self.scan_rows(table, cols, rows)
+            if track and self.progress is not None:
+                self.progress[table] = after
 
-    def at_old_max(table: str, cols: list[str], plain: list[str], updated: str, mark: int, before: dict,
+    def at_old_max(self, table: str, cols: list[str], plain: list[str], updated: str, mark: int, before: dict,
                    rid: str = "rowid") -> None:
         """The rows at the old maximum of the update column whose digest is not the recorded
         one: edited within the same tick of the clock. Read a page at a time, by rowid. Past
@@ -1074,27 +1116,28 @@ def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, Se
         sel = ", ".join(_q(c) for c in plain)
         known = before.get("at_max")
         if known is None and before.get("at_max_set") is not None and \
-                _set_digest(conn, table, updated, before["upd"], mark, sel, rid) == before["at_max_set"]:
+                _set_digest(self.conn, table, updated, before["upd"], mark, sel, rid) == before["at_max_set"]:
             return
         index = [i for i, c in enumerate(plain) if c in cols]
         after = 0
         while True:
-            in_time()
-            rows = conn.execute(f'SELECT {rid}, {sel} FROM {_q(table)} WHERE {_q(updated)} = ? AND {rid} > ? '
-                                f'AND {rid} <= ? ORDER BY {rid} LIMIT {PAGE}',
-                                (before["upd"], after, mark)).fetchall()
+            self.in_time()
+            rows = self.conn.execute(f'SELECT {rid}, {sel} FROM {_q(table)} WHERE {_q(updated)} = ? AND {rid} > ? '
+                                     f'AND {rid} <= ? ORDER BY {rid} LIMIT {PAGE}',
+                                     (before["upd"], after, mark)).fetchall()
             if not rows:
                 return
             after = rows[-1][0]
             changed = [r for r in rows if known is None or known.get(str(r[0])) != _digest(r[1:])]
             if changed:
-                scan_rows(table, cols, [(r[0], *(r[1 + i] for i in index)) for r in changed])
+                self.scan_rows(table, cols, [(r[0], *(r[1 + i] for i in index)) for r in changed])
 
-    def read_table(table: str, sql: str) -> None:
-        # THE STORED COLUMNS ONLY (`table_xinfo` hidden 0, and 3 for a STORED generated column,
-        # whose value is on disk). A VIRTUAL generated column (2) is computed on read, and
-        # evaluating it can fail with an error that quotes a cell (rounds 4 and 5).
-        info_rows = conn.execute(f"PRAGMA table_xinfo({_q(table)})").fetchall()
+    def columns(self, table: str) -> tuple[list, list[str]]:
+        """(every stored column's `table_xinfo` row, the text columns to read). THE STORED COLUMNS ONLY
+        (`table_xinfo` hidden 0, and 3 for a STORED generated column, whose value is on disk). A VIRTUAL
+        generated column (2) is computed on read, and evaluating it can fail with an error that quotes a cell
+        (rounds 4 and 5)."""
+        info_rows = self.conn.execute(f"PRAGMA table_xinfo({_q(table)})").fetchall()
         plain, unnamed = [], []
         for r in info_rows:
             if r[6] not in (0, 3):
@@ -1107,90 +1150,74 @@ def scan_sqlite(db: pathlib.Path, pattern: list[bytes], by_value: dict[bytes, Se
                 # the table is still read, and this column is named as a hole.
                 unnamed.append(r[1])
         for name in unnamed:
-            damaged.append(f"{_shown(table)}.{_shown(name)} (column name is not UTF-8)")
+            self.damaged.append(f"{_shown(table)}.{_shown(name)} (column name is not UTF-8)")
+        return info_rows, plain
+
+    def read_whole(self, table: str, cols: list[str]) -> None:
+        """A REAL WITHOUT ROWID TABLE, so SQLite says, or one whose own columns take all three of the rowid's
+        names: no rowid to mark, so it is read whole, still a page at a time. Any other error is a hole."""
+        sel = ", ".join(_q(c) for c in cols)
+        offset = 0
+        while True:
+            self.in_time()
+            rows = self.conn.execute(f'SELECT NULL, {sel} FROM {_q(table)} LIMIT {PAGE} OFFSET ?',
+                                     (offset,)).fetchall()
+            if not rows:
+                return
+            offset += len(rows)
+            self.scan_rows(table, cols, rows)
+
+    def read_table(self, table: str, sql: str) -> None:
+        info_rows, plain = self.columns(table)
         cols = [r[1] for r in plain if _holds_text(r[2])]
         if not cols:
             return
         rid = _rowid_alias([r[1] for r in info_rows])
-        if rid is None or _without_rowid(conn, table, sql):
-            # A REAL WITHOUT ROWID TABLE, so SQLite says, or one whose own columns take all
-            # three of the rowid's names: no rowid to mark, so it is read whole, still a page
-            # at a time. Any other error is a hole.
-            sel = ", ".join(_q(c) for c in cols)
-            offset = 0
-            while True:
-                in_time()
-                rows = conn.execute(f'SELECT NULL, {sel} FROM {_q(table)} LIMIT {PAGE} OFFSET ?',
-                                    (offset,)).fetchall()
-                if not rows:
-                    return
-                offset += len(rows)
-                scan_rows(table, cols, rows)
+        if rid is None or _without_rowid(self.conn, table, sql):
+            self.read_whole(table, cols)
+            return
         names = [r[1] for r in plain]
         every = ", ".join(_q(c) for c in names)
         updated = next((c for c in UPDATED_COLUMNS if c in names), None)
-        now = table_signature(conn, table, updated, every, rid)
-        mark = since.get(table, 0) or 0
+        now = table_signature(self.conn, table, updated, every, rid)
+        mark = self.since.get(table, 0) or 0
         if isinstance(mark, bool) or not isinstance(mark, int):
             # A mark that is not a rowid (an old or edited state file) is no mark: the table is
             # read from the start, never left unread until the weekly pass (round 6, L2).
             mark = 0
-        before = (old_sig.get("tables") or {}).get(table) if same_file else None
+        before = (self.old_sig.get("tables") or {}).get(table) if self.same_file else None
         if before is not None and before.get("max") != mark:
             before = None
         if not mark or now["max"] < mark:
             # First pass, a complete pass, or a table emptied or recreated. A complete pass resumes
             # from what it already read of this table (`resume`), unless the table shrank below it.
-            start = (resume or {}).get(table, 0)
+            start = (self.resume or {}).get(table, 0)
             start = start if isinstance(start, int) and not isinstance(start, bool) and 0 < start <= now["max"] else 0
-            pages(table, cols, start, now["max"], rid=rid, track=True)
+            self.pages(table, cols, start, now["max"], rid=rid, track=True)
         else:
-            fresh, fresh_sum, fresh_sq = pages(table, cols, mark, now["max"], rid=rid)
-            below_changed = (before is None
-                             or now["count"] != before["count"] + fresh
-                             or before.get("sum") is None or before.get("sq") is None
-                             or now["sum"] != before["sum"] + fresh_sum
-                             or now["sq"] != before["sq"] + fresh_sq
-                             or _row_digest(conn, table, mark, every, rid) != before.get("tail"))
-            moved = _moved(before.get("upd"), now["upd"]) if updated and before else False
-            if below_changed or moved is None:
-                pages(table, cols, 0, mark, rid=rid)
-            elif updated and isinstance(before.get("upd"), (int, float, str)):
-                if moved:
-                    pages(table, cols, 0, mark, f" AND {_q(updated)} > ?", (before["upd"],), rid=rid)
-                at_old_max(table, cols, names, updated, mark, before, rid)
-        high[table] = now["max"]
-        if progress is not None:
-            progress[table] = now["max"]
-        new_sig["tables"][table] = now
+            self.read_since_mark(table, cols, names, every, updated, now, mark, before, rid)
+        self.high[table] = now["max"]
+        if self.progress is not None:
+            self.progress[table] = now["max"]
+        self.new_sig["tables"][table] = now
 
-    try:
-        tables = conn.execute("SELECT name, coalesce(sql, '') FROM sqlite_master "
-                              "WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()
-        # FTS mirrors are the same text again: `observations_fts` and its
-        # `_fts_*` shadow tables doubled every count on the first run.
-        for table, sql in tables:
-            if re.search(r"_fts(_|$)", table):
-                continue
-            try:
-                read_table(table, sql)
-            except (sqlite3.Error, UnicodeError) as exc:
-                # A DAMAGED TABLE IS A HOLE, NEVER A CLEAN TABLE (round 3, N1): a damaged page,
-                # a missing module, a name that is not UTF-8 (round 4). Only the error's type
-                # is kept: SQLite's message can quote a cell. The other tables are still read,
-                # and their sightings stand.
-                damaged.append(f"{_shown(table)} ({type(exc).__name__})")
-    except UnicodeError as exc:
-        return hits, type(exc).__name__, {}, read, None
-    except sqlite3.Error as exc:
-        # The type only (round 5, F1): `malformed database schema (t) - unknown table option:
-        # '<text>'` quotes the stored CREATE statement, and that text can be anything.
-        return hits, type(exc).__name__, {}, read, None
-    finally:
-        conn.close()
-    if damaged:
-        return hits, PARTIAL + ", ".join(damaged), high, read, None
-    return hits, None, high, read, new_sig
+    def read_since_mark(self, table: str, cols: list[str], names: list[str], every: str, updated: str | None,
+                        now: dict, mark: int, before: dict | None, rid: str) -> None:
+        """The rows above the mark, then the rows below it again only when the signature says they changed."""
+        fresh, fresh_sum, fresh_sq = self.pages(table, cols, mark, now["max"], rid=rid)
+        below_changed = (before is None
+                         or now["count"] != before["count"] + fresh
+                         or before.get("sum") is None or before.get("sq") is None
+                         or now["sum"] != before["sum"] + fresh_sum
+                         or now["sq"] != before["sq"] + fresh_sq
+                         or _row_digest(self.conn, table, mark, every, rid) != before.get("tail"))
+        moved = _moved(before.get("upd"), now["upd"]) if updated and before else False
+        if below_changed or moved is None:
+            self.pages(table, cols, 0, mark, rid=rid)
+        elif updated and isinstance(before.get("upd"), (int, float, str)):
+            if moved:
+                self.pages(table, cols, 0, mark, f" AND {_q(updated)} > ?", (before["upd"],), rid=rid)
+            self.at_old_max(table, cols, names, updated, mark, before, rid)
 
 
 #: The operator's decisions that a sighting is known and accepted, each with a
@@ -1380,87 +1407,46 @@ def _signature(path: pathlib.Path) -> list[int] | None:
     return [info.st_size, info.st_mtime_ns]
 
 
-def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(
-        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--full", action="store_true",
-                    help="forget remembered offsets and read every target whole")
-    ap.add_argument("--days", type=int, default=14,
-                    help="how far back a session transcript counts (default 14)")
-    a = ap.parse_args(argv[1:])
+def _report_no_values(skipped: list[dict], now: str) -> int:
+    """Nothing to look for: the report says why, and that a clean report here means unmeasured."""
+    holes = sum(1 for k in skipped if k.get("unreadable"))
+    unsearchable = sum(1 for k in skipped if not k.get("unreadable"))
+    # SAID FROM WHAT WAS RECORDED (review rounds 5 and 6): "no env scan, no
+    # vault" was false when a source existed and would not read, or when
+    # values were found and none was distinctive enough to search for.
+    reasons = []
+    if holes:
+        reasons.append(f"{holes} source(s) of values could not be read")
+    if unsearchable:
+        reasons.append(f"{unsearchable} value(s) were found but none is searchable "
+                       f"(too short or not distinctive)")
+    if not reasons:
+        # SAID FROM WHAT WAS FOUND (review round 7): a valid inventory with no
+        # secret class, or a vault that exists and holds no slot, is not "no
+        # env scan, no vault".
+        inv_files, inv_problem = env_inventory(paths.SCRATCH / "env.json")
+        inv_exists = os.path.lexists(paths.SCRATCH / "env.json")
+        reasons.append("no env inventory" if not inv_exists else
+                       f"the env inventory lists {len(inv_files)} file(s) and no secret value")
+        reasons.append("no vault" if not os.path.lexists(VAULT) else "the vault holds no slot")
+        reasons.append("no installed key")
+    why = "nothing to look for: " + "; ".join(reasons) + \
+        (" (each is named in skipped)" if holes or unsearchable else "")
+    _write_json(OUT, {
+        "scanned_at": now, "hits": [], "known": 0, "skipped": skipped,
+        "degraded": [{"code": "no-values", "source": "leak-scan:no-values",
+                      "why": why, "reason": why,
+                      "effect": "a clean report here means UNMEASURED, not clean"}]})
+    print(f"leaks: {why}")
+    return 0
 
-    values, homes, skipped = known_values()
-    home_paths = {h["path"] for h in homes}
-    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    if not values:
-        holes = sum(1 for k in skipped if k.get("unreadable"))
-        unsearchable = sum(1 for k in skipped if not k.get("unreadable"))
-        # SAID FROM WHAT WAS RECORDED (review rounds 5 and 6): "no env scan, no
-        # vault" was false when a source existed and would not read, or when
-        # values were found and none was distinctive enough to search for.
-        reasons = []
-        if holes:
-            reasons.append(f"{holes} source(s) of values could not be read")
-        if unsearchable:
-            reasons.append(f"{unsearchable} value(s) were found but none is searchable "
-                           f"(too short or not distinctive)")
-        if not reasons:
-            # SAID FROM WHAT WAS FOUND (review round 7): a valid inventory with no
-            # secret class, or a vault that exists and holds no slot, is not "no
-            # env scan, no vault".
-            inv_files, inv_problem = env_inventory(paths.SCRATCH / "env.json")
-            inv_exists = os.path.lexists(paths.SCRATCH / "env.json")
-            reasons.append("no env inventory" if not inv_exists else
-                           f"the env inventory lists {len(inv_files)} file(s) and no secret value")
-            reasons.append("no vault" if not os.path.lexists(VAULT) else "the vault holds no slot")
-            reasons.append("no installed key")
-        why = "nothing to look for: " + "; ".join(reasons) + \
-            (" (each is named in skipped)" if holes or unsearchable else "")
-        _write_json(OUT, {
-            "scanned_at": now, "hits": [], "known": 0, "skipped": skipped,
-            "degraded": [{"code": "no-values", "source": "leak-scan:no-values",
-                          "why": why, "reason": why,
-                          "effect": "a clean report here means UNMEASURED, not clean"}]})
-        print(f"leaks: {why}")
-        return 0
 
-    # Keep versions separate even when two different values share one name.
-    # The workspace-keyed HMAC cannot identify a value outside this workspace;
-    # without the salt it is None and no suppression may match.
-    by_value = {v.encode("utf-8", "surrogateescape"):
-                (n, sqlite_scan.values_digest({v: n})) for v, n in values.items()}
-    rules, rule_problems = load_suppressions(SUPPRESSIONS, datetime.now(timezone.utc).date())
-    suppression_mark = hashlib.sha256(json.dumps(rules, sort_keys=True).encode()).hexdigest()
-    digest = sqlite_scan.values_digest(values)
-    longest = max(len(b) for b in by_value)
-    # `bytes.find` PER PATTERN, not one compiled alternation. The alternation was
-    # the obvious thing and it read 956 MB in 2m58s: `re` walks the buffer in its
-    # own VM, while `find` is `memmem` in C and 199 passes of that over the same
-    # buffer still win by an order of magnitude. Measured, not assumed.
-    pattern = sorted(by_value, key=len, reverse=True)
-
-    state, signatures, sqlite_mark, saved = {}, {}, {}, {}
-    if STATE.is_file():
-        try:
-            saved = json.loads(STATE.read_text(encoding="utf-8"))
-            sqlite_mark = saved.get("sqlite") or {}
-            if not a.full:
-                state = saved.get("offsets", {})
-                signatures = saved.get("signatures", {})
-        except ValueError:
-            state = {}
-
-    # Revisit existing transcripts when values or decisions change, including
-    # expiry. Old offsets cannot prove a new value absent from an old file.
-    decisions_changed = saved.get("suppressions_digest") != suppression_mark
-    files_full = a.full or digest is None or saved.get("values_digest") != digest or decisions_changed
-    if files_full:
-        state, signatures = {}, {}
-
-    files, notes = targets(a.days)
-    stores = transcript_stores(notes)
+def _scan_files(files: list, home_paths: set, state: dict, signatures: dict, pattern: list[bytes],
+                by_value: dict, longest: int, hits: dict) -> tuple[list[dict], int, int | None]:
+    """Read every file target from its offset or signature, counting into `hits` and moving `state` and
+    `signatures`; answers (the unreadable targets, the bytes read, the index of the first target the deadline
+    left unread, or None)."""
     unreadable: list[dict] = []
-    hits: dict[tuple[SecretRef, str], int] = {}
     read_bytes = 0
     cut_at = None                    # the index of the first target the deadline left unread (OBS-52)
     for i, p in enumerate(files):
@@ -1507,37 +1493,19 @@ def main(argv: list[str]) -> int:
         for name, n in found.items():
             hits[(name, key)] = hits.get((name, key), 0) + n
 
-    # THE COMPANION'S STORE, read as a database rather than named as unread.
-    # Whole every time — SQLite has no offset to resume from and the store is
-    # rewritten in place — so it is not part of `read_bytes`.
-    mem = paths.COMPANION_DB
-    today = datetime.now(timezone.utc).date()
-    full, why = sqlite_scan.plan(sqlite_mark, digest, a.full, today)
-    if decisions_changed and not a.full:
-        full, why = True, "the effective suppression rules changed"
-    # AND THE OBSERVATORY'S OWN STORE, which holds agent memory. Every value an
-    # agent writes there is redacted on the way in (`memory_redact`), so a
-    # sighting here means the redactor missed one, or a door that does not
-    # redact wrote it — the alarm for the safety net itself.
-    own = paths.DB
-    marks = sqlite_mark.get("stores") or {}
-    # WHAT EACH STORE LOOKED LIKE when its mark was taken (I-5): a store replaced by
-    # another file, a row deleted under the mark, a reused rowid or a row rewritten
-    # in place is read again rather than hidden behind the mark.
-    store_sigs = {} if full else dict(saved.get("sqlite_signatures") or {})
-    results = {}
-    stores_cut = []
-    # AND EVERY AGENT'S TRANSCRIPT DATABASE (I-5): Hermes `state.db`, opencode's `opencode.db`,
-    # Codex's `state_*`, `logs_*`, `thread_history_*`, `memories*`, `queue_*`, `goals_*`,
-    # `agent_message_board_*`.
-    # A COMPLETE PASS THAT A DEADLINE CUT RESUMES on the next tick (review of #328, M1): how far it
-    # read each table of each store, under this value set, and which stores it finished. The
-    # stores it has not finished go first. A different value set, or --full, starts it again.
-    # A database FINISHED earlier in the pass is read incrementally from what the pass read it to, with
-    # the signature taken then, so a row updated in place, a replaced file or a renumbered table is
-    # caught by the same checks as any incremental pass (confirming review of #328). An unfinished one
-    # resumes only if it is still the same file. A pass pending longer than PENDING_MAX_DAYS starts over.
-    pending = saved.get("sqlite_pending") if full and not a.full else None
+    return unreadable, read_bytes, cut_at
+
+
+def _pending_pass(saved: dict, full: bool, forced: bool, digest: str | None, today) -> tuple[dict, set]:
+    """A COMPLETE PASS THAT A DEADLINE CUT RESUMES on the next tick (review of #328, M1): how far it
+    read each table of each store, under this value set, and which stores it finished. The
+    stores it has not finished go first. A different value set, or --full, starts it again.
+    A database FINISHED earlier in the pass is read incrementally from what the pass read it to, with
+    the signature taken then, so a row updated in place, a replaced file or a renumbered table is
+    caught by the same checks as any incremental pass (confirming review of #328). An unfinished one
+    resumes only if it is still the same file. A pass pending longer than PENDING_MAX_DAYS starts over.
+    Answers (the pending record, the stores it finished)."""
+    pending = saved.get("sqlite_pending") if full and not forced else None
     try:
         age = (today - datetime.fromisoformat(str(pending.get("started_on"))).date()).days
     except (AttributeError, TypeError, ValueError):
@@ -1550,9 +1518,15 @@ def main(argv: list[str]) -> int:
         if not isinstance(pending.get(field), dict):
             pending[field] = {}
     done = set(pending.get("complete") or []) if isinstance(pending.get("complete"), list) else set()
-    order = list(dict.fromkeys((mem, own, *stores)))
-    if full:
-        order.sort(key=lambda st: str(st) in done)
+    return pending, done
+
+
+def _scan_stores(order: list, full: bool, done: set, pending: dict, marks: dict, store_sigs: dict,
+                 pattern: list[bytes], by_value: dict, digest: str | None) -> tuple[dict, list[str]]:
+    """Read every SQLite store in `order`, one store that fails being a hole and never the end of the scan;
+    answers (each store's `scan_sqlite` result, the stores the deadline left unread)."""
+    results = {}
+    stores_cut = []
     for store in order:
         if step_budget.remaining() < STORE_RESERVE_S:
             # Unread, not clean: the mark stays where it was, so the next pass reads what this one did not.
@@ -1603,6 +1577,12 @@ def main(argv: list[str]) -> int:
                 # A store not yet finished keeps how far it got. One finished earlier in this pass
                 # keeps the mark its signature describes; the rows it read now are read again.
                 pending["stores"][key] = progress
+    return results, stores_cut
+
+
+def _next_marks(results: dict, stores_cut: list[str], order: list, full: bool, done: set, pending: dict,
+                sqlite_mark: dict, store_sigs: dict, digest: str | None, today) -> tuple[dict | None, bool]:
+    """The stores' new mark, their signatures (into `store_sigs`), and whether the complete pass stays pending."""
     succeeded = {str(store): r for store, r in results.items() if not r[1] and str(store) not in stores_cut}
     pending["complete"] = sorted(done)
     if full and digest is not None:
@@ -1629,6 +1609,126 @@ def main(argv: list[str]) -> int:
                 store_sigs[s] = r[4]
             else:
                 store_sigs.pop(s, None)
+    return new_mark, keep_pending
+
+
+def _degraded(cut_at: int | None, files: list, stores_cut: list[str], notes: list[dict],
+              skipped: list[dict]) -> list[dict]:
+    """EACH ENTRY CARRIES A CODE (ENG-001). One unlabelled `degraded` used to mean
+    both "nothing to look for" and "the deadline cut this pass", and the
+    findings read any entry as the first: a pass the deadline cut after it had
+    already seen a credential reported only that it had nothing to look for.
+    The codes are `no-values` (`_report_no_values`), `deadline-targets`, `deadline-store`
+    and `source-unreadable`; the prose beside them is for a person."""
+    degraded = []
+    if cut_at is not None:
+        degraded.append({"code": "deadline-targets",
+                         "why": f"the step's time ran out after {cut_at} of {len(files)} targets; the other "
+                                f"{len(files) - cut_at} resume from their offsets on the next pass",
+                         "effect": "those targets are UNMEASURED by this pass, not clean"})
+    for store in stores_cut:
+        degraded.append({"code": "deadline-store",
+                         "why": f"the step's time ran out before {_label(store)} was read; its mark did not move",
+                         "effect": "that store is UNMEASURED by this pass, not clean"})
+    # EVERY UNREAD SOURCE IS A HOLE, and a hole holds /health as degraded
+    # (decision, review round 2): the scan finished, but what it could not open
+    # is unmeasured, not clean. `notes` already holds `unreadable` and any
+    # unreadable source `targets()` named, and each store that would not open.
+    holes = sum(1 for n in notes if n.get("unreadable")) + sum(1 for k in skipped if k.get("unreadable"))
+    if holes:
+        degraded.append({"code": "source-unreadable",
+                         "why": f"{holes} source(s) could not be opened; each is named in not_scanned or skipped",
+                         "effect": "those sources are UNMEASURED, not clean; the rest of the pass counts"})
+    for d in degraded:
+        # `source` and `reason` are what /health and `collector.degraded` read;
+        # without them every entry printed "no reason given".
+        d.setdefault("source", "leak-scan:" + d["code"])
+        d.setdefault("reason", d["why"])
+    return degraded
+
+
+def main(argv: list[str]) -> int:
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--full", action="store_true",
+                    help="forget remembered offsets and read every target whole")
+    ap.add_argument("--days", type=int, default=14,
+                    help="how far back a session transcript counts (default 14)")
+    a = ap.parse_args(argv[1:])
+
+    values, homes, skipped = known_values()
+    home_paths = {h["path"] for h in homes}
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if not values:
+        return _report_no_values(skipped, now)
+
+    # Keep versions separate even when two different values share one name.
+    # The workspace-keyed HMAC cannot identify a value outside this workspace;
+    # without the salt it is None and no suppression may match.
+    by_value = {v.encode("utf-8", "surrogateescape"):
+                (n, sqlite_scan.values_digest({v: n})) for v, n in values.items()}
+    rules, rule_problems = load_suppressions(SUPPRESSIONS, datetime.now(timezone.utc).date())
+    suppression_mark = hashlib.sha256(json.dumps(rules, sort_keys=True).encode()).hexdigest()
+    digest = sqlite_scan.values_digest(values)
+    longest = max(len(b) for b in by_value)
+    # `bytes.find` PER PATTERN, not one compiled alternation. The alternation was
+    # the obvious thing and it read 956 MB in 2m58s: `re` walks the buffer in its
+    # own VM, while `find` is `memmem` in C and 199 passes of that over the same
+    # buffer still win by an order of magnitude. Measured, not assumed.
+    pattern = sorted(by_value, key=len, reverse=True)
+
+    state, signatures, sqlite_mark, saved = {}, {}, {}, {}
+    if STATE.is_file():
+        try:
+            saved = json.loads(STATE.read_text(encoding="utf-8"))
+            sqlite_mark = saved.get("sqlite") or {}
+            if not a.full:
+                state = saved.get("offsets", {})
+                signatures = saved.get("signatures", {})
+        except ValueError:
+            state = {}
+
+    # Revisit existing transcripts when values or decisions change, including
+    # expiry. Old offsets cannot prove a new value absent from an old file.
+    decisions_changed = saved.get("suppressions_digest") != suppression_mark
+    files_full = a.full or digest is None or saved.get("values_digest") != digest or decisions_changed
+    if files_full:
+        state, signatures = {}, {}
+
+    files, notes = targets(a.days)
+    stores = transcript_stores(notes)
+    hits: dict[tuple[SecretRef, str], int] = {}
+    unreadable, read_bytes, cut_at = _scan_files(files, home_paths, state, signatures, pattern, by_value,
+                                                 longest, hits)
+
+    # THE COMPANION'S STORE, read as a database rather than named as unread.
+    # Whole every time — SQLite has no offset to resume from and the store is
+    # rewritten in place — so it is not part of `read_bytes`.
+    mem = paths.COMPANION_DB
+    today = datetime.now(timezone.utc).date()
+    full, why = sqlite_scan.plan(sqlite_mark, digest, a.full, today)
+    if decisions_changed and not a.full:
+        full, why = True, "the effective suppression rules changed"
+    # AND THE OBSERVATORY'S OWN STORE, which holds agent memory. Every value an
+    # agent writes there is redacted on the way in (`memory_redact`), so a
+    # sighting here means the redactor missed one, or a door that does not
+    # redact wrote it — the alarm for the safety net itself.
+    own = paths.DB
+    marks = sqlite_mark.get("stores") or {}
+    # WHAT EACH STORE LOOKED LIKE when its mark was taken (I-5): a store replaced by
+    # another file, a row deleted under the mark, a reused rowid or a row rewritten
+    # in place is read again rather than hidden behind the mark.
+    store_sigs = {} if full else dict(saved.get("sqlite_signatures") or {})
+    # AND EVERY AGENT'S TRANSCRIPT DATABASE (I-5): Hermes `state.db`, opencode's `opencode.db`,
+    # Codex's `state_*`, `logs_*`, `thread_history_*`, `memories*`, `queue_*`, `goals_*`,
+    # `agent_message_board_*`.
+    pending, done = _pending_pass(saved, full, a.full, digest, today)
+    order = list(dict.fromkeys((mem, own, *stores)))
+    if full:
+        order.sort(key=lambda st: str(st) in done)
+    results, stores_cut = _scan_stores(order, full, done, pending, marks, store_sigs, pattern, by_value, digest)
+    new_mark, keep_pending = _next_marks(results, stores_cut, order, full, done, pending, sqlite_mark, store_sigs,
+                                         digest, today)
     for store, (store_hits, problem, _high, _rows, _sig) in results.items():
         for (name, where_in), n in store_hits.items():
             hits[(name, f"{store}#{where_in}")] = hits.get((name, f"{store}#{where_in}"), 0) + n
@@ -1656,38 +1756,9 @@ def main(argv: list[str]) -> int:
             for ((name, version), where), n in sorted(hits.items(), key=lambda kv: -kv[1])]
     rows, suppressed = apply_suppressions(rows, rules)
     notes = notes + unreadable
-    # EACH ENTRY CARRIES A CODE (ENG-001). One unlabelled `degraded` used to mean
-    # both "nothing to look for" and "the deadline cut this pass", and the
-    # findings read any entry as the first: a pass the deadline cut after it had
-    # already seen a credential reported only that it had nothing to look for.
-    # The codes are `no-values` (above), `deadline-targets`, `deadline-store`
-    # and `source-unreadable`; the prose beside them is for a person.
-    degraded = []
-    if cut_at is not None:
-        degraded.append({"code": "deadline-targets",
-                         "why": f"the step's time ran out after {cut_at} of {len(files)} targets; the other "
-                                f"{len(files) - cut_at} resume from their offsets on the next pass",
-                         "effect": "those targets are UNMEASURED by this pass, not clean"})
-    for store in stores_cut:
-        degraded.append({"code": "deadline-store",
-                         "why": f"the step's time ran out before {_label(store)} was read; its mark did not move",
-                         "effect": "that store is UNMEASURED by this pass, not clean"})
+    degraded = _degraded(cut_at, files, stores_cut, notes, skipped)
     stores_unread = [_label(s) for s in stores_cut] + [
         _label(store) for store, r in results.items() if r[1] and str(store) not in stores_cut]
-    # EVERY UNREAD SOURCE IS A HOLE, and a hole holds /health as degraded
-    # (decision, review round 2): the scan finished, but what it could not open
-    # is unmeasured, not clean. `notes` already holds `unreadable` and any
-    # unreadable source `targets()` named, and each store that would not open.
-    holes = sum(1 for n in notes if n.get("unreadable")) + sum(1 for k in skipped if k.get("unreadable"))
-    if holes:
-        degraded.append({"code": "source-unreadable",
-                         "why": f"{holes} source(s) could not be opened; each is named in not_scanned or skipped",
-                         "effect": "those sources are UNMEASURED, not clean; the rest of the pass counts"})
-    for d in degraded:
-        # `source` and `reason` are what /health and `collector.degraded` read;
-        # without them every entry printed "no reason given".
-        d.setdefault("source", "leak-scan:" + d["code"])
-        d.setdefault("reason", d["why"])
     partial = any(d["code"].startswith("deadline-") for d in degraded)
     targets_read = len(files) if cut_at is None else cut_at
     _write_json(OUT, {
