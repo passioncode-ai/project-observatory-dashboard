@@ -33,6 +33,9 @@ EDITED_AFTER_TAG = {
                "67a77d9c0d5c7877872f23f69b16ed6cdc0b508fd3b1343d248a945502cbef65"),
     "0.24.1": ("the OBS-52 collector rotation entry added after the tag",
                "c9bcfd8d239dc8e6ed9958f3bb1b53533b92d4a71e547fd1a6a250f920855514"),
+    "0.43.0": ("the heading says the tag was never published and is included in 0.44.0 (OBS-631: its "
+               "check rerun could not pass once v0.44.0 existed)",
+               "fe91a8c9b1cba64bc202b33041c9caec4768296b47f3f6bf896da87ac24890ff"),
 }
 
 
@@ -58,10 +61,15 @@ def digest(text: str) -> str:
 
 
 def release_tags() -> list[str] | None:
-    """The `vX.Y.Z` tags in this checkout, or None when Git cannot be asked."""
+    """The `vX.Y.Z` tags reachable from the checked-out commit, or None when Git cannot be asked.
+
+    Only reachable tags (`--merged HEAD`): when check.yml runs again on an older tag commit, a tag
+    made after it names a section that commit never had (OBS-631: the v0.43.0 rerun read
+    "0.44.0: the section is gone" once v0.44.0 existed).
+    """
     try:
-        run = subprocess.run(["git", "-C", str(ROOT), "tag", "--list", "v*"], capture_output=True, text=True,
-                             timeout=60)
+        run = subprocess.run(["git", "-C", str(ROOT), "tag", "--list", "v*", "--merged", "HEAD"],
+                             capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if run.returncode != 0:

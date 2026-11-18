@@ -3,6 +3,16 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## Unreleased
+
+### Fixed
+
+- **A check rerun on an older tag passes again** (OBS-631): the test that keeps released CHANGELOG sections as
+  tagged compared every tag in the checkout, so check.yml run again on the v0.43.0 commit read "0.44.0: the section
+  is gone" once v0.44.0 existed, and the release guard could not turn green. It now compares only the tags reachable
+  from the checked-out commit. 0.43.0 stays tagged and unpublished: every change in it ships in 0.44.0, and its
+  heading says so.
+
 ## 0.44.0 (2026-11-18)
 
 Waves R5 and the first board fixes of the control plane refactor: the documents say what the code does, Integrations
@@ -36,7 +46,7 @@ observatory-log plugin moves to 0.44.0 with the release.
   a deploy-key clone gets its repository row and its service its project.
 - **A broker test bound to the wall clock** (OBS-622): it runs on the broker's own clock.
 
-## 0.43.0 (2026-11-18)
+## 0.43.0 (2026-11-18, tagged, not published; included in 0.44.0)
 
 Wave R4 of the control plane refactor: the halves the first audit found missing. A project's stack is read from its
 lockfiles, keys say where they came from and whose they are, integration keys are checked for their scopes, a rotated
