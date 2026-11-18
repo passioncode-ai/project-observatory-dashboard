@@ -93,6 +93,59 @@ class Store(unittest.TestCase):
         return W.checkpoint_write(self.conn, **args)
 
 
+
+class AbandonedSweep(Store):
+    """Task 32dcd2e6: a session that ended without its final checkpoint left the workflow open, its lease active, for
+    ever (154 open on the maintainer's machine on 2026-11-18, dispatched runs whose window had closed hours before)."""
+
+    def later(self, **delta) -> datetime:
+        return datetime.now(timezone.utc).replace(microsecond=0) + timedelta(**delta)
+
+    def dispatched(self) -> dict:
+        return self.start(body=packet(refs() + [{"kind": "other", "ref": "run-ends-at:2026-11-10T13:00:00Z"}]))
+
+    def test_a_dispatched_run_silent_a_day_past_its_window_is_closed(self):
+        wf = self.dispatched()
+        self.assertEqual(W.close_abandoned(self.conn, now=self.later(hours=1)), [], "written an hour ago: not yet")
+        closed = W.close_abandoned(self.conn, now=self.later(hours=25))
+        self.assertEqual([c["workflowId"] for c in closed], [wf["workflowId"]])
+        self.assertIn("run ended", closed[0]["why"])
+        row = self.conn.execute("SELECT status, closed_by FROM workflows WHERE workflow_id = ?",
+                                (wf["workflowId"],)).fetchone()
+        self.assertEqual((row["status"], row["closed_by"]), ("closed", W.SWEEPER))
+        self.assertEqual(self.conn.execute("SELECT count(*) FROM workflow_leases WHERE workflow_id = ? AND state IN"
+                                           " ('active','offered')", (wf["workflowId"],)).fetchone()[0], 0)
+        last = self.conn.execute("SELECT owner, why FROM ledger WHERE memory_id = ? ORDER BY revision DESC LIMIT 1",
+                                 (f"ckpt:{wf['workflowId']}",)).fetchone()
+        self.assertEqual(last["owner"], W.SWEEPER)
+        self.assertIn("abandoned", last["why"])
+        with self.assertRaises(W.WorkflowClosed):
+            W.checkpoint_write(self.conn, owner=FABRIC, idempotency_key=self.key(), step_id="late",
+                               status="done", body=packet(), workflow_id=wf["workflowId"],
+                               lease_token=wf["leaseId"], redactor=redactor())
+        self.assertEqual(W.close_abandoned(self.conn, now=self.later(hours=26)), [], "closed once")
+
+    def test_a_workflow_without_a_run_window_is_closed_after_two_silent_weeks(self):
+        wf = self.start(body={"goal": "a long piece of work an agent started by hand"})
+        self.assertEqual(W.close_abandoned(self.conn, now=self.later(days=13)), [])
+        closed = W.close_abandoned(self.conn, now=self.later(days=15))
+        self.assertEqual([c["workflowId"] for c in closed], [wf["workflowId"]])
+        self.assertIn("nothing was written for 15 days", closed[0]["why"])
+
+    def test_a_live_handoff_offer_keeps_the_workflow_open(self):
+        wf = self.dispatched()
+        W.handoff_create(self.conn, owner=FABRIC, idempotency_key=self.key(), workflow_id=wf["workflowId"],
+                         to={"provider": "claude-code"}, reason="plan_route", lease_token=wf["leaseId"],
+                         offer_ttl_seconds=86400)
+        self.conn.execute("UPDATE ledger SET created_at = ? WHERE workflow_id = ?",
+                          ((datetime.now(timezone.utc) - timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                           wf["workflowId"]))
+        self.conn.commit()
+        self.assertEqual(W.close_abandoned(self.conn, now=self.later(hours=1)), [], "someone may still take it")
+        closed = W.close_abandoned(self.conn, now=self.later(hours=25))
+        self.assertEqual([c["workflowId"] for c in closed], [wf["workflowId"]], "the offer lapsed untaken")
+        self.assertEqual(closed[0]["leasesEnded"], 2, "the active lease and the lapsed offer")
+
 class Packet(Store):
     def test_a_board_ref_is_kept_only_when_its_uuid_ends_the_token(self):
         self.assertIsNotNone(memory_redact.KEEP.fullmatch(f"board-request:{REQUEST}"))

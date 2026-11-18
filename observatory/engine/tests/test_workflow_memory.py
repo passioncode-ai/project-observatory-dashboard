@@ -14,6 +14,8 @@ secret values. Nothing here reads a workspace, a vault or a provider.
 """
 from __future__ import annotations
 
+import contextlib
+import io
 import json
 import os
 import pathlib
@@ -582,6 +584,29 @@ class RetentionSeam(WorkflowCase):
             got = retention.ledger_candidates(self.conn)
             self.assertEqual([c["kind"] for c in got], ["checkpoint"])
             self.assertIn("closed more than 30 days", got[0]["reason"])
+        finally:
+            retention.config = real
+
+
+    def test_apply_closes_an_abandoned_workflow_and_its_lease(self) -> None:
+        from store import retention
+        defaults = json.loads((ROOT / "defaults/retention.json").read_text(encoding="utf-8"))
+        real = retention.config
+        retention.config = lambda: defaults
+        try:
+            wf = self.start()
+            self.conn.execute("UPDATE ledger SET created_at = '2000-01-01T00:00:00Z'")
+            self.conn.execute("UPDATE workflows SET created_at = '2000-01-01T00:00:00Z'")
+            self.conn.commit()
+            with contextlib.redirect_stdout(io.StringIO()) as out:
+                retention.cmd_plan(self.conn)
+            self.assertIn("abandoned workflows — would be closed: 1", out.getvalue())
+            self.assertEqual(W.workflow_list(self.conn)["total"], 1, "plan writes nothing")
+            with contextlib.redirect_stdout(io.StringIO()):
+                retention.cmd_apply(self.conn)
+            self.assertEqual(W.workflow_list(self.conn)["total"], 0)
+            closed = W.workflow_list(self.conn, status="closed")["workflows"][0]
+            self.assertEqual((closed["workflowId"], closed["lease"]), (wf["workflowId"], None))
         finally:
             retention.config = real
 

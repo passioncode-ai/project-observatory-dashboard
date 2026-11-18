@@ -479,6 +479,11 @@ def cmd_plan(conn: sqlite3.Connection) -> int:
         tuple(cfg["ledger"]["never"])).fetchone()[0]
     old = prune_migration_backups(migration_backup_dir(), keep=cfg.get("migration_backups_keep", 2),
                                   days=cfg.get("migration_backups_days", 30), dry_run=True)
+    if _has_table(conn, "workflows"):
+        gone = workflow.abandoned_workflows(conn)
+        print(f"\nabandoned workflows — would be closed: {len(gone)}")
+        for g in gone[:10]:
+            print(f"    {g['workflowId']} {g['projectId'] or ''}: {g['why']}")
     print(f"\nmigration backups — would be removed: {len(old)}"
           + (f" ({', '.join(p.name for p in old[:5])})" if old else ""))
     print(f"\nexempt regardless of age: {exempt} operator-owned revision(s), "
@@ -509,6 +514,9 @@ def cmd_apply(conn: sqlite3.Connection) -> int:
     # incomplete until no projection holds a tombstoned revision, whenever it
     # was tombstoned.
     receipts = purge_projections(conn)
+    # Before the lease rows are pruned: a workflow a session left open without its final checkpoint is closed here
+    # (task 32dcd2e6), and then ages out like any closed one.
+    abandoned = workflow.close_abandoned(conn) if _has_table(conn, "workflows") else []
 
     with conn:
         ev = conn.execute("DELETE FROM events WHERE occurred_at < ?",
@@ -569,10 +577,13 @@ def cmd_apply(conn: sqlite3.Connection) -> int:
     # pipes into a log nothing reads on a schedule. Ledger rows had their
     # tombstone; the volatile deletes and the projection receipts had nothing.
     report(tombstoned=tombstoned, records=records, events=ev, observations=ob,
-           deltas=dl, metrics=mt, idempotency=ik, workflow_leases=wl, receipts=receipts,
+           deltas=dl, metrics=mt, idempotency=ik, workflow_leases=wl,
+           workflows_closed=[{"workflowId": a["workflowId"], "why": a["why"]} for a in abandoned], receipts=receipts,
            scrub=scrubbing, migration_backups=[p.name for p in migration])
 
     print(f"tombstoned {records} record(s), {tombstoned} revision(s) — every row retained")
+    if abandoned:
+        print(f"closed {len(abandoned)} abandoned workflow(s)")
     print(f"deleted: {ev} event(s), {ob} observation(s), {dl} consumed delta(s), "
           f"{mt} metric row(s), {ik} idempotency answer(s), {wl} lease row(s) of closed "
           f"workflows, {len(migration)} old migration backup(s)")
