@@ -951,7 +951,7 @@
     "machine": {
       "expect": "FAIL",
       "row": "OBS-278",
-      "reason": "AssertionError: Private(kb=0) != Unmeasured(reason='not-applicable', seconds=None, detail=None); it also timed out at its limit under the job's load (run 40668387839)",
+      "reason": "AssertionError: Private(kb=0) != Unmeasured(reason='not-applicable', seconds=None, detail=None); it also timed out at its limit under the job's load (run 40668387839); when it finishes under a lighter load, 9 ManualProposals checks fail too (run 44413657719)",
       "statuses": [
         "FAIL",
         "TIMEOUT"
@@ -970,6 +970,15 @@
         "Estate.test_idle_threshold_protects_fresh_work",
         "Estate.test_manual_archives_before_removing",
         "Estate.test_recheck_skips_what_changed_since_the_survey",
+        "ManualProposals.test_a_dependency_folder_tracked_after_the_plan_is_kept",
+        "ManualProposals.test_a_repository_of_a_running_service_is_never_proposed",
+        "ManualProposals.test_a_repository_that_changed_since_the_plan_is_kept",
+        "ManualProposals.test_an_idle_repository_whose_work_is_all_on_a_remote_is_proposed_with_its_rule_and_size",
+        "ManualProposals.test_applying_writes_the_restore_list_first_then_removes",
+        "ManualProposals.test_git_only_plans_no_manual_proposal",
+        "ManualProposals.test_merged_idle_checkouts_are_proposed_and_removed_by_hand",
+        "ManualProposals.test_stale_dependency_folders_outside_running_projects_are_proposed_never_tracked_ones",
+        "ManualProposals.test_the_tick_carries_proposals_younger_than_their_interval_and_a_person_plans_anew",
         "WorktreeRegistration.test_a_source_error_keeps_other_source_and_marks_partial",
         "WorktreeRegistration.test_cursor_checkpoint_survives_interruption_inside_git",
         "WorktreeRegistration.test_failed_repository_preserves_peer_registration_and_prior_time",
