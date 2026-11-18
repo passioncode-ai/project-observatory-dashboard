@@ -1268,11 +1268,13 @@ def observatory_mcp_supply() -> dict[str, Any]:
     """The supply-chain watch over MCP servers (OBS-555, CP-09): `risky` (servers whose command line trips a rule:
     `unpinned-runner`, `fetch-execute`, `outside-install-places`; the rule and the server, never the command line),
     `changes` (tools whose full definition changed since it was pinned: added, removed or changed, with the old and
-    new SHA-256 digest), `pins` (how many tool definitions are pinned), and `scanners` (whether third-party remote
-    scanners may be sent tool definitions: off unless `features.mcp_remote_scanners` is on). Read-only, from the
-    last MCP scan and `store/state/mcp-pins.json`; tools are listed and pinned only when a probe runs on request
-    (`machine.mcp.refresh`). No env or header value is ever read. A scan or pin file it could not read is named in
-    `degraded`. Design: docs/design/control-plane/supply-chain.md."""
+    new SHA-256 digest), `pins` (how many tool definitions are pinned), `judged` (each remote and plugin server: its
+    host or its plugin and version, transport, where its key travels, whether it is pinned), `unpinned` (server and
+    code: `remote-endpoint`, `plain-http`, `image-tag`, `plugin-unversioned`), and `scanners` (`wired: false`: no
+    remote scanner exists, so nothing is sent to one). Read-only, from the last MCP scan and
+    `store/state/mcp-pins.json`; tools are listed and pinned only when a probe runs on request
+    (`machine.mcp.refresh`). No env or header value, URL query or argument is ever read into the answer. A scan or
+    pin file it could not read is named in `degraded`. Design: docs/design/control-plane/supply-chain.md."""
     import mcp_supply
     return mcp_supply.summary()
 

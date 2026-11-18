@@ -406,6 +406,14 @@ def products_document(projects: list[dict], domains: list[dict], obs_date: str
 LIVENESS = ("connected", "failed", "needs-auth", "not-listed", "not-probed")
 
 
+#: The fields of a server's supply judgement a registry row keeps (mcp_supply.judge_remote, judge_command).
+SUPPLY_FIELDS = ("kind", "host", "transport", "auth", "credential_in_url", "pinned", "pin", "codes")
+
+
+def _supply(value) -> dict | None:
+    return {k: value[k] for k in SUPPLY_FIELDS if k in value} if isinstance(value, dict) else None
+
+
 def mcp_rows(scan: dict) -> list[dict]:
     """One row per declaration, id'd by agent, scope and name. No values,
     no query strings — the scan already dropped them; this only shapes."""
@@ -424,6 +432,9 @@ def mcp_rows(scan: dict) -> list[dict]:
             "key_in_header": bool(r.get("key_in_header")),
             "key_in_env": bool(r.get("key_in_env")),
             "risky": [x for x in (r.get("risky") or []) if isinstance(x, str)],
+            # OBS-606: what the server is pinned to, and the plugin that ships it; ids, names and digests only.
+            "supply": _supply(r.get("supply")),
+            **({"plugin": r["plugin"], "plugin_version": r.get("plugin_version")} if r.get("plugin") else {}),
             "liveness": r.get("liveness") if r.get("liveness") in LIVENESS else "not-probed",
             "liveness_detail": r.get("liveness_detail"),
             "source_refs": ["SRC-0017"],

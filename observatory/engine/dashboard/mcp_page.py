@@ -1,5 +1,6 @@
 """The supply-chain section of the MCP page (OBS-555, CP-09): which servers start risky commands, which pinned tools
-changed, and whether third-party scanners may be sent tool definitions.
+changed, and what each remote and plugin server is pinned to (OBS-606). No third-party scanner exists, so none is
+offered.
 
 Rendered here, at build time, from `mcp_supply.summary()` (`payload["supply"]`), above the page's table of servers.
 Nothing on it holds a command line, an argument, a header or an environment value: a row names the server, its agent
@@ -32,16 +33,25 @@ RULE_WHY = {
     "outside-install-places": "The executable sits in a temporary or download folder, or at a relative path.",
 }
 CHANGE_LABELS = {"changed": "changed", "added": "added", "removed": "removed"}
+#: OBS-606: a remote or plugin server, how its key travels, and what it is not pinned to.
+KIND_LABELS = {"remote": "Remote", "plugin": "Plugin"}
+AUTH_LABELS = {"url": "In the URL", "header": "In a header", "oauth": "Sign-in (OAuth)", "none-declared": "None declared"}
+UNPINNED_LABELS = {
+    "remote-endpoint": "Remote: only its endpoint is recorded",
+    "plain-http": "Plain HTTP to another host",
+    "image-tag": "Container image named by a tag",
+    "plugin-unversioned": "Plugin without a recorded version",
+}
 
 
 def _tiles(s: dict, t: Translator) -> str:
-    scanners = s.get("scanners") or {}
     tiles = [(t.mark("Tools pinned"), t.number(s.get("pins") or 0),
               t.mark("on {n} servers", n=s.get("pinned_servers") or 0)),
              (t.mark("Risky commands"), t.number(len(s.get("risky") or [])), t.mark("judged from the declarations")),
              (t.mark("Changed tools"), t.number(len(s.get("changes") or [])), t.mark("waiting for your acceptance")),
-             (t.mark("Remote scanners"), t.mark("switch@@on") if scanners.get("enabled") else t.mark("switch@@off"),
-              t.mark("they are sent tool definitions"))]
+             (t.mark("Unpinned servers"), t.number(len({(u.get("agent"), u.get("server"))
+                                                        for u in s.get("unpinned") or []})),
+              t.mark("remote, plugin and container servers"))]
     cells = "".join(f'<div class="tile">{k}<b>{v}</b>{sub}</div>' for k, v, sub in tiles)
     return f'<div class="tiles machine-tiles">{cells}</div>'
 
@@ -83,15 +93,26 @@ def _changed(s: dict, t: Translator) -> str:
             f'<tbody>{"".join(body)}</tbody></table></section>')
 
 
-def _scanners(s: dict, t: Translator) -> str:
-    on = (s.get("scanners") or {}).get("enabled") is True
-    head = t.mark("Third-party remote scanners", tag="h2", attrs=HEADING)
-    state = (t.mark("On: tool definitions may be sent to a scanner you chose.", tag="p") if on else
-             t.mark("Off: nothing is sent to a third-party scanner.", tag="p"))
-    why = t.mark("A remote scanner receives each tool's name, description and schema, which is content from your "
-                 "servers. It stays off until you turn on the setting features.mcp_remote_scanners; an agent "
-                 "changes it with observatory_configure.", tag="p", attrs=HINT)
-    return f'<section class="card panel">{head}{state}{why}</section>'
+def _judged(s: dict, t: Translator) -> str:
+    """Each remote and plugin server: where it is (a host, or a plugin and its version), its transport, where its key
+    travels, and what it is pinned to or why it is not (OBS-606). Never a URL's query, a key or an argument."""
+    rows = []
+    for j in s.get("judged") or []:
+        where = " · ".join(
+            ([f'<span class="mono">{_e(j.get("plugin"))}</span> {_e(j.get("plugin_version") or NONE)}']
+             if j.get("plugin") else []) + ([_e(j.get("host"))] if j.get("host") else [])) or NONE
+        codes = [c for c in j.get("codes") or [] if c in UNPINNED_LABELS]
+        pinned = (t.mark("Pinned") if j.get("pinned") else
+                  "<br>".join(t.mark(UNPINNED_LABELS[c]) for c in codes) or t.mark("Not pinned"))
+        rows.append([f'<span class="mono">{_e(j.get("server"))}</span>', _e(j.get("agent")),
+                     t.mark(KIND_LABELS.get(j.get("kind"), "Remote")), where, _e(j.get("transport") or NONE),
+                     t.mark(AUTH_LABELS[j["auth"]]) if j.get("auth") in AUTH_LABELS else NONE, pinned])
+    table = _table(t, "Remote and plugin servers",
+                   [("Server", False), ("Agent", False), ("Kind", False), ("Where", False), ("Transport", False),
+                    ("Key", False), ("Pinned", False)], rows, "No remote or plugin server is declared.")
+    note = t.mark("A remote server runs what its provider deploys, so only its endpoint is recorded. A plugin's server "
+                  "is pinned to the plugin's version. No URL query, key or argument is kept.", tag="p", attrs=HINT)
+    return table[: -len("</section>")] + note + "</section>"
 
 
 def _degraded(s: dict, t: Translator) -> str:
@@ -112,10 +133,12 @@ def mcp_html(payload: dict, t: Translator | None = None) -> str:
     note = t.mark("Commands are judged from the declarations and tools are pinned when a probe lists them on "
                   "request. No command line, argument or key is kept.", tag="p", attrs=HINT)
     return ('<section id="supply" class="machine">' f'<section class="card panel">{head}{note}</section>'
-            + _tiles(s, t) + _risky(s, t) + _changed(s, t) + _scanners(s, t) + _degraded(s, t) + "</section>")
+            + _tiles(s, t) + _risky(s, t) + _changed(s, t) + _judged(s, t) + _degraded(s, t) + "</section>")
 
 
 #: Values the page translates through a variable, named here so the catalog test sees them.
 DYNAMIC = (tuple(RULE_LABELS.values()) + tuple(RULE_WHY.values()) + tuple(CHANGE_LABELS.values())
+           + tuple(KIND_LABELS.values()) + tuple(AUTH_LABELS.values()) + tuple(UNPINNED_LABELS.values())
            + ("Server", "Agent", "Rule", "Why", "Tool", "What changed", "Seen", "Accept", "No server command trips a rule.",
-              "Risky commands", DISABLED, "Not measured"))
+              "Risky commands", DISABLED, "Not measured", "Remote and plugin servers", "Kind", "Where", "Transport",
+              "Key", "Pinned", "No remote or plugin server is declared."))
