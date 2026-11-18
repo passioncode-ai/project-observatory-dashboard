@@ -2434,7 +2434,8 @@ the registry then carries `organization`, `organization_source` and
                "figma": {"team": "Company Design", "project": "Builder"},
                "match": {"github_owners": ["company-org"], "products": ["product:suite"],
                          "digitalocean_teams": ["Company Team"], "cloudflare_accounts": ["<account id>"],
-                         "heroku_teams": ["company-apps"], "openrouter_accounts": ["company"]}},
+                         "heroku_teams": ["company-apps"], "heroku_users": ["ops@example.com"],
+                         "openrouter_accounts": ["company"]}},
    "person":  {"label": "Person", "default": true, "ga4_account": "accounts/200",
                "ga4_legacy_accounts": {"accounts/300": ["properties/31"]},
                "figma": {"team": "Personal"}}},
@@ -2471,7 +2472,34 @@ key was stashed as (`openrouter.py stash --as LABEL`). It decides that account's
 organization and the issuer side of the keys it minted, never a project's: a
 project's answer comes from its repositories, deploys and zones together
 (ORG-R26), and a key is weighed per key, so one personal key in a company
-project does not make the project a conflict. A `match` key the engine does not
+project does not make the project a conflict. `heroku_users` (OBS-628) names the
+Heroku user whose admin token the Heroku door stashed, by the email or the
+account id that stash's record holds (`heroku.py stash` writes both). Like
+`openrouter_accounts`, it decides that user's organization (the account
+`heroku:user` in `org accounts`) and the issuer side of the keys the user
+issued (`org keys`), never a project's; a Heroku user no rule names keeps the
+default organization.
+
+A key whose issuer belongs to another organization than its project's, or to
+an account no organization claims, is the finding `org.foreign_issuer`
+(OBS-627): it names the slot, the issuer account and the door step that issues
+a replacement from the project's own organization, never a value. Two entries
+say a key like that is meant: `match.shared_issuers` lists the accounts an
+organization shares with the projects of other organizations on purpose, by
+the id `org accounts` gives them (`openrouter:account:<label>`, `heroku:user`,
+`cloudflare:account:<id>`), and the top-level `partners` list names a
+partner's account and the projects it serves:
+
+```json
+{"organizations": {"company": {"match": {"openrouter_accounts": ["company"],
+                                         "shared_issuers": ["openrouter:account:company"]}}},
+ "partners": [{"issuer": "openrouter:account:partner-co",
+               "projects": ["project:partner-app"], "why": "the partner runs it"}]}
+```
+
+A declaration covers an account of the organization that makes it, or one no
+organization claims; neither entry decides an account's or a project's
+organization. A `match` key the engine does not
 know is ignored and named with the known ones, on the emit's error output and in
 the finding `organization.config_problem`; a file that does not parse is named
 there too. A project in `conflict` gets the finding `organization.unresolved`,

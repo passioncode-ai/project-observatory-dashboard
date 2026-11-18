@@ -16,6 +16,9 @@ One account failing is reported in `degraded` and the others still land — the
 rule every collector here follows.
 """
 from __future__ import annotations
+
+#: The provider this collector reads (OBS-605): `tools/door_registry.py` counts it as tracked.
+COVERS_PROVIDERS = ("cloudflare",)
 import json
 import pathlib
 import sys

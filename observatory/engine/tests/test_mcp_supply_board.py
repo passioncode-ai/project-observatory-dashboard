@@ -44,6 +44,30 @@ class Findings(unittest.TestCase):
         self.assertFalse([r for r in risky + changed if "fine" in r["title"]])
         self.assertNotIn("npx", json.dumps(risky + changed))
 
+    def test_an_unpinned_remote_or_plugin_server_is_a_finding_with_its_code(self):
+        import test_finding_rules as board
+        doc = {"servers": [
+            {"id": "mcp:claude/plugin-alpha/alpha-image", "name": "alpha-image", "agent": "claude",
+             "liveness": "connected", "key_in_url": False, "risky": [], "plugin": "alpha-tools@example-market",
+             "plugin_version": "1.4.0", "supply": {"kind": "plugin", "transport": "stdio", "pinned": False,
+                                                   "pin": None, "codes": ["image-tag"]}},
+            {"id": "mcp:claude/user/beta-remote", "name": "beta-remote", "agent": "claude", "liveness": "connected",
+             "key_in_url": False, "risky": [], "supply": {"kind": "remote", "host": "beta.example.com",
+                                                         "transport": "sse", "auth": "none-declared",
+                                                         "credential_in_url": False, "pinned": False,
+                                                         "pin": {"endpoint": "sha256:" + "d" * 64},
+                                                         "codes": ["remote-endpoint", "plain-http"]}}],
+            "own_declared": True, "totals": {"declarations": 2, "distinct_servers": 2, "by_liveness": {},
+                                              "in_one_agent_only": 2, "key_in_url": 0}}
+        rows = board.sandbox(registry={"mcp-servers.json": lambda d: (d.clear(), d.update(doc))})
+        found = board.rows(rows, "mcp.unpinned_server")
+        got = {(r["subject"], r["severity"]) for r in found}
+        self.assertEqual(got, {("mcp:claude/alpha-image/image-tag", "warning"),
+                               ("mcp:claude/beta-remote/remote-endpoint", "info"),
+                               ("mcp:claude/beta-remote/plain-http", "warning")})
+        self.assertTrue(all(r["title"] for r in found))
+        self.assertNotIn("d" * 64, json.dumps(found), "the endpoint pin is not printed")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

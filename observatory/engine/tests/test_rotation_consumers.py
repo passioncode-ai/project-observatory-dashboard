@@ -358,7 +358,10 @@ def test_rolling_doors_refuse_while_a_copy_is_found() -> None:
     hk.read_admin = lambda label: ("admin", "fake-admin")
     calls = []
     hk._request = lambda *a, **k: calls.append(a) or (_ for _ in ()).throw(RuntimeError("stop here"))
-    # Both doors call the one roll guard (`key_consumers.guard_roll`, OBS-601) over the one `consumer_sources`.
+    # Both doors read the one roll plan (`key_consumers.plan_roll`, OBS-601, OBS-607) over the one `consumer_sources`.
+    # A copy the door can write is delivered now (below); what still refuses is a place it cannot read.
+    unread = key_consumers.HerokuSource(tokens=lambda: ([], None, "the admin stash could not be read"), api=fake)
+    sources = [unread]
     with mock.patch.object(key_consumers, "vault_value", lambda *slot: OLD), \
             mock.patch.object(key_consumers, "consumer_sources", lambda slot=None, exclude=None: sources):
         rc, out, err = run(hk.cmd_rotate, "alpha/prod/K", False, wait=0)
@@ -387,6 +390,290 @@ def test_rolling_doors_refuse_while_a_copy_is_found() -> None:
     check("no value in either door's output or journal", clean(out + err + json.dumps(journal)), "")
 
 
+# ─────────────────────────── OBS-607: the rolling doors deliver ─────────────
+
+def test_a_vault_slot_holding_the_value_is_a_copy_and_takes_the_successor() -> None:
+    import vault
+    vault.store_value("alpha", "prod", "K", OLD, replace=True, tool="test")
+    vault.store_value("beta", "prod", "K_COPY", OLD, replace=True, tool="test")
+    vault.store_value("gamma", "prod", "OTHER", OTHER, replace=True, tool="test")
+    src = key_consumers.VaultSource(("alpha", "prod", "K"))
+    found = key_consumers.find(OLD, [src])
+    check("another slot with the value is found, the key's own slot is not",
+          [c.get("slot") for c in found["consumers"]] == ["beta/prod/K_COPY"], str(found["consumers"]))
+    outcomes = key_consumers.deliver_all(found, OLD, NEW)
+    check("delivered through the vault and read back", [o["status"] for o in outcomes] == ["delivered"],
+          str(outcomes))
+    check("the copy now holds the successor", key_consumers.vault_value("beta", "prod", "K_COPY") == NEW, "")
+    check("every door looks there", [s.name for s in key_consumers.consumer_sources("alpha/prod/K")]
+          == ["heroku", "env-file", "launchd", "vault"], "")
+    check("no value in the answer", clean(json.dumps(key_consumers.public(found)) + json.dumps(outcomes)), "")
+
+
+class HerokuWire:
+    """The Heroku door's own wire for a successor rotation: POST an authorization, the proof read, DELETE."""
+
+    def __init__(self, events: list):
+        self.events = events
+        self.deleted: list = []
+
+    def __call__(self, method, path, token, payload=None, accept=None):
+        self.events.append(("door", method, path))
+        if method == "POST" and path == "/oauth/authorizations":
+            return {"id": "auth-2", "scope": payload["scope"], "access_token": {"token": NEW, "expires_in": 7776000}}
+        if method == "DELETE":
+            self.deleted.append(path)
+            return {}
+        return {"id": "x"}
+
+
+def heroku_door_with_copy(fake: FakeHeroku):
+    hk = load("tools/heroku.py", "heroku_delivery_door")
+    base = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    hk.ADMIN_STORE, hk.LEDGER = base / "heroku-admin", base / "heroku-issued.json"
+    journal: list = []
+    hk._journal = lambda event, secret, **d: journal.append({"event": event, "secret": secret, **d})
+    hk.save_ledger({"issued": {"alpha/prod/K": {"authorization_id": "auth-1", "preset": "read", "scopes": ["read"],
+                                                "description": "observatory read alpha/prod/K (managed)",
+                                                "admin": "main", "expire_days": 90}}})
+    hk.read_admin = lambda label: ("main", "fake-admin")
+    slots = {"alpha/prod/K": OLD}
+    hk.deliver_to_vault = lambda value, p, e, n: slots.__setitem__(f"{p}/{e}/{n}", value)
+    hk.record_slot_expiry = lambda *a: "expires in 90 days"
+    events: list = []
+    wire = HerokuWire(events)
+    hk._request = wire
+    real_request = fake.request
+
+    def logged(method, path, tok, payload=None):
+        events.append(("app", method, path))
+        return real_request(method, path, tok, payload)
+    fake.request = logged
+    return hk, journal, slots, wire, events
+
+
+def test_heroku_delivers_to_a_copy_then_revokes_the_old_authorization() -> None:
+    fake = heroku_with_copy()
+    hk, journal, slots, wire, events = heroku_door_with_copy(fake)
+    sources = [heroku_source(fake)]
+    with mock.patch.object(key_consumers, "vault_value", lambda *slot: slots.get("/".join(slot))), \
+            mock.patch.object(key_consumers, "consumer_sources", lambda slot=None, exclude=None: sources):
+        rc, out, err = run(hk.cmd_rotate, "alpha/prod/K", False, wait=0)
+    row = hk.ledger()["issued"]["alpha/prod/K"]
+    check("Heroku: the rotation succeeds", rc == 0, out + err)
+    check("Heroku: no regenerate (it would kill the copy's value at once)",
+          not any("regenerate" in e[2] for e in events), str(events))
+    check("Heroku: the slot and the copy hold the successor",
+          slots["alpha/prod/K"] == NEW and fake.apps["app-1"]["vars"]["OPENROUTER_API_KEY"] == NEW, "")
+    patch = events.index(("app", "PATCH", "/apps/app-1/config-vars"))
+    delete = events.index(("door", "DELETE", "/oauth/authorizations/auth-1"))
+    check("Heroku: the old authorization is revoked only after the copy was written and read back",
+          patch < delete and any(e[:2] == ("app", "GET") for e in events[patch:delete]), str(events))
+    check("Heroku: the ledger names the successor", row["authorization_id"] == "auth-2" and row["rotations"] == 1
+          and "predecessor" not in row, str(row))
+    check("Heroku: the delivery is journaled by name",
+          any(j["event"] == "consumer-delivered" for j in journal) and any(j["event"] == "rotate" for j in journal),
+          str(journal))
+    check("Heroku: no value in output, journal or ledger",
+          clean(out + err + json.dumps(journal) + json.dumps(hk.ledger())), "")
+
+
+def test_heroku_a_copy_not_delivered_holds_the_revoke_until_the_next_rotate() -> None:
+    fake = heroku_with_copy()
+    fake.refuse_patch.add("app-1")
+    hk, journal, slots, wire, events = heroku_door_with_copy(fake)
+    sources = [heroku_source(fake)]
+    with mock.patch.object(key_consumers, "vault_value", lambda *slot: slots.get("/".join(slot))), \
+            mock.patch.object(key_consumers, "consumer_sources", lambda slot=None, exclude=None: sources):
+        rc, out, err = run(hk.cmd_rotate, "alpha/prod/K", False, wait=0)
+        row = hk.ledger()["issued"]["alpha/prod/K"]
+        check("Heroku: a refused delivery holds, exit 1", rc == 1 and "holds it" in err and "alpha-web" in err, err)
+        check("Heroku: the old authorization stays alive", not wire.deleted, str(wire.deleted))
+        check("Heroku: the row is held and names the copy and the old authorization",
+              row["rotation_status"] == hk.HELD and row["predecessor"]["predecessor"] == "auth-1"
+              and "alpha-web" in json.dumps(row["predecessor"]["held"]), str(row))
+        rc, out2, err2 = run(hk.cmd_revoke, "alpha/prod/K")
+        check("Heroku: revoke refuses a held row", rc == 1 and "held" in err2 and not wire.deleted, err2)
+        fake.refuse_patch.clear()
+        posts = sum(1 for e in events if e[1] == "POST")
+        rc, out3, err3 = run(hk.cmd_rotate, "alpha/prod/K", False, wait=0)
+    row = hk.ledger()["issued"]["alpha/prod/K"]
+    check("Heroku: the next rotate finishes it: the copy gets the successor, the old authorization is revoked",
+          rc == 0 and fake.apps["app-1"]["vars"]["OPENROUTER_API_KEY"] == NEW
+          and wire.deleted == ["/oauth/authorizations/auth-1"], out3 + err3)
+    check("Heroku: finishing mints nothing new", sum(1 for e in events if e[1] == "POST") == posts, str(events))
+    check("Heroku: the row is complete again", "predecessor" not in row and row["rotation_status"] == "complete",
+          str(row))
+    check("Heroku: no value anywhere", clean(out + err + out2 + err2 + out3 + err3 + json.dumps(journal)
+                                            + json.dumps(hk.ledger())), "")
+
+
+class FakeCfDoor:
+    """The Cloudflare door's provider calls for a successor rotation, recorded."""
+
+    def __init__(self, cf, events: list):
+        self.events = events
+        cf.read_admin = lambda label: ("admin", "fake-admin")
+        cf.existing_token = lambda admin, acc, name: "tok-old" if name == cf.PRESETS["analytics"]["name"] else None
+        cf.mint_answered = self.mint
+        cf.policies_for = lambda *a, **k: [{"effect": "allow"}]
+        cf._request = self.request
+        self.deleted: list = []
+        self.renamed: list = []
+
+    def mint(self, admin, acc, preset, resources=None, name=None, expires_on=None):
+        self.events.append(("door", "mint", name))
+        return "tok-new", NEW, {"expires_on": "2027-02-16T00:00:00Z"}
+
+    def request(self, path, token, payload=None, method=None, headers=None):
+        self.events.append(("door", method or "GET", path))
+        if method == "DELETE":
+            self.deleted.append(path)
+        if method == "PUT":
+            self.renamed.append((path, payload.get("name")))
+        return {"result": {}}
+
+
+def cloudflare_door_with_copy(fake: FakeHeroku):
+    sys.path.insert(0, str(ROOT / "plugins"))
+    cf = load("tools/cloudflare.py", "cloudflare_delivery_door")
+    base = pathlib.Path(tmpdir.mkdtemp()).resolve()
+    token = base / "example"
+    private_io.write(token, OLD + "\n")
+    metas = {token: {"account_id": "acc", "preset": "analytics", "account_name": "Example", "expire_days": 90}}
+    cf.issued = lambda: [token]
+    cf.read_meta = lambda p: dict(metas.get(p, {}))
+    cf.write_meta = lambda p, text, encoding="utf-8": metas.__setitem__(p, json.loads(text))
+    journal: list = []
+    cf._journal = lambda event, secret, **d: journal.append({"event": event, "secret": secret, **d})
+
+    def install(value, label, account, preset, project, rolled, **k):
+        private_io.write(token, value + "\n")
+        return 0
+    cf.install_issued = install
+    events: list = []
+    door = FakeCfDoor(cf, events)
+    real_request = fake.request
+
+    def logged(method, path, tok, payload=None):
+        events.append(("app", method, path))
+        return real_request(method, path, tok, payload)
+    fake.request = logged
+    return cf, token, metas, journal, door, events
+
+
+def test_cloudflare_delivers_to_a_copy_then_revokes_and_renames() -> None:
+    fake = heroku_with_copy()
+    cf, token, metas, journal, door, events = cloudflare_door_with_copy(fake)
+    sources = [heroku_source(fake)]
+    with mock.patch.object(key_consumers, "consumer_sources", lambda slot=None, exclude=None: sources):
+        rc, out, err = run(cf.cmd_rotate, "example", False)
+    check("Cloudflare: the rotation succeeds", rc == 0, out + err)
+    check("Cloudflare: a successor is minted beside the old token, never a roll of it",
+          ("door", "mint", cf.PRESETS["analytics"]["name"] + cf.SUCCESSOR_SUFFIX) in events, str(events))
+    check("Cloudflare: the token file and the copy hold the successor",
+          private_io.read(token).strip() == NEW and fake.apps["app-1"]["vars"]["OPENROUTER_API_KEY"] == NEW, "")
+    patch = events.index(("app", "PATCH", "/apps/app-1/config-vars"))
+    delete = events.index(("door", "DELETE", "/accounts/acc/tokens/tok-old"))
+    check("Cloudflare: the old token is deleted after the copy was written and read back, then the successor renamed",
+          patch < delete and door.renamed == [("/accounts/acc/tokens/tok-new", cf.PRESETS["analytics"]["name"])],
+          str(events))
+    check("Cloudflare: the record holds no hold", "predecessor" not in metas[token], str(metas[token]))
+    check("Cloudflare: no value in output or journal", clean(out + err + json.dumps(journal)), "")
+
+
+def test_cloudflare_a_copy_not_delivered_holds_the_revoke_until_the_next_rotate() -> None:
+    fake = heroku_with_copy()
+    fake.ignore_patch.add("app-1")
+    cf, token, metas, journal, door, events = cloudflare_door_with_copy(fake)
+    sources = [heroku_source(fake)]
+    with mock.patch.object(key_consumers, "consumer_sources", lambda slot=None, exclude=None: sources):
+        rc, out, err = run(cf.cmd_rotate, "example", False)
+        check("Cloudflare: a copy that did not read back holds, exit 1", rc == 1 and "alpha-web" in err, err)
+        check("Cloudflare: the old token stays alive", not door.deleted, str(door.deleted))
+        held = metas[token]
+        check("Cloudflare: the record is held, naming the old and the new token and the copy",
+              held.get("rotation_status") == cf.HELD and held["predecessor"]["predecessor"] == "tok-old"
+              and held.get("successor_id") == "tok-new", str(held))
+        check("Cloudflare: the record holds a keyed digest, never the value",
+              held["predecessor"]["digest"].startswith("hmac-sha256:") and clean(json.dumps(held)), "")
+        rc, out2, err2 = run(cf.cmd_revoke, "example")
+        check("Cloudflare: revoke refuses a held token", rc == 1 and "held" in err2 and not door.deleted, err2)
+        fake.ignore_patch.clear()
+        mints = sum(1 for e in events if e[1] == "mint")
+        rc, out3, err3 = run(cf.cmd_rotate, "example", False)
+    check("Cloudflare: the next rotate finishes it", rc == 0 and door.deleted == ["/accounts/acc/tokens/tok-old"]
+          and fake.apps["app-1"]["vars"]["OPENROUTER_API_KEY"] == NEW, out3 + err3)
+    check("Cloudflare: finishing mints nothing new", sum(1 for e in events if e[1] == "mint") == mints, "")
+    check("Cloudflare: the record is clean again", "predecessor" not in metas[token]
+          and "rotation_status" not in metas[token], str(metas[token]))
+    check("Cloudflare: no value anywhere", clean(out + err + out2 + err2 + out3 + err3 + json.dumps(journal)), "")
+
+
+def test_a_held_rotation_whose_old_value_is_gone_stays_held_and_force_revokes() -> None:
+    fake = heroku_with_copy()
+    fake.refuse_patch.add("app-1")
+    hk, journal, slots, wire, events = heroku_door_with_copy(fake)
+    sources = [heroku_source(fake)]
+    with mock.patch.object(key_consumers, "vault_value", lambda *slot: slots.get("/".join(slot))), \
+            mock.patch.object(key_consumers, "consumer_sources", lambda slot=None, exclude=None: sources):
+        run(hk.cmd_rotate, "alpha/prod/K", False, wait=0)
+        fake.apps["app-1"]["vars"]["OPENROUTER_API_KEY"] = OTHER     # changed by hand: the old value is nowhere now
+        rc, out, err = run(hk.cmd_rotate, "alpha/prod/K", False, wait=0)
+        check("a predecessor whose value no copy holds stays held", rc == 1 and not wire.deleted, err)
+        rc, out2, err2 = run(hk.cmd_rotate, "alpha/prod/K", False, wait=0, force=True)
+    check("--force revokes it and journals the cut", rc == 0 and wire.deleted == ["/oauth/authorizations/auth-1"]
+          and any(j["event"] == "rotation-forced" for j in journal), out2 + err2)
+    check("no value anywhere", clean(out + err + out2 + err2 + json.dumps(journal)), "")
+
+
+def test_a_refused_revoke_holds_and_the_next_rotate_only_retries_it() -> None:
+    fake = heroku_with_copy()
+    hk, journal, slots, wire, events = heroku_door_with_copy(fake)
+    refuse = [True]
+    real = hk._request
+
+    def wire_refusing(method, path, token, payload=None, accept=None):
+        if method == "DELETE" and refuse[0]:
+            raise hk.HerokuError(500, "heroku answered HTTP 500 on /oauth/authorizations/<id>; provider response "
+                                      "withheld")
+        return real(method, path, token, payload)
+    hk._request = wire_refusing
+    sources = [heroku_source(fake)]
+    with mock.patch.object(key_consumers, "vault_value", lambda *slot: slots.get("/".join(slot))), \
+            mock.patch.object(key_consumers, "consumer_sources", lambda slot=None, exclude=None: sources):
+        rc, out, err = run(hk.cmd_rotate, "alpha/prod/K", False, wait=0)
+        row = hk.ledger()["issued"]["alpha/prod/K"]
+        check("a refused revoke holds, the copy already delivered", rc == 1 and row["predecessor"]["code"]
+              == "revoke-failed" and fake.apps["app-1"]["vars"]["OPENROUTER_API_KEY"] == NEW, err + str(row))
+        refuse[0] = False
+        rc, out2, err2 = run(hk.cmd_rotate, "alpha/prod/K", False, wait=0)
+    row = hk.ledger()["issued"]["alpha/prod/K"]
+    check("the next rotate retries only the revoke", rc == 0 and wire.deleted == ["/oauth/authorizations/auth-1"]
+          and "predecessor" not in row, out2 + err2)
+    check("no value anywhere", clean(out + err + out2 + err2 + json.dumps(journal) + json.dumps(hk.ledger())), "")
+
+
+def test_the_revoke_runs_through_the_guard_after_delivery() -> None:
+    fake = heroku_with_copy()
+    sources = [heroku_source(fake)]
+    found = key_consumers.find(OLD, sources)
+    revoked: list = []
+    # A second copy appears between the delivery and the revoke: the guard sees it and holds.
+    real = fake.request
+
+    def sneaky(method, path, tok, payload=None):
+        answer = real(method, path, tok, payload)
+        if method == "PATCH":
+            fake.apps["app-2"]["vars"]["LATE_COPY"] = OLD
+        return answer
+    fake.request = sneaky
+    result = key_consumers.deliver_then_revoke("alpha/prod/K", found, OLD, NEW, lambda: revoked.append(1), sources)
+    check("a copy the guard still finds holds the revoke", not result["revoked"] and not revoked
+          and result["code"] == key_consumers.IN_USE and "beta-worker" in json.dumps(result["held"]), str(result))
+    check("no value in the answer", clean(json.dumps(result)), "")
+
+
 if __name__ == "__main__":
     print("rotation never cuts a live consumer (OBS-561)\n")
     for fn in (test_the_finder_names_every_copy_and_every_unread_source,
@@ -398,7 +685,15 @@ if __name__ == "__main__":
                test_a_held_rotation_finishes_once_the_copy_is_reachable,
                test_issue_into_an_occupied_destination_delivers_to_its_copies,
                test_dry_run_acts_on_nothing,
-               test_rolling_doors_refuse_while_a_copy_is_found):
+               test_rolling_doors_refuse_while_a_copy_is_found,
+               test_a_vault_slot_holding_the_value_is_a_copy_and_takes_the_successor,
+               test_heroku_delivers_to_a_copy_then_revokes_the_old_authorization,
+               test_heroku_a_copy_not_delivered_holds_the_revoke_until_the_next_rotate,
+               test_cloudflare_delivers_to_a_copy_then_revokes_and_renames,
+               test_cloudflare_a_copy_not_delivered_holds_the_revoke_until_the_next_rotate,
+               test_a_held_rotation_whose_old_value_is_gone_stays_held_and_force_revokes,
+               test_a_refused_revoke_holds_and_the_next_rotate_only_retries_it,
+               test_the_revoke_runs_through_the_guard_after_delivery):
         fn()
     print()
     if FAILURES:

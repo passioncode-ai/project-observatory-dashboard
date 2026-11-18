@@ -5,7 +5,7 @@ import os
 import re
 from pathlib import Path
 
-VERSION = "0.42.1"
+VERSION = "0.43.0"
 CONFIG_VERSION = 1
 WORKSPACE_VERSION = 1
 SOURCE = Path(__file__).resolve().parent
@@ -156,7 +156,7 @@ DEFAULT_ON = {"integrations": frozenset({"vulnerabilities", "github_issues", "gi
                                          "github_issues_integrations", "key_sweep"}), "features": frozenset()}
 KNOWN_FEATURES = frozenset({
     "agent", "auto_cleanup", "companion_remediation", "embeddings", "fixture_cleanup",
-    "machine_watch", "mcp_remote_scanners", "notifications", "probe_fixture", "registry_history", "retention",
+    "machine_watch", "notifications", "probe_fixture", "registry_history", "retention",
     "scheduler", "wiki_projection"})
 KNOWN_SOURCES = frozenset({
     "cloudflare_snapshot", "companion_db", "companion_home", "domain_export", "gateway_root",

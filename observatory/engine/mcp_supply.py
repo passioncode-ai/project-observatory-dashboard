@@ -14,9 +14,15 @@ THREE QUESTIONS, ASKED WITHOUT READING A SECRET.
    finds a tool added, removed or changed records it as pending against the ACCEPTED pin (`mcp.tool_changed`), and the
    person accepts the new definitions (`accept`), page button or `observatory_mcp_accept`. Only digests are stored: a
    description can carry anything, and none of it is kept. A change that is reverted clears itself.
-3. Does a scanner send content out? A third-party remote scanner receives tool definitions, which is content. It is
-   off until the person turns on `features.mcp_remote_scanners` through the configuration door (`remote_scanners`);
-   this module sends nothing itself and says which state it found.
+3. Does a scanner send content out? No. A third-party remote scanner would receive tool definitions, which is content;
+   none is built or planned (docs/design/control-plane/supply-chain.md, OBS-606), so the switch that was to allow one
+   is gone and `remote_scanners` answers `wired: false`. A setting left on from before is named as doing nothing.
+4. What is a server pinned to? (OBS-606) `judge_remote` reads a remote server's host, transport and auth kind and
+   whether its URL carries a credential (never the credential), and pins its endpoint by digest; its code is the
+   provider's, so it is never version-pinned (`remote-endpoint`). `judge_command` says what a stdio command is pinned
+   to: an exact version, an image digest, the version of the plugin that ships it, or its installation; an image named
+   by a tag (`image-tag`) and a plugin with no recorded version (`plugin-unversioned`) are unpinned codes. The codes
+   become `mcp.unpinned_server` findings; an unpinned package runner stays the `unpinned-runner` rule.
 
 The probe that lists tools starts a stdio server on a person's or an agent's request only (never from the tick). It
 does not pass a server's declared environment (values are never read), so a server that needs its own credentials
@@ -36,12 +42,36 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 SCHEMA = "mcp-pins/1"
-SWITCH = "features.mcp_remote_scanners"
+#: The setting that was to allow a remote scanner (OBS-555); it no longer exists (OBS-606) and is read only to say so.
+RETIRED_SWITCH = "features.mcp_remote_scanners"
 RULES = {
     "unpinned-runner": "a package runner fetches the newest version each time, so what runs can change under the declaration",
     "fetch-execute": "the command fetches a program from a URL and runs it as it arrives",
     "outside-install-places": "the executable sits where no installer owns it (a temporary or download folder, or a relative path)",
 }
+#: What a server is not pinned to (OBS-606): code -> (finding severity, why). An unpinned package runner is the
+#: `unpinned-runner` rule above, said once.
+UNPINNED = {
+    "remote-endpoint": ("info", "a remote server runs what its provider deploys; only its endpoint is recorded, since no "
+                                "version or digest can be pinned"),
+    "plain-http": ("warning", "a remote server is reached over plain HTTP to a host other than this machine, so its "
+                              "traffic and any key it carries can be read on the way"),
+    "image-tag": ("warning", "a container image is named by a tag, which can be moved to another image; a digest "
+                             "(`@sha256:`) cannot"),
+    "plugin-unversioned": ("warning", "the plugin that ships the server has no recorded version, so the command it runs "
+                                      "from its folder is pinned to nothing"),
+}
+#: The placeholder a plugin's declaration uses for its own folder.
+PLUGIN_ROOT = "${CLAUDE_PLUGIN_ROOT}"
+#: Container engines whose `run` takes an image.
+CONTAINER_ENGINES = {"docker", "podman", "nerdctl"}
+#: `docker run` flags that take a value, so the image is not mistaken for one.
+CONTAINER_VALUE_FLAGS = {"-e", "--env", "-v", "--volume", "--name", "-p", "--publish", "--network", "--net", "-w",
+                         "--workdir", "-u", "--user", "--env-file", "--mount", "--entrypoint", "--platform", "-l",
+                         "--label", "--add-host", "--cpus", "-m", "--memory", "--pull", "--restart", "--hostname", "-h"}
+LOOPBACK = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+DIGEST = re.compile(r"@(sha256:[0-9a-f]{64})$")
+
 #: Seconds one server may take to list its tools, and the most the whole refresh may spend on listings.
 LIST_TIMEOUT = 20.0
 LIST_BUDGET = 300.0
@@ -178,6 +208,125 @@ def judge(command: Any, args: Any = (), home: str | None = None) -> list[str]:
     if _outside(command, home):
         found.append("outside-install-places")
     return found
+
+
+# --- what a server is pinned to (OBS-606) --------------------------------------------------------------------------
+
+def _runner_spec(program: str, args: list[str]) -> str | None:
+    """The package spec a runner call names (the same walk as `_unpinned_runner`), or None."""
+    if program not in RUNNERS:
+        return None
+    lead = RUNNERS[program]
+    rest = list(args)
+    if lead is not None:
+        words = lead.split()
+        if rest[: len(words)] != words:
+            return None
+        rest = rest[len(words):]
+    index = 0
+    while index < len(rest):
+        item = rest[index]
+        if item in ("--from", "--spec", "-p", "--package") and index + 1 < len(rest):
+            return rest[index + 1]
+        if item in ("--with",) and index + 1 < len(rest):
+            index += 2
+            continue
+        if item.startswith("-"):
+            index += 1
+            continue
+        return item
+    return None
+
+
+def _image(args: list[str]) -> str | None:
+    """The image a `docker run` names: the first word after `run` that is neither a flag nor a flag's value."""
+    if "run" not in args:
+        return None
+    rest = args[args.index("run") + 1:]
+    index = 0
+    while index < len(rest):
+        item = rest[index]
+        if item in CONTAINER_VALUE_FLAGS:
+            index += 2
+            continue
+        if item.startswith("-"):
+            index += 1
+            continue
+        return item
+    return None
+
+
+def judge_command(command: Any, args: Any = (), plugin_version: str | None = None, *,
+                  plugin: bool | None = None) -> dict:
+    """{kind, pinned, pin, codes} for a stdio command: pinned to an exact version (`{version}`), an image digest
+    (`{digest}`), the version of the plugin whose folder it runs from (`{plugin_version}`), or its installation
+    (`{by: install}`). Never the command line: a version is kept only when it is release-shaped (`EXACT`)."""
+    if isinstance(command, list):
+        args = list(command[1:]) + list(args or ())
+        command = command[0] if command else ""
+    command = str(command or "")
+    argv = [str(a) for a in (args or ())]
+    in_plugin = PLUGIN_ROOT in command or any(PLUGIN_ROOT in a for a in argv)
+    is_plugin = plugin if plugin is not None else (in_plugin or plugin_version is not None)
+    out = {"kind": "plugin" if is_plugin else "stdio", "pinned": False, "pin": None, "codes": []}
+    program = _program(command)
+    spec = _runner_spec(program, argv)
+    if spec is not None:
+        if _spec_pinned(spec, program):
+            version = spec.rsplit("@", 1)[1] if "@" in spec[1:] else spec.split("==", 1)[1]
+            out.update(pinned=True, pin={"version": version})
+        return out                                    # an unpinned runner is the `unpinned-runner` rule
+    if program in CONTAINER_ENGINES:
+        image = _image(argv)
+        if image is not None:
+            found = DIGEST.search(image)
+            if found:
+                out.update(pinned=True, pin={"digest": found.group(1)})
+            else:
+                out["codes"].append("image-tag")
+            return out
+    if in_plugin:
+        if isinstance(plugin_version, str) and plugin_version:
+            out.update(pinned=True, pin={"plugin_version": plugin_version})
+        else:
+            out["codes"].append("plugin-unversioned")
+        return out
+    out.update(pinned=True, pin={"by": "install"})
+    return out
+
+
+def judge_remote(url: str, cfg: dict | None = None, transport: str | None = None) -> dict:
+    """{kind: remote, host, transport, auth, credential_in_url, pinned: False, pin: {endpoint}, codes} for a remote
+    server. `auth` is `url` (a credential in the URL), `header` (a key header or a bearer variable), `oauth` (declared)
+    or `none-declared` (the client may still sign in when the server asks). The endpoint pin is a digest of the scheme,
+    host, port, path and transport, never of the query or the user part, so a rotated key does not move it."""
+    from urllib.parse import urlsplit
+    cfg = cfg if isinstance(cfg, dict) else {}
+    try:
+        parts = urlsplit(str(url or ""))
+        host = (parts.hostname or "").lower()
+        port = parts.port
+        scheme = (parts.scheme or "").lower()
+        path = parts.path
+        keyed = bool(parts.query) or parts.username is not None or parts.password is not None
+    except ValueError:
+        host, port, scheme, path, keyed = "", None, "", "", True
+    headers = {}
+    for name in ("headers", "http_headers", "env_http_headers"):
+        if isinstance(cfg.get(name), dict):
+            headers.update(cfg[name])
+    keyed_header = bool(cfg.get("bearer_token_env_var")) or any(
+        k.lower() in ("authorization", "x-api-key") or "key" in k.lower() or "token" in k.lower()
+        for k in map(str, headers))
+    auth = ("url" if keyed else "header" if keyed_header
+            else "oauth" if cfg.get("oauth") or cfg.get("authProviderType") else "none-declared")
+    endpoint = f"{scheme}://{host}{':' + str(port) if port else ''}{path}|{transport or ''}"
+    codes = ["remote-endpoint"]
+    if scheme == "http" and host and host not in LOOPBACK and not host.startswith("127."):
+        codes.append("plain-http")
+    return {"kind": "remote", "host": host or None, "transport": transport, "auth": auth, "credential_in_url": keyed,
+            "pinned": False, "pin": {"endpoint": "sha256:" + hashlib.sha256(endpoint.encode("utf-8")).hexdigest()},
+            "codes": codes}
 
 
 # --- tool definitions and their pins ------------------------------------------------------------------------------
@@ -403,28 +552,31 @@ def probe_tools(specs: dict[str, tuple[str, list[str]]], lister: Callable[[str, 
     return record_probe(listed, path), degraded
 
 
-# --- the third-party scanners switch --------------------------------------------------------------------------------
+# --- the third-party scanners (none) --------------------------------------------------------------------------------
 
 def remote_scanners(base: pathlib.Path | None = None) -> dict:
-    """{enabled, reason, source}: whether sending tool definitions to a third-party scanner is allowed. Off unless the
-    person turned `features.mcp_remote_scanners` on; never sends anything itself."""
-    reason = ("a third-party remote scanner receives each tool's name, description and schema, which is content from "
-              "your servers: it stays off until you turn it on")
+    """{enabled: False, wired: False, reason, degraded}: no remote scanner client exists, so nothing is ever sent to one
+    (OBS-606). A `features.mcp_remote_scanners` left on from before is named in `degraded` as doing nothing."""
+    reason = "no remote scanner client is built, so nothing is sent to a third-party scanner"
+    degraded: list[dict] = []
     try:
         import configuration
-        on = configuration.enabled("mcp_remote_scanners", "features",
-                                   settings=None if base is None else configuration.load(base))
-    except Exception as exc:                          # noqa: BLE001: an unreadable setting is off, said so
-        return {"enabled": False, "reason": reason, "source": SWITCH, "degraded": [{"source": SWITCH,
-                "reason": f"the setting could not be read ({type(exc).__name__}); treated as off"}]}
-    return {"enabled": bool(on), "reason": reason, "source": SWITCH, "degraded": []}
+        left_on = (configuration.load(base) or {}).get("features", {}).get("mcp_remote_scanners") is True
+    except Exception:                                 # noqa: BLE001: unreadable settings change nothing here
+        left_on = False
+    if left_on:
+        degraded.append({"source": RETIRED_SWITCH, "code": "not-wired",
+                         "reason": "the setting is on but no remote scanner exists, so it does nothing"})
+    return {"enabled": False, "wired": False, "reason": reason, "degraded": degraded}
 
 
 # --- the answer for the page, the tool and the findings -------------------------------------------------------------
 
 def summary(servers: list[dict] | None = None, path: pathlib.Path | None = None, base: pathlib.Path | None = None) -> dict:
-    """{risky, changes, pins, scanners, degraded}: `risky` rows {server, agent, rules} from the scan's declarations,
-    `changes` rows {server, tool, change, old, new} still waiting for acceptance, `pins` the count of pinned tools."""
+    """{risky, changes, pins, judged, unpinned, scanners, degraded}: `risky` rows {server, agent, rules} from the scan's
+    declarations, `changes` rows {server, tool, change, old, new} still waiting for acceptance, `pins` the count of
+    pinned tools, `judged` each remote and plugin server with what it is pinned to, `unpinned` rows {server, agent,
+    code, severity} (OBS-606), and `scanners` saying no remote scanner is wired."""
     degraded: list[dict] = []
     risky = []
     if servers is None:
@@ -442,6 +594,30 @@ def summary(servers: list[dict] | None = None, path: pathlib.Path | None = None,
             seen.add((row.get("agent"), row.get("name"), tuple(rules)))
             risky.append({"server": row["name"], "agent": row.get("agent"), "rules": rules})
     risky.sort(key=lambda r: (str(r["agent"]), r["server"]))
+    # OBS-606: what each remote and plugin server is pinned to, and every unpinned code (stdio servers included).
+    judged, unpinned, said = [], [], set()
+    for row in servers:
+        supply = row.get("supply") if isinstance(row, dict) else None
+        if not isinstance(supply, dict) or not row.get("name"):
+            continue
+        for code in supply.get("codes") or []:
+            if code in UNPINNED and (row.get("agent"), row["name"], code) not in said:
+                said.add((row.get("agent"), row["name"], code))
+                unpinned.append({"server": row["name"], "agent": row.get("agent"), "code": code,
+                                 "severity": UNPINNED[code][0]})
+        if supply.get("kind") in ("remote", "plugin") or row.get("plugin"):
+            judged.append({"server": row["name"], "agent": row.get("agent"),
+                           "kind": "plugin" if row.get("plugin") else supply.get("kind"),
+                           **{k: supply.get(k) for k in ("host", "transport", "auth", "credential_in_url")
+                              if supply.get(k) is not None},
+                           **({} if supply.get("transport") else
+                              {"transport": row.get("wire") or row.get("transport")} if (row.get("wire")
+                                                                                       or row.get("transport")) else {}),
+                           **({"plugin": row["plugin"], "plugin_version": row.get("plugin_version")}
+                              if row.get("plugin") else {}),
+                           "pinned": bool(supply.get("pinned")), "codes": list(supply.get("codes") or [])})
+    unpinned.sort(key=lambda r: (str(r["agent"]), r["server"], r["code"]))
+    judged.sort(key=lambda r: (str(r["agent"]), r["server"]))
     doc = load(path)
     changes, pinned = [], 0
     for key, entry in sorted(doc["servers"].items()):
@@ -453,4 +629,5 @@ def summary(servers: list[dict] | None = None, path: pathlib.Path | None = None,
     scanners = remote_scanners(base)
     degraded += scanners.pop("degraded", [])
     return {"risky": risky, "changes": changes, "pins": pinned, "pinned_servers": len(doc["servers"]),
-            "scanners": scanners, "rules": dict(RULES), "degraded": degraded}
+            "judged": judged, "unpinned": unpinned, "scanners": scanners, "rules": dict(RULES),
+            "unpinned_codes": {k: v[1] for k, v in UNPINNED.items()}, "degraded": degraded}

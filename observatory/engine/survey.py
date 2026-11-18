@@ -460,6 +460,10 @@ def survey(scope: dict | None = None, include_external: bool = False,
         else:
             degraded.extend(_collector_degradation("domains_live.json"))
 
+    # A STACK READ FROM MARKER FILES (OBS-603): the lockfiles named no ecosystem for it, so it is a guess.
+    import project_stack
+    degraded.extend(project_stack.survey_degraded(selected, one_project=kind == "project"))
+
     # THE GITHUB LISTING, which nothing had ever reported. Its failures are
     # per-owner and the collector keeps the previous file when one fails, so the
     # answer is not wrong — it is OLDER than it looks, and a caller comparing
@@ -557,6 +561,11 @@ def project_detail(project_id: str, timeline_limit: int = 10,
         derived, copies, rdeg = derivations.relations_of(ddoc, repo_ids)
         out["project"]["derived_from"], out["project"]["copies"] = derived, copies
         out["degraded"] += [d for d in rdeg if d not in out["degraded"]]
+    # WHERE THE STACK WAS READ (OBS-603): the lockfiles, marker files or a hand-set value, with the evidence per kind.
+    # On the detail only: the survey's item schema is closed, so the survey keeps `stack` and its degraded line.
+    import project_stack
+    out["project"].update(project_stack.detail_fields(
+        next((p for p in _load("projects.json")["projects"] if p.get("id") == out["project"]["id"]), None)))
     if timeline_limit:
         tl = timeline(project_id, limit=timeline_limit)
         out["recentEvents"] = tl["events"]
@@ -907,16 +916,17 @@ def credentials(project_id: str) -> dict:
                             "use": (f"python \"$(project-observatory full-path)/tools/use_secret.py\" "
                                     f"run --env {envdir.name} {name} {slot.name} -- <command>")})
 
-    # WHERE EACH VALUE CAME FROM (OBS-556, CP-10): issued by a door, received from a sender a person named,
-    # shared with another project's folder, or unknown; with its context and the services started from it.
-    # Names, records and keyed digests only; `observatory_key_consumers` finds the other copies by the value.
+    # WHERE EACH VALUE CAME FROM (OBS-556, OBS-604, CP-10): issued by a door, received from a sender a person
+    # named, shared out to another party, copied to another project's folder, or unknown; whose it is (personal or
+    # an organization's), and who reads it, from every source the revoke guard reads (the value held in memory).
     if out["vault"]:
         import key_source
         classes = key_source.classify([f"{r['project']}/{r['env']}/{r['name']}" for r in out["vault"]],
                                       out["degraded"], root=root)
+        readers = key_source.ConsumerReader(out["degraded"])
         for row in out["vault"]:
             row.update(classes.get(f"{row['project']}/{row['env']}/{row['name']}") or {"source": "unknown"})
-            row["consumers"] = key_source.consumers(row["project"], row["env"], row["name"], out["degraded"])
+            row["consumers"] = readers.of(row["project"], row["env"], row["name"])
             row["consumersTool"] = key_source.CONSUMERS_TOOL
 
     # WHICH MACHINES HOLD EACH SLOT (OBS-194): this one, and every peer whose digest manifest

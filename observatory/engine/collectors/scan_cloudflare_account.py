@@ -23,6 +23,9 @@ step's deadline. A listing that failed is `null`, never an empty list: unread is
 """
 from __future__ import annotations
 
+#: The provider this collector reads (OBS-605): `tools/door_registry.py` counts it as tracked.
+COVERS_PROVIDERS = ("cloudflare",)
+
 import pathlib
 import re
 import sys

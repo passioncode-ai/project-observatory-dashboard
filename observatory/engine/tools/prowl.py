@@ -25,6 +25,9 @@ fails is revoked again at once, and the answer says whether that revocation was 
 """
 from __future__ import annotations
 
+#: This door declares itself (OBS-605): `tools/door_registry.py` reads it, so integration health tracks prowl.
+DOOR_PROVIDER = "prowl"
+
 import argparse
 import ipaddress
 import json

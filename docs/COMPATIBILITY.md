@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-The application release is **0.42.1**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
+The application release is **0.43.0**. The complete engine and each user's workspace are separate. Updating program files never intentionally replaces configuration, registry data, credentials, history or local dashboards. The previously published portable 0.1 command set remains a compatibility entry point; its smaller data model is not interchangeable with the complete engine's SQLite database.
 
 ## SQLite runtime prerequisite
 
@@ -438,6 +438,35 @@ with the answer before and why. Design: [decisions-and-settings.md](design/contr
 
 No tool name, input schema or answer field is removed. Downgrade: an older engine answers the earlier spelling.
 Design: [mcp-surface.md](design/control-plane/mcp-surface.md).
+
+## Keys by source: `copied` and `shared`, context and consumers (OBS-604)
+
+- **A renamed class value.** A vault slot whose value also sits under another project's folder of this vault read
+  `source: shared` (0.40.0 to 0.42.x); it now reads `source: copied`. `shared` now means the key was handed to another
+  party: a peer share this node sent, a credential request delivered into an organization's context, or a hand-over in
+  an organization's applied selection, each named in the new field `sharedTo` (`kind`, `to`, `record`). The keys page
+  reads both: a registry row with `shared` and no `key_source_shared_to` is shown as a copy. A client that read
+  `shared` as a copy reads `copied`, or accepts both and tells them apart by `sharedTo`.
+- **Kept fields.** `sharedWith` (and the registry's `key_source_shared_with`) still names the slots holding the same
+  value; `copiedWith` (`key_source_copied_with`) names the same list under the class's new name. The degraded code
+  `shared-unmeasured` keeps its spelling.
+- **Added fields.** `context` on every row of `observatory_credentials` (`key_context` on a registry row): whose the
+  key is (`personal`, `organization` with its name and label, `not-ours`, `undecided`), read the way `full org keys`
+  reads a project. `consumers` now comes from every source the revoke guard reads (the OpenRouter scan, Heroku config
+  vars, inventoried env files, services started from the slot) instead of the services alone: the slot's value is
+  read in memory and compared in constant time, and a source it could not read is in `degraded` with its `code`.
+
+No field is removed. Downgrade: an older engine answers `shared` for a copy and omits `context` and `sharedTo`.
+Design: [keys-by-organization.md](design/control-plane/keys-by-organization.md).
+
+## Organizations: the Heroku user, shared issuers and partners (OBS-627, OBS-628)
+
+`config/organizations.json` gains `match.heroku_users`, `match.shared_issuers` and a top-level `partners` list; an
+older engine names them as unknown entries (`organization.config_problem`) and reads the rest as before. The account
+`heroku:user` in `org accounts` reads `rule` when `match.heroku_users` names it, and a key it issued reads its
+organization in `org keys`; with no such rule both read as before (the default organization). The findings board
+gains `org.foreign_issuer`, silent without organizations. No field is removed. Design:
+[keys-by-organization.md](design/control-plane/keys-by-organization.md).
 
 ## Every setting through the one door (OBS-612)
 

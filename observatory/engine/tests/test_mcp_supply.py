@@ -231,27 +231,174 @@ class ScanIntegration(unittest.TestCase):
         self.assertNotIn("opencode:eta-local", specs)
 
 
-class Switch(unittest.TestCase):
-    def test_remote_scanners_are_off_by_default_and_declared_through_the_door(self):
+class NoRemoteScanner(unittest.TestCase):
+    """OBS-606: no remote scanner client is built or planned, so its switch is gone; the answer says nothing is sent."""
+
+    def test_the_switch_is_gone_from_the_door_and_the_answer_says_not_wired(self):
         import configuration
         import configuration_door
-        self.assertIn("mcp_remote_scanners", configuration.KNOWN_FEATURES)
-        row = configuration_door.catalogue()[S.SWITCH]
-        self.assertIs(row.default, False)
-        self.assertEqual(row.person, "on", "turning it on sends content out, so it needs the person")
+        self.assertNotIn("mcp_remote_scanners", configuration.KNOWN_FEATURES)
+        self.assertNotIn("features.mcp_remote_scanners", configuration_door.catalogue())
         with patch.object(configuration, "load", return_value={"features": {}}):
             state = S.remote_scanners()
-        self.assertFalse(state["enabled"])
-        self.assertIn("content", state["reason"])
-        with patch.object(configuration, "load", return_value={"features": {"mcp_remote_scanners": True}}):
-            self.assertTrue(S.remote_scanners()["enabled"])
+        self.assertEqual((state["enabled"], state["wired"]), (False, False))
+        self.assertIn("nothing is sent", state["reason"])
+        self.assertEqual(state["degraded"], [])
 
-    def test_an_unreadable_setting_is_off_and_says_so(self):
+    def test_a_setting_left_on_from_before_is_named_as_doing_nothing(self):
+        import configuration
+        with patch.object(configuration, "load", return_value={"features": {"mcp_remote_scanners": True}}):
+            state = S.remote_scanners()
+        self.assertFalse(state["enabled"])
+        self.assertEqual([d["code"] for d in state["degraded"]], ["not-wired"])
+
+    def test_an_unreadable_setting_still_sends_nothing(self):
         import configuration
         with patch.object(configuration, "load", side_effect=configuration.ConfigurationError("x")):
             state = S.remote_scanners()
         self.assertFalse(state["enabled"])
-        self.assertTrue(state["degraded"])
+
+
+class RemoteServers(unittest.TestCase):
+    """OBS-606: a remote server is judged by its host, transport, auth kind and whether its URL carries a credential."""
+
+    def test_a_remote_server_is_judged_and_its_credential_never_kept(self):
+        url = "https://" + "alpha-user:" + SECRET + "@docs.example.com/mcp?token=" + SECRET
+        got = S.judge_remote(url, {"headers": {"Authorization": "Bearer " + SECRET}}, "streamable-http")
+        self.assertEqual({k: got[k] for k in ("kind", "host", "transport", "auth", "credential_in_url", "pinned",
+                                              "codes")},
+                         {"kind": "remote", "host": "docs.example.com", "transport": "streamable-http", "auth": "url",
+                          "credential_in_url": True, "pinned": False, "codes": ["remote-endpoint"]})
+        self.assertTrue(got["pin"]["endpoint"].startswith("sha256:"))
+        self.assertNotIn(SECRET, json.dumps(got))
+        self.assertNotIn("alpha-user", json.dumps(got))
+        same = S.judge_remote("https://docs.example.com/mcp?token=other", {}, "streamable-http")
+        self.assertEqual(same["pin"]["endpoint"], got["pin"]["endpoint"], "the pin is the endpoint, not its key")
+
+    def test_auth_kinds(self):
+        for cfg, want in (({"headers": {"X-Api-Key": SECRET}}, "header"), ({"bearer_token_env_var": "ALPHA"}, "header"),
+                          ({"oauth": {"clientId": "alpha"}}, "oauth"), ({}, "none-declared")):
+            with self.subTest(want=want):
+                self.assertEqual(S.judge_remote("https://alpha.example.com/mcp", cfg, "sse")["auth"], want)
+
+    def test_plain_http_to_another_host_is_a_code_and_loopback_is_not(self):
+        self.assertIn("plain-http", S.judge_remote("http://tools.example.com/mcp", {}, "sse")["codes"])
+        for url in ("http://127.0.0.1:8080/mcp", "http://localhost:3000/mcp", "http://[::1]:9000/mcp"):
+            with self.subTest(url=url):
+                self.assertNotIn("plain-http", S.judge_remote(url, {}, "streamable-http")["codes"])
+
+
+class CommandPins(unittest.TestCase):
+    """OBS-606: what a stdio command is pinned to, a version, a digest, its plugin's version or its installation."""
+
+    def test_versions_digests_plugins_and_installations(self):
+        digest = "sha256:" + "a" * 64
+        cases = [
+            (("npx", ["-y", "alpha-mcp@1.2.3"]), {}, True, {"version": "1.2.3"}, []),
+            (("uvx", ["alpha-mcp==0.4.0"]), {}, True, {"version": "0.4.0"}, []),
+            (("npx", ["-y", "alpha-mcp"]), {}, False, None, []),
+            (("docker", ["run", "-i", "--rm", "-e", "ALPHA_KEY", "ghcr.io/example/alpha:1.0"]), {}, False, None,
+             ["image-tag"]),
+            (("docker", ["run", "-i", "--rm", "ghcr.io/example/alpha@" + digest]), {}, True, {"digest": digest}, []),
+            (("${CLAUDE_PLUGIN_ROOT}/bin/alpha", ["--key", SECRET]), {"plugin_version": "1.4.0"}, True,
+             {"plugin_version": "1.4.0"}, []),
+            (("node", ["${CLAUDE_PLUGIN_ROOT}/server.js"]), {"plugin_version": None}, False, None,
+             ["plugin-unversioned"]),
+            (("/opt/example/bin/gamma-mcp", ["--api-key", SECRET]), {}, True, {"by": "install"}, []),
+        ]
+        for (command, args), extra, pinned, pin, codes in cases:
+            with self.subTest(command=command, args=args[:2]):
+                got = S.judge_command(command, args, **extra)
+                self.assertEqual((got["pinned"], got["pin"], got["codes"]), (pinned, pin, codes))
+                self.assertNotIn(SECRET, json.dumps(got))
+
+
+def write_plugin(home: pathlib.Path) -> pathlib.Path:
+    """One enabled plugin shipping four servers (two through .mcp.json, one in plugin.json) and one disabled plugin."""
+    claude = home / ".claude"
+    root = claude / "plugins" / "cache" / "example-market" / "alpha-tools" / "1.4.0"
+    (root / ".claude-plugin").mkdir(parents=True)
+    (root / ".mcp.json").write_text(json.dumps({"mcpServers": {
+        "alpha-local": {"command": "${CLAUDE_PLUGIN_ROOT}/bin/alpha", "args": ["--key", SECRET],
+                        "env": {"ALPHA_TOKEN": SECRET}},
+        "alpha-remote": {"type": "http", "url": "https://alpha.example.com/mcp?key=" + SECRET},
+        "alpha-runner": {"command": "npx", "args": ["-y", "alpha-mcp"]}}}), encoding="utf-8")
+    (root / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "alpha-tools", "mcpServers": {
+        "alpha-image": {"command": "docker", "args": ["run", "-i", "--rm", "ghcr.io/example/alpha:latest"]}}}),
+        encoding="utf-8")
+    off = claude / "plugins" / "cache" / "example-market" / "beta-off" / "2.0.0"
+    off.mkdir(parents=True)
+    (off / ".mcp.json").write_text(json.dumps({"mcpServers": {"beta-server": {"command": "beta"}}}), encoding="utf-8")
+    (claude / "settings.json").write_text(json.dumps({"enabledPlugins": {"alpha-tools@example-market": True,
+                                                                         "beta-off@example-market": False}}),
+                                          encoding="utf-8")
+    (claude / "plugins" / "installed_plugins.json").write_text(json.dumps({"version": 2, "plugins": {
+        "alpha-tools@example-market": [{"installPath": str(root), "version": "1.4.0"}],
+        "beta-off@example-market": [{"installPath": str(off), "version": "2.0.0"}]}}), encoding="utf-8")
+    return root
+
+
+class PluginServers(unittest.TestCase):
+    def setUp(self):
+        import tmp as tmpdir
+        self.home = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-mcp-plugins-")) / "home"
+        write_home(self.home)
+        write_plugin(self.home)
+
+    def test_an_enabled_plugins_servers_are_read_judged_and_pinned_by_its_version(self):
+        doc = scan_mcp.scan(self.home, declarations_only=True, previous=None)
+        rows = {r["name"]: r for r in doc["servers"] if r.get("scope") == "plugin:alpha-tools@example-market"}
+        self.assertEqual(sorted(rows), ["alpha-image", "alpha-local", "alpha-remote", "alpha-runner"])
+        local = rows["alpha-local"]
+        self.assertEqual((local["plugin"], local["plugin_version"], local["declared_in"]),
+                         ("alpha-tools@example-market", "1.4.0", "plugin"))
+        self.assertEqual(local["supply"]["pin"], {"plugin_version": "1.4.0"})
+        self.assertEqual(rows["alpha-runner"]["risky"], ["unpinned-runner"])
+        self.assertEqual(rows["alpha-image"]["supply"]["codes"], ["image-tag"])
+        self.assertEqual(rows["alpha-remote"]["supply"]["kind"], "remote")
+        self.assertTrue(rows["alpha-remote"]["supply"]["credential_in_url"])
+        self.assertFalse([r for r in doc["servers"] if r.get("name") == "beta-server"], "a disabled plugin loads nothing")
+        self.assertNotIn(SECRET, json.dumps(doc))
+        self.assertEqual(leaked(json.dumps(doc)), [])
+        self.assertNotIn("claude:alpha-local", scan_mcp.launch_specs(self.home), "a plugin server is not started")
+
+    def test_declared_servers_carry_their_judgement_too(self):
+        doc = scan_mcp.scan(self.home, declarations_only=True, previous=None)
+        rows = {(r["agent"], r["name"]): r for r in doc["servers"] if r.get("name")}
+        self.assertEqual(rows[("claude", "alpha-docs")]["supply"]["auth"], "url")
+        self.assertEqual(rows[("claude", "beta-events")]["supply"]["auth"], "none-declared")
+        self.assertEqual(rows[("claude", "gamma-local")]["supply"]["pin"], {"by": "install"})
+        self.assertFalse(rows[("cursor", "epsilon-tool")]["supply"]["pinned"])
+
+    def test_a_probe_heard_plugin_server_is_not_listed_twice(self):
+        probe = lambda: ({"alpha-local": {"status": "connected", "plugin": "alpha-tools", "detail": "Connected",  # noqa: E731
+                                          "wire": "stdio"}}, None, True)
+        doc = scan_mcp.scan(self.home, probe=probe)
+        local = [r for r in doc["servers"] if r.get("name") == "alpha-local"]
+        self.assertEqual(len(local), 1)
+        self.assertEqual(local[0]["liveness"], "connected")
+
+    def test_a_plugin_whose_files_cannot_be_read_is_named(self):
+        (self.home / ".claude" / "plugins" / "installed_plugins.json").write_text("{not json", encoding="utf-8")
+        doc = scan_mcp.scan(self.home, declarations_only=True, previous=None)
+        self.assertTrue([d for d in doc["degraded"] if d["source"].startswith("claude:plugins")], doc["degraded"])
+
+    def test_the_registry_row_and_the_summary_carry_the_judgement_and_the_unpinned_codes(self):
+        import estate_surfaces
+        doc = scan_mcp.scan(self.home, declarations_only=True, previous=None)
+        rows = estate_surfaces.mcp_rows(doc)
+        image = next(r for r in rows if r["name"] == "alpha-image")
+        self.assertEqual(image["supply"]["codes"], ["image-tag"])
+        self.assertEqual(image["plugin_version"], "1.4.0")
+        out = S.summary(rows, pathlib.Path(self.home) / "pins.json")
+        unpinned = {(u["agent"], u["server"], u["code"]) for u in out["unpinned"]}
+        self.assertIn(("claude", "alpha-image", "image-tag"), unpinned)
+        self.assertIn(("claude", "alpha-remote", "remote-endpoint"), unpinned)
+        self.assertNotIn(("cursor", "epsilon-tool", "unpinned-runner"), unpinned, "a rule is said once, as risky")
+        judged = {j["server"]: j for j in out["judged"]}
+        self.assertEqual(judged["alpha-remote"]["host"], "alpha.example.com")
+        self.assertEqual(judged["alpha-local"]["plugin"], "alpha-tools@example-market")
+        self.assertNotIn(SECRET, json.dumps(out))
 
 
 class Summary(unittest.TestCase):
@@ -276,7 +423,14 @@ class Page(unittest.TestCase):
                                         "old": "sha256:" + "a" * 64, "new": "sha256:" + "b" * 64,
                                         "seen_at": "2026-11-16T10:00:00Z"}],
                            "pins": 4, "pinned_servers": 2,
-                           "scanners": {"enabled": False, "reason": "x", "source": S.SWITCH},
+                           "scanners": {"enabled": False, "wired": False, "reason": "x"},
+                           "judged": [{"server": "alpha-remote", "agent": "claude", "kind": "remote",
+                                       "host": "alpha.example.com", "transport": "streamable-http", "auth": "url",
+                                       "credential_in_url": True, "pinned": False, "codes": ["remote-endpoint"]},
+                                      {"server": "alpha-image", "agent": "claude", "kind": "plugin",
+                                       "plugin": "alpha-tools@example-market", "plugin_version": "1.4.0",
+                                       "transport": "stdio", "pinned": False, "codes": ["image-tag"]}],
+                           "unpinned": [{"server": "alpha-image", "agent": "claude", "code": "image-tag"}],
                            "degraded": [{"source": "mcp-tools:claude:b", "reason": "the server did not answer"}]}}
 
     def test_the_section_shows_rules_changes_and_the_switch_without_a_command(self):
@@ -284,8 +438,10 @@ class Page(unittest.TestCase):
         from i18n import Translator
         html = mcp_page.mcp_html(self.payload(), Translator("en"))
         for word in ("alpha", "Package runner without an exact version", "Fetches code and runs it", "Accept all",
-                     "Third-party remote scanners", "Off: nothing is sent"):
+                     "Remote and plugin servers", "alpha.example.com", "alpha-tools@example-market", "1.4.0",
+                     "Container image named by a tag", "In the URL"):
             self.assertIn(word, html)
+        self.assertNotIn("remote scanner", html.lower(), "no switch is offered for a scanner that does not exist")
         self.assertEqual(html.count("data-mcp-accept="), 2)
         self.assertNotIn("npx", html)
         self.assertNotIn("sha256:", html, "digests are not shown on the page")
@@ -298,11 +454,12 @@ class Page(unittest.TestCase):
         ru = mcp_page.mcp_html(self.payload(), Translator("ru"))
         self.assertNotIn(">Accept all<", ru)
         self.assertIn("Принять все", ru)
+        self.assertIn("Удалённые и плагинные серверы", ru)
         empty = mcp_page.mcp_html({"supply": {"risky": [], "changes": [], "pins": 0, "pinned_servers": 0,
-                                              "scanners": {"enabled": True}, "degraded": []}}, Translator("en"))
+                                              "judged": [], "unpinned": [], "degraded": []}}, Translator("en"))
         self.assertIn("No server command trips a rule.", empty)
         self.assertIn("No pinned tool has changed.", empty)
-        self.assertIn("On: tool definitions may be sent", empty)
+        self.assertIn("No remote or plugin server is declared.", empty)
         none = mcp_page.mcp_html({}, Translator("en"))
         self.assertIn("has not been read", none)
 

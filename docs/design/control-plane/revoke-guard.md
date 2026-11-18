@@ -59,8 +59,8 @@ Cloudflare and Heroku doors, already journals what it cut (`rotation-forced`, `i
 
 ## Not yet
 
-The Cloudflare (`revoke LABEL`, `revoke --vault`), Heroku, Sentry and Prowl revokes do not run the guard yet; their
-rotations already refuse through `roll_guard`. Delivery to consumers for Cloudflare and Heroku is OBS-607.
+The Cloudflare (`revoke LABEL`, `revoke --vault`), Heroku, Sentry and Prowl revokes do not run the guard yet. The
+Cloudflare and Heroku rotations deliver to the copies they find and revoke through the guard since OBS-607 (below).
 
 ## One copy of each door helper (OBS-601)
 
@@ -120,3 +120,63 @@ checked to carry no fake value. Neighbours updated to give a clean scan where th
 file and a vault slot, read in memory, refusing unread; a code on every degraded entry (by source, and by a walk of
 every `degraded` literal in the doors); every key server refusal typed, each act exception's status and code, the R1
 fields beside `error` kept; the MCP key acts take the same codes. Every answer is checked to carry no fake value.
+
+## The rolling doors deliver (OBS-607)
+
+Built 2026-11-18 on `refactor/r4-doors`, row OBS-607 of wave R4, CP-11. Before it, only the OpenRouter door delivered a
+rotated key to its consumers; Cloudflare and Heroku roll a value in place (the old value dies at the roll), so a copy
+found elsewhere refused the rotation.
+
+### What
+
+| Step | Where |
+|---|---|
+| Find the copies of the old value, before anything is minted | `key_consumers.plan_roll(slot=... \| path=...)`: the old value in memory, `find` over `consumer_sources`, `holds` (`blocks`: a source that could not be read, a Git-tracked file), `restart` (services from the slot), `copies` |
+| No copy outside the door's own place | the door rolls in place, as before |
+| Copies, every one writable | a successor beside the old key: Heroku creates an authorization with the row's scope and description (`POST /oauth/authorizations`) and proves it; Cloudflare mints a token with the preset's policies named `<name> successor` and files it through `install_issued` |
+| Deliver, read back, revoke | `key_consumers.deliver_then_revoke`: `deliver_all` writes each copy and reads it back; `revoke_guard` over the value sources (Heroku, env files, vault) must find no copy of the old value; then the door's revoke (Heroku `DELETE /oauth/authorizations/{old}`; Cloudflare `DELETE` of the old token, then the successor renamed to the preset's name) |
+| A copy not delivered | the revoke is held: the old key stays alive; the record (Heroku ledger row, Cloudflare token meta) is `successor-delivered-predecessor-held` with `predecessor` = `held_record` (old id, the copies by name and place, the lines that hold, a keyed digest of the old value) |
+| The next `rotate` of a held key | `key_consumers.finish_held`: `recover` reads the recorded copies and finds the old value by its digest, finds its copies afresh, delivers the successor read from the door's own slot or file, revokes through the guard; nothing new is minted |
+| `revoke` of a held key | refused: its old key is still read |
+
+A new consumer source, `VaultSource` (`vault`), finds other slots of the local vault holding the same value (a key
+copied into a second project's slot); the key's own slot is left out. It is in `consumer_sources` for every door and
+in `GUARD_SOURCES`. Delivery is the vault's own `store_value` (the old value archived beside the slot), read back with
+`vault_value`.
+
+### Data
+
+- `held_record`: `{predecessor, digest, consumers, held}`. `digest` is `hmac-sha256:` of the old value under this
+  machine's random key (`store/state/consumer-digest.key`, owner-only, made on first use), never the value and never a
+  plain hash. `consumers` keep `kind`, `app`, `app_id`, `var`, `path`, `slot`, `git`, `project` only.
+- Journal lines: `consumer-delivered` per copy, `rotate` (Heroku: `authorization` and `predecessor`; Cloudflare's
+  `install_issued` writes its own) and `rotation-delivered` (Cloudflare: `successor` and `predecessor`),
+  `rotation-held` (`stage` `after-delivery` or `resume`), `rotation-resumed`, `rotation-forced`.
+
+### Failure behaviour
+
+- A source that cannot be read, or a copy that cannot be written, holds before anything is minted (exit 1), as before.
+- A successor that cannot be proved or filed is deleted again (Cloudflare `discard_fresh`, Heroku `_delete_fresh`); the
+  old key and its place are untouched.
+- A delivery refused, a read-back that does not match, a copy the guard still finds after delivery (one that appeared
+  meanwhile), a source it could not read, or a revoke the provider refused: held, named, exit 1.
+- A held key whose old value no recorded copy holds any more (changed by hand) stays held (`predecessor-missing`):
+  without the value its other copies cannot be looked for. `--force` revokes it anyway and journals the cut.
+- `--force` with a hold before minting rolls in place as before and journals the copies it cut.
+
+### Not done
+
+- While a Cloudflare rotation is held, the old token keeps the preset's name, so an `issue` of the same preset in that
+  window would roll the old token; `rotate` finishes the hold first.
+- A Cloudflare successor renamed after its predecessor is deleted: a rename the provider refuses leaves the hold
+  recorded, and the next `rotate` retries the delete (a 404 counts as gone) and the rename.
+
+### Tests
+
+`test_rotation_consumers` (suite `rotation_consumers`), fake Heroku apps, a fake Heroku wire and fake Cloudflare
+calls, no network: a vault slot holding the value is a copy and takes the successor; Heroku and Cloudflare deliver to
+a copy, read it back and only then revoke (Cloudflare renames the successor), with no regenerate or roll; a copy not
+delivered holds the revoke, `revoke` refuses the held key, and the next `rotate` finishes it without minting again; a
+held key whose old value is gone stays held and `--force` revokes; a copy that appears between delivery and revoke is
+caught by the guard. `test_door_helpers`: every door's sources include `vault`. Every case asserts the fixture values
+appear in no output, journal, ledger or record.

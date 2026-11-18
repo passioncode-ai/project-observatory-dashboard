@@ -71,6 +71,9 @@ a failure is reported without stopping independent consumers.
 """
 from __future__ import annotations
 
+#: This door declares itself (OBS-605): `tools/door_registry.py` reads it, so integration health tracks digitalocean.
+DOOR_PROVIDER = "digitalocean"
+
 import argparse
 import json
 import os

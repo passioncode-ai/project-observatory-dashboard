@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Every dependency each project resolves, read from its lockfiles (OBS-553, CP-06).
 
-`plugins/dependency_weight.py` counts the DIRECT names a manifest declares, and the stack is
-guessed from marker files; neither says which version of which package a project would run. A
+`plugins/dependency_weight.py` counts the DIRECT names a manifest declares, and marker files say
+little more; neither says which version of which package a project would run (a project's stack is
+derived from this inventory since OBS-603, `project_stack.py`). A
 vulnerability is a fact about a version, so this reads what a resolver already decided: the
 lockfile. Standard library only, one reader per format, the same formats osv-scanner reads
 (docs/design/control-plane/research.md):

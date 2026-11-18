@@ -100,6 +100,9 @@ this door minted it, the slot of the minting credential, dates and the last veri
 broad tokens retired (`broad`), by slot and state. Never a value. One operation on it at a time.
 """
 from __future__ import annotations
+
+#: This door declares itself (OBS-605): `tools/door_registry.py` reads it, so integration health tracks sentry.
+DOOR_PROVIDER = "sentry"
 import argparse
 import base64
 import datetime

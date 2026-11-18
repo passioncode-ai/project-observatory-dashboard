@@ -12,6 +12,11 @@ Two rows, silent when `config/organizations.json` is not configured:
   organization, or a file that does not parse. Each of those changes which organization a project gets without a word in
   the registry: the emit prints them to its log and nothing else did.
 
+`org.foreign_issuer` (OBS-627), one per vault slot whose key was issued in another organization's provider account
+than its project's, or in an account no organization claims, and is neither declared shared on purpose
+(`match.shared_issuers`) nor a partner of the project (`partners`): `org_view.foreign_issuers`. It names the slot, the
+issuer account and the door step that issues a replacement from the project's own organization; never a value.
+
 A third, `organization.selection_new` (OBS-417, ORG-R16), one per organization with an applied selection
 (`org_selection.py`): the projects and keys found since that the organization's rules would propose. They are
 listed in the next plan and never chosen by themselves; this row is how a person hears of them.
@@ -26,7 +31,7 @@ if _DASHBOARD not in _sys.path:
     _sys.path.append(_DASHBOARD)  # `finding_types.titled`: a title is a message id
 from finding_types import titled  # noqa: E402
 
-TYPES = ("organization.unresolved", "organization.config_problem", "organization.selection_new")
+TYPES = ("organization.unresolved", "organization.config_problem", "organization.selection_new", "org.foreign_issuer")
 ACCOUNTS_CMD = "project-observatory full org accounts"
 
 
@@ -94,6 +99,29 @@ def selection_findings(rows: list[dict]) -> list[dict]:
                        + ". None is chosen by itself; each waits for a person (ORG-R16)."),
             "action": (f"review them with `project-observatory full org select --org {_quoted(org)} plan`, include "
                        "the ones that belong to it, then apply the new form"),
+        })
+    return out
+
+
+def foreign_issuer_findings(view: dict) -> list[dict]:
+    """`view`: `org_view.foreign_issuers()`. One row per slot; silent without organizations or such a key."""
+    out = []
+    for row in (view or {}).get("rows") or []:
+        issuer = row.get("issuer") or {}
+        owner = issuer.get("organization")
+        whose = (f"{owner}'s" if owner else "an account no organization claims (a partner's, or one with no rule)")
+        out.append({
+            "type": "org.foreign_issuer", "subject": f"credential:vault/{row['slot']}", "severity": "warning",
+            **titled("{slot} was issued in another organization's account", slot=row["slot"]),
+            "detail": (f"{row['slot']} belongs to {row['project']}, which is {row['projectOrganization']}'s; its key was "
+                       f"issued in the {issuer.get('provider')} account {issuer.get('account')} ({issuer.get('accountId')}), "
+                       f"which is {whose} ({issuer.get('record')}). A key from another organization's account keeps "
+                       "working for this project only as long as that organization allows it, and is billed there."),
+            "action": (f"issue its replacement from an account of {row.get('projectLabel') or row['projectOrganization']}: "
+                       f"`{row['step']}`; move its consumers to it (`observatory_key_consumers` finds them), then revoke "
+                       "this key. If the account serves other organizations on purpose, list it under its organization's "
+                       "`match.shared_issuers` in config/organizations.json; a partner's account goes under `partners` "
+                       f"with this project. `{ACCOUNTS_CMD}` lists the accounts and their ids"),
         })
     return out
 

@@ -3,6 +3,39 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.43.0 (2026-11-18)
+
+Wave R4 of the control plane refactor: the halves the first audit found missing. A project's stack is read from its
+lockfiles, keys say where they came from and whose they are, integration keys are checked for their scopes, a rotated
+Cloudflare or Heroku key reaches every consumer before the old one is revoked, and remote and plugin MCP servers are
+judged and pinned. The observatory-log plugin moves to 0.43.0 with the release.
+
+### Added
+
+- **A project's packages** (OBS-603): the stack comes from the dependency inventory (languages from lockfiles read, a
+  framework from a direct dependency), markers only fill a gap and say so in `stack_degraded`; the project panel lists
+  its packages with ecosystem, kind and advisory count. `project.detail` adds `stackSource` and `stackEvidence`.
+- **Keys by organization** (OBS-604, OBS-627, OBS-628): a value also in another vault folder reads `copied`; `shared`
+  now means handed to another party (`sharedTo`); every key carries its `context`; consumers come from every source the
+  revoke guard reads. A key issued in another organization's account, not covered by `match.shared_issuers` or a
+  `partners` entry, is the finding `org.foreign_issuer` with the door's replacement step. `match.heroku_users` names the
+  Heroku user an organization's keys are issued by.
+- **Token scopes** (OBS-605): the tracked integrations come from the doors that declare themselves
+  (`tools/door_registry.py`), Heroku, Sentry and the `gh` session are asked too, and missing or excess scopes are the
+  findings `integration.scope_missing` and `integration.scope_excess`.
+- **Remote and plugin MCP servers** (OBS-606): host, transport, auth kind and whether the URL carries a credential
+  (never the credential), an endpoint pin, plugin versions; unpinned servers are the finding `mcp.unpinned_server`.
+
+### Changed
+
+- **Rotation delivers before it revokes** (OBS-607): Cloudflare and Heroku write a rotated key to every consumer the
+  guard finds, read it back, then revoke the old key; a consumer out of reach holds the revoke and is named.
+- The remote MCP scanner switch is removed: nothing read it (OBS-606, `docs/design/control-plane/supply-chain.md`).
+
+### Compatibility
+
+`docs/COMPATIBILITY.md`: the key source value `shared` is now `copied` for a value in another vault folder.
+
 ## 0.42.1 (2026-11-18)
 
 An update no longer rolls back for being slow on a healthy workspace, and the MCP surface states itself. The

@@ -516,12 +516,18 @@ def observatory_credentials(
     issued on a credential request carries `issuedOnRequest` (the request id, its
     context, agent, door and account; `credential_requests.py show ID` has the rest).
 
-    Each vault row says where its value came from (OBS-556): `source` is `issued` (a door's ledger or record, or a
-    credential request, with `sourceContext` naming the door and account), `received` (`vault.py put --from LABEL`:
-    the sender as a person typed it), `shared` (the same keyed digest under another project's folder) or `unknown`
-    (put by hand; never read as issued). `sharedWith` names the other slots holding the value, `consumers` the
-    services started from the slot, and `consumersTool` the tool that finds every other copy by the value.
-    A source it could not read (the vault, a door's ledger, an unknown project) is named in `degraded`.
+    Each vault row says where its value came from (OBS-556, OBS-604): `source` is `issued` (a door's ledger or
+    record, or a credential request, with `sourceContext` naming the door and account), `received` (`vault.py put
+    --from LABEL`: the sender as a person typed it), `shared` (handed to another party: a sent peer share, a
+    credential request into an organization's context, an organization selection's hand-over), `copied` (the same
+    keyed digest under another project's folder of this vault; `shared` before 0.43) or `unknown` (put by hand;
+    never read as issued). `copiedWith` (and `sharedWith`, its earlier name) names the other slots holding the
+    value, `sharedTo` each party it was handed to, `context` whose the key is (`personal`, `organization` with its
+    name, `not-ours`, `undecided`), `consumers` who reads it from every source the revoke guard reads (the
+    OpenRouter scan, Heroku config vars, env files, services started from the slot; the value compared in memory,
+    never returned), and `consumersTool` the tool that answers the same for one slot.
+    A source it could not read (the vault, a door's ledger, a share record, an unknown project) is named in
+    `degraded`.
     """
     bad = _project_id_refusal(projectId, bare=True)
     if bad:
@@ -706,7 +712,7 @@ def observatory_org_accounts() -> dict[str, Any]:
     Heroku teams and the Heroku user, OpenRouter accounts), each under exactly one organization (the default
     Personal, another of `config/organizations.json`, or Not ours) with `source` (`rule`: a `match` rule names it;
     `default`: a repository owner of yours no rule names, whose projects take the default organization, the Heroku
-    user, which no rule kind names, or every account when no organizations are configured; `external`: a
+    user when no `match.heroku_users` names it, or every account when no organizations are configured; `external`: a
     repository owner outside `config/ownership.json`), or listed in `needsDecision` with the reason: `conflict`
     (two organizations claim it), `none` (a provider account no rule names, which decides no project until a rule
     in `config/organizations.json` does), or seen and not connected (with the door's command that connects it).
@@ -718,7 +724,8 @@ def observatory_org_accounts() -> dict[str, Any]:
     context is compared with the stashed tokens in memory by the DigitalOcean door, as `digitalocean.py teams`
     does). The same answer as `project-observatory full org accounts --json` (schema `org-accounts/1`). Saying which organization an account
     belongs to is a rule in `organizations.json` (`match.github_owners`, `digitalocean_teams`,
-    `cloudflare_accounts`, `heroku_teams`, `openrouter_accounts`)."""
+    `cloudflare_accounts`, `heroku_teams`, `heroku_users` (by the email or id its admin stash records),
+    `openrouter_accounts`)."""
     import org_view
     return org_view.accounts()
 
@@ -1261,11 +1268,13 @@ def observatory_mcp_supply() -> dict[str, Any]:
     """The supply-chain watch over MCP servers (OBS-555, CP-09): `risky` (servers whose command line trips a rule:
     `unpinned-runner`, `fetch-execute`, `outside-install-places`; the rule and the server, never the command line),
     `changes` (tools whose full definition changed since it was pinned: added, removed or changed, with the old and
-    new SHA-256 digest), `pins` (how many tool definitions are pinned), and `scanners` (whether third-party remote
-    scanners may be sent tool definitions: off unless `features.mcp_remote_scanners` is on). Read-only, from the
-    last MCP scan and `store/state/mcp-pins.json`; tools are listed and pinned only when a probe runs on request
-    (`machine.mcp.refresh`). No env or header value is ever read. A scan or pin file it could not read is named in
-    `degraded`. Design: docs/design/control-plane/supply-chain.md."""
+    new SHA-256 digest), `pins` (how many tool definitions are pinned), `judged` (each remote and plugin server: its
+    host or its plugin and version, transport, where its key travels, whether it is pinned), `unpinned` (server and
+    code: `remote-endpoint`, `plain-http`, `image-tag`, `plugin-unversioned`), and `scanners` (`wired: false`: no
+    remote scanner exists, so nothing is sent to one). Read-only, from the last MCP scan and
+    `store/state/mcp-pins.json`; tools are listed and pinned only when a probe runs on request
+    (`machine.mcp.refresh`). No env or header value, URL query or argument is ever read into the answer. A scan or
+    pin file it could not read is named in `degraded`. Design: docs/design/control-plane/supply-chain.md."""
     import mcp_supply
     return mcp_supply.summary()
 
@@ -1300,8 +1309,11 @@ def observatory_integrations(
     Read-only, from `store/raw/integration-health.json` (`checkedOn`): each key is asked once a UTC day through its
     door's own validity call, and is named by its slot, never by value. A 401 or 403 is `invalid`; any other failure
     is `unreachable` and says nothing about the key. `drift` rows carry the collector, the field and the day it was
-    last seen; `untracked` rows carry the project, the provider and the package or variable NAMES that point at it.
-    A step that has not run, or an offline run, is named in `degraded`. Design:
+    last seen; `untracked` rows carry the project, the provider, the package or variable NAMES that point at it and a
+    `code` (`untracked-key`, `untracked-package`). Where the provider answers a key's scope, the key carries `scope`
+    (`granted`, `needed`, `missing`, `excess`, `code` `scope-ok`, `scope-missing`, `scope-excess` or
+    `scope-unknown`). `trackedProviders` is what the doors and collectors declare; `keysNotAsked` names doors whose
+    keys this step does not ask. A step that has not run, or an offline run, is named in `degraded`. Design:
     docs/design/control-plane/integration-health.md.
     """
     sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "tools"))

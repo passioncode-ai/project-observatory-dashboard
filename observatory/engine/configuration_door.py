@@ -152,8 +152,6 @@ SECRET_SOURCES = frozenset({"secret_store", "secrets"})
 
 FEATURE_TEXT = {
     "auto_cleanup": "the disk guard and the cleanup's auto tier remove what loses nothing, from the maintenance job",
-    "mcp_remote_scanners": "third-party remote scanners of MCP tools: they are sent each tool's name, description "
-                           "and schema, so this stays off until you turn it on",
 }
 INTEGRATION_TEXT = {
     "vulnerabilities": "the dependency watch: public package names and versions go to OSV; local ones never leave",

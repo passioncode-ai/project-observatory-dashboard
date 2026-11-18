@@ -45,7 +45,8 @@ LISTED = ("fixed", "fix-failed", "finding", "unknown")
 AREAS = ("keys", "supply", "dependencies", "integrations")
 AREA_WORDS = {"keys": "Keys and secrets", "supply": "Supply chain", "dependencies": "Dependencies",
               "integrations": "Integrations"}
-_AREA_PREFIXES = (("mcp.risky_command", "supply"), ("mcp.tool_changed", "supply"), ("harness.hook_risk", "supply"),
+_AREA_PREFIXES = (("mcp.risky_command", "supply"), ("mcp.tool_changed", "supply"), ("mcp.unpinned_server", "supply"),
+                  ("harness.hook_risk", "supply"),
                   ("harness.skill_risk", "supply"), ("dep.", "dependencies"), ("integration.", "integrations"))
 SEVERITIES = ("critical", "warning", "info")
 

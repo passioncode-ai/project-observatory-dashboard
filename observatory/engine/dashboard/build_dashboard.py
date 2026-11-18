@@ -970,6 +970,8 @@ def build():
             "lifecycle": project["lifecycle"],
             "description": project.get("description", ""),
             "stack": project.get("stack", []),
+            # Where the stack was read (OBS-603): the lockfiles, marker files, or a hand-set value.
+            "stack_source": project.get("stack_source"),
             "folders": project.get("local_folders", []),
             # A local-only project that IS a git repository: the row counted
             # "0 repos · 1 folder" for a checkout the findings call "Repository
@@ -1270,6 +1272,18 @@ def build():
         PAYLOAD["doctor"] = daily_doctor.agent_view(paths.HOME)
     except Exception as exc:  # noqa: BLE001 (a page, not a crash)
         PAYLOAD["doctor"] = {"at": None, "degraded": [{"source": "doctor", "reason": f"{type(exc).__name__}"}]}
+    # EACH PROJECT'S PACKAGES (OBS-603, CP-06): the dependency inventory with the advisory count the vulnerability
+    # watch matched, for the project panel; bounded per project, and only the projects page carries it.
+    try:
+        import project_stack
+
+        def _doc(path):
+            return json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+        PAYLOAD["packages"] = project_stack.panel(_doc(INV / "dependencies.json"),
+                                                  _doc(paths.SCRATCH / "vulnerabilities.json"))
+    except Exception as exc:  # noqa: BLE001 (a page, not a crash)
+        PAYLOAD["packages"] = {"projects": {}, "degraded": [
+            {"source": "dependencies", "reason": f"{type(exc).__name__}"[:200]}]}
     # THE AGENTS: workflows, handoffs and sessions, read-only from the store;
     # only the Agents page carries it (shell.slice_for), and the overview card
     # reads its counters.
@@ -3184,6 +3198,44 @@ function row(r) {
   </tr>`;
 }
 
+// WHERE A PROJECT'S STACK WAS READ (OBS-603): its lockfiles, marker files, or a value set by hand.
+function stackSourceLine(source) {
+  const SOURCE = {
+    "dependencies": T("Read from the project's lockfiles."),
+    "dependencies+markers": T("Read from the project's lockfiles; some kinds from marker files, because no lockfile shows them."),
+    "markers": T("Read from marker files: no lockfile of this project was read."),
+    "curated": T("Set by hand in the project overrides."),
+  };
+  return SOURCE[source] ? `<p class="none" id="panel-stack-source">${SOURCE[source]}</p>` : "";
+}
+
+// A PROJECT'S PACKAGES (OBS-603, CP-06): name, version, ecosystem, direct, transitive or local, and how many
+// advisories the vulnerability watch matched. Bounded per project; an agent pages them all.
+function packagesBlock(id) {
+  const PK = D.packages || {};
+  const pk = (PK.projects || {})[id];
+  const why = (PK.degraded || []).length ? " · " + T("some sources could not be read") : "";
+  if (!pk || !pk.total) {
+    return `<p class="none" id="panel-packages-none">${T("No lockfile or manifest of this project was read, so its packages are not known.")}${why}</p>`;
+  }
+  const kind = p => p.local ? T("local dependency") : p.direct === true ? T("direct dependency")
+    : p.direct === false ? T("transitive dependency") : T("not known");
+  const adv = p => p.advisories == null ? `<span class="none">${T("not checked")}</span>`
+    : p.advisories ? chip(NUM(p.advisories), "danger") : NUM(0);
+  const heads = [T("Package"), T("Version"), T("Ecosystem"), T("Dependency"), T("Advisories")];
+  const rows = pk.rows.map(p => `<tr>
+      <td data-label="${heads[0]}" class="mono">${E(p.name)}</td>
+      <td data-label="${heads[1]}" class="mono">${E(p.version)}</td>
+      <td data-label="${heads[2]}">${E(p.ecosystem)}</td>
+      <td data-label="${heads[3]}">${kind(p)}</td>
+      <td data-label="${heads[4]}">${adv(p)}</td></tr>`).join("");
+  return `<p class="dmeta" id="panel-packages-counts">${T("Direct {direct} · transitive {transitive} · local {local} · with advisories {vulnerable}",
+      {direct: pk.direct, transitive: pk.transitive, local: pk.local, vulnerable: pk.vulnerable})}${why}</p>
+    <table class="packages"><thead><tr>${heads.map(h => `<th scope="col">${h}</th>`).join("")}</tr></thead>
+      <tbody>${rows}</tbody></table>
+    ${pk.shown < pk.total ? `<p class="none">${T("{shown} of {total} shown, the vulnerable first; an agent reads them all with observatory_dependencies.", {shown: pk.shown, total: pk.total})}</p>` : ""}`;
+}
+
 // THE PROJECT PANEL: everything known about one project, opened from its row
 // by the URL hash.
 function detail(id) {
@@ -3231,6 +3283,9 @@ function detail(id) {
     ${(r.heroku || []).length ? hostingGroups(r.heroku) : `<p class="none">${T("No linked apps")}</p>`}
     <h3>${T("Technology and documentation")}</h3>
     <p>${(r.stack || []).map(x => chip(x)).join(" ") || T("Stack not measured")} · ${T("{n} notes", {n: r.wiki_notes || 0})}</p>
+    ${stackSourceLine(r.stack_source)}
+    <h3 id="panel-packages">${T("Packages")}</h3>
+    ${packagesBlock(r.id)}
     <h3>${T("Product")}</h3>
     ${(r.products || []).length
       ? `<ul class="dlist">${r.products.map(p => `<li>${E(p.name)} — ${E(labelOf(ROLE_LABEL, p.role))}` +
@@ -3893,21 +3948,32 @@ function keepCred(c, q, section) {
   return true;
 }
 
-// WHERE A SLOT'S VALUE CAME FROM (OBS-556, CP-10): issued by a door, handed over by a sender a person named,
-// the same value as another project's slot, or unknown. Names and records only, as the registry row carries them.
+// WHERE A SLOT'S VALUE CAME FROM (OBS-556, OBS-604, CP-10): issued by a door, handed over by a sender a person named,
+// shared out to another party, the same value as another project's slot (copied), or unknown; and whose it is.
+// Names and records only, as the registry row carries them. A row built before OBS-604 says `shared` for a copy.
 function keySourceOf(c) {
   if (!c.key_source) return "";
   const x = c.key_source_context || {};
+  const cls = c.key_source === "shared" && !(c.key_source_shared_to || []).length ? "copied" : c.key_source;
+  const copies = c.key_source_copied_with || c.key_source_shared_with || [];
   const KIND = {issued: [T("issued by a door"), "ok"], received: [T("handed over"), "ok"],
-                shared: [T("shared with another project"), "warn"], unknown: [T("source unknown"), "warn"]};
-  const [label, tone] = KIND[c.key_source] || KIND.unknown;
-  const said = c.key_source === "issued" ? [x.door, x.account].filter(Boolean).map(E).join(" · ")
-    : c.key_source === "received" ? T("from {who}", {who: E(x.from || "")})
-    : c.key_source === "shared" ? T("same value as {slots}", {slots: E((x.with || []).join(", "))})
+                shared: [T("shared out to another party"), "warn"],
+                copied: [T("shared with another project"), "warn"], unknown: [T("source unknown"), "warn"]};
+  const [label, tone] = KIND[cls] || KIND.unknown;
+  const said = cls === "issued" ? [x.door, x.account].filter(Boolean).map(E).join(" · ")
+    : cls === "received" ? T("from {who}", {who: E(x.from || "")})
+    : cls === "shared" ? T("handed to {who}", {who: E((x.to || []).join(", "))})
+    : cls === "copied" ? T("same value as {slots}", {slots: E((x.with || copies).join(", "))})
     : T("put by hand; nobody recorded who handed it over");
-  const also = c.key_source !== "shared" && (c.key_source_shared_with || []).length
-    ? `<div class="anchor">${T("same value as {slots}", {slots: E(c.key_source_shared_with.join(", "))})}</div>` : "";
-  return `<div class="tier">${chip(label, tone)}</div><div class="anchor">${said}</div>${also}`;
+  const also = cls !== "copied" && copies.length
+    ? `<div class="anchor">${T("same value as {slots}", {slots: E(copies.join(", "))})}</div>` : "";
+  const out = cls !== "shared" && (c.key_source_shared_to || []).length
+    ? `<div class="anchor">${T("handed to {who}", {who: E([...new Set(c.key_source_shared_to.map(s => s.to))].join(", "))})}</div>` : "";
+  const k = c.key_context || {};
+  const WHOSE = {personal: T("personal"), "not-ours": T("not ours"), undecided: T("organization undecided")};
+  const whose = !k.kind ? "" : `<div class="anchor">${k.kind === "organization"
+    ? T("organization: {name}", {name: E(k.label || k.organization || "")}) : (WHOSE[k.kind] || E(k.kind))}</div>`;
+  return `<div class="tier">${chip(label, tone)}</div><div class="anchor">${said}</div>${also}${out}${whose}`;
 }
 
 function renderCreds() {
