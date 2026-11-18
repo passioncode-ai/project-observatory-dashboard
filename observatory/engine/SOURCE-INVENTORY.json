@@ -6205,8 +6205,8 @@
       "path": "tests/test_node_lifecycle_broker.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b8fa79303ae9deff2ae7ab17dc80437be7da70ec39f7f78130cc2201dbaf7433",
-      "bytes": 83303
+      "export_sha256": "bb9de0f4581bcb94ed507d2308a2e7ddeb0ff051469a17d269ebc93c11fe9bdc",
+      "bytes": 84266
     },
     {
       "path": "tests/test_node_lifecycle_helper.py",
