@@ -5368,8 +5368,8 @@
       "path": "tests/test_door_helpers.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "19fecce2385212b5e2bfb92d1e50fcc9896943523813e22d2d801c66cff4e8fa",
-      "bytes": 18818
+      "export_sha256": "75a5554b16e1136daa8f0555fa35c9590f705d231d7d7f3de84776b20b4bb1c9",
+      "bytes": 18886
     },
     {
       "path": "tests/test_embedding_enforcement.py",
@@ -5626,8 +5626,8 @@
       "path": "tests/test_heroku_door.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0e6e527bc11e7db0a828d1195edc92cb99e5b4935a616cd255b465c609b67f06",
-      "bytes": 46324
+      "export_sha256": "9c925e099c29fb736df8cbe4d07ff3c40128fdea0e690be7c2aa99d854ec8d56",
+      "bytes": 46430
     },
     {
       "path": "tests/test_heroku_scoped.py",
@@ -6749,8 +6749,8 @@
       "path": "tests/test_rotation_consumers.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9ce41418255db7cc9e7ad7a61c92717e3c23ffdc81fa0a14cf5c5f633da6131c",
-      "bytes": 22248
+      "export_sha256": "dee0563d253b960d97f87cddf6006b664bed563bcddeed081ce014987df13ab7",
+      "bytes": 39788
     },
     {
       "path": "tests/test_runtime_identity.py",
@@ -7564,8 +7564,8 @@
     {
       "path": "tools/cloudflare.py",
       "source_sha256": "554f7d6d0d677c887404479e33a84d40e76f022ecd49ce15e85cf409d5e6738f",
-      "export_sha256": "148f13b58bb1506342f3979a2d2d916c5a9e63d23976ad4acbefd46ef593b941",
-      "bytes": 136947,
+      "export_sha256": "b128180b17497c0c4824df066c1b475aac11dc38b19de1109c0a361724fea1fa",
+      "bytes": 145984,
       "python_comments_removed": 37,
       "python_docstrings_removed": 16,
       "tool_descriptions_retained": 0,
@@ -7805,8 +7805,8 @@
       "path": "tools/heroku.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5a396603b214903144e194370a76b4348960dcee7acd0aedf18c0075198832c4",
-      "bytes": 62561
+      "export_sha256": "8d50e179444fdd171dd89ad9d24bd5e048b067cc8fbb14923c466c02f5e44139",
+      "bytes": 71068
     },
     {
       "path": "tools/heroku_findings.py",
@@ -7870,8 +7870,8 @@
       "path": "tools/key_consumers.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "680752d9f3605f08cb0b375fe763f4004fbad4537e6237a66de085b54b563768",
-      "bytes": 36663
+      "export_sha256": "0878857fa6c87494e18fba9be241ecf9daa5f1679789fb97085a4dd7f5fbea4d",
+      "bytes": 50033
     },
     {
       "path": "tools/key_expiry.py",

@@ -226,9 +226,11 @@ def setup(vault_ok=True):
     m.deliver_to_vault = deliver
     m.parse_vault_target = lambda t: tuple(t.split("/"))
     # No copy of a slot's value elsewhere (OBS-561); test_rotation_consumers drives the real guard. The door calls the
-    # one roll guard every door shares (`key_consumers.guard_roll`, OBS-601), stubbed for this suite's process.
+    # one roll plan every rolling door reads (`key_consumers.plan_roll`, OBS-601, OBS-607), stubbed for this suite's
+    # process.
     import key_consumers
     key_consumers.guard_roll = lambda slot=None, path=None: ([], [])
+    key_consumers.plan_roll = lambda slot=None, path=None: key_consumers.empty_plan()
     with_admin(m)
     return m, fake, delivered
 

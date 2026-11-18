@@ -69,9 +69,17 @@ ROTATION IS IN PLACE. `regenerate-tokens` keeps the authorization's id, scope
 and description and kills the old value at once, so the slot is written in the
 same run; a delivery that fails after it says that the slot now holds a dead
 value. Because the old value dies at once, a copy of it elsewhere (a Heroku
-config var, a local env file: `tools/key_consumers.py`) would be cut, so the
-roll is refused while one is found or a place it could be is unreadable;
-`--force` rolls anyway and journals what it cut (OBS-561).
+config var, a local env file, another vault slot: `tools/key_consumers.py`)
+would be cut. So when such a copy is found (OBS-607) the rotation does not
+regenerate: it creates a successor authorization with the same scope and
+description, proves it, writes the slot, delivers it to every copy and reads
+each back, and only then revokes the old one through the one revoke guard. A
+copy it could not deliver to holds the revoke: the old authorization stays
+alive, the ledger row is `successor-delivered-predecessor-held` with the copies
+named, and the next `rotate` finishes it. A place a copy could be that is
+unreadable, or a copy it cannot write (a file Git tracks), refuses before
+anything is created; `--force` regenerates anyway and journals what it cut
+(OBS-561). `revoke` refuses a held row: its old authorization is still read.
 
 TEAM MEMBERSHIP WRITES ARE A PLAN UNTIL `--apply`. `member add|role|remove`
 reads the team, prints what would change and stops. With `--apply` it makes the
@@ -903,11 +911,19 @@ def cmd_rotate(wanted: str | None, leaked: bool, wait: float = 2.0, force: bool 
     bad = 0
     for slot in slots:
         row = doc["issued"][slot]
-        # A regenerate kills the old value at once, so a copy of it outside the vault would be cut: the one roll
-        # guard every door calls (OBS-601). Delivering to such copies is later work (docs/design/control-plane/
-        # rotation.md).
         import key_consumers
-        refuse, restart = key_consumers.guard_roll(slot=slot)
+        if row.get("rotation_status") == HELD:
+            bad += _finish_held(slot, row, force)
+            continue
+        # A regenerate kills the old value at once, so a copy of it outside the vault would be cut. The one roll
+        # plan every rolling door reads (OBS-601, OBS-607): copies found that it can all write get a successor and a
+        # delivery instead of a regenerate; a place it cannot read or a copy it cannot write holds.
+        plan = key_consumers.plan_roll(slot=slot)
+        refuse, restart = plan["holds"], plan["restart"]
+        if plan["copies"] and not refuse:
+            bad += _rotate_successor(slot, row, plan, wait)
+            continue
+        refuse += [f"{key_consumers.describe(c)}: holds the value" for c in plan["copies"] if refuse]
         if refuse and not force:
             print(f"  {slot}: HELD, not regenerated: a regenerate kills the old value at once, and a copy of it "
                   f"would be cut (`--force` regenerates anyway)", file=sys.stderr)
@@ -961,12 +977,152 @@ def cmd_rotate(wanted: str | None, leaked: bool, wait: float = 2.0, force: bool 
     return 1 if bad else 0
 
 
+#: A rotation whose successor is in the slot while a copy of the old value was not delivered and read back
+#: (OBS-607): the old authorization stays alive, named on the row, until `rotate` delivers to every copy.
+HELD = "successor-delivered-predecessor-held"
+
+
+def _deliver_successor(slot: str, row: dict, plan: dict, admin: str, value: str, old_id: str) -> dict:
+    """Deliver the successor to every copy of the old value and revoke the old authorization through the one guard.
+    Each delivery is journaled by name."""
+    import key_consumers
+
+    def revoke():
+        try:
+            _request("DELETE", f"/oauth/authorizations/{q(old_id)}", admin)
+        except HerokuError as exc:
+            if exc.status != 404:
+                raise
+    result = key_consumers.deliver_then_revoke(slot, plan["found"], plan["old"], value, revoke, plan["sources"])
+    for o in result["outcomes"]:
+        if o.get("status") == "delivered":
+            _journal("consumer-delivered", slot, consumer=o["consumer"])
+    return result
+
+
+def _hold(slot: str, row: dict, record: dict, held: list[str], stage: str) -> int:
+    row["rotation_status"] = HELD
+    row["predecessor"] = {**record, "held": held}
+    put_row(slot, row)
+    _journal("rotation-held", slot, consumers=held, stage=stage,
+             authorization=row.get("authorization_id"), predecessor=record.get("predecessor"))
+    print(f"  {slot}: the successor is in the slot, but the old authorization {record.get('predecessor')} stays "
+          f"alive until every copy of it is delivered; `rotate {slot}` again once the copy is reachable",
+          file=sys.stderr)
+    for line in held:
+        print(f"    holds it: {line}", file=sys.stderr)
+    return 1
+
+
+def _rotate_successor(slot: str, row: dict, plan: dict, wait: float) -> int:
+    """OBS-607: a copy of the slot's value lives elsewhere, so the authorization is not regenerated (that would kill
+    the copy's value at once). A successor with the same scope and description is created and proved, the slot
+    written, every copy delivered and read back, and only then the old authorization revoked through the guard."""
+    import key_consumers
+    project, env, name = slot.split("/")
+    preset = PRESETS.get(row.get("preset"), PRESETS["read"])
+    days = row["expire_days"] if "expire_days" in row else key_expiry.DEFAULT_DAYS
+    where = (f" team {row['team']}" if row.get("team") else "") + (f" app {row['app']}" if row.get("app") else "")
+    body = {"scope": list(row.get("scopes") or preset["scopes"]),
+            "description": row.get("description") or DESCRIPTION.format(preset=row.get("preset"), slot=slot,
+                                                                        where=where)}
+    if days is not None:
+        body["expires_in"] = days * 86400
+    admin, fresh = None, None
+    try:
+        _label, admin = read_admin(row.get("admin"))
+        auth = _request("POST", "/oauth/authorizations", admin, body)
+        fresh = (auth or {}).get("id")
+        value = _token_of(auth)
+        for path, what in probe_paths(preset, row.get("team"), row.get("app")):
+            why = prove(value, path, wait)
+            if why is not None:
+                raise HerokuError("proof", f"the successor cannot read {what} ({why})")
+        deliver_to_vault(value, project, env, name)
+    except (HerokuError, RuntimeError, ValueError, KeyError) as exc:
+        tail = _delete_fresh(admin, fresh) if admin and fresh else ""
+        print(f"  {slot}: could not rotate: {exc}{tail}; the old authorization is untouched and the slot holds "
+              f"it", file=sys.stderr)
+        return 1
+    old_id = row.get("authorization_id")
+    life = _lifetime(auth, days)
+    row.pop("expiry_reason", None)
+    row.update(life)
+    row.update({"authorization_id": fresh, "expires_in": _expires_in(auth), "rotated_on": today(),
+                "rotations": (row.get("rotations") or 0) + 1})
+    record_slot_expiry(project, env, name, life)
+    put_row(slot, row)
+    result = _deliver_successor(slot, row, plan, admin, value, old_id)
+    for line in plan["restart"]:
+        print(f"    {line}")
+    if not result["revoked"]:
+        record = key_consumers.held_record(plan["found"], plan["old"], result["held"], old_id, result.get("code"))
+        return _hold(slot, row, record, result["held"], "after-delivery")
+    _journal("rotate", slot, authorization=fresh, predecessor=old_id, consumers=len(result["outcomes"]))
+    print(f"  {slot}: rotated to authorization {fresh}, delivered to the slot and to "
+          f"{len(result['outcomes'])} copy(ies), read back; the old authorization {old_id} was revoked")
+    for o in result["outcomes"]:
+        print(f"    {o['consumer']}: {'delivered and read back' if o['status'] == 'delivered' else o['status']}")
+    return 0
+
+
+def _finish_held(slot: str, row: dict, force: bool) -> int:
+    """A held rotation (`HELD`) is finished once every copy of the old value carries the successor: the old value is
+    found again in a recorded copy by its keyed digest, its copies looked for afresh and delivered, and the old
+    authorization revoked through the guard. `--force` revokes it anyway and journals what it cut."""
+    import key_consumers
+    record = row.get("predecessor") or {}
+    old_id = record.get("predecessor")
+    try:
+        _label, admin = read_admin(row.get("admin"))
+        new = key_consumers.vault_value(*slot.split("/"))
+    except (RuntimeError, OSError, ValueError) as exc:
+        print(f"  {slot}: the held rotation could not be finished: {type(exc).__name__}", file=sys.stderr)
+        return 1
+
+    def revoke():
+        try:
+            _request("DELETE", f"/oauth/authorizations/{q(old_id)}", admin)
+        except HerokuError as exc:
+            if exc.status != 404:
+                raise
+    sources = key_consumers.consumer_sources(slot)
+    result = key_consumers.finish_held(slot, record, new, sources, revoke)
+    for o in result["outcomes"]:
+        if o.get("status") == "delivered":
+            _journal("consumer-delivered", slot, consumer=o["consumer"])
+    if not result["revoked"] and force:
+        try:
+            revoke()
+        except HerokuError as exc:
+            print(f"  {slot}: --force could not revoke the old authorization: {exc}", file=sys.stderr)
+            return 1
+        _journal("rotation-forced", slot, cut=result["held"], predecessor=old_id)
+        result = {**result, "revoked": True}
+        print(f"  {slot}: --force revoked the old authorization {old_id}; cut: {'; '.join(result['held'])}")
+    if not result["revoked"]:
+        return _hold(slot, row, {**record, "code": result.get("code") or record.get("code")}, result["held"],
+                     "resume")
+    row.pop("predecessor", None)
+    row["rotation_status"] = "complete"
+    put_row(slot, row)
+    _journal("rotation-resumed", slot, authorization=row.get("authorization_id"), predecessor=old_id)
+    print(f"  {slot}: the held rotation is finished: every copy carries the successor and the old authorization "
+          f"{old_id} was revoked")
+    return 0
+
+
 @_locked
 def cmd_revoke(wanted: str) -> int:
     try:
         doc = ledger()
         try:
             slot, row = find_row(doc, wanted)
+            if row.get("rotation_status") == HELD:
+                print(f"refused: {slot} is a held rotation: its old authorization "
+                      f"{(row.get('predecessor') or {}).get('predecessor')} is still read by a copy; `rotate {slot}` "
+                      f"finishes it first", file=sys.stderr)
+                return 1
             auth_id, admin_label = row.get("authorization_id"), row.get("admin")
         except RuntimeError:
             # A stray `ping` named: an id with no ledger row, deleted by id.
