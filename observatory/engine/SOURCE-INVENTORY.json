@@ -666,8 +666,8 @@
       "path": "dashboard/disk_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "997fd54562d4d9a5c55d1780146d2b67934b560fcb7b307417c55cc114d3ce4d",
-      "bytes": 32308
+      "export_sha256": "04aaa3b91c723f2b94140675270a584ce6bcbf9a536f3752eb559969f6d04e89",
+      "bytes": 35724
     },
     {
       "path": "dashboard/finding_types.py",
@@ -722,15 +722,15 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f80b5ea36359e32f3a74886e6605c6e3e4fa0b6a2557e458b618ab6a8095dde3",
-      "bytes": 262092
+      "export_sha256": "8cf6f3b84389eafb8aa130f6ed7d7f74400c2b62a1a780c7da469c89b418b0bc",
+      "bytes": 264496
     },
     {
       "path": "dashboard/machine_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "001ee1ced248fdb9ecdd28fd47bc08da0ffdbfeec450b5e705009026b4ec2756",
-      "bytes": 17623
+      "export_sha256": "f2a8b670bdb0a9507bbc78f769894bb46fcfbe2a19321d26dfac50a90105a840",
+      "bytes": 17750
     },
     {
       "path": "dashboard/mcp_page.py",
@@ -832,8 +832,8 @@
       "path": "defaults/cleanup.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "29d75b89e8c8858eba8f657144691cf4382f492a49a5141ed021ec051a095a5b",
-      "bytes": 7227
+      "export_sha256": "70dc5a10a896959c85bd1b234f34f3aba60e0d7c2f55127145cd844613b8a192",
+      "bytes": 8267
     },
     {
       "path": "defaults/credential_annotations.json",
@@ -1059,8 +1059,8 @@
     {
       "path": "docs/ux/portable-scenarios.md",
       "source_sha256": "ea1e51df9b88d283ef99e8fd2c8cc8994f73daa4d964f55147e20e2e276765c7",
-      "export_sha256": "6d80fbce0b92f97f00d3ab7708e3409eadf548419920eba5f11515d03e7f3f64",
-      "bytes": 275161,
+      "export_sha256": "b9b0f2f1e8b992cd8ceaafdf6f19436014d84575540aa1d6ccc988a78fe44c42",
+      "bytes": 276178,
       "upstream_modified": true
     },
     {
@@ -3531,8 +3531,8 @@
       "path": "machine_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "54a8bd935ca5b3a67b9c6b3404e33861d37e33dadef3a775774cbd036c59d8bc",
-      "bytes": 20536
+      "export_sha256": "0fc5e03b775e909656f5cea76fed81cfd22ffcc30c5fedbb02b51548c7e38dac",
+      "bytes": 20733
     },
     {
       "path": "maintenance.py",
@@ -5333,15 +5333,15 @@
       "path": "tests/test_disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f6cbe45bae5465eaf11419288d73ba5f8ac65f9f26c3aa2f3b4faf10c827d08d",
-      "bytes": 237688
+      "export_sha256": "a20837c3b4e2098dbb20c5eef7547631a6c2849700cd281b3e1efae2e91c5071",
+      "bytes": 237985
     },
     {
       "path": "tests/test_disk_page.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "57178c7d0d15f9807ea3bb586a84ac173e7a4c7aac55612c0ddda88752d7de02",
-      "bytes": 25034
+      "export_sha256": "a727e49a2345170259e5f9a073b73be63a71e03f01652dfc92cb3928f5818c0d",
+      "bytes": 26928
     },
     {
       "path": "tests/test_dispatch_packet.py",
@@ -5968,8 +5968,8 @@
       "path": "tests/test_machine.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "39d949383bab37268254d27a7bcfaea7e86650fd0c190cadb5d08e67a078c97c",
-      "bytes": 82586
+      "export_sha256": "8bcb45ec01e13d88587179d2214e43e498b7fdc07ecdc279ec0967cfac39eb01",
+      "bytes": 97339
     },
     {
       "path": "tests/test_machine_backup.py",
@@ -7565,8 +7565,8 @@
       "path": "tools/cleanup.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "abd12363d21fa6e276860cae2e7de63c038d006d99acac6ac5c088e8edda6fed",
-      "bytes": 55463
+      "export_sha256": "4ddf1d3e6f7f58c55a406130c135f078a8c2c49a78ca9b5800b6b44e11d173c3",
+      "bytes": 83978
     },
     {
       "path": "tools/cloud_cli.py",
@@ -7703,11 +7703,18 @@
       "bytes": 3307
     },
     {
+      "path": "tools/disk_growth_series.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "5493f47ca3b8e72a92ee487e316917acaa268e77515d490e19ab88e3ed48c344",
+      "bytes": 4823
+    },
+    {
       "path": "tools/disk_guard.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "668c072a804fcf32afc830ad0445cf5262814a98ba6fbe969ee87ae962cc4fa6",
-      "bytes": 144824
+      "export_sha256": "3b9928916b6c92c21e8b271abc0f9209089a442af0043217236c2fb4615083b4",
+      "bytes": 144870
     },
     {
       "path": "tools/doctor_findings.py",
@@ -8520,7 +8527,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 1153,
+  "file_count": 1154,
   "excluded": [
     "git-history",
     "operator-registries",

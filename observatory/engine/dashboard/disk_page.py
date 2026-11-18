@@ -66,6 +66,10 @@ CLASSES = (
     ("worktree-missing", "worktree records whose folder is gone", "auto", None),
     ("branch-unique", "branches holding the only copy", "kept", None),
     ("worktree-dirty", "uncommitted worktrees", "kept", None),
+    # Proposed in the manual tier (OBS-621): what the operator cleaned by hand on 2026-11-17.
+    ("repo-idle", "idle repositories whose work is all on a remote", "manual", None),
+    ("deps-stale", "dependency and build folders unchanged for weeks", "manual", None),
+    ("checkout-merged", "merged idle checkouts", "manual", None),
 )
 DISABLED = "This page only shows the settings: it was opened as a file or without the local control server. An agent changes them with {tool}."
 
@@ -205,18 +209,68 @@ def _classes(cleanup: dict | None, values: dict, t: Translator) -> str:
         days = values.get(key) if key else None
         if tier == "kept":
             keep = t.mark("never removed by itself; archived first, removed by hand")
+        elif tier == "manual":
+            keep = t.mark("proposed only; checked again and removed by hand")
         elif isinstance(days, int) and not isinstance(days, bool):
             keep = t.mark("{n} days", n=days)
         elif key:
             keep = NONE
         else:
             keep = t.mark("until the next pass")
-        rows.append([t.mark(label), t.mark("auto") if tier == "auto" else t.mark("kept"),
+        rows.append([t.mark(label), t.mark(tier),
                      t.number(counts.get(cls, 0)) if cleanup else NONE, keep])
     out = _table(t, "What auto cleanup removes and keeps",
                  [("What", False), ("Tier", False), ("Now", True), ("Kept for", False)], rows, "")
     return out + t.mark("Under disk pressure the guard lowers these days. A branch or worktree that holds the only copy "
                         "of someone's work is never removed by itself.", tag="p", attrs=' class="machine-hint"')
+
+
+#: The manual tier's proposals (OBS-621) and how each one's rule reads, from the fields the plan writes.
+PROPOSED = ("repo-idle", "deps-stale", "checkout-merged")
+PROPOSAL_HINT = ("Nothing here is removed by itself. When a person applies the manual tier, each item is checked "
+                 "again, and a repository or a clone is listed for restore (its folder, remotes, commit and branch) "
+                 "before it goes.")
+
+
+def _rule(a: dict, t: Translator) -> str:
+    cls = a.get("class")
+    if cls == "repo-idle":
+        return t.mark("no commit, reflog or agent session in {days} days; clean, no stash, every commit on "
+                      "{remote}", days=a.get("idle_days", NONE), remote=a.get("contained_in") or NONE)
+    if cls == "deps-stale":
+        return t.mark("not tracked by Git, unchanged for {days} days, no running service uses the project",
+                      days=a.get("unchanged_days", NONE))
+    return t.mark("clean, merged into {base}, index idle {hours} hours, no process inside",
+                  base=a.get("base") or NONE, hours=a.get("idle_hours", NONE))
+
+
+def proposals_html(cleanup: dict | None, t: Translator) -> str:
+    """The manual tier's proposals, largest first, each with the rule that chose it and its size (OBS-621)."""
+    head = t.mark("Proposed for removal by hand", tag="h2", attrs=HEADING)
+    hint = t.mark(PROPOSAL_HINT, tag="p", attrs=HINT)
+    items = sorted((a for a in (cleanup or {}).get("actions") or []
+                    if isinstance(a, dict) and a.get("class") in PROPOSED and a.get("target")),
+                   key=lambda a: -(a.get("kb") or 0))
+    parts = [f'<section class="card panel" id="disk-proposals">{head}{hint}']
+    if not items:
+        parts.append(t.mark("Nothing proposed.", tag="p", attrs=EMPTY))
+    else:
+        heads = [("What", False), ("Item", False), ("Rule", False), ("Size", True)]
+        th = "".join(f'<th scope="col"{NUM if num else ""}>{t.mark(h)}</th>' for h, num in heads)
+        body = []
+        for a in items[:ROWS]:
+            kb = a.get("kb")
+            size = (_gigabytes(round(kb / 1048576, 2), t) if isinstance(kb, int) and not isinstance(kb, bool)
+                    else NONE)
+            cells = [_word(t, a["class"]), f'<span class="mono">{_e(a["target"])}</span>', _rule(a, t), size]
+            body.append("<tr>" + "".join(f'<td{NUM if num else ""}{t.attr("data-label", h)}>{c}</td>'
+                                         for (h, num), c in zip(heads, cells)) + "</tr>")
+        parts.append(f'<table><thead><tr>{th}</tr></thead><tbody>{"".join(body)}</tbody></table>')
+        if len(items) > ROWS:
+            parts.append(t.mark("{shown} of {total} shown, the largest first.", tag="p", attrs=HINT,
+                                shown=ROWS, total=len(items)))
+    parts.append("</section>")
+    return "".join(parts)
 
 
 #: Why a VM's volumes could not be listed (disk_guard.vm_unused_volumes), in a reader's words.
@@ -498,6 +552,7 @@ def disk_html(payload: dict, t: Translator | None = None) -> str:
     parts.append(guard_html(m.get("guard"), t))
     parts.append(_runs(cleanup, t))
     parts.append(_classes(cleanup, values, t))
+    parts.append(proposals_html(cleanup, t))
     parts.append(temp_html(m.get("guard"), t))
     parts.append(vms_html(m.get("guard"), t))
     parts.append(volumes_html(m.get("guard"), t))
@@ -518,5 +573,6 @@ DYNAMIC = (tuple(SETTING_LABELS.values()) + tuple(c[1] for c in CLASSES)
               "unreadable", VOLUME_HINT,
               "Names", "Entries", "New a day", "Growth", TEMP_HINT,   # the temporary folder's section (`temp_html`)
               "File", "Space taken", "Last day", VM_HINT,             # the VM disks' section (`vms_html`, OBS-620)
-              "on the same disk", "on another disk", "disk not known", "last day")
+              "on the same disk", "on another disk", "disk not known", "last day",
+              "auto", "kept", "manual", "Item", "Rule", PROPOSAL_HINT)   # the manual proposals (OBS-621)
            + tuple(VOLUME_UNREAD.values()))

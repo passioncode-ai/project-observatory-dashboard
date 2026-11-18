@@ -258,6 +258,8 @@ DYNAMIC = ("cache", "toolchain", "build", "simulator", "vm", "worktrees", "user"
            "regenerable", "command", "history", "manual", "auto", "clean", "dirty", "missing", "unreadable",
            "branch-merged", "branch-pushed", "worktree-missing", "worktree-clean", "build-artifacts",
            "branch-unique", "worktree-dirty", "removed", "pruned", "skipped", "failed",
+           # The manual tier's proposals (tools/cleanup.py, OBS-621).
+           "repo-idle", "deps-stale", "checkout-merged",
            # The disk guard's classes and pressure levels (tools/disk_guard.py).
            "cache-command", "cache-dir", "build-output", "user-temp", "temp", "trash", "browser-clone", "normal", "low", "critical",
            # Empty states chosen by whether their survey ran (see UNMEASURED).

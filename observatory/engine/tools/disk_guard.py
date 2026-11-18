@@ -2434,7 +2434,7 @@ def _git_tier(apply: bool, level: str, seconds: float) -> dict:
             out["plan_seconds"] = value
     else:
         keys = {"branch-merged", "branch-pushed", "worktree-missing", "worktree-clean",
-                "build-artifacts", "branch-unique", "worktree-dirty"}
+                "build-artifacts", "branch-unique", "worktree-dirty", "repo-idle", "deps-stale", "checkout-merged"}
         counts = doc.get("counts")
         if not isinstance(counts, dict) or not counts or not set(counts) <= keys or not all(
                 integer(value) for value in counts.values()):

@@ -217,6 +217,32 @@ class Page(unittest.TestCase):
         unmeasured, _ = both(machine())
         self.assertIn("Not measured yet", shown(unmeasured))
 
+    def test_manual_proposals_name_their_rule_and_size_and_are_never_removed_by_themselves(self):
+        """OBS-621: what the operator cleaned by hand is proposed in the manual tier, each item with its rule and size,
+        largest first; no command line on a row."""
+        actions = [{"class": "repo-idle", "tier": "manual", "target": "/data/old-bot", "kb": 340 * 1024,
+                    "idle_days": 90, "contained_in": "origin/main", "rule": "x"},
+                   {"class": "deps-stale", "tier": "manual", "target": "/data/alpha-web/node_modules",
+                    "kb": 2 * 1024 * 1024, "unchanged_days": 14, "rule": "x"},
+                   {"class": "checkout-merged", "tier": "manual", "target": "/data/_worktrees/fix-1",
+                    "kb": 80 * 1024, "base": "origin/main", "idle_hours": 24, "rule": "x"},
+                   {"class": "branch-merged", "tier": "auto", "target": "old", "rule": "x"}]
+        cleanup = {**CLEANUP, "actions": actions,
+                   "counts": {**CLEANUP["counts"], "repo-idle": 1, "deps-stale": 1, "checkout-merged": 1}}
+        en, ru = both(machine(cleanup=cleanup))
+        text = shown(en)
+        for want in ("Proposed for removal by hand", "old-bot", "node_modules", "fix-1", "90 days", "14 days",
+                     "origin/main", "24 hours", "2 GB", "idle repositories whose work is all on a remote"):
+            self.assertIn(want, text)
+        self.assertLess(text.index("node_modules"), text.index("old-bot"), "largest first")
+        self.assertRegex(text, r"idle repositories whose work is all on a remote\s+manual\s+1")
+        self.assertIn("Предложено удалить вручную", shown(ru))
+        for page in (en, ru):
+            self.assertIsNone(COMMAND.search(page))
+        relocalizes(self, en, ru)
+        none, _ = both(machine())
+        self.assertIn("Nothing proposed", shown(none))
+
     def test_what_auto_cleanup_removes_and_keeps_with_its_idle_days(self):
         en, _ = both(machine())
         text = shown(en)

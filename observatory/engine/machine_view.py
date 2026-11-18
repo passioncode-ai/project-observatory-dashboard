@@ -289,6 +289,8 @@ def summary(explain_pid: int | None = None) -> dict:
         out["cleanup"] = {"plannedAt": plan.get("planned_at"), "autoEnabled": plan.get("auto_enabled"),
                           "counts": plan.get("counts"), "actions": plan.get("actions"), "journal": journal(),
                           "level": plan.get("level", "normal")}
+        # What the manual proposals could not read (OBS-621): named, so an empty list is never read as "nothing".
+        degraded += [d for d in plan.get("degraded") or [] if isinstance(d, dict)]
     runs = guard_summaries()
     if runs:
         out.setdefault("cleanup", {"journal": journal()})

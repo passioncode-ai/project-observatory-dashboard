@@ -190,3 +190,57 @@ Held by 38 agent sessions, their processes holding 32 GB of memory . claude 35
 - Tests: `test_disk_guard.py` (`VmDiskGrowth`, `SwapOnTheSameDisk`), `test_machine_findings.py`
   (`VirtualMachineGrowth`), `test_disk_page.py` (`test_vm_disks_and_swap_show_their_growth_and_who_holds_the_memory`).
   Scenario: OSS-139.
+
+## The manual tier proposes what was cleaned by hand (OBS-621)
+
+On 2026-11-17 the operator had three kinds of things cleaned by hand from a full disk: repositories nobody had worked
+in for 90 days whose every commit was on a remote, dependency and build folders unchanged for two weeks outside the
+projects running services use, and checkouts merged into their default branch. The cleanup plan (`tools/cleanup.py`)
+now proposes the same in its manual tier: never on a tick, never from the guard (`--git-only` plans none of them),
+removed only when a person applies `--apply --include manual`, and each item checked again then.
+
+- Where it looks (`manual_roots`): every checkout the hygiene survey measured and every repository directly in the
+  data folder; every clean linked worktree the survey found and every checkout directly in a `manual.checkout_roots`
+  folder (default `{data}/_worktrees`). A checkout is judged as a checkout, never as an idle repository.
+- `repo-idle`: no commit on any ref, no reflog entry and no agent session (a folder under `manual.session_roots`,
+  default `~/.claude/projects`, named by the path) in `manual.idle_repository_days` (90); clean, no stash, no commit
+  that no remote branch holds, no linked worktree, HEAD contained in a remote branch (as of the last fetch); its
+  project no running service's. Applying it re-checks all of that, fetches the remote that holds HEAD and checks
+  again, refuses ignored files that are not build output, and writes the restore record (folder, remotes with any
+  credential stripped from the URL, commit, branch) to `archive/cleanup/<day>/restore-list.jsonl`, flushed to the
+  disk, BEFORE a fresh complete holder listing and the removal. The journal row carries the record and the list's
+  path (`UNDO_IN_JOURNAL`).
+- `deps-stale`: a folder named in `artifact_dirs` or `manual.dependency_dirs` (`.venv`, `venv`, `.tox`, `.build`,
+  `.dart_tool`) that `git ls-files` names nothing inside, with no entry changed in `manual.dependency_unchanged_days`
+  (14) (`disk_guard.inspect`, which also refuses sockets, protected entries and another account's), in a project no
+  process works inside and no launchd or systemd job names. Applying it checks the folder's identity, `ls-files`, the
+  age and the jobs again, and the whole project must be free in a fresh complete listing.
+- `checkout-merged`: clean, HEAD an ancestor of origin's default branch, its index unchanged for
+  `manual.merged_checkout_idle_hours` (24), no process inside; a clone (not a linked worktree) also no stash and no
+  commit off the remotes. A linked worktree goes with `git worktree remove` (its branch stays); a clone gets a restore
+  record first, like a repository.
+- Each item names its `rule` and its size (`kb`, allocated blocks; `size_complete` false when the walk stopped), and
+  the plan takes at most `manual.plan_budget_seconds` (120, and never past the tick step's deadline) and
+  `manual.max_proposals` (500), the largest first; what it could not read is in the plan's `degraded` (source
+  `manual-proposals`), which `machine_view` passes on. The tick (`cleanup.py --auto`, every half hour) carries the
+  previous plan's proposals while `manual_planned_at` is younger than `manual.plan_every_hours` (6), so the walk runs
+  a few times a day; a person's plan or apply always walks anew. A dependency folder of more than 500,000 entries is
+  not proposed. The restore list is written through `journal_writer` (owner-only, fsync).
+- Disk page: the classes table lists the three as `manual` ("proposed only; checked again and removed by hand"), and
+  "Proposed for removal by hand" lists the items, largest first, with their rule and size. No command line on a row.
+
+```
+Proposed for removal by hand
+Nothing here is removed by itself. When a person applies the manual tier, each item is checked again, ...
+What                     Item                          Rule                                              Size
+deps-stale               /data/alpha-web/node_modules  not tracked by Git, unchanged for 14 days, ...    2 GB
+repo-idle                /data/old-bot                 no commit, reflog or agent session in 90 days ... 0.33 GB
+checkout-merged          /data/_worktrees/fix-1        clean, merged into origin/main, index idle 24 ... 0.08 GB
+```
+
+- Failure: an unreadable repository, session folder or data folder proposes nothing for it and is named; a fetch that
+  fails, a restore list that cannot be written, a HEAD that moved, new work, a tracked file or a holder keeps the item
+  and says why in its journal row.
+- Tests: `test_machine.py` (`ManualProposals`), `test_disk_page.py`
+  (`test_manual_proposals_name_their_rule_and_size_and_are_never_removed_by_themselves`), `test_disk_guard.py`
+  (`test_git_child_envelope_is_typed_and_exit_status_wins`). Scenario: OSS-140.

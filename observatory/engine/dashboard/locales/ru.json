@@ -3090,5 +3090,19 @@
  "Swap growing fast": "Подкачка быстро растёт",
  "the {vm} virtual machine's disk grows {gb} GB a day": "диск виртуальной машины {vm} растёт на {gb} ГБ в день",
  "swap on the same disk grows {gb} GB a day": "подкачка на этом же диске растёт на {gb} ГБ в день",
- "Lima or Colima virtual machine disk": "Диск виртуальной машины Lima или Colima"
+ "Lima or Colima virtual machine disk": "Диск виртуальной машины Lima или Colima",
+ "repo-idle": "неактивный репозиторий",
+ "deps-stale": "устаревшие зависимости",
+ "checkout-merged": "слитая рабочая копия",
+ "idle repositories whose work is all on a remote": "неактивные репозитории, вся работа которых есть на удалённом сервере",
+ "dependency and build folders unchanged for weeks": "папки зависимостей и сборки, не менявшиеся неделями",
+ "merged idle checkouts": "слитые неактивные рабочие копии",
+ "proposed only; checked again and removed by hand": "только предлагается; проверяется заново и удаляется вручную",
+ "Proposed for removal by hand": "Предложено удалить вручную",
+ "Nothing here is removed by itself. When a person applies the manual tier, each item is checked again, and a repository or a clone is listed for restore (its folder, remotes, commit and branch) before it goes.": "Ничто отсюда не удаляется само. Когда человек применяет ручной уровень, каждый объект проверяется заново, а репозиторий или клон сначала записывается в список для восстановления (папка, удалённые репозитории, коммит и ветка).",
+ "no commit, reflog or agent session in {days} days; clean, no stash, every commit on {remote}": "ни коммита, ни записи reflog, ни сессии агента за {days} дн.; чисто, без stash, все коммиты есть в {remote}",
+ "not tracked by Git, unchanged for {days} days, no running service uses the project": "не отслеживается Git, не менялось {days} дн., проект не использует ни один работающий сервис",
+ "clean, merged into {base}, index idle {hours} hours, no process inside": "чисто, слито в {base}, индекс не менялся {hours} ч, внутри нет процессов",
+ "Nothing proposed.": "Ничего не предложено.",
+ "{shown} of {total} shown, the largest first.": "Показано {shown} из {total}, сначала самые большие."
 }

@@ -2205,6 +2205,9 @@ class JsonLine(Base):
             ({**good, "carried": {"checkouts": 1, "measured_at": None, "extra": marker}}, 0, "ran"),
             ({"result": "plan-only", "counts": {"worktree-clean": 2},
               "carried": {"checkouts": 1, "measured_at": None}}, 0, "plan-only"),
+            # The manual proposals' classes (OBS-621) are counted in every plan, zero under `--git-only`.
+            ({"result": "plan-only", "counts": {"worktree-clean": 2, "repo-idle": 0, "deps-stale": 0,
+                                                "checkout-merged": 0}}, 0, "plan-only"),
         ]
         for doc, code, expected in cases:
             with self.subTest(doc=doc, code=code):
