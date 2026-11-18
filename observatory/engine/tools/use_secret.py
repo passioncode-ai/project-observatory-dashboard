@@ -630,6 +630,18 @@ def cmd_run(args) -> int:
             print(f"use_secret: {why if why.startswith('refused:') else f'refused: {code}: {why}'}",
                   file=sys.stderr)
             return 2
+    bound = None
+    if not args.share:
+        # The agent's binding (OBS-635): under one, only its projects' slots are released; without one the run is
+        # journalled as unbound. A binding that is named and cannot be honoured refuses, never falls back.
+        import secret_binding
+        try:
+            bound = secret_binding.check(args.project)
+        except secret_binding.Refused as exc:
+            audit("use-refused", f"{args.project}:{','.join(names)}",
+                  {"command": args.command[0], "binding": exc.code})
+            print(f"use_secret: refused: {exc.code}: {exc}", file=sys.stderr)
+            return 2
     try:
         if args.share:
             # A key another person shared with this machine: never a project's vault slot (DEC-0142 PS-3).
@@ -657,6 +669,7 @@ def cmd_run(args) -> int:
     audit("use", f"{args.project}:{','.join(names)}",
           {"from": wheres, "command": args.command[0],
            "argv_len": len(args.command), "grant": verdict,
+           "binding": (f"{bound.binding_id}:{bound.project_id}" if bound else ("share" if args.share else "unbound")),
            **({"workflow": workflow, "request": dispatch["request"]} if dispatch else {})})
     child_env = dict(os.environ)
     child_env.update(values)

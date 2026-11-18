@@ -5,8 +5,8 @@
       "path": "access_binding.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d34f55a95238b84a7fd03e393e49e55bd05c6b7aee81a399e2040299449a9a7e",
-      "bytes": 16379
+      "export_sha256": "8ce67eca5562010a0ec1fdaaf7631049dc952c9190295eb5e071dd1ba90ceb4d",
+      "bytes": 16519
     },
     {
       "path": "activity.py",
@@ -4250,6 +4250,13 @@
       "bytes": 13286
     },
     {
+      "path": "secret_binding.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "670982832bc1053ee4adc83b0b986bddc2ce4f595d7fef1e313bf08546108380",
+      "bytes": 4619
+    },
+    {
       "path": "secret_client.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -4759,8 +4766,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "f85b3588d4f55680f0084c881858207a728a19e5c24b372421d1cf9be36e0eaf",
-      "bytes": 60828,
+      "export_sha256": "b326b910ff7913a6bbc5e81cbcdc4ac4f483850b2f6a445781b00960c470cea8",
+      "bytes": 60974,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -6840,6 +6847,13 @@
       "bytes": 8279
     },
     {
+      "path": "tests/test_secret_binding.py",
+      "source_sha256": null,
+      "upstream_modified": true,
+      "export_sha256": "ca58a3ccdf6ddf6824a36cd7435a27ae10026b207cb653d5c974754b22eb9485",
+      "bytes": 3057
+    },
+    {
       "path": "tests/test_secret_header.py",
       "source_sha256": null,
       "upstream_modified": true,
@@ -8409,8 +8423,8 @@
     {
       "path": "tools/use_secret.py",
       "source_sha256": "8836e5826c78ca12bd852fd8f7b036c49db3b41383209d829f321318afc76bc1",
-      "export_sha256": "1dd17080d339f959c66e122515651f105f05f4c642e0c5603a0dfbfd3ccdaf12",
-      "bytes": 57761,
+      "export_sha256": "5d9e5378ab569b90d9908ada24ebd6146dcb2c540b9d4971b366a5b53d19bc40",
+      "bytes": 58523,
       "python_comments_removed": 14,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
@@ -8527,7 +8541,7 @@
       "upstream_modified": true
     }
   ],
-  "file_count": 1154,
+  "file_count": 1156,
   "excluded": [
     "git-history",
     "operator-registries",

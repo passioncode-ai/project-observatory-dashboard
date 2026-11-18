@@ -346,6 +346,8 @@ BOUNDARY += ('relay_server',)
 # OBS-330: `ops.digest.record`, products' daily operations digests (contract DEC-0153): the engine's port over the
 # contract's vectors and fixtures, and the capability over stdio under a binding and on the HTTP door with a token.
 BOUNDARY += ('ops_digest', 'ops_digest_record')
+# OBS-635: `use_secret run` under an access binding releases only its projects' vault slots.
+BOUNDARY += ('secret_binding',)
 # OBS-577: `observatory_health`, one agent-health/1 reading (contract DEC-0179) over the contract's vendored vectors.
 BOUNDARY += ('machine_health',)
 # OBS-331 part a: the daily learning review (lessons by class, rising failures from the digests, late arrivals, the
@@ -422,7 +424,7 @@ RUNTIME_DIRS = ('agent', 'collectors', 'dashboard', 'mcp', 'node', 'plugins', 's
 ROOT_FILES = (
     'activity.py', 'atomic.py', 'companion_faults.py', 'configuration.py',
     'degradations.py', 'estate.py', 'identity.py', 'observatory.py', 'paths.py', 'tracked.py',
-    'identity_map.py', 'identifiers.py', 'derivations.py', 'folder_attribution.py', 'fabric_attribution.py', 'ops_digest_folders.py', 'activity_collector.py', 'fabric_hub.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'sessions_view.py', 'textkeys.py', 'vault_project.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'tick_progress.py', 'tick_budget.py', 'dashboard_stamp.py', 'workspace.py',
+    'identity_map.py', 'identifiers.py', 'derivations.py', 'folder_attribution.py', 'fabric_attribution.py', 'ops_digest_folders.py', 'activity_collector.py', 'fabric_hub.py', 'leak_register.py', 'credential_shape.py', 'memory_redact.py', 'agents_view.py', 'sessions_view.py', 'textkeys.py', 'vault_project.py', 'secret_binding.py', 'private_io.py', 'proposals.py', 'runtime_identity.py', 'store_faults.py', 'survey.py', 'tick_health.py', 'tick_progress.py', 'tick_budget.py', 'dashboard_stamp.py', 'workspace.py',
     'workspace_upgrade.py', 'backup_vault.py', 'secret_store_carry.py', 'organizations.py', 'org_view.py', 'key_source.py', 'org_selection.py', 'machine_view.py', 'memory_snapshot.py', 'checkout_inventory.py', 'checkout_state.py', 'checkout_graph.py', 'cache_coverage.py', 'open_unlinked.py', 'coverage_view.py', 'engine_update.py', 'workspace_profile.py', 'tmp.py',
     'configuration_door.py',
     # The key page's acts for an agent (OBS-559 part 2).

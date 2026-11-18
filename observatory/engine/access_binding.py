@@ -43,7 +43,9 @@ SCOPES = ("memory.read", "memory.search", "memory.record", "memory.checkpoint",
           "memory.handoff",
           # A product's daily operations digests, over stdio, for the binding's one project (OBS-330,
           # ops_digest_store.py). It opens no memory tool and no memory tool needs it.
-          "ops.digest.record")
+          "ops.digest.record",
+          # `use_secret run` under a binding releases only its projects' vault slots (OBS-635, secret_binding.py).
+          "secrets.use")
 #: `read` < `propose`. `operator` exists only to be refused: it is the authority a
 #: terminal grants (review.py, embedding-policy), never a binding.
 EFFECTS = ("read", "propose")

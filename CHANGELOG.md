@@ -15,6 +15,15 @@ while the major version is 0, a minor release may change behaviour and says so h
 
 ## Unreleased
 
+### Added
+
+- **Secret access bound to an agent's project** (OBS-635): an agent started with `OBSERVATORY_BINDING_TOKEN_FILE`
+  naming an access binding with the new scope `secrets.use` (`full access-binding issue AGENT --project PROJECT
+  --scope secrets.use --token-file PATH`) gets from `use_secret run` only the slots of the binding's projects; a slot of
+  another project, a binding without the scope, a revoked or unknown binding and a token file others can read are
+  refused with a typed code, never a fallback to the unbound path. Every run's journal row now says `binding`: the
+  binding and project, `share`, or `unbound`. Not a sandbox between organizations on one OS account (OBS-200).
+
 ### Fixed
 
 - **The machine inventory keeps another person's processes as counts only** (OBS-634): on a machine several people
