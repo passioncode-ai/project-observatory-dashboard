@@ -24,7 +24,7 @@ from __future__ import annotations
 
 
 from i18n import NO_VALUE, Translator
-from page_util import escape as _e, stamp
+from page_util import escape as _e, reason_html, stamp
 
 HEADING = ' class="machine-h"'
 NUM = ' class="num"'
@@ -433,9 +433,8 @@ def agents_html(payload: dict, t: Translator | None = None, live: bool = False) 
                 return t.mark("the store does not exist yet")
             if code == "before-agent-memory":
                 return t.mark("the store predates agent memory; the next engine start migrates it")
-            if code == "unreadable":
-                return t.mark("unreadable: {error}", error=d.get("reason", ""))
-            return t.known(d.get("reason"))
+            # An unreadable store's `reason` is its error's name (agents_view); a command is cut (OBS-629).
+            return reason_html(d, t)
         items = "".join(f'<li><span class="mono">{_e(d.get("source"))}</span>: {reason(d)}</li>'
                         for d in degraded)
         parts.append(f'<section class="card panel">{t.mark("Not read", tag="h2", attrs=HEADING)}<ul>{items}</ul></section>')

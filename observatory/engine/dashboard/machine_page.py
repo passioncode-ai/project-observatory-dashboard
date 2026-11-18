@@ -13,7 +13,7 @@ import json
 import pathlib
 
 from i18n import NO_VALUE, Translator
-from page_util import escape as _e, stamp
+from page_util import escape as _e, reason_html, stamp
 
 ROWS = 20
 #: Attributes built outside the f-strings: Python 3.11 allows no backslash and no
@@ -23,11 +23,12 @@ EMPTY = ' class="empty"'
 HEADING = ' class="machine-h"'
 TOOLS_LINK = ' href="tools.html"'
 #: What an empty table says when its survey has not run. "Every worktree is
-#: clean" over checkouts nobody looked at is a claim, not an empty state — and
-#: each survey names the command that runs it: the git tables are refreshed by
-#: `full cleanup`, not `full machine` (audit A42).
-UNMEASURED = "Not measured yet: run project-observatory full machine"
-UNMEASURED_GIT = "Not measured yet: run project-observatory full cleanup"
+#: clean" over checkouts nobody looked at is a claim, not an empty state. Each
+#: names its own survey: the git tables are filled by the cleanup survey,
+#: not the machine survey (audit A42). The command that runs each is an agent's
+#: to read (`degraded` in the JSON and MCP answers); a page shows none (OBS-629).
+UNMEASURED = "Not measured yet: the machine survey has not run."
+UNMEASURED_GIT = "Not measured yet: the cleanup survey has not run."
 
 
 def _gb(mb):
@@ -187,7 +188,7 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
                           _e(p["origin"]), _project(p.get("project"), names), _size(p["rss_mb"], t), _e(p["pid"])]
                          for p in (procs.get("top") or [])[:ROWS]],
                         "No process survey yet."))
-    parts.append(t.mark("Why one of them runs: project-observatory full machine --explain PID",
+    parts.append(t.mark("Why one of them runs: an agent asks observatory_machine with explainPid.",
                         tag="p", attrs=' class="machine-hint"'))
     parts.append(_table(t, "Memory by project",
                         [("Project", False), ("Processes", True), ("Memory", True)],
@@ -236,17 +237,10 @@ def machine_html(payload: dict, t: Translator | None = None) -> str:
     if degraded:
         # A reason with a `code` is a message id, so the Russian page reads Russian;
         # one without (a collector's own words) is translated when the catalog
-        # holds it and shown as written otherwise (L10N-04).
-        def reason(d: dict) -> str:
-            if d.get("code") == "not-surveyed":
-                # Each survey names the command that runs it (machine_view._load).
-                if "full cleanup" in str(d.get("reason") or ""):
-                    return t.mark("not surveyed yet: enable features.machine_watch, or run project-observatory full cleanup")
-                return t.mark("not surveyed yet: enable features.machine_watch, or run project-observatory full machine")
-            if d.get("code") == "unreadable":
-                return t.mark("unreadable: {error}", error=d.get("error", ""))
-            return t.known(d.get("reason"))
-        items = "".join(f'<li><span class="mono">{_e(d.get("source"))}</span>: {reason(d)}</li>' for d in degraded)
+        # holds it and shown as written otherwise (L10N-04). The command a survey's
+        # reason names (machine_view._load) is for agents (OBS-629).
+        items = "".join(f'<li><span class="mono">{_e(d.get("source"))}</span>: {reason_html(d, t)}</li>'
+                        for d in degraded)
         parts.append(f'<section class="card panel">{t.mark("Not measured", tag="h2", attrs=HEADING)}<ul>{items}</ul></section>')
     parts.append("</section>")
     return "".join(parts)

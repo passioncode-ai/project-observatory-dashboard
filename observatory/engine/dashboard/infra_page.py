@@ -23,7 +23,7 @@ from __future__ import annotations
 
 
 from i18n import Translator
-from page_util import escape as _e
+from page_util import escape as _e, reason_html
 
 NUM = ' class="num"'
 EMPTY = ' class="empty"'
@@ -149,7 +149,7 @@ def _degraded(doc: dict, spec: dict, t: Translator) -> str:
     gaps = [d for d in doc.get("degraded") or [] if isinstance(d, dict) and d.get("reason")]
     if not gaps:
         return ""
-    items = "".join(f'<li><span class="mono">{_e(d.get("source"))}</span>: {t.known(d.get("reason"))}</li>'
+    items = "".join(f'<li><span class="mono">{_e(d.get("source"))}</span>: {reason_html(d, t)}</li>'
                     for d in gaps)
     unread = not (doc.get("resources") or [])
     lead = t.mark("Nothing was read. What stopped it:", tag="p") if unread else t.mark(spec["unread"], tag="p")
@@ -238,9 +238,9 @@ def _resources(doc: dict, findings: list[dict], names: dict, t: Translator) -> s
             project = (f'<a href="projects.html#{_e(pid)}">{_e(names.get(pid) or pid.removeprefix("project:"))}</a>'
                        f' <span class="mono">{_e(r.get("link_rule"))}</span>')
         else:
-            project = t.mark("no project") + f'<div class="machine-hint">{t.known(r.get("unlinked_reason"))}</div>'
+            project = t.mark("no project") + f'<div class="machine-hint">{reason_html(r.get("unlinked_reason"), t)}</div>'
         cost = (_money(r["monthly_cost"], t) if isinstance(r.get("monthly_cost"), (int, float))
-                else t.mark("not stated") + f'<div class="machine-hint">{t.known(r.get("cost_note"))}</div>')
+                else t.mark("not stated") + f'<div class="machine-hint">{reason_html(r.get("cost_note"), t)}</div>')
         rows.append([
             f'<b id="{_e(r.get("id"))}">{_e(r.get("name"))}</b> {t.mark(KINDS.get(r.get("kind"), "Resource"), attrs=CHIP)}'
             + _detail(r, t),

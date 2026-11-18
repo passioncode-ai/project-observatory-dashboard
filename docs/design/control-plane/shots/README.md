@@ -46,7 +46,14 @@ done
 - The first render (commit `6d99bd12`) showed the Disk and memory tile of a machine never surveyed printing the
   survey's English reason with the command `project-observatory full machine`. Home now says "This machine has not
   been surveyed yet." in the page's language, and a reason of any other tile that names a command is replaced by
-  "Not read yet; its page says why." (`home_page._reason_html`). The reason with its command stays in the machine
-  survey's JSON and MCP answer (`machine_view.py`), where agents read it. Tests: `test_home_page.py` `StateBand`,
-  `test_a_machine_never_surveyed_says_so_in_the_readers_language_with_no_command` and
-  `test_a_reason_that_holds_a_command_is_not_shown_on_home`.
+  "Not read yet; its page says why." (`page_util.reason_html`, called with `tile=True`). The reason with its command
+  stays in the machine survey's JSON and MCP answer (`machine_view.py`), where agents read it. Tests:
+  `test_home_page.py` `StateBand`, `test_a_machine_never_surveyed_says_so_in_the_readers_language_with_no_command`
+  and `test_a_reason_that_holds_a_command_is_not_shown_on_home`.
+- Every other page took a source's reason as written (OBS-629): the Machine page said "run project-observatory full
+  machine" in its not-measured list, its empty tables and its process hint. Every page now shows a source's reason
+  through the same `page_util.reason_html`: a reason naming a command is cut to the clauses before it, or, when
+  nothing stands before it, replaced by "The reason names a command; an agent reads it through MCP." Tests:
+  `observatory/engine/tests/test_dashboard_shell.py` `NoCommandEveryPage` (every place, both languages) and
+  `tests/test_docs_drift.py` `test_every_page_shows_a_source_reason_only_through_the_filter_that_drops_commands`
+  (every module of the page table).

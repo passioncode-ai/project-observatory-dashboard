@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 
 from i18n import NO_VALUE, Translator
-from page_util import escape as _e, stamp
+from page_util import escape as _e, plain, reason_html, stamp
 
 HEADING = ' class="machine-h"'
 SUB = ' class="tools-h"'
@@ -152,15 +152,6 @@ def _agent(a: dict, t: Translator) -> str:
     return "".join(parts) + "</section>"
 
 
-def _plain(reason: str) -> str:
-    """A reason without the command it ends with: a person reads it, an agent has the MCP tool."""
-    at = reason.find("`")
-    if at < 0:
-        return reason
-    cut = max(reason.rfind(";", 0, at), reason.rfind(",", 0, at))
-    return (reason[:cut] if cut > 0 else reason[:at]).rstrip(" :(")
-
-
 def _reason(d: dict, t: Translator) -> str:
     code, reason = d.get("code"), str(d.get("reason") or "")
     if d.get("source") == "harness.json" and code == "not-surveyed":
@@ -170,10 +161,11 @@ def _reason(d: dict, t: Translator) -> str:
     if code == "stale":
         return t.mark("The last scan is more than a day old; the lists show that day.")
     if code == "unreadable" and d.get("error"):
-        return t.mark("the record could not be read ({error})", error=d["error"])
+        return t.mark("the record could not be read ({error})", error=plain(d["error"]))
     if code == "not-built":
         return t.mark("the findings were not built, so none is shown beside the items")
-    return t.known(_plain(reason))
+    # A reason's command is cut, since a person types none: an agent has the MCP tool (OBS-629).
+    return reason_html(reason, t)
 
 
 def _tiles(v: dict, t: Translator) -> str:

@@ -10,10 +10,8 @@ in part says so; a reason's command is never shown (IS rules).
 """
 from __future__ import annotations
 
-import re
-
 from i18n import NO_VALUE, Translator
-from page_util import escape as _e, stamp
+from page_util import escape as _e, reason_html, stamp
 
 HEADING = ' class="machine-h"'
 HINT = ' class="machine-hint"'
@@ -47,14 +45,6 @@ def summary(doc) -> dict:
             "degraded": [str(d.get("reason") or "") for d in doc.get("degraded") or [] if isinstance(d, dict)]}
 
 
-#: A reason a collector wrote may end in the command that fixes it; a page shows a person no command.
-COMMAND = re.compile(r"\s*[;:(]?\s*`[^`]*`.*$")
-
-
-def _reason(text: str) -> str:
-    return _e(COMMAND.sub("", text).strip())
-
-
 def key_sweep_html(payload: dict, t: Translator) -> str:
     v = payload.get("key_sweep") or {"state": "not-run"}
     head = t.mark("Keys found in repositories", tag="h2", attrs=HEADING)
@@ -79,8 +69,9 @@ def key_sweep_html(payload: dict, t: Translator) -> str:
                     + "</tr>")
     table = (f'<table><thead><tr>{th}</tr></thead><tbody>{"".join(body)}</tbody></table>' if body
              else t.mark("No repository with a local clone to sweep.", tag="p", attrs=HINT))
-    notes = [_reason(x) for x in v.get("degraded") or []]
-    notes += [f'<span class="mono">{_e(r["repo"])}</span>: {_reason(x)}' for r in v.get("rows") or []
+    # A reason a collector wrote may end in the command that fixes it; a page shows a person no command (OBS-629).
+    notes = [reason_html(x, t) for x in v.get("degraded") or [] if x]
+    notes += [f'<span class="mono">{_e(r["repo"])}</span>: {reason_html(x, t)}' for r in v.get("rows") or []
               for x in r["degraded"]]
     partial = ""
     if notes:

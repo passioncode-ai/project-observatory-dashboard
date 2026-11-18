@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from i18n import NO_VALUE, Translator
 from machine_page import EMPTY, HEADING, NUM, _table
-from page_util import escape as _e
+from page_util import escape as _e, reason_html
 
 HINT = ' class="machine-hint"'
 NONE = NO_VALUE
@@ -116,7 +116,7 @@ def _judged(s: dict, t: Translator) -> str:
 
 
 def _degraded(s: dict, t: Translator) -> str:
-    items = [f'<li><span class="mono">{_e(d.get("source"))}</span> · {t.known(d.get("reason"))}</li>'
+    items = [f'<li><span class="mono">{_e(d.get("source"))}</span> · {reason_html(d, t)}</li>'
              for d in s.get("degraded") or [] if isinstance(d, dict)]
     if not items:
         return ""
