@@ -758,194 +758,244 @@ def inventory(github: bool = True) -> dict:
 
     Permissions are osprivacy's answer, never raw mode bits: Windows reports 0o666 for every
     file and keeps owner-only in an ACL, so a mode check there was a false critical."""
-    degraded: list[dict] = []
-    folder = ssh_dir()
-    doc: dict = {"schema": "ssh-keys/1", "measured_at": now(),
-                 "folder": {"path": "~/.ssh", "exists": False, "mode": None, "private": None, "link": False},
-                 "misplaced": []}
-    unseen: list[str] = []
-    try:
-        st = os.lstat(folder)
-        doc["folder"].update(exists=True, mode=osprivacy.describe(folder), private=osprivacy.private(folder),
-                             link=stat.S_ISLNK(st.st_mode))
-    except FileNotFoundError:
-        pass
-    except OSError as exc:
-        unseen.append(f"~/.ssh (could not be read: {type(exc).__name__})")
-    keygen_ok = available(tool("ssh-keygen"))
-    if not keygen_ok:
-        degraded.append({"source": "ssh-keygen", "reason": "not found; fingerprints computed by Observatory "
-                                                           "from the public files", "fix": "install OpenSSH"})
-    files, pubs, links = _candidates(folder) if doc["folder"]["exists"] else ([], [], [])
-    agent_config: list[dict] = []
-    config = read_config(degraded, agent_config)
-    for entry in config:   # every key the config names is a key, at any depth, in ~/.ssh or not
-        p = entry["path"]
-        if p is None:
-            continue
-        kind, err = _probe(p)
-        entry["kind"] = kind
-        if kind == "error":
-            unseen.append(f"IdentityFile {entry['spelled']} (could not be looked at: {err})")
-        elif kind == "file" and p not in files:
-            files.append(p)
-            pub = pathlib.Path(str(p) + ".pub")
-            if _probe(pub)[0] == "file" and pub not in pubs:
-                pubs.append(pub)
-    rows: dict[str, dict] = {}
+    inv = _Inventory()
+    inv.read_folder()
+    inv.read_config_keys()
+    inv.read_private_files()
+    inv.read_links()
+    inv.read_public_files()
+    inv.attach_hosts()
+    inv.read_agents()
+    inv.name_unseen()
+    inv.read_github(github)
+    return inv.document()
 
-    def row(base: pathlib.Path) -> dict:
+
+class _Inventory:
+    """`inventory` in named steps (OBS-609). Each step reads one place a key can live and adds to the rows;
+    `unseen` gathers every place that could not be read, which decides whether a GitHub key may be called
+    foreign."""
+
+    def __init__(self) -> None:
+        self.degraded: list[dict] = []
+        self.folder = ssh_dir()
+        self.doc: dict = {"schema": "ssh-keys/1", "measured_at": now(),
+                          "folder": {"path": "~/.ssh", "exists": False, "mode": None, "private": None, "link": False},
+                          "misplaced": []}
+        self.unseen: list[str] = []
+        self.rows: dict[str, dict] = {}
+        self.files: list[pathlib.Path] = []
+        self.pubs: list[pathlib.Path] = []
+        self.links: list[pathlib.Path] = []
+        self.config: list[dict] = []
+        self.agent_config: list[dict] = []
+        self.keygen_ok = False
+        self.by_path: dict[str, dict] = {}
+        self.identity_files: list[dict] = []
+        self.agent_keys: list[dict] = []
+        self.disk: set[str] = set()
+
+    def row(self, base: pathlib.Path) -> dict:
         key = str(base)
-        if key not in rows:
+        if key not in self.rows:
             try:
-                name = str(base.relative_to(folder)).replace(os.sep, "/")
+                name = str(base.relative_to(self.folder)).replace(os.sep, "/")
             except ValueError:
                 name = tilde(base)
-            rows[key] = {"name": name, "path": tilde(base), "private": False, "public": False, "link": False,
-                         "format": None, "passphrase": "unknown", "type": None, "bits": None,
-                         "fingerprint": None, "comment": "", "private_mode": None, "private_ok": None,
-                         "public_mode": None, "last_access": None, "hosts": [], "in_agent": None,
-                         "github": None, "mismatch": False}
-        return rows[key]
+            self.rows[key] = {"name": name, "path": tilde(base), "private": False, "public": False, "link": False,
+                              "format": None, "passphrase": "unknown", "type": None, "bits": None,
+                              "fingerprint": None, "comment": "", "private_mode": None, "private_ok": None,
+                              "public_mode": None, "last_access": None, "hosts": [], "in_agent": None,
+                              "github": None, "mismatch": False}
+        return self.rows[key]
 
-    for f in files:
+    def read_folder(self) -> None:
+        folder, doc = self.folder, self.doc
         try:
-            st = os.lstat(f)
-            header = private_header(f)
-            if header is not None:
-                mode_text, private_ok = osprivacy.describe(f), osprivacy.private(f)
+            st = os.lstat(folder)
+            doc["folder"].update(exists=True, mode=osprivacy.describe(folder), private=osprivacy.private(folder),
+                                 link=stat.S_ISLNK(st.st_mode))
+        except FileNotFoundError:
+            pass
         except OSError as exc:
-            if f.name.startswith("id_") or _probe(pathlib.Path(str(f) + ".pub"))[0] != "missing" \
-                    or any(e["path"] == f for e in config):
-                row(f).update(private=True, hint=f"unreadable: {type(exc).__name__}")
-                unseen.append(f"{tilde(f)} (could not be read: {type(exc).__name__})")
-            continue
-        if header is None:
-            continue
-        r = row(f)
-        r.update(private=True, private_mode=mode_text, private_ok=private_ok,
-                 last_access=stamp(st.st_atime), **header)
-    for link in links:
-        base = pathlib.Path(str(link)[:-4]) if link.name.endswith(".pub") else link
-        named = any(e["path"] == link for e in config)
-        if link.name.startswith("id_") or named or _probe(pathlib.Path(str(link) + ".pub"))[0] != "missing" \
-                or link.name.endswith(".pub"):
-            row(base).update(link=True)
-    for pub in pubs:
-        base = pathlib.Path(str(pub)[:-4])
-        if holds_private_key(pub):
-            doc["misplaced"].append(tilde(pub))
-            continue
-        r = row(base)
-        try:
-            parsed = read_public(pub)
-        except (Refused, OSError):
-            r["hint"] = f"{tilde(pub)} is not one public key line"
-            continue
-        from_header = r["fingerprint"]
-        r.update(public=True, public_mode=osprivacy.describe(pub), comment=said(parsed["comment"], 120))
-        described = (keygen_describe(pub) if keygen_ok else None) or {
-            "type": KEY_TYPES[parsed["type"]], "bits": blob_bits(parsed["type"], parsed["blob"]),
-            "fingerprint": parsed["fingerprint"]}
-        if from_header and from_header != described["fingerprint"]:
-            # The private key authenticates; a .pub of another key would be copied and sent.
-            r.update(mismatch=True, hint=f"{tilde(pub)} is not the public half of {tilde(base)}; "
-                                         f"`ssh-keygen -y -f {tilde(base)}` prints the right one")
-            continue
-        r.update(described)
-    for r in rows.values():
-        if r["private"] and not r["public"] and "hint" not in r:
-            r["hint"] = (f"no public half: `ssh-keygen -y -f {r['path']} > {r['path']}.pub` recreates it "
-                         f"(it asks for the passphrase)")
-    for entry in config:   # a key the config names through a link: a row, never followed
-        if entry.get("kind") == "link":
-            row(entry["path"]).update(link=True)
-    by_path = {str(pathlib.Path(k)): r for k, r in rows.items()}
-    identity_files = []
-    for entry in config:
-        p = entry["path"]
-        kind = entry.get("kind")
-        exists = None if p is None or kind == "error" else kind != "missing"
-        identity_files.append({"host": " ".join(entry["hosts"]), "path": entry["spelled"], "exists": exists})
-        r = by_path.get(str(p)) if p is not None else None
-        if r is not None:
-            for h in entry["hosts"]:
-                if h != "*" and h not in r["hosts"]:
-                    r["hosts"].append(h)
-    deadline = __import__("time").monotonic() + AGENT_BUDGET
-    agent = agent_fingerprints(degraded, deadline=deadline)
-    # WHAT THIS INVENTORY COULD NOT SEE. A GitHub key is called foreign (and a delete offered)
-    # only when every place a key of this machine can live was read: the agent, every other
-    # agent the config names, every IdentityFile, every linked key. Round 2 found five ways a
-    # key in use stayed invisible and was offered for deletion.
-    if agent is None:
-        unseen.append("the ssh-agent")
-    other_agents: list[dict] = []
-    seen_socks: set[str] = set()
-    for a in agent_config:
-        value = a["value"]
-        if value.lower() == "none" or value == "SSH_AUTH_SOCK":
-            continue
-        where = " ".join(a["hosts"])
-        if value.startswith("$") and not value.startswith("${"):
-            path = os.environ.get(value[1:])
-            spelled = value
-        else:
-            target, spelled = _expand(value)
-            path = str(target) if target is not None else None
-            if target is not None:
-                spelled = tilde(target)
-        label = f"agent {spelled} (IdentityAgent, Host {where})"
-        if path is None:
-            degraded.append({"source": "identity-agent", "reason": f"{label}: its path depends on the host or an "
-                                                                    f"unset variable; not read"})
-            unseen.append(label)
-            continue
-        if path == os.environ.get("SSH_AUTH_SOCK") or path in seen_socks:
-            continue
-        seen_socks.add(path)
-        held = agent_fingerprints(degraded, sock=path, label=f"identity-agent {spelled}", deadline=deadline)
-        if held is None:
-            unseen.append(label)
-        else:
-            other_agents += [dict(k, agent=spelled) for k in held]
-    agent_keys = (agent or []) + other_agents
-    disk = {r["fingerprint"] for r in rows.values() if r["fingerprint"]}
-    if agent is not None or other_agents:
-        loaded = {a["fingerprint"] for a in agent_keys}
-        for r in rows.values():
-            r["in_agent"] = bool(r["fingerprint"]) and r["fingerprint"] in loaded
-    doc["agent_only"] = [a for a in agent_keys if a["fingerprint"] not in disk]
-    for entry in config:
-        p = entry["path"]
-        if p is None:
-            unseen.append(f"IdentityFile {entry['spelled']} (Host {' '.join(entry['hosts'])}): the path "
-                          f"depends on the host or an unset variable")
-        elif entry.get("kind") == "file" and str(p) not in by_path:
-            unseen.append(f"IdentityFile {entry['spelled']}: not readable as a key")
-    for r in rows.values():
-        if not r["fingerprint"] and (r["private"] or r["link"]):
-            unseen.append(f"{r['path']}" + (" (a link, not followed)" if r["link"] else " (fingerprint unknown)"))
-    doc["unseen"] = sorted(set(unseen))
-    doc["github"] = None
-    if github:
+            self.unseen.append(f"~/.ssh (could not be read: {type(exc).__name__})")
+        self.keygen_ok = available(tool("ssh-keygen"))
+        if not self.keygen_ok:
+            self.degraded.append({"source": "ssh-keygen", "reason": "not found; fingerprints computed by Observatory "
+                                                                    "from the public files", "fix": "install OpenSSH"})
+        self.files, self.pubs, self.links = _candidates(folder) if doc["folder"]["exists"] else ([], [], [])
+
+    def read_config_keys(self) -> None:
+        """Every key the config names is a key, at any depth, in ~/.ssh or not."""
+        self.config = read_config(self.degraded, self.agent_config)
+        for entry in self.config:
+            p = entry["path"]
+            if p is None:
+                continue
+            kind, err = _probe(p)
+            entry["kind"] = kind
+            if kind == "error":
+                self.unseen.append(f"IdentityFile {entry['spelled']} (could not be looked at: {err})")
+            elif kind == "file" and p not in self.files:
+                self.files.append(p)
+                pub = pathlib.Path(str(p) + ".pub")
+                if _probe(pub)[0] == "file" and pub not in self.pubs:
+                    self.pubs.append(pub)
+
+    def read_private_files(self) -> None:
+        for f in self.files:
+            try:
+                st = os.lstat(f)
+                header = private_header(f)
+                if header is not None:
+                    mode_text, private_ok = osprivacy.describe(f), osprivacy.private(f)
+            except OSError as exc:
+                if f.name.startswith("id_") or _probe(pathlib.Path(str(f) + ".pub"))[0] != "missing" \
+                        or any(e["path"] == f for e in self.config):
+                    self.row(f).update(private=True, hint=f"unreadable: {type(exc).__name__}")
+                    self.unseen.append(f"{tilde(f)} (could not be read: {type(exc).__name__})")
+                continue
+            if header is None:
+                continue
+            r = self.row(f)
+            r.update(private=True, private_mode=mode_text, private_ok=private_ok,
+                     last_access=stamp(st.st_atime), **header)
+
+    def read_links(self) -> None:
+        for link in self.links:
+            base = pathlib.Path(str(link)[:-4]) if link.name.endswith(".pub") else link
+            named = any(e["path"] == link for e in self.config)
+            if link.name.startswith("id_") or named or _probe(pathlib.Path(str(link) + ".pub"))[0] != "missing" \
+                    or link.name.endswith(".pub"):
+                self.row(base).update(link=True)
+
+    def read_public_files(self) -> None:
+        for pub in self.pubs:
+            base = pathlib.Path(str(pub)[:-4])
+            if holds_private_key(pub):
+                self.doc["misplaced"].append(tilde(pub))
+                continue
+            r = self.row(base)
+            try:
+                parsed = read_public(pub)
+            except (Refused, OSError):
+                r["hint"] = f"{tilde(pub)} is not one public key line"
+                continue
+            from_header = r["fingerprint"]
+            r.update(public=True, public_mode=osprivacy.describe(pub), comment=said(parsed["comment"], 120))
+            described = (keygen_describe(pub) if self.keygen_ok else None) or {
+                "type": KEY_TYPES[parsed["type"]], "bits": blob_bits(parsed["type"], parsed["blob"]),
+                "fingerprint": parsed["fingerprint"]}
+            if from_header and from_header != described["fingerprint"]:
+                # The private key authenticates; a .pub of another key would be copied and sent.
+                r.update(mismatch=True, hint=f"{tilde(pub)} is not the public half of {tilde(base)}; "
+                                             f"`ssh-keygen -y -f {tilde(base)}` prints the right one")
+                continue
+            r.update(described)
+        for r in self.rows.values():
+            if r["private"] and not r["public"] and "hint" not in r:
+                r["hint"] = (f"no public half: `ssh-keygen -y -f {r['path']} > {r['path']}.pub` recreates it "
+                             f"(it asks for the passphrase)")
+
+    def attach_hosts(self) -> None:
+        for entry in self.config:   # a key the config names through a link: a row, never followed
+            if entry.get("kind") == "link":
+                self.row(entry["path"]).update(link=True)
+        self.by_path = {str(pathlib.Path(k)): r for k, r in self.rows.items()}
+        for entry in self.config:
+            p = entry["path"]
+            kind = entry.get("kind")
+            exists = None if p is None or kind == "error" else kind != "missing"
+            self.identity_files.append({"host": " ".join(entry["hosts"]), "path": entry["spelled"], "exists": exists})
+            r = self.by_path.get(str(p)) if p is not None else None
+            if r is not None:
+                for h in entry["hosts"]:
+                    if h != "*" and h not in r["hosts"]:
+                        r["hosts"].append(h)
+
+    def read_agents(self) -> None:
+        """WHAT THIS INVENTORY COULD NOT SEE. A GitHub key is called foreign (and a delete offered)
+        only when every place a key of this machine can live was read: the agent, every other
+        agent the config names, every IdentityFile, every linked key. Round 2 found five ways a
+        key in use stayed invisible and was offered for deletion."""
+        degraded, unseen = self.degraded, self.unseen
+        deadline = __import__("time").monotonic() + AGENT_BUDGET
+        agent = agent_fingerprints(degraded, deadline=deadline)
+        if agent is None:
+            unseen.append("the ssh-agent")
+        other_agents: list[dict] = []
+        seen_socks: set[str] = set()
+        for a in self.agent_config:
+            value = a["value"]
+            if value.lower() == "none" or value == "SSH_AUTH_SOCK":
+                continue
+            where = " ".join(a["hosts"])
+            if value.startswith("$") and not value.startswith("${"):
+                path = os.environ.get(value[1:])
+                spelled = value
+            else:
+                target, spelled = _expand(value)
+                path = str(target) if target is not None else None
+                if target is not None:
+                    spelled = tilde(target)
+            label = f"agent {spelled} (IdentityAgent, Host {where})"
+            if path is None:
+                degraded.append({"source": "identity-agent", "reason": f"{label}: its path depends on the host or an "
+                                                                        f"unset variable; not read"})
+                unseen.append(label)
+                continue
+            if path == os.environ.get("SSH_AUTH_SOCK") or path in seen_socks:
+                continue
+            seen_socks.add(path)
+            held = agent_fingerprints(degraded, sock=path, label=f"identity-agent {spelled}", deadline=deadline)
+            if held is None:
+                unseen.append(label)
+            else:
+                other_agents += [dict(k, agent=spelled) for k in held]
+        self.agent_keys = (agent or []) + other_agents
+        self.disk = {r["fingerprint"] for r in self.rows.values() if r["fingerprint"]}
+        if agent is not None or other_agents:
+            loaded = {a["fingerprint"] for a in self.agent_keys}
+            for r in self.rows.values():
+                r["in_agent"] = bool(r["fingerprint"]) and r["fingerprint"] in loaded
+        self.doc["agent_only"] = [a for a in self.agent_keys if a["fingerprint"] not in self.disk]
+
+    def name_unseen(self) -> None:
+        for entry in self.config:
+            p = entry["path"]
+            if p is None:
+                self.unseen.append(f"IdentityFile {entry['spelled']} (Host {' '.join(entry['hosts'])}): the path "
+                                   f"depends on the host or an unset variable")
+            elif entry.get("kind") == "file" and str(p) not in self.by_path:
+                self.unseen.append(f"IdentityFile {entry['spelled']}: not readable as a key")
+        for r in self.rows.values():
+            if not r["fingerprint"] and (r["private"] or r["link"]):
+                self.unseen.append(f"{r['path']}" + (" (a link, not followed)" if r["link"] else " (fingerprint unknown)"))
+        self.doc["unseen"] = sorted(set(self.unseen))
+
+    def read_github(self, github: bool) -> None:
+        doc = self.doc
+        doc["github"] = None
+        if not github:
+            self.degraded.append({"source": "github", "reason": "not read (--no-github)"})
+            return
         gh, gh_degraded = github_keys()
-        degraded += gh_degraded
-        held = disk | {a["fingerprint"] for a in agent_keys}
+        self.degraded += gh_degraded
+        held = self.disk | {a["fingerprint"] for a in self.agent_keys}
         if any(v is not None for v in gh.values()):
             keys = [dict(k, on_machine=k["fingerprint"] in held) for v in gh.values() if v for k in v]
             doc["github"] = {"read": {u: v is not None for u, v in gh.items()}, "keys": keys}
             if all(v is not None for v in gh.values()):
-                for r in rows.values():
+                for r in self.rows.values():
                     r["github"] = [u for u, v in gh.items() if any(k["fingerprint"] == r["fingerprint"] for k in v)] \
                         if r["fingerprint"] else []
-    else:
-        degraded.append({"source": "github", "reason": "not read (--no-github)"})
-    doc["keys"] = sorted(rows.values(), key=lambda r: r["name"])
-    doc["identity_files"] = identity_files
-    doc["degraded"] = degraded
-    return doc
 
+    def document(self) -> dict:
+        doc = self.doc
+        doc["keys"] = sorted(self.rows.values(), key=lambda r: r["name"])
+        doc["identity_files"] = self.identity_files
+        doc["degraded"] = self.degraded
+        return doc
 
 def saved_path() -> pathlib.Path:
     scratch = os.environ.get("OBSERVATORY_SCRATCH")
@@ -1536,6 +1586,36 @@ def rekey_plan(old: str, new: str | None = None, fingerprint: str | None = None,
     """What `rekey` would do, read without changing anything: the other machine's key (by its public
     half), this machine's key (made or reused), every place to send it with why, what cannot be
     known from here, and the person's steps. Raises Refused."""
+    keys = _rekey_keys(old, new, fingerprint, servers)
+    new, old_base, mine, fp_old = keys["new"], keys["old_base"], keys["mine"], keys["fp_old"]
+    degraded: list[dict] = []
+    unknown: list[dict] = []
+    aliases, resolved, github_hosts, server_hosts = _rekey_hosts(old, new, old_base, servers, degraded, unknown)
+    targets, account = _rekey_github(old, old_base, fp_old, github_hosts, degraded, unknown)
+    if old in DEFAULT_IDENTITIES:
+        unknown.append({"where": "hosts without an IdentityFile line",
+                        "why": f"ssh offers {tilde(old_base)} to every host whose config names no key, so a server "
+                               f"that accepts it need not appear in ~/.ssh/config",
+                        "next": f"name each such server: {CMD} rekey {old} --server ALIAS"})
+    for alias in server_hosts:
+        why = (f"Host {alias} names {tilde(old_base)} in ~/.ssh/config" if alias in aliases
+               else "named with --server")
+        targets.append({"to": f"server:{alias}", "why": why, "verify": True,
+                        "hostname": resolved[alias]["hostname"]})
+    config = []
+    if new != old and not keys["old_private"]:
+        for alias in aliases:
+            config.append({"host": alias, "why": f"Host {alias} names {tilde(old_base)}, which is not on this machine",
+                           "next": f"in ~/.ssh/config, point Host {alias}'s IdentityFile at ~/.ssh/{new}"})
+    return {"schema": "ssh-rekey/1", "applied": False,
+            "old": {"name": old, "fingerprint": fp_old, "from": keys["source"]},
+            "new": mine, "github": {"account": account}, "targets": targets, "unknown": unknown,
+            "config": config, "gates": _rekey_gates(mine, no_passphrase, targets), "degraded": degraded}
+
+
+def _rekey_keys(old: str, new: str | None, fingerprint: str | None, servers) -> dict:
+    """The two keys of a rekey, checked: the other machine's (by its public half or --fingerprint) and this
+    machine's (made or reused). Raises Refused before anything is read further."""
     old_base, old_pub = _key_paths(old)
     new = new or old
     if not NAME.fullmatch(new) or new.endswith(".pub"):
@@ -1550,7 +1630,6 @@ def rekey_plan(old: str, new: str | None = None, fingerprint: str | None = None,
     for alias in servers:
         if not HOST_ARG.fullmatch(alias or ""):
             raise Refused(f"{credential_shape.echo(alias)} is not a host: a Host of ~/.ssh/config or [user@]host")
-    degraded: list[dict] = []
     fp_old, source = fingerprint, ("--fingerprint" if fingerprint else None)
     old_private, old_public = _probe(old_base)[0] != "missing", _probe(old_pub)[0] != "missing"
     if new == old and not old_private and old_public:
@@ -1577,7 +1656,15 @@ def rekey_plan(old: str, new: str | None = None, fingerprint: str | None = None,
         raise Refused(f"{fp_old} is this machine's own key {tilde(new_base)}, not the other machine's; pass the "
                       f"other machine's fingerprint (`{CMD} list` there prints it)")
 
-    unknown: list[dict] = []
+    return {"new": new, "old_base": old_base, "old_private": old_private, "fp_old": fp_old, "source": source,
+            "mine": mine}
+
+
+def _rekey_hosts(old: str, new: str, old_base, servers, degraded: list[dict],
+                 unknown: list[dict]) -> tuple[list[str], dict[str, dict], list[str], list[str]]:
+    """The hosts that reach the other machine's key: the config's Host blocks that name it and the servers
+    named with --server, each resolved and sorted into GitHub, a git service or a server. Answers (the aliases
+    the config names, each host resolved, the GitHub hosts, the server hosts)."""
     aliases: list[str] = []
     seen: dict = {}
     config_gaps: list[dict] = []
@@ -1640,6 +1727,13 @@ def rekey_plan(old: str, new: str | None = None, fingerprint: str | None = None,
         degraded.append({"source": "ssh-config", "reason": f"ssh -G was not run: {why}; hosts were read from the "
                                                            f"config's own HostName and User lines"})
 
+    return aliases, resolved, github_hosts, server_hosts
+
+
+def _rekey_github(old: str, old_base, fp_old: str | None, github_hosts: list[str], degraded: list[dict],
+                  unknown: list[dict]) -> tuple[list[dict], str | None]:
+    """GitHub as a target, only when the other key is proven on gh's account; answers (the targets, the
+    account)."""
     held, gh_degraded = github_keys()
     degraded += gh_degraded
     account = github_account(degraded)
@@ -1685,21 +1779,11 @@ def rekey_plan(old: str, new: str | None = None, fingerprint: str | None = None,
                                                       f"keys, yet GitHub may know it{hint}: it may be on another "
                                                       f"account",
                             "next": f"{switch}; then run this again"})
-    if old in DEFAULT_IDENTITIES:
-        unknown.append({"where": "hosts without an IdentityFile line",
-                        "why": f"ssh offers {tilde(old_base)} to every host whose config names no key, so a server "
-                               f"that accepts it need not appear in ~/.ssh/config",
-                        "next": f"name each such server: {CMD} rekey {old} --server ALIAS"})
-    for alias in server_hosts:
-        why = (f"Host {alias} names {tilde(old_base)} in ~/.ssh/config" if alias in aliases
-               else "named with --server")
-        targets.append({"to": f"server:{alias}", "why": why, "verify": True,
-                        "hostname": resolved[alias]["hostname"]})
-    config = []
-    if new != old and not old_private:
-        for alias in aliases:
-            config.append({"host": alias, "why": f"Host {alias} names {tilde(old_base)}, which is not on this machine",
-                           "next": f"in ~/.ssh/config, point Host {alias}'s IdentityFile at ~/.ssh/{new}"})
+    return targets, account
+
+
+def _rekey_gates(mine: dict, no_passphrase: bool, targets: list[dict]) -> list[str]:
+    """What a person must do at this terminal or in a browser for the plan to be applied."""
     gates = []
     if mine["action"] == "create" and not no_passphrase:
         gates.append("ssh-keygen asks for the new key's passphrase at this terminal (it is never an argument); "
@@ -1711,11 +1795,7 @@ def rekey_plan(old: str, new: str | None = None, fingerprint: str | None = None,
     if any(t["to"] != "github" for t in targets):
         gates.append("a server that does not let this machine in yet takes the key from the machine that holds the "
                      "other key, or from a password typed at this terminal (--interactive)")
-    return {"schema": "ssh-rekey/1", "applied": False,
-            "old": {"name": old, "fingerprint": fp_old, "from": source},
-            "new": mine, "github": {"account": account}, "targets": targets, "unknown": unknown,
-            "config": config, "gates": gates, "degraded": degraded}
-
+    return gates
 
 def _target_label(t: dict) -> str:
     return f"GitHub {USE_WORDS[t['use']]}" if t["to"] == "github" else t["to"]

@@ -3,7 +3,21 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
-## Unreleased
+## 0.45.0 (2026-11-18)
+
+Wave R6 and R7 of the control plane refactor: no page shows a command a person would copy, and the longest door and
+scanner functions are split into named steps.
+
+### Changed
+
+- **No page shows a command** (OBS-629): every page module shows a source's reason through one function,
+  `page_util.reason_html`. A reason that names a command is cut to the words before it, or says that an agent reads it
+  through MCP; a Home tile keeps "Not read yet; its page says why". JSON and MCP answers keep the whole reason. The
+  Machine, Installed tools, Disk, Integrations, Agents, DigitalOcean, Cloudflare, MCP and key sweep pages use it, and
+  the drift test covers every page module.
+- **Long functions split into named steps** (OBS-609), with behaviour, messages and tests unchanged:
+  `vault.copy_slot`, `digitalocean.cmd_rotate`, `scan_leaks.scan_sqlite` and `scan_leaks.main`, `ssh_keys.inventory`
+  and `ssh_keys.rekey_plan`.
 
 ### Fixed
 
@@ -12,6 +26,12 @@ while the major version is 0, a minor release may change behaviour and says so h
   is gone" once v0.44.0 existed, and the release guard could not turn green. It now compares only the tags reachable
   from the checked-out commit. 0.43.0 stays tagged and unpublished: every change in it ships in 0.44.0. Its
   released section keeps its text as tagged.
+
+### Board
+
+- OBS-632 (a context egress gate on every route to an organization), OBS-633 (the harness scan on by default),
+  OBS-634 (the machine inventory keeps other accounts as counts only), OBS-635 (secret access bound to an agent's
+  project), OBS-637 (an MCP server with two doors, `search` and `execute`).
 
 ## 0.44.0 (2026-11-18)
 
