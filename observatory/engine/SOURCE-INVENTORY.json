@@ -180,8 +180,8 @@
     {
       "path": "collectors/credentials_registry.py",
       "source_sha256": "5876b75923c191737b6162537db6ef2e004b45a944ff1a387d2055cfd0de98e2",
-      "export_sha256": "e1f46020b7877c28ee0df3e95738c12863cc3e6283d78e54976c48a264f0081c",
-      "bytes": 35250,
+      "export_sha256": "8ef6308e3e931e13d5e4f5db3ed4c19530ee981b1901b250a3411ad3ae4568b2",
+      "bytes": 35709,
       "python_comments_removed": 104,
       "python_docstrings_removed": 12,
       "tool_descriptions_retained": 0,
@@ -655,8 +655,8 @@
     {
       "path": "dashboard/build_dashboard.py",
       "source_sha256": "9169551d891a47eb7e9d96011b07f6b0a621338884beeba4c868c10d3f84724a",
-      "export_sha256": "ceca642650490990c188bba81019200ce361c661039267d0474e20878360b351",
-      "bytes": 330417,
+      "export_sha256": "215cab8acbe81eedf1aaad643aa2054f84762cd042ff3bb90dd253fa5f2d4fcb",
+      "bytes": 331350,
       "python_comments_removed": 235,
       "python_docstrings_removed": 8,
       "tool_descriptions_retained": 0,
@@ -722,8 +722,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9bc441de8470bb76b969f86791169925a543d9f9f3c1336f2f9ba36db0c43229",
-      "bytes": 254948
+      "export_sha256": "afb2b65eecebfb1d4219b2f55bda03843c1bc3b69b01e637600312508f5ec22a",
+      "bytes": 255199
     },
     {
       "path": "dashboard/machine_page.py",
@@ -1045,8 +1045,8 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "53f2b462dfad639ce857e598b751af15e5325950f82aa677ae3bba1e00587d8e",
-      "bytes": 155397,
+      "export_sha256": "d8584885fd043fd9263aa372b81d6e50dfb6f31327ea4215cde5ea64d8df9e56",
+      "bytes": 157270,
       "upstream_modified": true
     },
     {
@@ -3461,8 +3461,8 @@
       "path": "key_source.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b13e3ef097dee98c52fbc1ec4ed81761de731116ce7919908a46d84dd7d941b7",
-      "bytes": 9151
+      "export_sha256": "43f555a321ccde3da1129bf7b35c457f6cd31bda184c5a1d1a766e7dde855efe",
+      "bytes": 21934
     },
     {
       "path": "leak_register.py",
@@ -3565,8 +3565,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "abdb887070f57b90acf3fd1fde3cc172dea17943338c3f616f9282f97706e89b",
-      "bytes": 171850,
+      "export_sha256": "49473cadb9841b580132edb04943484bc4462df121c65f7f33b08abd6ffd1f41",
+      "bytes": 172399,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -4512,8 +4512,8 @@
     {
       "path": "survey.py",
       "source_sha256": "2c692bcd4b6deac11f6608cce06abe134b748382d7037e43a6d2034d193aac0f",
-      "export_sha256": "e8c7e245542845ea7bd72fc1c88b1ed5dc4a4c4f13ac0935e60f1416953fa108",
-      "bytes": 80773,
+      "export_sha256": "78f5bca586fd54e4407b0fc26c8cb4147eda3a37b10a86149daec5ebce39181a",
+      "bytes": 80820,
       "python_comments_removed": 210,
       "python_docstrings_removed": 11,
       "tool_descriptions_retained": 0,
@@ -5829,8 +5829,8 @@
       "path": "tests/test_key_source.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "fcc2d822da984ea24ce26bcd65cfb16feb9fefa4846d7d9dee189d2f4c1d7eba",
-      "bytes": 13375
+      "export_sha256": "f07730e9e9793c636b81f029b8b25ae490c94026d5bfb2ed12f649b2f2b13bc5",
+      "bytes": 27684
     },
     {
       "path": "tests/test_key_sweep.py",
@@ -7863,8 +7863,8 @@
       "path": "tools/key_consumers.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "680752d9f3605f08cb0b375fe763f4004fbad4537e6237a66de085b54b563768",
-      "bytes": 36663
+      "export_sha256": "1ef553e6debc944a5c72e218333ec7c252777dba510746e28406f43688ab2e14",
+      "bytes": 38367
     },
     {
       "path": "tools/key_expiry.py",
