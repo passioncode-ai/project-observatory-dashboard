@@ -195,6 +195,30 @@ every agent and person who changes this repository, in every copy of it:
 - **Every change is logged.** Each change, by an agent or a person, has its `docs/backlog.md`
   row and its `CHANGELOG.md` line (written at the release) with its reason and basis.
 
+## Etalons live on PassionCode.ai
+
+Operator rule, 2026-11-17 (rule R33 O11 of the organization's agent templates), for every agent
+working in this repository and in every organization copy of the engine:
+
+- **The etalon.** The etalon of this agent kind is the `estate-engine` template on PassionCode.ai:
+  its template repository `passioncode-ai/template-estate-engine`, rendered from the
+  organization's agents database. This agent's rules and every organization copy of the engine
+  are built, adapted, cloned or restored from that etalon at the template's current version,
+  never from another copy or a personal repository.
+- **The code stays here.** This repository is still the single home of the engine's code (see
+  "What this repository is"): the etalon carries the agent's rules and how a copy is assembled,
+  and an engine change still lands here first and ships as a release.
+- **An improvement goes to the base first.** A better rule or practice found here or in any copy
+  goes to the agents database first (a contribution or an `agents.improve` request on the board),
+  then every etalon of the template is rendered again, then this repository and the copies take
+  the version. A copy never takes a fix by copying another copy's code, and an organization's
+  data (people, keys, clients, chats, records) never crosses.
+- **The end of a change.** A change to this agent's rules ends with the agents database's
+  staleness check (`template_repo.py stale`) listing nothing for `estate-engine`.
+- **Open.** On 2026-11-18 the template repository `passioncode-ai/template-estate-engine` is not
+  published yet (`gh repo view` answers that it cannot resolve it), so the template in the agents
+  database is the etalon until it is rendered. Tracked as OBS-636.
+
 ## How a change reaches `main`
 
 1. Branch from `main`; commit in small logical commits.

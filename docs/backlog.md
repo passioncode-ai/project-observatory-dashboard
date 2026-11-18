@@ -1,6 +1,6 @@
 # Local backlog
 
-**Next free ID:** `OBS-631`
+**Next free ID:** `OBS-637`
 
 **Vacant ids:** `OBS-91` (skipped when the OBS register began reserving: #277 wrote OBS-92 and OBS-93, and no row was ever written under 91); `OBS-422` (reserved on 2026-11-08 for the provider-account organization rules, which became OBS-412 part 1 when the organization onboarding rows OBS-411 to OBS-420 were written)
 
@@ -652,3 +652,4 @@ still open and needs nothing, and a reservation older than that with no row must
 | OBS-628 | `config/organizations.json` can name the Heroku user an organization's keys are issued by (`match.heroku_users`), so a key the operator's own Heroku user issued for an organization's project is attributed instead of ambiguous; `org keys` and `org accounts` read it | done in 0.43.0 | Fabric board request `a1a592ac` from another project, item 3, 2026-11-18 |
 | OBS-629 | No page shows a command a person would copy, not only Home: the Machine page (`machine_page.py`, the localized survey reason) and every other page take a source's reason through one function that replaces a command with a sentence, while the JSON and MCP answers keep the command for agents | open | Found while closing OBS-608, 2026-11-18 |
 | OBS-630 | Observatory watches every coding session and the host's load, with history: a session run through a group folder's route (the account manager's proxy or a launch id) reads managed with its `account_group`; the account manager's sessions feed (one record per session and one per host each minute) is read when present, its CLI answers until then; findings with an owner and a fix for a critical host, free disk under 5 GB, a group with no account with room, a launch served by another group, a session outside the account manager and a stalled session, each sent to the operator once through the communicator | open | Fabric board request `d712d49c` from the account manager, the operator's order of 2026-11-18 |
+| OBS-636 | Carry the organization rule R33 O11 (2026-11-17: etalons live on PassionCode.ai; this agent and every organization copy are built from the `estate-engine` template's etalon at its current version, an improvement goes to the agents database first) in this repository's agent rules: a section in `AGENTS.md`. Still to do: the etalon repository `passioncode-ai/template-estate-engine` is not published yet (2026-11-18), so the base's template stands in for it until the agents database renders it | open | Fabric board request `e91e861f` (agents.improve, 2026-11-18) |
