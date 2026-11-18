@@ -191,6 +191,32 @@ class Page(unittest.TestCase):
         unsampled, _ = both(machine())
         self.assertIn("Not sampled yet", shown(unsampled))
 
+    def test_vm_disks_and_swap_show_their_growth_and_who_holds_the_memory(self):
+        """OBS-620: each VM disk file with its space and growth over the last day; the swap on the same disk with the
+        agent sessions holding the memory it writes. Nothing on the page acts on a VM."""
+        vms = [{"path": "/h/.colima/_lima/_disks/colima/datadisk", "tool": "colima", "vm": "colima",
+                "file": "datadisk", "allocated_gb": 23.0, "size_gb": 100.0,
+                "growth": {"gb": 10.7, "window_hours": 24.0, "gb_per_day": 10.7}, "growing": True},
+               {"path": "/h/.lima/default/diffdisk", "tool": "lima", "vm": "default", "file": "diffdisk",
+                "allocated_gb": 4.0, "growth": None, "growing": False}]
+        swap = {"gb": 15.0, "same_container": True, "growing": True,
+                "growth": {"gb": 10.0, "window_hours": 24.0, "gb_per_day": 10.0},
+                "owner": {"sessions": 38, "rss_gb": 32.0, "agents": [{"agent": "claude", "sessions": 35, "rss_gb": 30.0}]}}
+        en, ru = both(machine(guard={**GUARD, "vmDisks": vms, "swap": swap}))
+        text = shown(en)
+        for want in ("Virtual machine disks", "colima", "datadisk", "23 GB", "10.7 GB", "growing fast", "default",
+                     "Swap", "15 GB", "38", "32 GB", "claude"):
+            self.assertIn(want, text)
+        self.assertIn("Диски виртуальных машин", shown(ru))
+        for page in (en, ru):
+            self.assertIsNone(COMMAND.search(page))
+            self.assertIsNone(re.search(r"\b(colima|limactl)\s+(stop|delete|ssh|prune)", shown(page)))
+        relocalizes(self, en, ru)
+        none, _ = both(machine(guard={**GUARD, "vmDisks": [], "swap": None}))
+        self.assertIn("No Lima or Colima virtual machine disk", shown(none))
+        unmeasured, _ = both(machine())
+        self.assertIn("Not measured yet", shown(unmeasured))
+
     def test_what_auto_cleanup_removes_and_keeps_with_its_idle_days(self):
         en, _ = both(machine())
         text = shown(en)

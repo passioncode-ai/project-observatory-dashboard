@@ -28,6 +28,8 @@
   "clone_min_age_hours": 1,
   "user_temp_hours": 12,
   "tmp_growth": {"entries_per_day": 1000, "gb_per_day": 1},
+  "vm_growth": {"gb_per_day": 2},
+  "swap_growth": {"gb_per_day": 2},
   "temp_roots": [
    {"path": "{tmpdir}", "depth": 1},
    {"path": "/private/tmp", "depth": 1},

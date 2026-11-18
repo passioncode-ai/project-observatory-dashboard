@@ -1089,6 +1089,12 @@ def observatory_machine(
         out["guard"]["userTemp"] = ({**{k: temp.get(k) for k in ("at", "hours", "entries", "gb", "complete",
                                                                   "window_hours", "growing", "last_removed")},
                                      "classes": (temp.get("classes") or [])[:MACHINE_TOP]} if temp else None)
+        # Each VM disk file with its growth over the last day, and the swap on the same disk with the agent sessions
+        # holding its memory (OBS-620). `[]` and `null` when the guard has not measured them.
+        out["guard"]["vmDisks"] = [{k: v.get(k) for k in ("vm", "tool", "file", "path", "allocated_gb", "growth",
+                                                          "growing")}
+                                   for v in (g.get("vmDisks") or []) if isinstance(v, dict)][:MACHINE_TOP]
+        out["guard"]["swap"] = g.get("swap") if isinstance(g.get("swap"), dict) else None
         memory = g.get("memory") or {}
         out["guard"]["memory"] = {k: memory.get(k) for k in ("measured_at", "swap_gb", "swap_reason")}
     return out

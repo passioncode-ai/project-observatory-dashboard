@@ -290,4 +290,6 @@ def _location_labels() -> tuple[str, ...]:
 
 #: The swap row's label, written by collectors/scan_machine.py itself.
 SWAP_LABEL = "Swap files (memory written to disk)"
-DYNAMIC = DYNAMIC + (SWAP_LABEL,) + _location_labels()
+#: A VM disk file's row, which `machine_view.vm_location` adds from the disk guard's pass (OBS-620).
+VM_DISK_LABEL = "Lima or Colima virtual machine disk"
+DYNAMIC = DYNAMIC + (SWAP_LABEL, VM_DISK_LABEL) + _location_labels()

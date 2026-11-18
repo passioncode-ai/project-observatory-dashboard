@@ -50,6 +50,8 @@ SETTING_LABELS = {
     "guard.user_temp_hours": "Entries of the temporary folder kept, hours",
     "guard.tmp_growth.entries_per_day": "Temporary folder growth worth a finding, new entries a day",
     "guard.tmp_growth.gb_per_day": "Temporary folder growth worth a finding, GB a day",
+    "guard.vm_growth.gb_per_day": "Virtual machine disk growth worth a finding, GB a day",
+    "guard.swap_growth.gb_per_day": "Swap growth worth a finding, GB a day",
     "cleanup.auto.merged_branch_idle_days": "Merged branches kept, idle days",
     "cleanup.auto.pushed_branch_idle_days": "Pushed branches kept, idle days",
     "cleanup.auto.clean_worktree_idle_days": "Clean worktrees kept, idle days",
@@ -318,6 +320,71 @@ def temp_html(g: dict | None, t: Translator) -> str:
     return "".join(parts)
 
 
+VM_HINT = ("Each Lima or Colima virtual machine keeps its disk in a file on this disk; the file takes the space the "
+           "machine wrote, and a log or database growing inside it shows here first. Observatory never changes a "
+           "virtual machine: a disk growing faster than the setting below is a finding for its owner.")
+
+
+def _growth(growth, t: Translator) -> str:
+    if not isinstance(growth, dict) or not isinstance(growth.get("gb"), (int, float)):
+        return t.mark("measured from the next day")
+    return t.mark("{gb} GB in {hours} h", gb=growth["gb"], hours=growth.get("window_hours", NONE))
+
+
+def vms_html(g: dict | None, t: Translator) -> str:
+    """Each Lima or Colima VM disk file with the space it takes and its growth over the last day, and the swap on the
+    same disk with the agent sessions holding the memory it writes (OBS-620). Nothing here acts on a VM."""
+    head = t.mark("Virtual machine disks", tag="h2", attrs=HEADING)
+    hint = t.mark(VM_HINT, tag="p", attrs=HINT)
+    vms = (g or {}).get("vmDisks")
+    parts = [f'<section class="card panel" id="disk-vms">{head}{hint}']
+    if not isinstance(vms, list):
+        parts.append(t.mark("Not measured yet. The guard measures them on every pass.", tag="p", attrs=EMPTY))
+    elif not [v for v in vms if isinstance(v, dict)]:
+        parts.append(t.mark("No Lima or Colima virtual machine disk on this machine.", tag="p", attrs=EMPTY))
+    else:
+        heads = [("Virtual machine", False), ("File", False), ("Space taken", True), ("Last day", True),
+                 ("Growth", False)]
+        th = "".join(f'<th scope="col"{NUM if num else ""}>{t.mark(h)}</th>' for h, num in heads)
+        body = []
+        for v in [v for v in vms if isinstance(v, dict)][:ROWS]:
+            cells = [_e(v.get("vm") or NONE) + f' <span class="machine-hint">{_e(v.get("tool") or "")}</span>',
+                     f'<span class="mono">{_e(v.get("file") or NONE)}</span>',
+                     _gigabytes(v.get("allocated_gb"), t), _growth(v.get("growth"), t),
+                     t.mark("growing fast") if v.get("growing") is True else NONE]
+            body.append("<tr>" + "".join(f'<td{NUM if num else ""}{t.attr("data-label", h)}>{c}</td>'
+                                         for (h, num), c in zip(heads, cells)) + "</tr>")
+        parts.append(f'<table><thead><tr>{th}</tr></thead><tbody>{"".join(body)}</tbody></table>')
+    parts.append(_swap(g, t))
+    parts.append("</section>")
+    return "".join(parts)
+
+
+def _swap(g: dict | None, t: Translator) -> str:
+    swap = (g or {}).get("swap")
+    if not isinstance(swap, dict):
+        return ""
+    if not isinstance(swap.get("gb"), (int, float)):
+        return t.mark("Swap: not measured.", tag="p", attrs=HINT)
+    where = {True: "on the same disk", False: "on another disk"}.get(swap.get("same_container"), "disk not known")
+    line = (f'<p class="machine-at">{t.mark("Swap holds {gb} GB", gb=swap["gb"])} · {t.mark(where)} · '
+            f'{t.mark("last day")} {_growth(swap.get("growth"), t)}</p>')
+    if swap.get("growing") is True:
+        line += t.mark("Swap is growing fast.", tag="p", attrs=HINT)
+    owner = swap.get("owner") if isinstance(swap.get("owner"), dict) else {}
+    sessions, rss = owner.get("sessions"), owner.get("rss_gb")
+    agents = [a for a in owner.get("agents") or [] if isinstance(a, dict) and a.get("agent")]
+    named = "".join(f' · <span class="mono">{_e(a["agent"])}</span> '
+                    f'{t.number(a["sessions"]) if isinstance(a.get("sessions"), int) else NONE}' for a in agents[:5])
+    if isinstance(sessions, int):
+        held = t.mark("Held by {count} agent sessions, their processes holding {gb} GB of memory", count=sessions,
+                      gb=rss if isinstance(rss, (int, float)) else NONE)
+        line += f'<p class="machine-hint">{held}{named}</p>'
+    else:
+        line += t.mark("The agent sessions holding its memory were not read.", tag="p", attrs=HINT)
+    return line
+
+
 def _runs(cleanup: dict | None, t: Translator) -> str:
     runs = (cleanup or {}).get("guardRuns") or []
     return _table(t, "Guard passes in 7 days",
@@ -432,6 +499,7 @@ def disk_html(payload: dict, t: Translator | None = None) -> str:
     parts.append(_runs(cleanup, t))
     parts.append(_classes(cleanup, values, t))
     parts.append(temp_html(m.get("guard"), t))
+    parts.append(vms_html(m.get("guard"), t))
     parts.append(volumes_html(m.get("guard"), t))
     parts.append(_journal(cleanup, t))
     parts.append(settings_html(listing, t))
@@ -448,5 +516,7 @@ DYNAMIC = (tuple(SETTING_LABELS.values()) + tuple(c[1] for c in CLASSES)
               "incomplete measurement", "Not measured", DISABLED,
               "Virtual machine", "Volume", "Owner", "Size",       # the volumes table's heads (`volumes_html`)
               "unreadable", VOLUME_HINT,
-              "Names", "Entries", "New a day", "Growth", TEMP_HINT)   # the temporary folder's section (`temp_html`)
+              "Names", "Entries", "New a day", "Growth", TEMP_HINT,   # the temporary folder's section (`temp_html`)
+              "File", "Space taken", "Last day", VM_HINT,             # the VM disks' section (`vms_html`, OBS-620)
+              "on the same disk", "on another disk", "disk not known", "last day")
            + tuple(VOLUME_UNREAD.values()))

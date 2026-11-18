@@ -227,6 +227,18 @@ def skills_page(section: dict, limit: int | None = None, cursor: str | None = No
             "findings": findings, "open": section["open"], "degraded": degraded}
 
 
+#: The label of a VM disk file's place in the disk section (OBS-620); a message id the pages translate.
+VM_DISK_LABEL = "Lima or Colima virtual machine disk"
+
+
+def vm_location(v: dict, at) -> dict:
+    """One VM disk file as a place of the disk section: what it takes now and what it grew over the last day."""
+    growth = v.get("growth") if isinstance(v.get("growth"), dict) else None
+    return {"path": v["path"], "kind": "vm", "label": VM_DISK_LABEL, "reclaim": "manual", "gb": v["allocated_gb"],
+            "measured_at": at, "vm": v.get("vm"), "tool": v.get("tool"),
+            "growth_gb_per_day": growth.get("gb_per_day") if growth else None, "growing": v.get("growing") is True}
+
+
 def summary(explain_pid: int | None = None) -> dict:
     degraded = []
     machine, d1 = _load("machine.json", "machine")
@@ -295,8 +307,20 @@ def summary(explain_pid: int | None = None) -> dict:
                         "vmVolumes": guard.get("vm_volumes"),
                         # The user's temporary folder: size, fastest-growing classes, last removal (OBS-585).
                         "userTemp": guard.get("user_temp"),
+                        # Each Lima or Colima VM disk file with its growth over the last day, and the swap on the same
+                        # disk with the agent sessions that hold its memory (OBS-620).
+                        "vmDisks": guard.get("vms"), "swap": guard.get("swap"),
                         "memory": guard.get("memory")}
         degraded += guard.get("degraded") or []
+        # The disk section lists each VM disk file as a place of its own, sized by the guard every pass (its
+        # allocated size, not the length a sparse file claims), largest first with the survey's places.
+        vm_rows = [vm_location(v, guard.get("at")) for v in guard.get("vms") or [] if isinstance(v, dict)
+                   and isinstance(v.get("allocated_gb"), (int, float)) and v.get("path")]
+        if vm_rows:
+            disk = dict(out.get("disk") or {})
+            places = [r for r in disk.get("locations") or [] if isinstance(r, dict)] + vm_rows
+            disk["locations"] = sorted(places, key=lambda r: -(r.get("gb") or 0))
+            out["disk"] = disk
     # The days before the last pass, for the Disk page's trend (OBS-572): `[]` when the guard has not recorded any.
     tools = str(paths.ROOT / "tools")
     if tools not in sys.path:

@@ -208,5 +208,58 @@ class TemporaryFolderGrowth(unittest.TestCase):
         self.assertIn("disk.tmp_growth", [f["type"] for f in found])
 
 
+
+class VirtualMachineGrowth(unittest.TestCase):
+    """OBS-620: a VM disk file growing faster than `vm_growth.gb_per_day` is a row naming the VM, before the host disk
+    runs out (2026-11-17: a container log of 10.7 GB inside a VM filled it twice). The guard never changes a VM."""
+
+    GUARD = {"vms": [{"path": "/h/.colima/_lima/_disks/colima/datadisk", "key": "colima/colima/datadisk",
+                      "tool": "colima", "vm": "colima", "file": "datadisk", "allocated_gb": 23.0,
+                      "growth": {"gb": 10.7, "window_hours": 24.0, "gb_per_day": 10.7}, "growing": True},
+                     {"path": "/h/.lima/default/diffdisk", "key": "lima/default/diffdisk", "tool": "lima",
+                      "vm": "default", "file": "diffdisk", "allocated_gb": 4.0,
+                      "growth": {"gb": 0.1, "window_hours": 24.0, "gb_per_day": 0.1}, "growing": False}],
+             "swap": {"gb": 15.0, "same_container": True, "growing": True,
+                      "growth": {"gb": 10.0, "window_hours": 24.0, "gb_per_day": 10.0},
+                      "owner": {"sessions": 38, "rss_gb": 32.0,
+                                "agents": [{"agent": "claude", "sessions": 35, "rss_gb": 30.0}]}}}
+
+    def test_a_growing_vm_is_a_finding_naming_it(self):
+        found = F.vm_growth_findings(self.GUARD)
+        self.assertEqual([(f["type"], f["subject"]) for f in found], [("disk.vm_growth", "machine:vm:colima")])
+        f = found[0]
+        self.assertEqual(f["severity"], "warning")
+        self.assertIn("colima", f["title"])
+        self.assertIn("10.7", f["detail"])
+        self.assertIn("never", f["detail"])
+        self.assertNotIn("--", f["detail"] + f["action"])
+        sys.path.insert(0, str(ROOT / 'dashboard'))
+        import finding_types
+        self.assertIn("disk.vm_growth", finding_types.LABELS)
+        self.assertIn("disk.swap_growth", finding_types.LABELS)
+
+    def test_a_growing_swap_is_a_finding_naming_its_owner(self):
+        found = F.swap_growth_findings(self.GUARD)
+        self.assertEqual([(f["type"], f["subject"]) for f in found], [("disk.swap_growth", "machine:swap")])
+        self.assertIn("38", found[0]["detail"])
+        self.assertIn("claude", found[0]["detail"])
+        self.assertEqual(F.swap_growth_findings({"swap": {**self.GUARD["swap"], "growing": False}}), [])
+
+    def test_nothing_without_growth_or_with_a_malformed_section(self):
+        for bad in (None, {"vms": "x"}, {"vms": [3, {"growing": True}]}, {"swap": "x"}, {"swap": {"growing": True}}):
+            self.assertEqual(F.vm_growth_findings(bad) + F.swap_growth_findings(bad), [])
+
+    def test_the_board_reads_them(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / 'logs').mkdir()
+            (root / 'disk-guard.json').write_text(json.dumps({**self.GUARD, "at": "2026-01-01T12:00:00Z"}))
+            found = F.findings(root, root / 'logs', {}, now=datetime(2026, 1, 1, 12, tzinfo=timezone.utc),
+                               auto_cleanup=False)
+        types = [f["type"] for f in found]
+        self.assertIn("disk.vm_growth", types)
+        self.assertIn("disk.swap_growth", types)
+
+
 if __name__ == '__main__':
     unittest.main()

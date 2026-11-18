@@ -3965,5 +3965,199 @@ class UserTempGrowth(Base):
             self.assertIsNone(server.observatory_machine()["guard"]["userTemp"])
 
 
+
+class VmDiskGrowth(Base):
+    """OBS-620: each Lima or Colima VM disk file is its own location with what it grew over the last day, from the
+    guard's own history; one growing faster than `vm_growth.gb_per_day` is marked, and nothing acts on a VM."""
+
+    def series(self):
+        import disk_growth_series
+        return importlib.reload(disk_growth_series)
+
+    def sparse(self, path: Path, allocated_mb: int) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "wb") as fh:
+            fh.truncate(8 * 1024 ** 3)
+            fh.write(b"x" * allocated_mb * 1024 * 1024)
+        return path
+
+    def test_each_vm_disk_file_is_named_by_its_tool_vm_and_file(self):
+        names = [self.g.vm_name("/h/.colima/_lima/_disks/colima/datadisk"),
+                 self.g.vm_name("/h/.colima/_lima/colima-work/disk"),
+                 self.g.vm_name("/h/.lima/_disks/data1/datadisk"),
+                 self.g.vm_name("/h/.lima/default/diffdisk")]
+        self.assertEqual(names, [("colima", "colima", "datadisk"), ("colima", "colima-work", "disk"),
+                                 ("lima", "data1", "datadisk"), ("lima", "default", "diffdisk")])
+        raw = self.base / ".colima" / "_lima"
+        self.sparse(raw / "_disks" / "colima" / "datadisk", 1)
+        rows = self.g.vm_disks(time.time(), globs=(str(raw / "_disks" / "*" / "datadisk"),))
+        self.assertEqual((rows[0]["tool"], rows[0]["vm"], rows[0]["file"], rows[0]["key"]),
+                         ("colima", "colima", "datadisk", "colima/colima/datadisk"))
+
+    def test_the_series_keeps_two_days_and_measures_the_last_day(self):
+        m = self.series()
+        at = 1_800_000_000.0
+        for h in range(0, 60, 1):
+            m.record({"colima/colima/datadisk": 10 + h * 0.5, "swap": 3.0, "bad key!": 1, "x": "nan"},
+                     at - (59 - h) * HOUR)
+        rows = m.read()
+        self.assertEqual(sorted(rows), ["colima/colima/datadisk", "swap"], "keys only, a bad key or value adds nothing")
+        self.assertLessEqual(rows["swap"][-1][0] - rows["swap"][0][0], m.KEEP_HOURS * HOUR)
+        got = m.growth(rows["colima/colima/datadisk"], at)
+        self.assertEqual(got["window_hours"], 25.0)
+        self.assertAlmostEqual(got["gb"], 12.5)
+        self.assertAlmostEqual(got["gb_per_day"], 12.0)
+        self.assertEqual(m.growth(rows["swap"], at)["gb_per_day"], 0.0)
+        self.assertIsNone(m.growth([[at - 600, 1.0], [at, 2.0]], at), "under an hour claims no rate")
+        self.assertIsNone(m.growth([], at))
+        text = m.series_file().read_text(encoding="utf-8")
+        self.assertNotIn(str(self.base), text, "numbers and keys only, never a path")
+        m.series_file().write_text("{not json", encoding="utf-8")
+        self.assertEqual(m.read(), {}, "a damaged history is no history, never zero growth")
+
+    def test_a_vm_growing_faster_than_the_setting_is_marked(self):
+        vms = [{"path": "/h/.colima/_lima/_disks/colima/datadisk", "key": "colima/colima/datadisk", "vm": "colima",
+                "tool": "colima", "file": "datadisk", "allocated_gb": 23.0},
+               {"path": "/h/.lima/default/diffdisk", "key": "lima/default/diffdisk", "vm": "default", "tool": "lima",
+                "file": "diffdisk", "allocated_gb": 4.0}]
+        at = 1_800_000_000.0
+        series = {"colima/colima/datadisk": [[at - 24 * HOUR, 12.3], [at, 23.0]],
+                  "lima/default/diffdisk": [[at - 24 * HOUR, 3.5], [at, 4.0]]}
+        rows = self.g.vm_growth(vms, series, at, 2.0)
+        self.assertEqual([(r["vm"], r["growing"]) for r in rows], [("colima", True), ("default", False)])
+        self.assertAlmostEqual(rows[0]["growth"]["gb"], 10.7)
+        first = self.g.vm_growth(vms, {}, at, 2.0)
+        self.assertEqual([(r["growth"], r["growing"]) for r in first], [(None, False), (None, False)],
+                         "the first pass has no history and marks nothing")
+
+    def test_a_run_records_the_vm_disks_and_never_touches_a_vm(self):
+        disk = self.sparse(self.base / ".colima" / "_lima" / "_disks" / "colima" / "datadisk", 2)
+        before = disk.stat()
+        globs = (str(self.base / ".colima" / "_lima" / "_disks" / "*" / "datadisk"),)
+        calls = []
+        with patch.object(self.g, "VM_DISK_GLOBS", globs), \
+                patch.object(self.g, "load_config", return_value=self.cfg(vm_growth={"gb_per_day": 2})), \
+                patch.object(self.g.Holders, "take", return_value=self.free()), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g.subprocess, "run", side_effect=lambda *a, **k: calls.append(a) or (_ for _ in ()).throw(OSError())):
+            doc = self.g.run([])
+        self.assertEqual([v["key"] for v in doc["vms"]], ["colima/colima/datadisk"])
+        self.assertIsNone(doc["vms"][0]["growth"], "the first pass measures nothing yet")
+        self.assertIn("colima/colima/datadisk", self.series().read())
+        after = disk.stat()
+        self.assertEqual((before.st_size, before.st_mtime), (after.st_size, after.st_mtime), "never changed")
+        self.assertFalse([a for a in calls if any("colima" in str(x) or "limactl" in str(x) for x in a[0])],
+                         "planning asks no VM tool")
+
+    def test_a_series_that_cannot_be_written_is_named_and_the_report_still_lists_the_vms(self):
+        self.sparse(self.base / ".colima" / "_lima" / "_disks" / "colima" / "datadisk", 1)
+        globs = (str(self.base / ".colima" / "_lima" / "_disks" / "*" / "datadisk"),)
+        m = self.series()
+        with patch.object(self.g, "VM_DISK_GLOBS", globs), \
+                patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g.Holders, "take", return_value=self.free()), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(m, "record", side_effect=OSError("disk full")):
+            doc = self.g.run([])
+        self.assertIn("growth-series", [d["source"] for d in doc["degraded"]])
+        self.assertEqual(len(doc["vms"]), 1)
+        self.assertIsNone(doc["vms"][0]["growth"])
+
+    def test_the_disk_section_lists_each_vm_file_as_its_own_location(self):
+        import machine_view, paths
+        guard = {"at": "2026-11-17T10:00:00Z", "level": "low", "vms": [
+            {"path": "/h/.colima/_lima/_disks/colima/datadisk", "key": "colima/colima/datadisk", "vm": "colima",
+             "tool": "colima", "file": "datadisk", "allocated_gb": 23.0, "size_gb": 100.0,
+             "growth": {"gb": 10.7, "window_hours": 24.0, "gb_per_day": 10.7}, "growing": True}],
+                 "swap": {"gb": 15.0, "same_container": True, "growth": None, "growing": False,
+                          "owner": {"sessions": 38, "rss_gb": 41.5, "agents": []}}}
+        paths.SCRATCH.mkdir(parents=True, exist_ok=True)
+        (paths.SCRATCH / "disk-guard.json").write_text(json.dumps(guard), encoding="utf-8")
+        (paths.SCRATCH / "machine.json").write_text(json.dumps({"measured_at": "2026-11-17T09:00:00Z", "disk": {
+            "volume": {"free_gb": 1.6}, "locations": [{"path": "/h/Library/Caches", "kind": "cache",
+                                                         "label": "Caches", "gb": 30.0}]}}), encoding="utf-8")
+        view = machine_view.summary()
+        rows = view["disk"]["locations"]
+        vm = [r for r in rows if r.get("vm") == "colima"]
+        self.assertEqual(len(vm), 1)
+        self.assertEqual((vm[0]["kind"], vm[0]["gb"], vm[0]["growth_gb_per_day"]), ("vm", 23.0, 10.7))
+        self.assertEqual(rows[0]["label"], "Caches", "largest first")
+        self.assertEqual(view["guard"]["vmDisks"][0]["vm"], "colima")
+        self.assertEqual(view["guard"]["swap"]["owner"]["sessions"], 38)
+
+    def test_the_machine_tool_returns_the_vm_disks_and_the_swap(self):
+        sys.path.insert(0, str(ROOT / "mcp"))
+        import server, machine_view
+        vms = [{"vm": "colima", "file": "datadisk", "allocated_gb": 23.0, "growing": True,
+                "growth": {"gb": 10.7, "window_hours": 24.0, "gb_per_day": 10.7}}] * 12
+        swap = {"gb": 15.0, "same_container": True, "growing": True, "owner": {"sessions": 38}}
+        with patch.object(machine_view, "summary", return_value={"degraded": [], "guard": {"vmDisks": vms,
+                                                                                           "swap": swap}}):
+            got = server.observatory_machine()["guard"]
+        self.assertEqual(got["swap"]["owner"]["sessions"], 38)
+        self.assertLessEqual(len(got["vmDisks"]), 10)
+        with patch.object(machine_view, "summary", return_value={"degraded": [], "guard": {"level": "normal"}}):
+            got = server.observatory_machine()["guard"]
+        self.assertEqual((got["vmDisks"], got["swap"]), ([], None))
+
+
+class SwapOnTheSameDisk(Base):
+    """OBS-620: the guard's free-space reading counts the swap in use (vm.swapusage) when it sits on the same disk,
+    and names who holds the memory it writes: the agent sessions and their memory."""
+
+    def test_swap_on_the_same_container_is_told_by_the_volumes_size(self):
+        Usage = __import__("collections").namedtuple("Usage", "total used free")
+        same = {"/System/Volumes/VM": Usage(500, 0, 7), "home": Usage(500, 0, 7)}
+        other = {"/System/Volumes/VM": Usage(64, 0, 60), "home": Usage(500, 0, 7)}
+        pick = lambda table: (lambda p: table["/System/Volumes/VM" if p == "/System/Volumes/VM" else "home"])
+        self.assertTrue(self.g.swap_same_container(usage=pick(same), platform="darwin", home="/h"))
+        self.assertFalse(self.g.swap_same_container(usage=pick(other), platform="darwin", home="/h"))
+        self.assertIsNone(self.g.swap_same_container(usage=lambda p: (_ for _ in ()).throw(OSError()),
+                                                     platform="darwin", home="/h"))
+        self.assertIsNone(self.g.swap_same_container(platform="linux", home="/h"), "not known elsewhere")
+
+    def test_the_owner_is_the_agent_sessions_and_their_memory(self):
+        machine = {"processes": {"groups": [{"origin": "agent:claude", "processes": 120, "sessions": 30, "rss_mb": 30720},
+                                            {"origin": "agent:codex", "processes": 9, "sessions": 3, "rss_mb": 2048},
+                                            {"origin": "app:Browser", "processes": 40, "rss_mb": 9000}]}}
+        sessions = {"schema": "coding-sessions/1", "processes": {"claude": 35, "codex": 3},
+                    "sources": {"processes": {"from": "manager"}}}
+        owner = self.g.swap_owner(machine, sessions)
+        self.assertEqual(owner["sessions"], 38, "the count is the coding-sessions reading's")
+        self.assertEqual(owner["rss_gb"], 32.0)
+        self.assertEqual([(a["agent"], a["sessions"], a["rss_gb"]) for a in owner["agents"]],
+                         [("claude", 35, 30.0), ("codex", 3, 2.0)])
+        none = self.g.swap_owner(None, {"processes": {}, "sources": {"processes": {"from": None}}})
+        self.assertEqual((none["sessions"], none["rss_gb"]), (None, None), "unread is not zero")
+
+    def test_a_growing_swap_is_named_with_its_owner(self):
+        at = 1_800_000_000.0
+        owner = {"sessions": 38, "rss_gb": 32.0, "agents": []}
+        series = [[at - 24 * HOUR, 5.0], [at, 15.0]]
+        got = self.g.swap_section({"swap_gb": 15.0}, series, at, 2.0, owner, True)
+        self.assertEqual((got["gb"], got["same_container"], got["growing"]), (15.0, True, True))
+        self.assertEqual(got["growth"]["gb"], 10.0)
+        self.assertEqual(got["owner"]["sessions"], 38)
+        quiet = self.g.swap_section({"swap_gb": 15.0}, [[at - 24 * HOUR, 15.0], [at, 15.0]], at, 2.0, owner, True)
+        self.assertFalse(quiet["growing"])
+        other = self.g.swap_section({"swap_gb": 15.0}, series, at, 2.0, owner, False)
+        self.assertFalse(other["growing"], "swap on another disk does not take this disk's space")
+        unread = self.g.swap_section({"swap_gb": None, "swap_reason": "missing-swap-measurement"}, [], at, 2.0,
+                                     owner, True)
+        self.assertEqual((unread["gb"], unread["reason"], unread["growing"]),
+                         (None, "missing-swap-measurement", False))
+
+    def test_a_run_reports_the_swap_with_the_free_space(self):
+        report = {"swap_gb": 15.0, "swap_reason": None, "holders": [], "simulators": []}
+        with patch.object(self.g, "load_config", return_value=self.cfg()), \
+                patch.object(self.g.Holders, "take", return_value=self.free()), \
+                patch.object(self.g, "large_files", return_value=None), \
+                patch.object(self.g, "memory_report", return_value=report), \
+                patch.object(self.g, "swap_same_container", return_value=True):
+            doc = self.g.run([])
+        self.assertEqual((doc["swap"]["gb"], doc["swap"]["same_container"]), (15.0, True))
+        self.assertIn("swap", __import__("disk_growth_series").read())
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -144,3 +144,49 @@ Last removed 2026-11-16 09:45 UTC: 820 entries, 0.4 GB by the disk's own count
 - Tests: `test_disk_guard.py` (`UserTemp`, `UserTempPlace`, `UserTempGrowth`), `test_machine_findings.py`
   (`TemporaryFolderGrowth`), `test_disk_page.py`
   (`test_the_temporary_folder_shows_its_size_fastest_growing_classes_and_last_removal`). Scenarios: OSS-133, OSS-134.
+
+## Virtual machine disks and swap growth (OBS-620)
+
+On 2026-11-17 a container log inside a Colima VM grew to 10.7 GB and filled the host disk twice, while swap held about
+15 GB of the same APFS container. Neither showed as growth: the free-space series keeps one number a day and the
+machine survey sizes its places every few weeks. The guard now measures both on every pass.
+
+- Data: `disk_guard.vm_disks` lists each Lima or Colima VM disk file (`_disks/<vm>/datadisk`, `<vm>/disk`,
+  `<vm>/diffdisk` under `~/.colima/_lima` and `~/.lima`) with its allocated size (blocks, not the length a sparse file
+  claims) and names it by `vm_name`: tool, VM and file, `key` `colima/<vm>/datadisk`. `growth_report` records each
+  key and the swap in use (`swap`, from the memory snapshot's `vm.swapusage`) into `tools/disk_growth_series.py`
+  (`store/disk-growth-series.json`: 48 hours of samples a key, at most 240 a key and 64 keys, numbers and keys only,
+  never a path) and returns each VM row with `growth` (`{gb, window_hours, gb_per_day}` from the oldest sample of the
+  last day; None under an hour of history) and `growing` (faster than `guard.vm_growth.gb_per_day`, 2).
+- Swap: `swap_section` puts the swap in use beside the free space with `same_container` (`swap_same_container`: on
+  macOS the swap volume and the home volume reporting one container size; None where that cannot be read and on other
+  systems), its growth, `growing` (faster than `guard.swap_growth.gb_per_day`, 2, and only on the same disk) and its
+  `owner` (`swap_owner`): the coding-agent sessions running now from the coding-sessions reading
+  (`sessions_view.facets`) and the memory their processes hold (the machine survey's `agent:` groups). A source not
+  read is None, never zero.
+- Report and view: `disk-guard.json` carries `vms` and `swap`; `machine_view` returns them as `guard.vmDisks` and
+  `guard.swap`, and adds each VM disk file to `disk.locations` as a place of its own (kind `vm`, label "Lima or Colima
+  virtual machine disk", `growth_gb_per_day`), so the Machine page's disk table and `observatory_machine`
+  (`section="disk"`) list it with the survey's places, largest first. The overview returns `guard.vmDisks` (ten rows)
+  and `guard.swap`.
+- Findings: `disk.vm_growth` (subject `machine:vm:<vm>`) and `disk.swap_growth` (subject `machine:swap`, naming the
+  sessions and their memory), both warnings (`machine_findings.vm_growth_findings`, `swap_growth_findings`).
+- Observatory never changes a VM: no VM tool is asked by these readings, and the finding's action is the VM owner's.
+
+```
+Virtual machine disks
+Each Lima or Colima virtual machine keeps its disk in a file on this disk; ...
+Virtual machine   File       Space taken   Last day          Growth
+colima colima     datadisk   23 GB         10.7 GB in 24 h   growing fast
+default lima      diffdisk   4 GB          measured from the next day
+Swap holds 15 GB . on the same disk . last day 10 GB in 24 h
+Swap is growing fast.
+Held by 38 agent sessions, their processes holding 32 GB of memory . claude 35
+```
+
+- Failure: a history that cannot be written is `degraded` source `growth-series` and the rows carry no growth; any
+  other failure is source `growth`; the report is always written. A guard that has not measured says "Not measured
+  yet", a machine with no VM says so.
+- Tests: `test_disk_guard.py` (`VmDiskGrowth`, `SwapOnTheSameDisk`), `test_machine_findings.py`
+  (`VirtualMachineGrowth`), `test_disk_page.py` (`test_vm_disks_and_swap_show_their_growth_and_who_holds_the_memory`).
+  Scenario: OSS-139.
