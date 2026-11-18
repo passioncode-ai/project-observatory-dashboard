@@ -95,6 +95,8 @@ LABELS: dict[str, str] = {
     "integration.drift": "Provider answer changed shape",
     "integration.key_invalid": "Key refused by its provider",
     "integration.untracked": "Provider in use that nothing watches",
+    "integration.scope_missing": "Key missing a scope it needs",
+    "integration.scope_excess": "Key with more scope than it needs",
     "domain.expiring": "Domain expiring",
     "domain.hold": "Domain on registrar hold",
     "domain.hold_unknown": "Domain hold status unknown",

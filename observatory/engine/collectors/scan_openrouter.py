@@ -32,6 +32,9 @@ both are worth saying out loud.
     scan_openrouter.py store/raw/openrouter.json
 """
 from __future__ import annotations
+
+#: The provider this collector reads (OBS-605): `tools/door_registry.py` counts it as tracked.
+COVERS_PROVIDERS = ("openrouter",)
 import json, pathlib, re, sys, time, urllib.error, urllib.request
 from datetime import datetime, timezone
 

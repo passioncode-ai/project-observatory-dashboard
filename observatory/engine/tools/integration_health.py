@@ -4,16 +4,21 @@
 
 Three questions, answered once a day into `store/raw/integration-health.json`:
 
-1. **Is each held key still valid?** Each provider door's own validity call (the one its `ping` verb makes), once a
-   UTC day per key. A 401 or 403 is `invalid`; any other failure is `unreachable`, which says nothing about the key.
-   The record names the slot, never the value: a value is read into memory for one request and dropped. No new spend:
-   each call is a read the door already makes.
+1. **Is each held key still valid, and does it hold the scope its readers need?** Each provider door's own validity
+   call (the one its `ping` verb makes), once a UTC day per key. A 401 or 403 is `invalid`; any other failure is
+   `unreachable`, which says nothing about the key. Where the provider answers a key's scope (GitHub's
+   `X-OAuth-Scopes` header through `gh`, Cloudflare's token verify and the token's policies, Heroku's authorization,
+   Sentry's `GET /api/0/`), it is compared with what the collectors and the door's preset need (OBS-605): a scope
+   missing is `scope-missing`, one granted beyond the need is `scope-excess`. The record names the slot, never the
+   value: a value is read into memory for one request and dropped. No new spend: each call is a read.
 2. **Did a provider change the answer a collector relies on?** `COLLECTOR_FIELDS` declares, per collector, the stored
    raw file, the list of rows in it and the fields every healthy row carries. A field that no row carries (absent or
    null in every row of a non-empty list) is `drift`, with the day it was last seen (`store/state/integration-fields.json`).
 3. **Which providers does a project use that no door or collector covers?** `PACKAGE_PROVIDERS` and `ENV_PROVIDERS`
    map a dependency or a variable NAME to a provider; applied to `registry/dependencies.json` and the env inventory,
-   a provider outside `TRACKED` is `untracked`, with the package or variable name as evidence, never a value.
+   a provider no door or collector declares (`tools/door_registry.py`, OBS-605) is `untracked`, with the package or
+   variable name as evidence, never a value, and a code: `untracked-key` when a variable (a key) points at it,
+   `untracked-package` when only a dependency does.
 
 Offline (`OBSERVATORY_OFFLINE=1`) asks nothing. A door that cannot be read is named in `degraded`.
 
@@ -44,11 +49,14 @@ def now() -> str:
 
 
 class Provider(NamedTuple):
-    """One provider door: `holders()` lists (slot name, a function reading that key's value), `ping(value)` raises
-    when the provider refuses or cannot be reached and returns when the key works."""
+    """One provider door: `holders()` lists (slot name, a function reading that key's value) or (slot, reader,
+    context); `ping(value)`, or `ping(value, context)` when the holder gave one, raises when the provider refuses or
+    cannot be reached and returns its answer when the key works. `scope(slot, value, answer, context)`, when given,
+    answers {granted, needed, allowed?} for `judge_scope`, or None where the key has no scope to compare."""
     name: str
     holders: Callable[[], list]
-    ping: Callable[[str], None]
+    ping: Callable[..., object]
+    scope: Callable[..., dict | None] | None = None
 
 
 def status_of(exc: BaseException) -> int | None:
@@ -70,7 +78,9 @@ def check_keys(providers: list[Provider], previous: dict | None, today: str, for
         except Exception as exc:  # noqa: BLE001 (a door that cannot list names itself, the rest still run)
             degraded.append({"source": f"integration:{p.name}", "reason": f"keys not listed: {type(exc).__name__}"})
             continue
-        for slot, read in held:
+        for entry in held:
+            slot, read = entry[0], entry[1]
+            ctx = entry[2] if len(entry) > 2 else None
             old = before.get((p.name, slot))
             if old and old.get("checked_on") == today and not force:
                 out.append(old)
@@ -82,8 +92,10 @@ def check_keys(providers: list[Provider], previous: dict | None, today: str, for
                 out.append({**rec, "state": "unreadable", "status": None, "reason": type(exc).__name__})
                 continue
             try:
-                p.ping(value)
+                answer = p.ping(value) if len(entry) <= 2 else p.ping(value, ctx)
                 rec.update(state="valid", status=200)
+                if p.scope is not None:
+                    rec.update(_scope_of(p, slot, value, answer, ctx, degraded))
             except Exception as exc:  # noqa: BLE001 (the message is the door's: endpoint and status only)
                 code = status_of(exc)
                 if code in REFUSED:
@@ -97,6 +109,36 @@ def check_keys(providers: list[Provider], previous: dict | None, today: str, for
             out.append(rec)
     out.sort(key=lambda r: (r["provider"], r["slot"]))
     return out, degraded
+
+
+def _scope_of(p: Provider, slot: str, value: str, answer, ctx, degraded: list) -> dict:
+    """{"scope": the judgement} for one key, or {} where the provider has no scope to compare for it. A scope that
+    cannot be read is said (`scope-unreadable`, by the exception's type only) and named in `degraded`."""
+    try:
+        info = p.scope(slot, value, answer, ctx)
+    except Exception as exc:  # noqa: BLE001 (named by type: a message may quote what was sent)
+        degraded.append({"source": f"integration:{p.name}", "code": "scope-unreadable",
+                         "reason": f"the scope of {slot} could not be read: {type(exc).__name__}"})
+        return {"scope": {"state": "unread", "code": "scope-unreadable", "reason": type(exc).__name__}}
+    return {"scope": judge_scope(info)} if info else {}
+
+
+def judge_scope(info: dict) -> dict:
+    """Compare what a key is granted with what its readers need. `allowed` are scopes granted beyond the need that
+    are no finding (what a provider's own sign-in always asks for). `granted` or `needed` unknown is `scope-unknown`:
+    the provider did not say, which is not a clean bill."""
+    granted, needed = info.get("granted"), info.get("needed")
+    out = {"granted": sorted(set(granted)) if granted is not None else None,
+           "needed": sorted(set(needed)) if needed is not None else None, "missing": [], "excess": []}
+    if granted is None or needed is None:
+        return {**out, "state": "unknown", "code": "scope-unknown"}
+    out["missing"] = sorted(set(needed) - set(granted))
+    out["excess"] = sorted(set(granted) - set(needed) - set(info.get("allowed") or ()))
+    if out["missing"]:
+        return {**out, "state": "missing", "code": "scope-missing"}
+    if out["excess"]:
+        return {**out, "state": "excess", "code": "scope-excess"}
+    return {**out, "state": "ok", "code": "scope-ok"}
 
 
 # ---- 2. drift ------------------------------------------------------------------------------------------
@@ -150,8 +192,17 @@ def check_drift(raw_dir: pathlib.Path, declared: dict, seen: dict | None, today:
 
 # ---- 3. untracked --------------------------------------------------------------------------------------
 
-#: Providers a door or a collector of this engine covers. Anything else a project uses is `untracked`.
-TRACKED = frozenset({"cloudflare", "digitalocean", "github", "google", "heroku", "openrouter", "sentry"})
+def _declared() -> tuple[frozenset, list[dict]]:
+    """(the providers a door or a collector of this engine declares, what could not be read): the one registry
+    (`tools/door_registry.py`, OBS-605), never a list kept here."""
+    import door_registry
+    found, degraded = door_registry.declarations()
+    return frozenset(d["provider"] for d in found), degraded
+
+
+#: Providers a door or a collector of this engine covers, as they declare themselves. Anything else a project uses
+#: is `untracked`. Read once at import for callers that want the set; `run` reads the declarations afresh.
+TRACKED = _declared()[0]
 #: package name (fnmatch, lower case, any ecosystem) -> (provider, category).
 PACKAGE_PROVIDERS: tuple[tuple[str, str, str], ...] = (
     ("stripe", "stripe", "payments"), ("@stripe/*", "stripe", "payments"),
@@ -205,7 +256,10 @@ def untracked(deps_doc: dict | None, env_doc: dict | None, tracked: frozenset = 
         if not project or provider in tracked:
             return
         row = found.setdefault((project, provider), {"project": project, "provider": provider,
-                                                     "category": category, "evidence": []})
+                                                     "category": category, "evidence": [],
+                                                     "code": "untracked-package"})
+        if kind == "env":
+            row["code"] = "untracked-key"
         item = {"kind": kind, "name": name}
         if item not in row["evidence"]:
             row["evidence"].append(item)
@@ -231,50 +285,206 @@ def untracked(deps_doc: dict | None, env_doc: dict | None, tracked: frozenset = 
 
 
 # ---- the doors -----------------------------------------------------------------------------------------
+#
+# One builder per provider whose keys are asked. Each takes the door module (or its client) as an argument, so the
+# tests pass a fake that records what was asked and nothing reaches a network; `default_providers` passes the real
+# one. Every value is read by the door's own reader into memory for one request.
 
-def default_providers() -> list[Provider]:
-    """The doors with a validity call of their own: OpenRouter, Cloudflare and DigitalOcean (their `ping` verbs).
-    A door that cannot be imported is left out and named by the caller's `degraded`."""
+def _file_reader(read=None):
+    if read is not None:
+        return read
     import private_io
+    return lambda path: private_io.read(path).strip()
+
+
+def openrouter_provider(door, read=None) -> Provider:
+    read = _file_reader(read)
+
+    def holders():
+        return [(f"openrouter/admin/{label}", (lambda p=path: read(p))) for label, path in door.admins()]
+    return Provider("openrouter", holders, lambda v: door._request("/keys?offset=0", v))
+
+
+def _cloudflare_groups(preset: dict) -> list[str]:
+    return [g for k in ("groups", "zone_groups", "account_groups") for g in preset.get(k) or ()]
+
+
+def cloudflare_provider(cf, read=None) -> Provider:
+    """The stashed admin tokens and the tokens the door issued. An issued token's scope: token verify with its own
+    value names its id (`/accounts/{id}/tokens/verify`), the admin reads that token's policies, and the permission
+    groups granted are compared with the preset's. An admin token's scope is not compared (its need is the door's)."""
+    read = _file_reader(read)
+
+    def holders():
+        rows = [(f"cloudflare/admin/{label}", (lambda p=path: read(p)), {"kind": "admin"})
+                for label, path in cf.admins()]
+        rows += [(f"cloudflare/issued/{cf.label_of(p)}", (lambda p=p: read(p)), {"kind": "issued", "path": p})
+                 for p in cf.issued()]
+        return rows
+
+    def ping(value, ctx=None):
+        # A token built for one job may not read accounts: refused on both roads is the only invalid.
+        try:
+            cf._request("/accounts?per_page=1", value)
+        except RuntimeError as first:
+            if status_of(first) not in REFUSED:
+                raise
+            cf._request("/memberships?per_page=1", value)
+
+    def scope(slot, value, answer, ctx):
+        if (ctx or {}).get("kind") != "issued":
+            return None
+        path = ctx["path"]
+        meta = cf.read_meta(path)
+        preset = cf.PRESETS.get(meta.get("preset") or "")
+        account = meta.get("account_id")
+        if not preset or not account:
+            return {"granted": None, "needed": None}
+        verified = (cf._request(f"/accounts/{account}/tokens/verify", value) or {}).get("result") or {}
+        token_id = verified.get("id")
+        if not token_id:
+            return {"granted": None, "needed": _cloudflare_groups(preset)}
+        _label, admin = cf.read_admin(meta.get("stash") or path.name)
+        token = (cf._request(f"/accounts/{account}/tokens/{token_id}", admin) or {}).get("result") or {}
+        policies = token.get("policies") if isinstance(token.get("policies"), list) else None
+        granted = None if policies is None else [
+            g.get("name") for pol in policies if isinstance(pol, dict)
+            for g in pol.get("permission_groups") or [] if isinstance(g, dict) and g.get("name")]
+        return {"granted": granted, "needed": _cloudflare_groups(preset)}
+    return Provider("cloudflare", holders, ping, scope)
+
+
+def digitalocean_provider(do, read=None) -> Provider:
+    read = _file_reader(read)
+
+    def holders():
+        return [(f"digitalocean/team/{label}", (lambda p=path: read(p))) for label, path, _meta in do.stashes()]
+    return Provider("digitalocean", holders, lambda v: do.account_of(v))
+
+
+def heroku_provider(hk, slot_value=None, read=None) -> Provider:
+    """The stashed admin tokens and every authorization the door issued (its ledger; the value read from its vault
+    slot). Valid: `GET /account`, which every scope reads. An issued authorization's scope: the admin reads the
+    authorization (`GET /oauth/authorizations/{id}`), compared with the preset's scopes."""
+    read = _file_reader(read)
+    if slot_value is None:
+        import key_consumers
+        slot_value = key_consumers.vault_value
+
+    def from_slot(slot):
+        value = slot_value(*slot.split("/"))
+        if not value:
+            raise LookupError("the slot holds no value")
+        return value
+
+    def holders():
+        rows = [(f"heroku/admin/{label}", (lambda p=path: read(p)), {"kind": "admin"})
+                for label, path in hk.admins()]
+        for slot, row in sorted((hk.ledger().get("issued") or {}).items()):
+            rows.append((f"heroku/issued/{slot}", (lambda s=slot: from_slot(s)), {"kind": "issued", "row": row}))
+        return rows
+
+    def scope(slot, value, answer, ctx):
+        if (ctx or {}).get("kind") != "issued":
+            return None
+        row = ctx["row"]
+        preset = hk.PRESETS.get(row.get("preset") or "")
+        if not preset or not row.get("authorization_id"):
+            return {"granted": None, "needed": None}
+        _label, admin = hk.read_admin(row.get("admin"))
+        auth = hk._request("GET", f"/oauth/authorizations/{hk.q(row['authorization_id'])}", admin) or {}
+        granted = auth.get("scope") if isinstance(auth.get("scope"), list) else None
+        return {"granted": granted, "needed": list(preset["scopes"])}
+    return Provider("heroku", holders, lambda v, ctx=None: hk._request("GET", "/account", v), scope)
+
+
+def sentry_provider(sn) -> Provider:
+    """Every narrow token the door issued or installed. A slot's value is sent only while it is the value the ledger
+    proved (`_narrow_value_ok`, the door's own rule): otherwise it is `unreadable` and nothing is sent. Valid and its
+    scope in one call: `GET /api/0/` answers the token's scopes, compared with the preset's exact scopes."""
+    def holders():
+        rows = []
+        for slot, row in sorted((sn.ledger().get("issued") or {}).items()):
+            def reader(s=slot, r=row):
+                value = sn.read_slot(*s.split("/"))
+                sn._narrow_value_ok(s, r, value)
+                return value
+            rows.append((f"sentry/issued/{slot}", reader, {"base": row.get("base_url"), "preset": row.get("preset")}))
+        return rows
+
+    def scope(slot, value, answer, ctx):
+        preset = sn.PRESETS.get((ctx or {}).get("preset") or "")
+        return {"granted": answer if isinstance(answer, list) else None,
+                "needed": list(preset["scopes"]) if preset else None}
+    return Provider("sentry", holders, lambda v, ctx: sn.scopes_of(v, ctx["base"]), scope)
+
+
+#: What the collectors and the issue filer read through the `gh` session: repositories, private ones included, and
+#: their issues (`repo`), and the organizations a person belongs to (`read:org`).
+GITHUB_NEEDS = ("read:org", "repo")
+#: What `gh auth login` asks for by default beside them: granted by every session, so not a finding.
+GITHUB_ALLOWED = ("gist", "workflow")
+_STATUS_LINE = re.compile(r"^HTTP/[\d.]+ (\d{3})")
+
+
+def github_provider(run=None, which=None) -> Provider:
+    """The `gh` session the GitHub collector and the issue filer use, asked through `gh` itself (the existing
+    client): the token never enters this process. `gh api -i user` answers the status line and the session's
+    `X-OAuth-Scopes` header; a fine-grained token answers no such header, which is `scope-unknown`."""
+    import shutil
+    import subprocess
+    run = run or subprocess.run
+    which = which or shutil.which
+
+    def holders():
+        return [("github/gh-session", lambda: "gh-session")] if which("gh") else []
+
+    def ping(_value):
+        done = run(["gh", "api", "-i", "user"], capture_output=True, text=True, timeout=60)
+        lines = (done.stdout or "").splitlines()
+        m = _STATUS_LINE.match(lines[0]) if lines else None
+        code = int(m.group(1)) if m else status_of(RuntimeError(done.stderr or ""))
+        if done.returncode != 0 or code is None or code >= 400:
+            if code is not None:
+                raise RuntimeError(f"github answered HTTP {code} through gh")
+            raise RuntimeError("github unreachable through gh")
+        scopes = None
+        for line in lines[1:]:
+            if not line.strip():
+                break
+            name, _, rest = line.partition(":")
+            if name.strip().lower() == "x-oauth-scopes":
+                scopes = [s.strip() for s in rest.split(",") if s.strip()]
+        return {"scopes": scopes}
+
+    def scope(slot, value, answer, ctx):
+        return {"granted": (answer or {}).get("scopes"), "needed": list(GITHUB_NEEDS), "allowed": list(GITHUB_ALLOWED)}
+    return Provider("github", holders, ping, scope)
+
+
+#: provider -> how its door is opened and wrapped. A door declared in the registry with no builder here is named in
+#: the answer's `keys_not_asked`.
+BUILDERS: dict[str, Callable[[], Provider]] = {
+    "openrouter": lambda: openrouter_provider(__import__("openrouter")),
+    "cloudflare": lambda: cloudflare_provider(__import__("cloudflare")),
+    "digitalocean": lambda: digitalocean_provider(__import__("digitalocean")),
+    "heroku": lambda: heroku_provider(__import__("heroku")),
+    "sentry": lambda: sentry_provider(__import__("sentry")),
+    "github": lambda: github_provider(),
+}
+
+
+def default_providers(degraded: list | None = None) -> list[Provider]:
+    """Every provider with a builder: OpenRouter, Cloudflare, DigitalOcean, Heroku, Sentry and the `gh` session. A
+    door that cannot be imported is left out and named in `degraded` (`door-unavailable`)."""
     out: list[Provider] = []
-    try:
-        import openrouter as door
-
-        def holders():
-            return [(f"openrouter/admin/{label}", (lambda p=path: private_io.read(p).strip()))
-                    for label, path in door.admins()]
-        out.append(Provider("openrouter", holders, lambda v: door._request("/keys?offset=0", v)))
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        import cloudflare as cf
-
-        def cf_holders():
-            rows = [(f"cloudflare/admin/{label}", (lambda p=path: private_io.read(p).strip()))
-                    for label, path in cf.admins()]
-            rows += [(f"cloudflare/issued/{p.name}", (lambda p=p: private_io.read(p).strip())) for p in cf.issued()]
-            return rows
-
-        def cf_ping(value):
-            # A token built for one job may not read accounts: refused on both roads is the only invalid.
-            try:
-                cf._request("/accounts?per_page=1", value)
-            except RuntimeError as first:
-                if status_of(first) not in REFUSED:
-                    raise
-                cf._request("/memberships?per_page=1", value)
-        out.append(Provider("cloudflare", cf_holders, cf_ping))
-    except Exception:  # noqa: BLE001
-        pass
-    try:
-        import digitalocean as do
-
-        def do_holders():
-            return [(f"digitalocean/team/{label}", (lambda p=path: private_io.read(p).strip()))
-                    for label, path, _meta in do.stashes()]
-        out.append(Provider("digitalocean", do_holders, lambda v: do.account_of(v)))
-    except Exception:  # noqa: BLE001
-        pass
+    for name, build in BUILDERS.items():
+        try:
+            out.append(build())
+        except Exception as exc:  # noqa: BLE001
+            if degraded is not None:
+                degraded.append({"source": f"integration:{name}", "code": "door-unavailable",
+                                 "reason": f"the {name} door could not be opened: {type(exc).__name__}"})
     return out
 
 
@@ -290,8 +500,10 @@ def _read(path: pathlib.Path) -> dict | None:
 
 def run(providers: list[Provider], *, raw_dir: pathlib.Path, registry_dir: pathlib.Path, previous: dict | None,
         seen: dict | None, today: str, offline: bool = False, force: bool = False,
-        declared: dict | None = None) -> tuple[dict, dict]:
-    degraded: list[dict] = []
+        declared: dict | None = None, degraded: list | None = None) -> tuple[dict, dict]:
+    degraded = list(degraded or [])
+    tracked, unread = _declared()
+    degraded += unread
     if offline:
         keys = [r for r in (previous or {}).get("keys") or []]
         degraded.append({"source": "integrations", "reason": "offline: no key was asked; the last answer is kept"})
@@ -299,9 +511,12 @@ def run(providers: list[Provider], *, raw_dir: pathlib.Path, registry_dir: pathl
         keys, bad = check_keys(providers, previous, today, force)
         degraded += bad
     drift, seen = check_drift(raw_dir, declared or COLLECTOR_FIELDS, seen, today)
-    rows = untracked(_read(registry_dir / "dependencies.json"), _read(registry_dir / "env-inventory.json"))
+    rows = untracked(_read(registry_dir / "dependencies.json"), _read(registry_dir / "env-inventory.json"), tracked)
+    import door_registry
+    asked = {p.name for p in providers}
     doc = {"schema": SCHEMA, "checked_on": today, "checked_at": now(), "keys": keys, "drift": drift,
-           "untracked": rows, "tracked_providers": sorted(TRACKED), "degraded": degraded}
+           "untracked": rows, "tracked_providers": sorted(tracked),
+           "keys_not_asked": sorted(set(door_registry.doors()) - asked), "degraded": degraded}
     return doc, seen
 
 
@@ -317,7 +532,7 @@ def agent_view(*, doc=None, raw_path: pathlib.Path | None = None) -> dict:
     keys = sorted(doc.get("keys") or [], key=lambda r: (order.get(r.get("state"), 4), r.get("slot") or ""))
     return {"checkedOn": doc.get("checked_on"), "keys": keys, "drift": doc.get("drift") or [],
             "untracked": doc.get("untracked") or [], "trackedProviders": doc.get("tracked_providers") or [],
-            "degraded": list(doc.get("degraded") or [])}
+            "keysNotAsked": doc.get("keys_not_asked") or [], "degraded": list(doc.get("degraded") or [])}
 
 
 def main(argv: list[str], providers: list[Provider] | None = None) -> int:
@@ -328,9 +543,10 @@ def main(argv: list[str], providers: list[Provider] | None = None) -> int:
     state_file = paths.STATE / "state" / "integration-fields.json"
     today = datetime.now(timezone.utc).date().isoformat()
     previous = _read(out)
-    doc, seen = run(default_providers() if providers is None else providers, raw_dir=paths.SCRATCH,
+    unopened: list[dict] = []
+    doc, seen = run(default_providers(unopened) if providers is None else providers, raw_dir=paths.SCRATCH,
                     registry_dir=paths.REGISTRY, previous=previous, seen=_read(state_file), today=today,
-                    offline=configuration.offline(), force="--force" in argv)
+                    offline=configuration.offline(), force="--force" in argv, degraded=unopened)
     atomic.write_json(out, doc)
     state_file.parent.mkdir(parents=True, exist_ok=True)
     atomic.write_json(state_file, seen)

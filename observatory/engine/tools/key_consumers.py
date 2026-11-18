@@ -22,6 +22,8 @@ THE SOURCES.
              publication, so it holds the revocation and is named with what to do
   launchd    the services `use_secret.py serve` started with the vault slot (`use_secret.consumers`); they read the
              slot once at start, so their delivery is the slot itself and they are named with the restart command
+  vault      every other slot of the local vault holding the same value (a key copied into a second project's
+             slot); delivery is the vault's own `store_value`, which archives the old value beside the slot
 
 A SOURCE THAT COULD NOT BE READ IS `degraded`, NEVER "NO CONSUMER". The door holds the revocation on it. A source
 that is not in use on this machine (no Heroku token stashed and the integration off; no vault slot to look up
@@ -33,9 +35,19 @@ sources above, the OpenRouter scan (`OpenRouterScanSource`, by the key's hash, l
 apps that bind a database cluster (`DigitalOceanAppsSource`, the DigitalOcean door's finder), and refuses with a typed
 code (`consumer-in-use`, `consumer-source-unreadable`, `consumer-source-unknown`) instead of revoking blind. Design:
 docs/design/control-plane/revoke-guard.md.
+
+A DOOR THAT ROLLS IN PLACE DELIVERS TOO (OBS-607). Cloudflare and Heroku kill a value when they roll it, so a copy
+found elsewhere used to refuse the roll. `plan_roll` finds the copies first; when every one of them is one this module
+can write, the door mints a successor beside the old key instead of rolling it, writes its own slot or file, and
+`deliver_then_revoke` delivers to every copy, reads each back, runs `revoke_guard` over the value sources (no copy of
+the old value may be left), and only then revokes the old key. A copy it could not deliver to holds the revoke: the
+door keeps the old key alive and records `held_record` (names, places and a keyed digest of the old value, never the
+value), and its next `rotate` finishes through `finish_held`, which finds the old value again in a recorded copy by
+that digest.
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import os
@@ -87,6 +99,8 @@ def describe(c: dict) -> str:
         return f"destination {c.get('destination')} (found by the key's {c.get('by')} in the OpenRouter scan)"
     if kind == "openrouter-serves":
         return f"{c.get('serves')} (the OpenRouter scan says the key serves it)"
+    if kind == "vault":
+        return f"vault slot {c.get('slot')}"
     if kind == "digitalocean-app":
         return f"App Platform app {c.get('name')} ({c.get('app')})"
     return str(kind)
@@ -186,6 +200,22 @@ class HerokuSource:
     def read_back(self, c: dict, new: str) -> bool:
         config = self.api.request("GET", f"/apps/{c['app_id']}/config-vars", self._token_of[c["app_id"]])
         return isinstance(config, dict) and same(config.get(c["var"]), new)
+
+    def current(self, c: dict) -> str | None:
+        """What one recorded consumer holds now, in memory (a held rotation looks for its old value there)."""
+        tokens, _skip, bad = self._tokens()
+        if bad or not tokens:
+            raise RuntimeError("no Heroku token")
+        for tok in tokens:
+            try:
+                config = self.api.request("GET", f"/apps/{c['app_id']}/config-vars", tok)
+            except RuntimeError:
+                continue
+            if isinstance(config, dict):
+                self._token_of[c["app_id"]] = tok
+                value = config.get(c["var"])
+                return value if isinstance(value, str) else None
+        return None
 
 
 # ─────────────────────────── local env files ────────────────────────────────
@@ -301,6 +331,10 @@ class EnvFileSource:
         mine = [v for k, v in pairs if k == c["var"]]
         return bool(mine) and all(same(v, new) for v in mine) and not any(same(v, old) for _k, v in pairs)
 
+    def current(self, c: dict) -> str | None:
+        pairs, _ = self.env.parse(pathlib.Path(c["path"]).read_text(encoding="utf-8"))
+        return next((v for k, v in pairs if k == c["var"]), None)
+
 
 # ─────────────────────────── launchd services ───────────────────────────────
 
@@ -328,15 +362,76 @@ class LaunchdSource:
                 for r in rows if isinstance(r, dict)], [], []
 
 
+# ─────────────────────────── other vault slots ──────────────────────────────
+
+class VaultSource:
+    """Every other slot of the local vault that holds the same value (OBS-607): read in memory, compared in constant
+    time. The key's own slot is left out: it holds the value by design and the door writes it itself. Delivery is the
+    vault's own `store_value` (the old value archived beside the slot, as `vault.py rotate` keeps it), read back with
+    `vault_value`. A slot that cannot be read is `degraded`, never "no copy"."""
+
+    name = "vault"
+
+    def __init__(self, exclude_slot: tuple | None = None, store: pathlib.Path | None = None):
+        self.exclude = tuple(exclude_slot) if exclude_slot else None
+        self._store = store
+
+    @property
+    def store(self) -> pathlib.Path:
+        if self._store is None:
+            import vault
+            self._store = vault.STORE
+        return pathlib.Path(self._store)
+
+    def find(self, old: str) -> tuple[list[dict], list[dict], list[dict]]:
+        store = self.store
+        if not store.is_dir():
+            return [], [], [{"source": self.name, "code": "not-in-use", "reason": "no vault on this machine"}]
+        import vault
+        try:
+            files = sorted(store.rglob("*"))
+        except OSError as exc:
+            return [], [{"source": self.name, "code": "store-unreadable",
+                         "reason": f"the vault could not be listed ({type(exc).__name__})"}], []
+        found, degraded = [], []
+        for path in files:
+            if path.name.endswith((".meta.json", ".tmp")) or ".retired-" in path.name or not path.is_file():
+                continue
+            parts = path.relative_to(store).parts
+            if len(parts) != 3 or parts == self.exclude:
+                continue
+            label = "/".join(parts)
+            try:
+                value = vault._read_private(path, private=False).strip()
+            except Exception as exc:                                            # noqa: BLE001  degraded, named
+                degraded.append({"source": self.name, "slot": label, "code": "slot-unreadable",
+                                 "reason": f"the vault slot {label} could not be read ({type(exc).__name__})"})
+                continue
+            if same(value, old):
+                found.append({"kind": "vault", "slot": label})
+        return found, degraded, []
+
+    def deliver(self, c: dict, new: str) -> None:
+        import vault
+        vault.store_value(*c["slot"].split("/"), new, replace=True, tool="key_consumers.py")
+
+    def read_back(self, c: dict, new: str) -> bool:
+        return same(vault_value(*c["slot"].split("/")), new)
+
+    def current(self, c: dict) -> str | None:
+        return vault_value(*c["slot"].split("/"))
+
+
 # ─────────────────────────── the finder and the delivery ────────────────────
 
 def default_sources(vault_slot: tuple[str, str, str] | None = None, exclude: tuple = ()) -> list:
-    return [HerokuSource(), EnvFileSource(exclude=exclude), LaunchdSource(vault_slot)]
+    return [HerokuSource(), EnvFileSource(exclude=exclude), LaunchdSource(vault_slot), VaultSource(vault_slot)]
 
 
 def consumer_sources(slot: str | tuple | None = None, exclude=None) -> list:
     """Where the copies of a door's value are looked for before a revoke or a roll: Heroku config vars, the local env
-    files the engine inventories, the services started from the vault slot. The one copy every door calls (OBS-601):
+    files the engine inventories, the services started from the vault slot, the vault's other slots (OBS-607). The
+    one copy every door calls (OBS-601):
     `slot` is the key's vault slot (`project/env/NAME` or a tuple, None when it is not delivered to one), `exclude`
     the file it was delivered to, which holds it by design and is never counted as a copy. Tests replace it."""
     if isinstance(slot, str):
@@ -626,6 +721,7 @@ GUARD_SOURCES = {
     "heroku": lambda key: HerokuSource(),
     "env-file": lambda key: EnvFileSource(exclude=tuple(key.get("exclude") or ())),
     "launchd": lambda key: LaunchdSource(key.get("slot")),
+    "vault": lambda key: VaultSource(key.get("slot")),
 }
 
 
@@ -695,3 +791,141 @@ def revoke_guard(subject: str, key: dict, sources: list, value: str | None = Non
         raise RevokeRefused(SOURCE_UNREADABLE, f"{subject}: a revoke never proceeds blind, and who reads this key "
                                                f"could not be checked: {'; '.join(lines)}", unread=out["degraded"])
     return out
+
+
+# ─────────────────────────── a roll that delivers (OBS-607, CP-11) ──────────
+
+def empty_plan(holds: list[str] | None = None) -> dict:
+    """A plan with no copy found: the door rolls in place as it always did (or refuses on `holds`)."""
+    return {"old": None, "found": {"consumers": [], "degraded": [], "skipped": [], "_sources": {}}, "sources": [],
+            "holds": list(holds or []), "restart": [], "copies": []}
+
+
+def plan_roll(slot: str | None = None, path=None) -> dict:
+    """What a door that rolls in place must know before it touches the key (Cloudflare names the token `path` it
+    issued, Heroku the vault `slot`): the old value (in memory, never printed), every copy of it found by
+    `consumer_sources`, the lines that `holds` the rotation before anything is minted (a source that could not be
+    read, a copy this module cannot write: `blocks`), the services to `restart`, and the `copies` a successor must
+    reach. No copy outside the vault: the door rolls in place. Copies, all writable: the door mints a successor beside
+    the old key and `deliver_then_revoke`s. A value that could not be read holds, named by its exception's type."""
+    if (slot is None) == (path is None):
+        raise ValueError("plan_roll takes a vault slot or a token path, one of them")
+    try:
+        if path is not None:
+            import private_io
+            old = private_io.read(pathlib.Path(path)).strip() or None
+        else:
+            old = vault_value(*slot.split("/"))
+    except Exception as exc:                                                    # noqa: BLE001  named, never echoed
+        return empty_plan([f"source destination could not be read: the "
+                           f"{'token file' if path is not None else 'slot'} could not be read ({type(exc).__name__})"])
+    sources = consumer_sources(slot, exclude=path)
+    found = find(old, sources)
+    return {"old": old, "found": found, "sources": sources, "holds": blocks(found),
+            "restart": [f"{describe(c)}: reads the slot at start; restart it: launchctl kickstart -k "
+                        f"gui/$(id -u)/{c['label']}" for c in found["consumers"] if c.get("kind") == "launchd"],
+            "copies": [c for c in found["consumers"] if c.get("kind") != "launchd"]}
+
+
+def deliver_then_revoke(subject: str, found: dict, old: str, new: str, revoke, sources: list) -> dict:
+    """Deliver `new` to every copy `found` named and read each back; then `revoke_guard` over the value sources (a
+    copy of `old` still found anywhere refuses); then `revoke()`, the door's own call that deletes the old key. Answers
+    {outcomes, held, revoked, code?}: `held` names each copy that holds the revoke (a delivery refused or not read
+    back, a copy the guard still finds, a source it could not read, a revoke the provider refused), and the old key is
+    then alive. Never raises for a consumer; never names a value."""
+    outcomes = deliver_all(found, old, new)
+    stuck = held(outcomes)
+    if stuck:
+        return {"outcomes": outcomes, "held": stuck, "revoked": False, "code": "consumer-not-delivered"}
+    checks = [s for s in sources if not isinstance(s, LaunchdSource)]
+    try:
+        revoke_guard(subject, {}, checks, value=old)
+    except RevokeRefused as exc:
+        lines = exc.consumers + [f"source {d.get('source')} ({d.get('code')}): {d.get('reason', 'could not be read')}"
+                                 for d in exc.unread]
+        return {"outcomes": outcomes, "held": lines or [str(exc)], "revoked": False, "code": exc.code}
+    try:
+        revoke()
+    except Exception as exc:                                                    # noqa: BLE001  held, named
+        why = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
+        return {"outcomes": outcomes, "held": [f"the old key could not be revoked: {why}"], "revoked": False,
+                "code": "revoke-failed"}
+    return {"outcomes": outcomes, "held": [], "revoked": True}
+
+
+def _digest_key() -> bytes:
+    """This machine's random key (32 bytes, owner-only, made on first use) for `digest`: a held rotation records a
+    keyed digest of the old value, never the value and never a plain hash of it."""
+    import private_io
+    path = paths.STATE / "state" / "consumer-digest.key"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        key = bytes.fromhex(private_io.read(path).strip())
+        if len(key) != 32:
+            raise RuntimeError("the consumer digest key is unreadable")
+        return key
+    key = os.urandom(32)
+    private_io.write(path, key.hex() + "\n")
+    return key
+
+
+def digest(value: str) -> str:
+    """HMAC-SHA256 of a value under this machine's key: says "the same value", never the value."""
+    return "hmac-sha256:" + hmac.new(_digest_key(), value.encode("utf-8"), hashlib.sha256).hexdigest()
+
+
+def held_record(found: dict, old: str, held_lines: list[str], predecessor, code: str | None = None) -> dict:
+    """What a door keeps on its record while a rotation is held: the old key's id at the provider, the copies found
+    (names and places), the lines that hold it, why (`code`), and the keyed digest that finds the old value again."""
+    copies = [{k: v for k, v in c.items() if k in ("kind", "app", "app_id", "var", "path", "slot", "git", "project")}
+              for c in found["consumers"] if c.get("kind") != "launchd"]
+    return {"predecessor": predecessor, "digest": digest(old), "consumers": copies, "held": list(held_lines),
+            "code": code}
+
+
+def recover(record: dict, sources: list) -> str | None:
+    """The old value of a held rotation, in memory: the first recorded copy that still holds a value with the
+    recorded digest. None when no copy holds it any more (or none can be read)."""
+    want = str(record.get("digest") or "")
+    by_name = {getattr(s, "name", None): s for s in sources}
+    for c in record.get("consumers") or []:
+        src = by_name.get(c.get("kind"))
+        if src is None or not hasattr(src, "current"):
+            continue
+        try:
+            value = src.current(c)
+        except Exception:                                                       # noqa: BLE001  that copy is unread
+            continue
+        if isinstance(value, str) and value and hmac.compare_digest(digest(value), want):
+            return value
+    return None
+
+
+def finish_held(subject: str, record: dict, new: str | None, sources: list, revoke) -> dict:
+    """Finish a held rotation: find the old value again (`recover`), find its copies afresh, deliver the successor
+    (`new`, read from the door's own slot or file) to each, then revoke through the guard. Answers what
+    `deliver_then_revoke` answers; a predecessor whose value no recorded copy holds any more stays held
+    (`predecessor-missing`), since its other copies cannot be looked for without it."""
+    if not new:
+        return {"outcomes": [], "held": ["the door's own slot holds no successor to deliver"], "revoked": False,
+                "code": "no-successor"}
+    if record.get("code") == "revoke-failed":
+        # Every copy was delivered and the guard passed before the provider refused the revoke: only the revoke is
+        # left, and the old value is in no copy any more to look for.
+        try:
+            revoke()
+        except Exception as exc:                                                # noqa: BLE001  held, named
+            why = str(exc) if isinstance(exc, RuntimeError) else type(exc).__name__
+            return {"outcomes": [], "held": [f"the old key could not be revoked: {why}"], "revoked": False,
+                    "code": "revoke-failed"}
+        return {"outcomes": [], "held": [], "revoked": True}
+    old = recover(record, sources)
+    if not old:
+        return {"outcomes": [], "revoked": False, "code": "predecessor-missing",
+                "held": ["the old key's value is in none of its recorded copies any more, so its other copies "
+                         "cannot be looked for; `--force` revokes it anyway"]}
+    found = find(old, sources)
+    early = blocks(found)
+    if early:
+        return {"outcomes": [], "held": early, "revoked": False, "code": "consumer-source-unreadable"}
+    return deliver_then_revoke(subject, found, old, new, revoke, sources)

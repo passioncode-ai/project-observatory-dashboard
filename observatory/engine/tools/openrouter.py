@@ -59,6 +59,9 @@ reports usage against it. A key without a ceiling is an unbounded liability
 attached to a file on disk.
 """
 from __future__ import annotations
+
+#: This door declares itself (OBS-605): `tools/door_registry.py` reads it, so integration health tracks openrouter.
+DOOR_PROVIDER = "openrouter"
 import argparse
 import contextlib
 import datetime

@@ -57,11 +57,11 @@ OpenRouter (`tools/openrouter.py`):
 Every hold, delivery and cut is a line in the movements journal (`rotation-held`, `consumer-delivered`,
 `rotation-forced`, `issue-held`, `issue-consumers-held`), names and places only.
 
-Cloudflare (`cloudflare.py rotate`) and Heroku (`heroku.py rotate`): `_roll_guard` runs the finder for the token's or
-slot's value before the roll and refuses (exit 1, `rotation-held` journaled) while a copy outside the vault is found
-or a source is unreadable; `--force` rolls and journals the cut. Delivering a rolled value to those copies (the full
-successor flow) is later work: a roll kills the old value at once, so it needs the copies written in the same run as
-the roll, which neither door does yet.
+Cloudflare (`cloudflare.py rotate`) and Heroku (`heroku.py rotate`): since OBS-607 they read `plan_roll` before the
+roll. No copy: they roll in place. Copies they can all write: a successor beside the old key, delivered to each copy
+and read back, then the old key revoked through the guard; a copy not delivered holds the revoke until the next
+`rotate`. A source that is unreadable, or a copy they cannot write, refuses (exit 1, `rotation-held` journaled);
+`--force` rolls and journals the cut. Design: [revoke-guard.md](revoke-guard.md), "The rolling doors deliver".
 
 ## Failure behaviour
 

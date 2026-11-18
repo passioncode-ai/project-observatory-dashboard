@@ -72,12 +72,19 @@ bucket's object lifecycle, not the token's.)
 
 ROTATION IS ROLLING, NOT REPLACING. Cloudflare can issue a fresh value for an
 existing token id, which keeps the token's identity, its permissions and its
-name — so a rotation after a leak changes exactly the thing that leaked, and
+name, so a rotation after a leak changes exactly the thing that leaked, and
 nothing downstream has to learn a new name. A roll kills the old value at once,
 so a copy of it outside this door's files (a Heroku config var, a local env
-file: `tools/key_consumers.py`) would be cut: `rotate` refuses while one is
-found or a place it could be is unreadable, and `--force` rolls anyway and
-journals what it cut (OBS-561).
+file, a vault slot: `tools/key_consumers.py`) would be cut. When such a copy is
+found and every one is writable (OBS-607), `rotate` does not roll: it mints a
+successor token with the same policies beside the old one (named `... successor`
+until the old one is gone), files it, delivers it to every copy and reads each
+back, then revokes the old token through the one revoke guard and gives the
+successor the preset's name. A copy it could not deliver to holds the revoke:
+the old token stays alive, the token's record names the copies, and the next
+`rotate` finishes it; `revoke` refuses while it is held. A place a copy could be
+that is unreadable, or a copy it cannot write, refuses before anything is
+minted, and `--force` rolls anyway and journals what it cut (OBS-561).
 
 REVOKING A VAULT-SLOT TOKEN (OBS-575). `revoke <label>` takes a token filed in the
 plugin folder. A token delivered to a vault slot (every zone and account preset) is
@@ -100,6 +107,9 @@ access is set by policies (this door writes legacy roles only); and the stashed
 admin's own membership when this token can read its user.
 """
 from __future__ import annotations
+
+#: This door declares itself (OBS-605): `tools/door_registry.py` reads it, so integration health tracks cloudflare.
+DOOR_PROVIDER = "cloudflare"
 import argparse
 import datetime
 import hashlib
@@ -802,25 +812,8 @@ def mint_answered(admin: str, account_id: str, preset: dict,
     without an expiry (OBS-191). The third item is Cloudflare's answer for the
     token (the create's, or the policy rewrite's for a roll): its `expires_on` is
     what is recorded, never the one sent."""
-    ids = group_ids(admin, account_id, preset["groups"], preset.get("level", "zone"))
     name = name or preset["name"]
-    resources = resources or {f"com.cloudflare.api.account.{account_id}": "*"}
-    policies = [{"effect": "allow", "resources": resources,
-                 "permission_groups": [{"id": i} for i in ids]}]
-    if preset.get("zone_groups"):
-        # Zone-level groups on every zone of the SAME account, as their own policy.
-        zone_ids = group_ids(admin, account_id, preset["zone_groups"], "zone")
-        policies.append({"effect": "allow",
-                         "resources": {f"com.cloudflare.api.account.{account_id}":
-                                       {"com.cloudflare.api.account.zone.*": "*"}},
-                         "permission_groups": [{"id": i} for i in zone_ids]})
-    if preset.get("account_groups"):
-        # Account-level groups beside a zone grant (Email Sending is offered at
-        # the account level only), as their own policy on the same account.
-        acct_ids = group_ids(admin, account_id, preset["account_groups"], "account")
-        policies.append({"effect": "allow",
-                         "resources": {f"com.cloudflare.api.account.{account_id}": "*"},
-                         "permission_groups": [{"id": i} for i in acct_ids]})
+    policies = policies_for(admin, account_id, preset, resources)
     lifetime = {"expires_on": expires_on} if expires_on else {}
     tid = existing_token(admin, account_id, name)
     if tid:
@@ -846,6 +839,30 @@ def mint_answered(admin: str, account_id: str, preset: dict,
         raise RuntimeError("cloudflare created the token but returned no value"
                            + discard_fresh(admin, account_id, res.get("id"), False))
     return res.get("id", ""), res["value"], res
+
+
+def policies_for(admin: str, account_id: str, preset: dict, resources: dict | None = None) -> list[dict]:
+    """The policies a preset grants on one account: its groups on `resources` (the account by default), its
+    zone-level groups on every zone of the account, its account-level groups beside them."""
+    ids = group_ids(admin, account_id, preset["groups"], preset.get("level", "zone"))
+    resources = resources or {f"com.cloudflare.api.account.{account_id}": "*"}
+    policies = [{"effect": "allow", "resources": resources,
+                 "permission_groups": [{"id": i} for i in ids]}]
+    if preset.get("zone_groups"):
+        # Zone-level groups on every zone of the SAME account, as their own policy.
+        zone_ids = group_ids(admin, account_id, preset["zone_groups"], "zone")
+        policies.append({"effect": "allow",
+                         "resources": {f"com.cloudflare.api.account.{account_id}":
+                                       {"com.cloudflare.api.account.zone.*": "*"}},
+                         "permission_groups": [{"id": i} for i in zone_ids]})
+    if preset.get("account_groups"):
+        # Account-level groups beside a zone grant (Email Sending is offered at
+        # the account level only), as their own policy on the same account.
+        acct_ids = group_ids(admin, account_id, preset["account_groups"], "account")
+        policies.append({"effect": "allow",
+                         "resources": {f"com.cloudflare.api.account.{account_id}": "*"},
+                         "permission_groups": [{"id": i} for i in acct_ids]})
+    return policies
 
 
 def discard_fresh(admin: str, account_id: str, tid: str | None, rolled: bool) -> str:
@@ -2202,10 +2219,19 @@ def cmd_rotate(label: str | None, leaked: bool, force: bool = False) -> int:
                   f"managed one over it", file=sys.stderr)
             bad += 1
             continue
-        # (lines that refuse rolling this token, services to restart after it), from the one roll guard every door
-        # calls (OBS-601). Delivering to the copies found is later work (docs/design/control-plane/rotation.md).
+        # The one roll plan every rolling door reads (OBS-601, OBS-607): copies of the token's value found that it
+        # can all write get a successor and a delivery instead of a roll; a place it cannot read or a copy it cannot
+        # write holds the rotation.
         import key_consumers
-        refuse, restart = key_consumers.guard_roll(path=p)
+        if m.get("rotation_status") == HELD:
+            bad += _finish_held(p, m, force)
+            continue
+        plan = key_consumers.plan_roll(path=p)
+        refuse, restart = plan["holds"], plan["restart"]
+        if plan["copies"] and not refuse:
+            bad += _rotate_successor(p, m, plan)
+            continue
+        refuse += [f"{key_consumers.describe(c)}: holds the value" for c in plan["copies"] if refuse]
         if refuse and not force:
             print(f"  {label_of(p)}: HELD, not rolled: a roll kills the old value at once, and a copy of it would "
                   f"be cut (`--force` rolls anyway)", file=sys.stderr)
@@ -2239,6 +2265,137 @@ def cmd_rotate(label: str | None, leaked: bool, force: bool = False) -> int:
         # `settle` closes a leak; `rotate` writes a new value and leaves the register open.
         print(SETTLE_HINT)
     return 1 if bad else 0
+
+
+#: A rotation whose successor is filed while a copy of the old value was not delivered and read back (OBS-607): the
+#: old token stays alive, named in the token's record, until `rotate` delivers to every copy.
+HELD = "successor-delivered-predecessor-held"
+#: What a successor token is called while the token it replaces still exists.
+SUCCESSOR_SUFFIX = " successor"
+
+
+def _update_meta(p: pathlib.Path, **fields) -> dict:
+    m = read_meta(p)
+    for k, v in fields.items():
+        if v is None:
+            m.pop(k, None)
+        else:
+            m[k] = v
+    write_meta(p, json.dumps(m, ensure_ascii=False, indent=2) + "\n")
+    return m
+
+
+def _revoke_and_rename(admin: str, account_id: str, old_id: str | None, new_id: str, preset: dict,
+                       expires_on: str | None):
+    """The revoke `deliver_then_revoke` runs once every copy reads the successor: delete the old token, then give the
+    successor the preset's name (and its policies and lifetime again: a PUT replaces them all)."""
+    def revoke():
+        if old_id:
+            try:
+                _request(f"/accounts/{account_id}/tokens/{old_id}", admin, method="DELETE")
+            except RuntimeError as exc:
+                if "HTTP 404" not in str(exc):
+                    raise
+        _request(f"/accounts/{account_id}/tokens/{new_id}", admin,
+                 {"name": preset["name"], "status": "active", "policies": policies_for(admin, account_id, preset),
+                  **({"expires_on": expires_on} if expires_on else {})}, method="PUT")
+    return revoke
+
+
+def _hold(p: pathlib.Path, record: dict, held: list[str], successor: str, stage: str) -> int:
+    _update_meta(p, rotation_status=HELD, predecessor={**record, "held": held}, successor_id=successor)
+    m = read_meta(p)
+    _journal("rotation-held", f"cloudflare/{m.get('account_name', '')}/{label_of(p)}", consumers=held, stage=stage,
+             predecessor=record.get("predecessor"))
+    print(f"  {label_of(p)}: the successor is filed, but the old token stays alive until every copy of it is "
+          f"delivered; `rotate {label_of(p)}` again once the copy is reachable", file=sys.stderr)
+    for line in held:
+        print(f"    holds it: {line}", file=sys.stderr)
+    return 1
+
+
+def _rotate_successor(p: pathlib.Path, m: dict, plan: dict) -> int:
+    """OBS-607: a copy of the token's value lives elsewhere, so the token is not rolled (a roll kills the copy's value
+    at once). A successor with the preset's policies is minted beside it, proved and filed, every copy delivered and
+    read back, and only then the old token revoked through the guard and the successor renamed."""
+    import key_consumers
+    preset = PRESETS[m["preset"]]
+    days = m["expire_days"] if "expire_days" in m else key_expiry.DEFAULT_DAYS
+    account = m["account_id"]
+    admin, tid = None, None
+    try:
+        expires_on, _why = lifetime(days)
+        _label, admin = read_admin(m.get("stash") or p.name)
+        old_id = existing_token(admin, account, preset["name"])
+        tid, value, answer = mint_answered(admin, account, preset, name=preset["name"] + SUCCESSOR_SUFFIX,
+                                           expires_on=expires_on)
+    except (RuntimeError, KeyError, ValueError) as exc:
+        print(f"  {label_of(p)}: could not rotate: {exc}; the old token is untouched", file=sys.stderr)
+        return 1
+    if install_issued(value, p.name, {"id": account, "name": m.get("account_name", "")}, m["preset"],
+                      m.get("project"), True, stash=m.get("stash") or p.name, expire_days=days,
+                      expiry=answered(answer, expires_on)):
+        print(f"  {label_of(p)}: the successor was not filed{discard_fresh(admin, account, tid, False)}; the old "
+              f"token is untouched", file=sys.stderr)
+        return 1
+    subject = f"cloudflare/{m.get('account_name', '')}/{label_of(p)}"
+    result = key_consumers.deliver_then_revoke(subject, plan["found"], plan["old"], value,
+                                               _revoke_and_rename(admin, account, old_id, tid, preset, expires_on),
+                                               plan["sources"])
+    for o in result["outcomes"]:
+        if o.get("status") == "delivered":
+            _journal("consumer-delivered", subject, consumer=o["consumer"])
+    for line in plan["restart"]:
+        print(f"    {label_of(p)}: {line}")
+    if not result["revoked"]:
+        record = key_consumers.held_record(plan["found"], plan["old"], result["held"], old_id, result.get("code"))
+        return _hold(p, record, result["held"], tid, "after-delivery")
+    # `install_issued` journaled the rotation itself; this line says the copies were delivered and the old one revoked.
+    _journal("rotation-delivered", subject, successor=tid, predecessor=old_id, consumers=len(result["outcomes"]))
+    print(f"  {label_of(p)}: delivered to {len(result['outcomes'])} copy(ies) and read back; the old token was "
+          f"revoked and the successor renamed")
+    for o in result["outcomes"]:
+        print(f"    {o['consumer']}: {'delivered and read back' if o['status'] == 'delivered' else o['status']}")
+    return 0
+
+
+def _finish_held(p: pathlib.Path, m: dict, force: bool) -> int:
+    """A held rotation is finished once every copy of the old value carries the successor: the old value is found
+    again in a recorded copy by its keyed digest, delivered over, and the old token revoked through the guard and the
+    successor renamed. `--force` revokes it anyway and journals what it cut."""
+    import key_consumers
+    record = m.get("predecessor") or {}
+    preset = PRESETS[m["preset"]]
+    account = m["account_id"]
+    subject = f"cloudflare/{m.get('account_name', '')}/{label_of(p)}"
+    try:
+        _label, admin = read_admin(m.get("stash") or p.name)
+        new = private_io.read(p).strip() or None
+        expires_on, _why = lifetime(m["expire_days"] if "expire_days" in m else key_expiry.DEFAULT_DAYS)
+    except (RuntimeError, OSError, KeyError, ValueError) as exc:
+        print(f"  {label_of(p)}: the held rotation could not be finished: {type(exc).__name__}", file=sys.stderr)
+        return 1
+    revoke = _revoke_and_rename(admin, account, record.get("predecessor"), m.get("successor_id"), preset, expires_on)
+    result = key_consumers.finish_held(subject, record, new, key_consumers.consumer_sources(None, exclude=p), revoke)
+    for o in result["outcomes"]:
+        if o.get("status") == "delivered":
+            _journal("consumer-delivered", subject, consumer=o["consumer"])
+    if not result["revoked"] and force:
+        try:
+            revoke()
+        except RuntimeError as exc:
+            print(f"  {label_of(p)}: --force could not revoke the old token: {exc}", file=sys.stderr)
+            return 1
+        _journal("rotation-forced", subject, cut=result["held"], predecessor=record.get("predecessor"))
+        result = {**result, "revoked": True}
+    if not result["revoked"]:
+        return _hold(p, {**record, "code": result.get("code") or record.get("code")}, result["held"],
+                     m.get("successor_id"), "resume")
+    _update_meta(p, rotation_status=None, predecessor=None, successor_id=None)
+    _journal("rotation-resumed", subject, predecessor=record.get("predecessor"))
+    print(f"  {label_of(p)}: the held rotation is finished: every copy carries the successor and the old token was "
+          f"revoked")
+    return 0
 
 
 def _leak_words(row) -> set[str]:
@@ -2300,6 +2457,10 @@ def cmd_revoke(label: str) -> int:
         print(f"no issued token called {label!r}", file=sys.stderr)
         return 1
     m = read_meta(p)
+    if m.get("rotation_status") == HELD:
+        print(f"refused: {label} is a held rotation: its old token is still read by a copy; `rotate {label}` "
+              f"finishes it first", file=sys.stderr)
+        return 1
     try:
         _l, admin = read_admin(m.get("stash") or label)
         tid = existing_token(admin, m["account_id"], PRESETS[m["preset"]]["name"])

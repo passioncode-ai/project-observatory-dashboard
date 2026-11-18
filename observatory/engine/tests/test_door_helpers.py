@@ -80,8 +80,9 @@ class OneCopy(unittest.TestCase):
                            (None, None), ("", None)):
             with self.subTest(slot=slot):
                 sources = key_consumers.consumer_sources(slot)
-                self.assertEqual([s.name for s in sources], ["heroku", "env-file", "launchd"])
+                self.assertEqual([s.name for s in sources], ["heroku", "env-file", "launchd", "vault"])
                 self.assertEqual(sources[2].slot, want)
+                self.assertEqual(sources[3].exclude, want)
                 self.assertEqual(sources[1].exclude, set())
         sources = key_consumers.consumer_sources(None, exclude=Path("/srv/alpha-web/token"))
         self.assertEqual(sources[1].exclude, {str(Path("/srv/alpha-web/token"))})
