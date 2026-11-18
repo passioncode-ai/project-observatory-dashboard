@@ -903,6 +903,74 @@ def keys(org: str, chosen: "list[str] | tuple[str, ...] | None" = None) -> dict:
             "problems": organizations.validate(doc), "degraded": degraded}
 
 
+#: The door step that issues a replacement into the same slot, by provider (OBS-627). `{account}` is an account of
+#: the project's organization when a rule names one, else a placeholder; never a value.
+REPLACE = {
+    "openrouter": 'python "$(project-observatory full-path)/tools/openrouter.py" issue --account {account} '
+                  '--name {name} --to vault:{slot}',
+    "cloudflare": 'python "$(project-observatory full-path)/tools/cloudflare.py" issue --preset PRESET '
+                  '--account {account} --vault {slot}',
+    "heroku": 'python "$(project-observatory full-path)/tools/heroku.py" issue --preset PRESET --vault {slot}',
+    "digitalocean": 'python "$(project-observatory full-path)/tools/digitalocean.py" issue --preset PRESET '
+                    '--team {account} --vault {slot}',
+}
+#: The `match` rule whose first entry names the project's organization's account in the step, by provider.
+REPLACE_RULE = {"openrouter": "openrouter_accounts", "digitalocean": "digitalocean_teams"}
+
+
+def foreign_issuers() -> dict:
+    """Keys issued in another organization's account (OBS-627): every vault slot whose project's organization is
+    decided and whose issuer (a door's record) belongs to another organization, or to an account no organization
+    claims, unless that issuer is declared shared on purpose (`match.shared_issuers`) or a partner of the project
+    (`partners`). A project in conflict, Not ours or unknown, a key put by hand and a shared (conflict) account are
+    not compared: each is a decision `full org keys` and `full org accounts` already name. Names only, never a
+    value. Silent without `organizations.json`."""
+    degraded: list[dict] = []
+    doc = organizations.load()
+    a = organizations.Assigner(doc=doc)
+    if not a.active or organizations.load_problem():
+        return {"rows": [], "degraded": degraded}
+    pdoc = _registry("projects.json", degraded, "no key's project is known, so none is compared")
+    projects = _project_rows(pdoc)
+    known = {p["id"]: p for p in projects}
+    do, cf = _quiet("digitalocean-account.json"), _quiet("cloudflare-account.json")
+    do_keys = organizations.account_keys("digitalocean", _rows(do, "accounts"))
+    do_by_uuid = {str(t["team_uuid"]): do_keys.get(t["id"]) or [str(t["team_uuid"])]
+                  for t in _rows(do, "accounts") if t.get("team_uuid") and isinstance(t.get("id"), str)}
+    slots = ["/".join(x) for x in _slots(degraded)]
+    who = issuers(degraded, cloudflare_names(cf, degraded), slots, do_by_uuid)
+    resolve = _vault_resolver(projects)
+    rows = []
+    for slot in slots:
+        issuer = who.get(slot)
+        pid = resolve(slot.split("/", 1)[0])
+        if issuer is None or pid is None:
+            continue
+        r = organizations.reading(known[pid], _NO_DESTINATIONS)
+        porg = r.get("organization")
+        if r["state"] != "decided" or not porg:
+            continue
+        iorg = issuer_organization(a, issuer)
+        owner, src = iorg["organization"], iorg["organization_source"]
+        if src == "conflict" or owner == porg:
+            continue
+        if a.shared_issuer(issuer["accountId"], owner) or a.partner(issuer["accountId"], pid):
+            continue
+        name = slot.rsplit("/", 1)[-1]
+        rule = REPLACE_RULE.get(issuer["provider"])
+        mine = (((a.orgs.get(porg) or {}).get("match") or {}).get(rule) or []) if rule else []
+        step = REPLACE.get(issuer["provider"], "the {provider} door's issue command").format(
+            account=_quote(mine[0]) if mine else "ACCOUNT", name=_quote(f"{slot.split('/', 1)[0]}-{name.lower()}"),
+            slot=_quote(slot), provider=issuer["provider"])
+        rows.append({"slot": slot, "project": pid, "projectOrganization": porg,
+                     "projectLabel": _label(a.orgs.get(porg)) or porg,
+                     "issuer": {"provider": issuer["provider"], "account": issuer["account"],
+                                "accountId": issuer["accountId"], "organization": owner, "source": src,
+                                "record": issuer["record"]},
+                     "step": step})
+    return {"rows": rows, "degraded": _once(degraded)}
+
+
 def _no_rule_kind(a) -> dict:
     """A Heroku user no `match.heroku_users` rule names: the default organization's, as `accounts()` reads it."""
     if a.default:

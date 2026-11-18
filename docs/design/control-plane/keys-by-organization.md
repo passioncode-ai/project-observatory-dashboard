@@ -1,4 +1,4 @@
-# Keys by organization (OBS-604, OBS-628, CP-10)
+# Keys by organization (OBS-604, OBS-627, OBS-628, CP-10)
 
 Status: built 2026-11-18 on `refactor/r4-org-keys`, wave R4 of the [refactor plan](refactor-plan.md). It finishes
 the halves [keys-by-source.md](keys-by-source.md) (OBS-556) left: what `shared` means, whose each key is, and who
@@ -92,7 +92,42 @@ org accounts                                   org keys --org acme
 - The configuration door declares `organizations.organizations` as one object, so the rule needs no new door key;
   `organizations.validate` accepts it as a list of strings, like every `match` rule.
 
+## A key from another organization's account (OBS-627)
+
+`org_view.foreign_issuers()` compares, for every vault slot with a door record of its issuer and a project whose
+organization is decided, the issuer account's organization (`issuer_organization`) with the project's. A different
+organization, or an account no organization claims, is a row, unless:
+
+- the issuer is listed in `match.shared_issuers` of the organization that owns it (or of any organization, for an
+  account no organization claims): the operator's agents running on one organization's account in every
+  organization;
+- the top-level `partners` names the issuer as a partner of that project.
+
+Not compared: a project in conflict, Not ours or unknown to the registry; a key put by hand (its issuer is unknown);
+an account two organizations claim. Each is already a decision in `org keys` or `org accounts`.
+
+```
+Findings, warning:
+  co-web/stage/OPENROUTER_API_KEY was issued in another organization's account
+  detail  belongs to project:co-web, which is company's; issued in the openrouter account main
+          (openrouter:account:main), which is person's (openrouter ledger (...))
+  action  issue its replacement from an account of Example Company:
+          `python ".../tools/openrouter.py" issue --account company-or --name co-web-openrouter_api_key
+           --to vault:co-web/stage/OPENROUTER_API_KEY`; move its consumers, then revoke this key; or declare
+          the account in match.shared_issuers, or the partner under partners
+```
+
+The finding `org.foreign_issuer` (`tools/organization_findings.foreign_issuer_findings`, called by
+`build_findings`) carries the slot as `credential:vault/<slot>`; its step names an account of the project's organization
+when a rule names one (`openrouter_accounts`, `digitalocean_teams`), else a placeholder. A door record that does not
+read is named in the view's `degraded` and costs the board nothing else.
+
 ## Tests
+
+`observatory/engine/tests/test_organizations.py` (suite `organizations`), class `ForeignIssuers`: a key from another
+organization's account named both ways with its step; an issuer shared on purpose, and one an organization cannot
+declare for another; an account no organization claims, and a partner of the project and of another; the board's
+row with no value; silence without organizations and the validation of the new entries.
 
 `observatory/engine/tests/test_organizations.py` (suite `organizations`), class `HerokuUsers`: without the rule the
 key stays ambiguous and the user personal; the rule by email (any case) and by id attributes the key, the account and

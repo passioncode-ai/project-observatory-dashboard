@@ -1818,6 +1818,12 @@ def collect() -> list[dict]:
     # A CONFLICT NAMED ON THE BOARD, and the rules the engine does not read (OBS-412, tools/organization_findings.py).
     import organization_findings
     out.extend(organization_findings.findings(_projects, _orgs, organizations.load_problem()))
+    # A KEY FROM ANOTHER ORGANIZATION'S ACCOUNT (OBS-627): named with the door step that replaces it, never a value.
+    try:
+        import org_view
+        out.extend(organization_findings.foreign_issuer_findings(org_view.foreign_issuers()))
+    except Exception as exc:  # noqa: BLE001 - an unreadable door record must not cost the board its other rows
+        print(f"foreign issuer findings skipped ({type(exc).__name__})", file=sys.stderr)
     # WHAT WAS FOUND SINCE A SELECTION (OBS-417, ORG-R16): proposed in the next plan, never chosen by itself.
     try:
         import org_selection

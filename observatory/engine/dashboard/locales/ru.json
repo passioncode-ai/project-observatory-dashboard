@@ -2460,6 +2460,8 @@
  "undecided": "не решено",
  "Organizations file not fully read": "Файл организаций прочитан не полностью",
  "Project with no organization (rules disagree)": "Проект без организации (правила расходятся)",
+ "Key issued in another organization's account": "Ключ выпущен в аккаунте другой организации",
+ "{slot} was issued in another organization's account": "{slot} выпущен в аккаунте другой организации",
  "organizations.json is not read: {reason}": "organizations.json не прочитан: {reason}",
  "organizations.json has entries the engine does not read": "в organizations.json есть записи, которые движок не читает",
  "{project} has no organization: its rules disagree": "у {project} нет организации: правила расходятся",

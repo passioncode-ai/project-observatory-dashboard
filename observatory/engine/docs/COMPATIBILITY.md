@@ -459,6 +459,15 @@ Design: [mcp-surface.md](https://github.com/passioncode-ai/project-observatory-d
 No field is removed. Downgrade: an older engine answers `shared` for a copy and omits `context` and `sharedTo`.
 Design: [keys-by-organization.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/control-plane/keys-by-organization.md).
 
+## Organizations: the Heroku user, shared issuers and partners (OBS-627, OBS-628)
+
+`config/organizations.json` gains `match.heroku_users`, `match.shared_issuers` and a top-level `partners` list; an
+older engine names them as unknown entries (`organization.config_problem`) and reads the rest as before. The account
+`heroku:user` in `org accounts` reads `rule` when `match.heroku_users` names it, and a key it issued reads its
+organization in `org keys`; with no such rule both read as before (the default organization). The findings board
+gains `org.foreign_issuer`, silent without organizations. No field is removed. Design:
+[keys-by-organization.md](https://github.com/passioncode-ai/project-observatory-dashboard/blob/main/docs/design/control-plane/keys-by-organization.md).
+
 ## Every setting through the one door (OBS-612)
 
 The configuration door now also declares the settings that had files of their own: the switch files `auto-update`

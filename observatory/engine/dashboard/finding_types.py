@@ -171,6 +171,7 @@ LABELS: dict[str, str] = {
     "model.degraded": "Model degraded",
     "notify.channel_failing": "Notification channel failing",
     "observatory.why_unanswered": "Requests for a why left unanswered",
+    "org.foreign_issuer": "Key issued in another organization's account",
     "organization.config_problem": "Organizations file not fully read",
     "organization.selection_new": "Found since an organization's selection",
     "organization.unresolved": "Project with no organization (rules disagree)",

@@ -26,7 +26,8 @@ so a workspace that never configures this sees no change):
                              "heroku_teams": ["<team name>"],
                              "heroku_users": ["<the Heroku user's email or id, as its admin stash records it>"],
                              "openrouter_accounts": ["<the label the door stashed it as>"]}}},
-     "projects": {"project:<slug>": {"organization": "<name>", "why": "..."}}}
+     "projects": {"project:<slug>": {"organization": "<name>", "why": "..."}},
+     "partners": [{"issuer": "<an account id>", "projects": ["project:<slug>"], "why": "..."}]}
 
 `platform_products` (OBS-564), a list of project ids under an organization, marks the projects the platform
 installs in every organization: the registry gives each `platform_product: true`.
@@ -45,6 +46,15 @@ email or the account id that stash's record holds (`heroku.py stash` writes both
 organization (`full org accounts`, the account `heroku:user`) and the issuer side of the keys the user issued
 (`full org keys`), never a project's, like `openrouter_accounts`. A user no rule names keeps the default
 organization, as before the rule existed.
+
+ISSUERS SHARED ON PURPOSE, AND PARTNERS (OBS-627). `match.shared_issuers` lists provider accounts, by the id
+`full org accounts` gives them (`openrouter:account:<label>`, `heroku:user`, `cloudflare:account:<id>`, ...), whose keys
+serve projects of other organizations by the operator's rule: the operator's own agents running on one organization's
+OpenRouter account in every organization. It covers an account of the organization that declares it, or one no
+organization claims. `partners` names, per issuer account, the projects a partner's account serves. Any other key
+whose issuer belongs to another organization than its project's, or to an account no organization claims, is the
+finding `org.foreign_issuer` (`org_view.foreign_issuers`). Neither entry decides an account's or a project's
+organization.
 
 PROVIDER ACCOUNTS (OBS-412 part 1; rule ORG-R04 of the organization onboarding design). A provider
 account named under `match` is a rule of step 2 too, beside a repository owner and a product. `digitalocean_teams`,
@@ -87,7 +97,9 @@ ACCOUNT_RULES = {"digitalocean_teams": ("digitalocean", "DigitalOcean team"),
                  "openrouter_accounts": ("openrouter", "OpenRouter account")}
 #: `match` rules on repository owners: `github_owners` is the onboarding design's name for `repository_owners`.
 OWNER_RULES = ("repository_owners", "github_owners")
-MATCH_RULES = (*OWNER_RULES, "products", *ACCOUNT_RULES)
+#: `match` lists that name accounts without deciding whose they are (OBS-627).
+ISSUER_RULES = ("shared_issuers",)
+MATCH_RULES = (*OWNER_RULES, "products", *ACCOUNT_RULES, *ISSUER_RULES)
 #: Providers whose accounts a rule names but whose resources never decide a project (see the docstring).
 ACCOUNT_ONLY = ("openrouter", "heroku-user")
 
@@ -151,6 +163,12 @@ def validate(doc: dict) -> list[str]:
                            + ", ".join(MATCH_RULES))
             elif not isinstance(match[key], list) or not all(isinstance(v, str) for v in match[key]):
                 out.append(f"{name}: match.{key} must be a list of strings")
+            elif key in ISSUER_RULES:
+                for v in match[key]:
+                    if not _account_id(v):
+                        out.append(f"{name}: match.{key} holds {_said(v)}, not an account id as `full org accounts` "
+                                   "names one (provider:kind:name, or heroku:user)")
+    out += _partner_problems(doc.get("partners"))
     declared = doc.get("projects") or {}
     if not isinstance(declared, dict):
         return out + ["projects must be an object keyed by project id"]
@@ -160,6 +178,40 @@ def validate(doc: dict) -> list[str]:
             out.append(f"{pid}: organization must name a configured organization or `external`")
         elif not row.get("why"):
             out.append(f"{pid}: a declared organization needs a `why`")
+    return out
+
+
+def _account_id(value: object) -> bool:
+    """Whether `value` reads as an account id of `full org accounts`: provider and kind, then a name."""
+    return isinstance(value, str) and (value == "heroku:user" or len(value.split(":", 2)) == 3
+                                       and all(value.split(":", 2)))
+
+
+def _said(value: object) -> str:
+    """A configured value quoted in a problem, never one shaped like a credential."""
+    import credential_shape
+    return credential_shape.echo(value) if credential_shape.shaped(str(value)) else repr(value)[:80]
+
+
+def _partner_problems(partners: object) -> list[str]:
+    """Problems with `partners` (OBS-627): a list of {issuer: an account id, projects: [project ids], why}."""
+    if partners is None:
+        return []
+    if not isinstance(partners, list):
+        return ["partners must be a list of {issuer, projects, why}"]
+    out = []
+    for i, row in enumerate(partners):
+        if not isinstance(row, dict):
+            out.append(f"partners[{i}] must be an object (issuer, projects, why)")
+            continue
+        if not _account_id(row.get("issuer")):
+            out.append(f"partners[{i}]: issuer must be an account id as `full org accounts` names one")
+        projects = row.get("projects")
+        if not isinstance(projects, list) or not projects or not all(
+                isinstance(p, str) and p.startswith("project:") for p in projects):
+            out.append(f"partners[{i}]: projects must be a list of project ids (project:<slug>)")
+        if not isinstance(row.get("why"), str) or not row["why"].strip():
+            out.append(f"partners[{i}]: a partner needs a `why`")
     return out
 
 
@@ -244,9 +296,33 @@ class Assigner:
                 else:
                     self.problems.append(f"{name}: platform_products holds {item!r}, not a project id; ignored")
 
+        # PARTNERS (OBS-627): only rows `validate` accepts count; the rest is named and covers nothing.
+        partners = self.doc.get("partners")
+        self.partners: list[tuple[str, set[str]]] = []
+        if partners is not None and _partner_problems(partners):
+            self.problems.append("partners has entries the engine does not read; they cover nothing")
+        for row in partners if isinstance(partners, list) else []:
+            if isinstance(row, dict) and not _partner_problems([row]):
+                self.partners.append((row["issuer"].lower(), set(row["projects"])))
+
     @property
     def active(self) -> bool:
         return bool(self.orgs)
+
+    def shared_issuer(self, account_id: str, owner: str | None) -> str | None:
+        """The organization that declares this issuer shared on purpose (`match.shared_issuers`), or None. A
+        declaration covers an account of the organization that makes it (`owner`), or one no organization claims."""
+        want = str(account_id or "").lower()
+        for name, org in sorted(self.orgs.items()):
+            listed = {str(v).lower() for v in ((org or {}).get("match") or {}).get("shared_issuers") or []}
+            if want in listed and owner in (name, None):
+                return name
+        return None
+
+    def partner(self, account_id: str, project_id: str | None) -> bool:
+        """Whether `partners` names this issuer as a partner of the project."""
+        want = str(account_id or "").lower()
+        return any(issuer == want and project_id in projects for issuer, projects in self.partners)
 
     def _rule_hits(self, provider: str, keys: list[str]) -> dict[str, list[str]]:
         """organization -> the `match` rules that name this account by any of its keys. A repository owner
