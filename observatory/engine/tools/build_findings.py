@@ -1054,6 +1054,10 @@ MERGE_REMEDY = {
     "bitbucket.json": "store a Bitbucket credential in the secret store, run "
                       "`project-observatory full scan-bb`, then `project-observatory "
                       "full local` — or switch the `bitbucket` integration off",
+    # OBS-623: a remote's host read as an `~/.ssh/config` alias that `ssh -G` could not resolve.
+    "ssh_alias": "check that `ssh` is installed and that `ssh -G <alias>` prints the alias's `hostname` "
+                 "from your SSH configuration, then `project-observatory full local`; until then the clone "
+                 "is classified by the alias as written",
     "identity": "pin a stable name for each colliding project in the workspace's "
                 "`config/identity_overrides.json`, then re-run "
                 "`project-observatory full local`; the suffixed keys are only a "

@@ -124,7 +124,7 @@ def ssh_hostname(alias):
                          if k.lower() == "hostname" and v.strip()), "")
             why = "" if real else "`ssh -G` printed no hostname"
     if why:
-        degraded.append({"source": f"ssh-alias:{alias}", "reason":
+        degraded.append({"source": f"ssh_alias:{alias}", "reason":
             f"could not resolve the SSH host {alias} through the SSH configuration ({why}); a clone whose remote "
             f"names it is classified by that name as written"})
     SSH_HOSTS[alias] = real

@@ -281,7 +281,7 @@
     {
       "path": "collectors/merge.py",
       "source_sha256": "832e43056d8f239ebe5184d9c2a20c12ef771d641064c2bee03365b1c75b5e69",
-      "export_sha256": "0d3074cf32df2707d94a80c22fe1d586a1a2bd286eb2607a93f27cee38b544ea",
+      "export_sha256": "f0556e33748fe29079d462c9456146fe55c6dcd3f0931cbca8c676e6a982dcac",
       "bytes": 47631,
       "python_comments_removed": 202,
       "python_docstrings_removed": 3,
@@ -6111,7 +6111,7 @@
       "path": "tests/test_merge_membership.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "de96d9764b5d81e007399c085a498402ab951c0368750eb90ae2815973a29b8b",
+      "export_sha256": "1844a3f25b600fd0124691c8ad84baaed51fbd84855785066538fcac1c5e36b9",
       "bytes": 29462
     },
     {
@@ -7507,8 +7507,8 @@
     {
       "path": "tools/build_findings.py",
       "source_sha256": "03136ce1f366d180307f7f0c17ab41a3de82631103750f081a6d79758569e0b3",
-      "export_sha256": "4e54e872346a1a1597156062414f705484e951a819d6a6cbe95c774c50d95d6d",
-      "bytes": 301695,
+      "export_sha256": "ca554d274c852a013cfd1375257aedeb62cf4d73cbf3f601447dae6c01d58110",
+      "bytes": 302065,
       "python_comments_removed": 996,
       "python_docstrings_removed": 28,
       "tool_descriptions_retained": 0,

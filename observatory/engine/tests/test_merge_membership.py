@@ -520,7 +520,7 @@ def test_an_ssh_config_alias_is_classified_by_its_real_host() -> None:
           sorted(a[1] for a in asked) == ["forge.example", "gh-alpha", "gh-beta"]
           and all(a[0] == "-G" for a in asked), str(asked))
     check("an answered alias is no degradation",
-          not [d for d in doc["degraded"] if d["source"].startswith("ssh-alias:")], str(doc["degraded"])[:300])
+          not [d for d in doc["degraded"] if d["source"].startswith("ssh_alias:")], str(doc["degraded"])[:300])
 
 
 def test_an_alias_ssh_cannot_resolve_is_named_not_guessed() -> None:
@@ -535,7 +535,7 @@ def test_an_alias_ssh_cannot_resolve_is_named_not_guessed() -> None:
           ((doc["repositories"].get(f"{OWNER}/fixture-module-a") or {}).get("local") or {}).get("folder")
           != "fixture-alias-a", "")
     check("and the gap is a degradation naming the alias",
-          any(d["source"] == "ssh-alias:gh-alpha" for d in doc["degraded"]), str(doc["degraded"])[:300])
+          any(d["source"] == "ssh_alias:gh-alpha" for d in doc["degraded"]), str(doc["degraded"])[:300])
 
 
 if __name__ == "__main__":
