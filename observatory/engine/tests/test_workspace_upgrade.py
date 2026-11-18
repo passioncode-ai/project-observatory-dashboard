@@ -59,6 +59,44 @@ class WorkspaceUpgrade(unittest.TestCase):
         result=upgrade.snapshot(self.home,writers_stopped=True)
         return Path(result['snapshot'])
 
+    def vanishing_companion(self):
+        """os.walk as a store whose database companion SQLite removes between the listing and its stat: the
+        last connection to close deletes `-wal` and `-shm` (the v0.44.0 update here, 2026-11-18)."""
+        real=os.walk
+        store=self.home/'store'
+
+        def walk(top,*args,**kwargs):
+            for directory,children,files in real(top,*args,**kwargs):
+                if Path(directory)==store:
+                    files=list(files)+['observatory.db-journal']   # listed, gone before its stat
+                yield directory,children,files
+        return patch.object(upgrade.os,'walk',side_effect=walk)
+
+    def test_a_database_companion_that_vanishes_mid_walk_is_left_out(self):
+        self.assertFalse((self.home/'store/observatory.db-journal').exists())
+        with self.vanishing_companion():
+            found=upgrade.inventory(self.home)
+        self.assertNotIn('store/observatory.db-journal',found)
+        self.assertIn('store/observatory.db',found)
+
+    def test_a_snapshot_survives_a_companion_that_vanishes_mid_walk(self):
+        with self.vanishing_companion():
+            snap=self.snapshot()
+        upgrade.verify_snapshot(snap)
+        self.assertFalse((snap/'data/store/observatory.db-journal').exists())
+
+    def test_a_file_removed_before_its_copy_is_a_change_during_the_snapshot(self):
+        real=upgrade._copy_file
+
+        def gone(source,dest):
+            if Path(source).name=='test.log':
+                raise FileNotFoundError(2,'No such file or directory',str(source))
+            return real(source,dest)
+        with patch.object(upgrade,'_copy_file',side_effect=gone):
+            with self.assertRaisesRegex(config.ConfigurationError,r'changed during snapshot.*store/logs/test\.log'):
+                self.snapshot()
+        self.assertEqual([p.name for p in (self.home/'backups').glob('*')] if (self.home/'backups').is_dir() else [],[])
+
     def test_missing_sqlite_extension_support_refuses_before_writes(self):
         class NoExtensions:
             def close(self):
