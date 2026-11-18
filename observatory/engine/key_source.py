@@ -40,6 +40,9 @@ CLASSES = ("issued", "received", "shared", "copied", "unknown")
 CONTEXTS = ("personal", "organization", "not-ours", "undecided")
 #: The revoke guard's sources (OBS-594), every one of which `consumers` reads.
 GUARD_NAMES = ("openrouter-scan", "heroku", "env-file", "launchd")
+#: Guard sources this page shows another way: another vault slot holding the value is `copied` (`copiedWith`), not a
+#: consumer (OBS-604 beside OBS-607's `VaultSource`).
+SHOWN_AS_COPIED = ("vault",)
 #: The decisions of an organization's selection that hand a key over (`org_selection.KEY_CHOICES`).
 HAND_OVER = ("hand-over-revoke", "hand-over-keep")
 #: The metadata key a received slot's source is kept under (CONTROL-PLANE.md, M7), and the longest label kept.

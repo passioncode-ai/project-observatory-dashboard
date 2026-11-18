@@ -3461,8 +3461,8 @@
       "path": "key_source.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "43f555a321ccde3da1129bf7b35c457f6cd31bda184c5a1d1a766e7dde855efe",
-      "bytes": 21934
+      "export_sha256": "63b60110105170e415df424c2228c482aa03783fc3aeea146c6a224e24084f2f",
+      "bytes": 22134
     },
     {
       "path": "leak_register.py",
@@ -5836,8 +5836,8 @@
       "path": "tests/test_key_source.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "33614dbb6727a1424b6e2629b07ac799a98ac7e687cdd051be7f130f7a701299",
-      "bytes": 27686
+      "export_sha256": "db3b1edf90276fe18a30a42eff81ff3d9608920953430ef07390c966e574f0d8",
+      "bytes": 27720
     },
     {
       "path": "tests/test_key_sweep.py",

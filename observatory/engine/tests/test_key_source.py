@@ -442,7 +442,7 @@ class Consumers(Pinned):
 
     def test_the_default_sources_are_the_guard_s(self):
         import key_consumers
-        self.assertEqual(set(key_source.GUARD_NAMES), set(key_consumers.GUARD_SOURCES))
+        self.assertEqual(set(key_source.GUARD_NAMES) | set(key_source.SHOWN_AS_COPIED), set(key_consumers.GUARD_SOURCES))
 
     def test_every_source_is_read_and_no_value_is_shown(self):
         put("upsilon", "prod", "OPENROUTER_API_KEY", VALUE)
