@@ -58,10 +58,15 @@ def digest(text: str) -> str:
 
 
 def release_tags() -> list[str] | None:
-    """The `vX.Y.Z` tags in this checkout, or None when Git cannot be asked."""
+    """The `vX.Y.Z` tags reachable from the checked-out commit, or None when Git cannot be asked.
+
+    Only reachable tags (`--merged HEAD`): when check.yml runs again on an older tag commit, a tag
+    made after it names a section that commit never had (OBS-631: the v0.43.0 rerun read
+    "0.44.0: the section is gone" once v0.44.0 existed).
+    """
     try:
-        run = subprocess.run(["git", "-C", str(ROOT), "tag", "--list", "v*"], capture_output=True, text=True,
-                             timeout=60)
+        run = subprocess.run(["git", "-C", str(ROOT), "tag", "--list", "v*", "--merged", "HEAD"],
+                             capture_output=True, text=True, timeout=60)
     except (OSError, subprocess.TimeoutExpired):
         return None
     if run.returncode != 0:

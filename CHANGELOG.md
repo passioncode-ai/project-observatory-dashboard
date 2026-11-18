@@ -19,6 +19,14 @@ scanner functions are split into named steps.
   `vault.copy_slot`, `digitalocean.cmd_rotate`, `scan_leaks.scan_sqlite` and `scan_leaks.main`, `ssh_keys.inventory`
   and `ssh_keys.rekey_plan`.
 
+### Fixed
+
+- **A check rerun on an older tag passes again** (OBS-631): the test that keeps released CHANGELOG sections as
+  tagged compared every tag in the checkout, so check.yml run again on the v0.43.0 commit read "0.44.0: the section
+  is gone" once v0.44.0 existed, and the release guard could not turn green. It now compares only the tags reachable
+  from the checked-out commit. 0.43.0 stays tagged and unpublished: every change in it ships in 0.44.0. Its
+  released section keeps its text as tagged.
+
 ### Board
 
 - OBS-632 (a context egress gate on every route to an organization), OBS-633 (the harness scan on by default),
