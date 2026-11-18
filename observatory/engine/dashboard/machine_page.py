@@ -258,6 +258,8 @@ DYNAMIC = ("cache", "toolchain", "build", "simulator", "vm", "worktrees", "user"
            "regenerable", "command", "history", "manual", "auto", "clean", "dirty", "missing", "unreadable",
            "branch-merged", "branch-pushed", "worktree-missing", "worktree-clean", "build-artifacts",
            "branch-unique", "worktree-dirty", "removed", "pruned", "skipped", "failed",
+           # The manual tier's proposals (tools/cleanup.py, OBS-621).
+           "repo-idle", "deps-stale", "checkout-merged",
            # The disk guard's classes and pressure levels (tools/disk_guard.py).
            "cache-command", "cache-dir", "build-output", "user-temp", "temp", "trash", "browser-clone", "normal", "low", "critical",
            # Empty states chosen by whether their survey ran (see UNMEASURED).
@@ -290,4 +292,6 @@ def _location_labels() -> tuple[str, ...]:
 
 #: The swap row's label, written by collectors/scan_machine.py itself.
 SWAP_LABEL = "Swap files (memory written to disk)"
-DYNAMIC = DYNAMIC + (SWAP_LABEL,) + _location_labels()
+#: A VM disk file's row, which `machine_view.vm_location` adds from the disk guard's pass (OBS-620).
+VM_DISK_LABEL = "Lima or Colima virtual machine disk"
+DYNAMIC = DYNAMIC + (SWAP_LABEL, VM_DISK_LABEL) + _location_labels()

@@ -145,6 +145,57 @@ def tmp_findings(guard: dict | None) -> list[dict]:
     return out
 
 
+def vm_growth_findings(guard: dict | None) -> list[dict]:
+    """OBS-620: a Lima or Colima VM disk file growing faster than `vm_growth.gb_per_day` (on 2026-11-17 a container
+    log of 10.7 GB inside a VM filled the host disk twice). One finding a VM, naming it, its file and its growth over
+    the last day; the guard never changes a VM, so the action is the VM owner's."""
+    vms = (guard or {}).get("vms")
+    out = []
+    for v in vms if isinstance(vms, list) else []:
+        growth = v.get("growth") if isinstance(v, dict) else None
+        if not (isinstance(v, dict) and v.get("growing") is True and isinstance(v.get("vm"), str) and v["vm"]
+                and isinstance(growth, dict) and isinstance(growth.get("gb_per_day"), (int, float))):
+            continue
+        out.append({"type": "disk.vm_growth", "subject": f"machine:vm:{v['vm']}", "severity": "warning",
+                    **titled("the {vm} virtual machine's disk grows {gb} GB a day", vm=v["vm"],
+                             gb=str(growth["gb_per_day"])),
+                    "detail": (f"Its {v.get('file') or 'disk'} file ({v.get('tool') or 'lima'}) takes "
+                               f"{v.get('allocated_gb')} GB on the host disk and grew {growth.get('gb')} GB over the "
+                               f"last {growth.get('window_hours')} hours. Something inside the VM is writing: a "
+                               "container log, a database or images. Space freed inside the VM returns to the host "
+                               "only after a trim. Observatory never changes a VM."),
+                    "action": ("find the writer inside the VM (`docker system df -v`, the largest container logs) and "
+                               "cap or rotate it; the VM's owner decides"),
+                    "evidence": ["store:raw/disk-guard.json"]})
+    return out
+
+
+def swap_growth_findings(guard: dict | None) -> list[dict]:
+    """OBS-620: the swap on the same disk growing faster than `swap_growth.gb_per_day`, named with its owner: the
+    agent sessions running and the memory their processes hold."""
+    swap = (guard or {}).get("swap")
+    growth = swap.get("growth") if isinstance(swap, dict) else None
+    if not (isinstance(swap, dict) and swap.get("growing") is True and isinstance(growth, dict)
+            and isinstance(growth.get("gb_per_day"), (int, float))):
+        return []
+    owner = swap.get("owner") if isinstance(swap.get("owner"), dict) else {}
+    agents = [a for a in owner.get("agents") or [] if isinstance(a, dict) and isinstance(a.get("agent"), str)][:5]
+    named = ", ".join(f"{a['agent']} {a.get('sessions') if a.get('sessions') is not None else 'unknown'} sessions"
+                      + (f" ({a['rss_gb']} GB)" if a.get("rss_gb") is not None else "") for a in agents)
+    sessions = owner.get("sessions")
+    return [{"type": "disk.swap_growth", "subject": "machine:swap", "severity": "warning",
+             **titled("swap on the same disk grows {gb} GB a day", gb=str(growth["gb_per_day"])),
+             "detail": (f"Swap holds {swap.get('gb')} GB of the same disk and grew {growth.get('gb')} GB over the last "
+                        f"{growth.get('window_hours')} hours. "
+                        + (f"{sessions} coding-agent sessions run now" if sessions is not None
+                           else "The coding-agent sessions were not read")
+                        + (f", their processes holding {owner['rss_gb']} GB of memory" if owner.get("rss_gb") is not None
+                           else "")
+                        + (f": {named}." if named else ".")),
+             "action": "end the agent sessions nobody works in; swap shrinks as their memory is freed",
+             "evidence": ["store:raw/disk-guard.json"]}]
+
+
 def _age_hours(stamp: str | None, now: datetime) -> float | None:
     try:
         return (now - datetime.strptime(stamp or "", "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)).total_seconds() / 3600
@@ -171,6 +222,8 @@ def findings(scratch: pathlib.Path, logs: pathlib.Path, config: dict, now: datet
     out.extend(hung_findings(_load(scratch / "hung-commands.json")))
     out.extend(vm_findings(guard))
     out.extend(tmp_findings(guard))
+    out.extend(vm_growth_findings(guard))
+    out.extend(swap_growth_findings(guard))
 
     # THE GUARD ITSELF. On 2026-10-11 the self-cleaning had not run for a day and nothing
     # said so: its steps were "not started" in a tick too long to reach them. A guard that

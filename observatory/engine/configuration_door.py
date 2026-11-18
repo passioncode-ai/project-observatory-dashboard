@@ -186,6 +186,11 @@ GUARD_KEYS = (
      "new entries a day in one name class of the temporary folder above which it is a finding"),
     (("tmp_growth", "gb_per_day"), "number", "never",
      "gigabytes a day written in one name class of the temporary folder above which it is a finding"),
+    # Thresholds of the `disk.vm_growth` and `disk.swap_growth` findings (OBS-620): they remove nothing either.
+    (("vm_growth", "gb_per_day"), "number", "never",
+     "gigabytes a day a Lima or Colima VM disk file may grow before it is a finding"),
+    (("swap_growth", "gb_per_day"), "number", "never",
+     "gigabytes a day the swap on the same disk may grow before it is a finding"),
 )
 CLEANUP_AUTO = {
     "merged_branch_idle_days": "days a merged branch is idle before the auto tier removes it",
