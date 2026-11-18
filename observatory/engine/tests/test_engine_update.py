@@ -248,9 +248,16 @@ class FakeEngine:
         self.upgrade_rc, self.doctor_rc, self.upgrade_writes = upgrade_rc, doctor_rc, upgrade_writes
         self.deps = {"mcp": "2.2.0"} if deps is None else deps
         self.calls: list[str] = []
+        #: OBS-626: how long the staged upgrade runs, in the scaled seconds the fake clock counts.
+        self.takes = 0
+        self.upgrade_kw: list[dict] = []
 
-    def upgrade(self):
+    def upgrade(self, **kw):
         self.calls.append("upgrade")
+        self.upgrade_kw.append(kw)
+        if self.takes and self.takes > kw.get("timeout", 1800):
+            # What the real child answers when its whole process group is ended at the limit.
+            return 125, f"TimeoutExpired after {kw.get('timeout')} s in step stage"
         if self.upgrade_writes:
             (self.home / "config" / "upgraded-by-new-release.json").write_text("{}\n")
         return self.upgrade_rc, "synthetic upgrade output"
@@ -1209,7 +1216,7 @@ class UpdateTest(unittest.TestCase):
         # ("already loaded", reported as a human step) and the server kept running the
         # code it was started with. A job found loaded is restarted instead.
         real_upgrade = self.engine.upgrade
-        def upgrade_while_someone_starts_the_server():
+        def upgrade_while_someone_starts_the_server(**_):
             self.services.state["server"] = True
             return real_upgrade()
         self.engine.upgrade = upgrade_while_someone_starts_the_server
@@ -1230,7 +1237,7 @@ class UpdateTest(unittest.TestCase):
         # itself had waited until launchd no longer knew the label (`install_launchd.stop_job`).
         real_upgrade = self.engine.upgrade
 
-        def upgrade_while_another_process_loads_the_server():
+        def upgrade_while_another_process_loads_the_server(**_):
             self.services.state["server"] = True
             (self.home / "store/raw/serverd.json").write_text(json.dumps(
                 {"pid": 70074, "port": 47311, "version": NEWER, "workspace": str(self.home)}))
@@ -1325,6 +1332,60 @@ class UpdateTest(unittest.TestCase):
         self.assertTrue(any("system daemon" in d for d in doc["degraded"]), doc["degraded"])
         self.assertTrue(any("kickstart -k system/org.example.server" in s for s in doc["human_steps"]), doc)
         self.assertFalse([c for c in self.services.calls if c[0] in ("stop", "start")])
+
+    # --- OBS-626: the staged upgrade's limit follows the machine, measured by the snapshot -------
+
+    def clock(self, snapshot_seconds: float):
+        """The update's clock: the snapshot takes `snapshot_seconds`, nothing else moves it."""
+        ticks = iter([0.0, float(snapshot_seconds)])
+        return lambda: next(ticks, float(snapshot_seconds))
+
+    def test_2026_11_17_a_staging_slower_than_the_old_limit_completes(self):
+        # Scaled: on 2026-11-17 the update's snapshot took 13 minutes on a loaded machine (20:08:00Z to
+        # 20:21:19Z) and the staged upgrade then ran past the fixed 1800 s. Here the snapshot takes
+        # 900 s and the staging 2400 s, longer than 1800 s and well inside four snapshots.
+        self.gh.publish(NEWER)
+        self.engine.takes = 2400
+        code, doc = self.run_cli("--apply", clock=self.clock(900))
+        self.assertEqual((code, doc["status"]), (0, "updated"), doc)
+        (kw,) = self.engine.upgrade_kw
+        self.assertEqual(kw["timeout"], 3600)
+        snapshot = Path(kw["snapshot"])
+        self.assertTrue(snapshot.name.startswith("before-update-"))
+        self.assertEqual(snapshot.parent, self.home / "backups", "the upgrade reuses the update's own snapshot")
+        step = next(s for s in doc["steps"] if s["step"] == "snapshot")
+        self.assertEqual((step["seconds"], step["upgrade_limit"]), (900.0, 3600))
+        self.assertGreater(step["bytes"], 0)
+
+    def test_a_limit_that_is_still_exceeded_names_the_step_it_stopped_in(self):
+        self.gh.publish(NEWER)
+        self.engine.takes = 2400
+        code, doc = self.run_cli("--apply", clock=self.clock(10))
+        self.assertEqual(code, self.mod.EXIT_FAILED, doc)
+        self.assertEqual(self.engine.upgrade_kw[0]["timeout"], self.mod.UPGRADE_FLOOR_S)
+        self.assertIn("TimeoutExpired after 1800 s in step stage", doc["error"])
+        self.assertEqual(doc["failed_step"], "workspace-upgrade")
+
+    def test_a_staging_the_snapshot_says_cannot_fit_is_refused_before_anything_is_installed(self):
+        self.gh.publish(NEWER)
+        before = self.tree()
+        code, doc = self.run_cli("--apply", clock=self.clock(4000))
+        self.assertEqual((code, doc["status"]), (self.mod.EXIT_REFUSED, "refused"), doc)
+        self.assertEqual(doc["failed_step"], "upgrade-limit")
+        self.assertIn("4000 s", doc["error"])
+        self.assertIn("MB", doc["error"])
+        self.assertEqual(self.installer.calls, [], "nothing was installed")
+        self.assertEqual(self.engine.calls, [])
+        self.assertEqual(self.services.state, {"tick": True, "server": True}, "the jobs run again")
+        self.assertEqual(list((self.home / "backups").glob("before-update-*")), [],
+                         "the snapshot of an update that changed nothing is not left behind")
+        self.assertEqual(self.tree(), before)
+
+    def test_the_limit_follows_the_snapshot(self):
+        self.assertEqual(self.mod.upgrade_limit(0), self.mod.UPGRADE_FLOOR_S)
+        self.assertEqual(self.mod.upgrade_limit(449.9), self.mod.UPGRADE_FLOOR_S)
+        self.assertEqual(self.mod.upgrade_limit(900), 3600)
+        self.assertEqual(self.mod.upgrade_limit(900.2), 3601)
 
     def test_no_workspace_installs_only(self):
         other = self.base / "empty-home"
@@ -1467,6 +1528,67 @@ class RealSeams(unittest.TestCase):
                                 ["launchctl", "bootout", f"gui/{uid}/{jobs[0]['label']}"],
                                 ["launchctl", "print", f"gui/{uid}/{jobs[0]['label']}"],
                                 ["launchctl", "bootstrap", f"gui/{uid}", jobs[0]["plist"]]])
+
+    # --- OBS-626 ---------------------------------------------------------------------------------
+
+    def test_the_upgrade_passes_the_updates_snapshot_and_its_limit(self):
+        engine = self.mod.NewEngine(self.home, python="/synthetic/python", runner=self.runner())
+        self.assertEqual(engine.upgrade(timeout=3600, snapshot=Path("/w/ws/backups/before-update-x"))[0], 0)
+        argv, kw = self.calls[0]
+        self.assertEqual(argv[7:], ["upgrade", "--apply", "--writers-stopped", "--snapshot", "/w/ws/backups/before-update-x"])
+        self.assertEqual(kw["timeout"], 3600)
+
+    def test_an_older_release_without_the_snapshot_option_is_asked_again_without_it(self):
+        def run(argv, **kw):
+            self.calls.append((argv, kw))
+            if "--snapshot" in argv:
+                return subprocess.CompletedProcess(argv, 2, "", "error: unrecognized arguments: --snapshot /w/x")
+            return subprocess.CompletedProcess(argv, 0, "{}", "")
+        engine = self.mod.NewEngine(self.home, python="/synthetic/python", runner=run)
+        self.assertEqual(engine.upgrade(timeout=3600, snapshot=Path("/w/x"))[0], 0)
+        self.assertEqual([a[7:] for a, _ in self.calls],
+                         [["upgrade", "--apply", "--writers-stopped", "--snapshot", "/w/x"],
+                          ["upgrade", "--apply", "--writers-stopped"]])
+
+    def test_a_timeout_names_the_step_the_upgrade_was_in(self):
+        def run(argv, **kw):
+            raise subprocess.TimeoutExpired(argv, kw["timeout"], output=b"",
+                                            stderr=b"Observatory: upgrade step inventory\nObservatory: upgrade step stage\n")
+        engine = self.mod.NewEngine(self.home, python="/synthetic/python", runner=run)
+        code, detail = engine.upgrade(timeout=1800)
+        self.assertEqual(code, 125)
+        self.assertEqual(detail, "TimeoutExpired after 1800 s in step stage")
+
+    def test_a_failed_upgrade_says_its_error_after_its_step_lines(self):
+        def run(argv, **kw):
+            return subprocess.CompletedProcess(argv, 2, "", "Observatory: upgrade step stillness\n"
+                                               "Observatory: Workspace changed while upgrade was staged\n")
+        engine = self.mod.NewEngine(self.home, python="/synthetic/python", runner=run)
+        code, detail = engine.upgrade(timeout=1800)
+        self.assertEqual(code, 2)
+        self.assertEqual(detail, "Observatory: Workspace changed while upgrade was staged (in step stillness)")
+
+    @unittest.skipUnless(os.name == "posix", "a process group is a POSIX notion; Windows ends the tree with taskkill")
+    def test_2026_11_17_a_timeout_ends_the_grandchild_too(self):
+        # `python -m observatory full upgrade` starts the engine as a child of its own: the 1800 s kill
+        # ended the launcher alone, and the engine went on exporting for 21 s more while the update
+        # rolled back around it (the backups folder moved at 20:51:56Z, the kill was at 20:51:35Z).
+        import tmp as tmpdir
+        folder = Path(tmpdir.mkdtemp()).resolve()
+        marker = folder / "grandchild-still-ran"
+        grandchild = f"import time, pathlib; time.sleep(1.5); pathlib.Path({str(marker)!r}).write_text('x')"
+        child = f"import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', {grandchild!r}]); time.sleep(30)"
+        with self.assertRaises(subprocess.TimeoutExpired):
+            self.mod.run_bounded([sys.executable, "-c", child], capture_output=True, text=True, timeout=0.5,
+                                 env=dict(os.environ), cwd=str(folder))
+        import time
+        time.sleep(2.5)
+        self.assertFalse(marker.exists(), "the grandchild was ended with the child")
+
+    def test_run_bounded_answers_like_subprocess_run(self):
+        done = self.mod.run_bounded([sys.executable, "-c", "import sys; print('out'); print('err', file=sys.stderr)"],
+                                    capture_output=True, text=True, timeout=30, env=dict(os.environ), cwd=None)
+        self.assertEqual((done.returncode, done.stdout.strip(), done.stderr.strip()), (0, "out", "err"))
 
     def test_default_release_source_is_the_plugin_repository(self):
         from tools import agent_plugin
