@@ -1490,15 +1490,19 @@ class Unmeasured(Base):
         en = machine_page.machine_html({"machine": summary}, Translator("en"))
         for claim in ("Every worktree is clean", "No branch holds commits found nowhere else"):
             self.assertNotIn(claim, en)
-        self.assertIn("Not measured yet", en)
-        self.assertIn("project-observatory full machine", en)
+        self.assertIn("Not measured yet: the cleanup survey has not run.", en)
+        # The command that runs a survey is for agents (`degraded` in the JSON and MCP answers); the page names
+        # the survey and shows no command (OBS-629).
+        self.assertNotIn("project-observatory", en)
+        self.assertIn("project-observatory full cleanup", json.dumps(summary["degraded"]))
         # The degraded reasons are message ids, so the Russian page is Russian.
         ru = machine_page.machine_html({"machine": summary}, Translator("ru"))
         import re
         shown = re.sub(r'data-t(-args)?="[^"]*"', "", ru)     # the ids themselves are English by design
         self.assertNotIn("not surveyed yet", shown)
         self.assertNotIn("Not measured yet", shown)
-        self.assertIn("project-observatory full machine", ru)
+        self.assertIn("ещё не обследовано", shown)
+        self.assertNotIn("project-observatory", ru)
 
 
 class Tool(Base):

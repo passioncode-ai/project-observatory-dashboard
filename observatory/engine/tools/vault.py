@@ -1070,79 +1070,86 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
     `copied_from` (the source store, slot and time); the source's header binding does not. The receipt's digests are keyed (`_copy_digest_key`), never the value.
 
     Across machines this is OBS-194's sealed envelope, not this function."""
-    validate_names(project, env, name)
-    src_label = f"{project}/{env}/{name}"
-    try:
-        src = _slot(project, env, name)
-    except VaultBoundaryError as exc:
-        raise CopyRefused(f"{src_label} cannot be reached as a private slot ({exc})", "source-unreadable") from None
-    t_project, t_env, t_name = _parse_to_slot(to_slot, project, env, name)
-    try:
-        validate_names(t_project, t_env, t_name)
-    except VaultBoundaryError as exc:
-        raise CopyRefused(f"--to-slot: {exc}", "target-slot-invalid") from None
-    store = _target_store(to_store)
-    target_vault = store / "projects"
-    if _holds(target_vault, STORE) and _holds(STORE, target_vault):
-        raise CopyRefused("the target store is this store; a slot is copied into another one", "same-store")
-    # The source's store is its vault folder's parent when the vault is a store's `projects/`, as by default.
-    source_side = (STORE, STORE.parent) if STORE.name == "projects" else (STORE,)
-    for outer, inner in [(store, STORE)] + [(side, store) for side in source_side]:
-        if _holds(outer, inner):
-            raise CopyRefused(f"the stores are nested ({shown_path(outer.resolve())} holds "
-                              f"{shown_path(inner.resolve())}); copy between two separate stores", "nested-stores")
-    def leak_check() -> None:
+    copy = _SlotCopy(project, env, name, to_store, to_slot=to_slot, replace=replace, tool=tool)
+    copy.preflight()
+    copy.write()
+    return copy.receipt()
+
+
+class _SlotCopy:
+    """`copy_slot` in named steps (OBS-609): `preflight` refuses before anything is written, `write` copies under
+    both stores' locks and undoes what it created on a refusal, `receipt` answers. The value lives only in this
+    object's locals while a step runs; it is never an attribute."""
+
+    def __init__(self, project: str, env: str, name: str, to_store: str, *, to_slot: str | None,
+                 replace: bool, tool: str) -> None:
+        validate_names(project, env, name)
+        self.project, self.env, self.name = project, env, name
+        self.replace, self.tool = replace, tool
+        self.src_label = f"{project}/{env}/{name}"
+        try:
+            self.src = _slot(project, env, name)
+        except VaultBoundaryError as exc:
+            raise CopyRefused(f"{self.src_label} cannot be reached as a private slot ({exc})",
+                              "source-unreadable") from None
+        t_project, t_env, t_name = _parse_to_slot(to_slot, project, env, name)
+        try:
+            validate_names(t_project, t_env, t_name)
+        except VaultBoundaryError as exc:
+            raise CopyRefused(f"--to-slot: {exc}", "target-slot-invalid") from None
+        self.store = _target_store(to_store)
+        self.target_vault = self.store / "projects"
+        self.t_label = f"{t_project}/{t_env}/{t_name}"
+        self.t_slot = self.target_vault / t_project / t_env / t_name
+        # The source's store: its vault folder's parent when the vault is a store's `projects/`, else the vault folder.
+        self.source_store = shown_path((STORE.parent if STORE.name == "projects" else STORE).resolve())
+        self.created = self.vault_created = False
+        self.outcome = self.archived = self.digest = None
+        self.written = False
+        self.carried: list[str] = []
+        self.key = self.key_id = None
+
+    # -- refusals shared by the preflight and the locked write --------------------------------------------------
+
+    def leak_check(self) -> None:
         """An open leak of the source stops the copy, checked before anything is written and again under the
         locks; a leak register that cannot be read stops it too."""
         try:
-            open_leak = bool(_unsettled_for(src_label))
+            open_leak = bool(_unsettled_for(self.src_label))
         except VaultBoundaryError as exc:
             raise CopyRefused(f"the source store's leak register cannot be read ({exc})", "source-unreadable") from None
         if open_leak:
-            raise CopyRefused(f"{src_label} has an open leak; copying it spreads a value that may be revoked. Rotate "
-                              f"it, settle the leak (`vault.py settle {project} {env} {name} ...`), then copy",
-                              "source-has-open-leak")
+            raise CopyRefused(f"{self.src_label} has an open leak; copying it spreads a value that may be revoked. "
+                              f"Rotate it, settle the leak (`vault.py settle {self.project} {self.env} {self.name} "
+                              f"...`), then copy", "source-has-open-leak")
 
-    try:
-        if not src.is_file():
-            raise CopyRefused(f"nothing at {src_label} to copy; `vault.py list {project}` shows the slots",
-                              "source-empty")
-        leak_check()
-        _writable_by_this_account(store)
-    except OSError as exc:
-        raise CopyRefused(f"the file system refused before anything was written ({type(exc).__name__})",
-                          "filesystem-refused") from None
-    t_label = f"{t_project}/{t_env}/{t_name}"
-    t_slot = target_vault / t_project / t_env / t_name
-    # The source's store: its vault folder's parent when the vault is a store's `projects/`, else the vault folder.
-    source_store = shown_path((STORE.parent if STORE.name == "projects" else STORE).resolve())
-
-    def source_value() -> str:
+    def source_value(self) -> str:
         """The source slot's one value; any boundary the vault's reader refuses is `source-unreadable`."""
         try:
-            return _read_private(src).strip()
+            return _read_private(self.src).strip()
         except VaultBoundaryError as exc:
-            raise CopyRefused(f"{src_label} cannot be read as a private slot ({exc})", "source-unreadable") from None
+            raise CopyRefused(f"{self.src_label} cannot be read as a private slot ({exc})", "source-unreadable") from None
         except ValueError:
             # Never the decoder's message: it quotes a byte of the value and its position.
-            raise CopyRefused(f"{src_label} does not hold UTF-8 text", "source-unreadable") from None
+            raise CopyRefused(f"{self.src_label} does not hold UTF-8 text", "source-unreadable") from None
 
-    def checked(value: str) -> str:
+    def checked(self, value: str) -> str:
         """The refusals that depend on the two values, run before anything is written and again under the locks."""
         if not value or "\n" in value or "\r" in value:
-            raise CopyRefused(f"{src_label} does not hold one single-line value", "source-unreadable")
-        _no_symlinks(t_slot)
-        if t_slot.exists() and not t_slot.is_file():
-            raise CopyRefused(f"{t_label} in {shown_path(store)} is not a regular file", "target-unsafe")
-        if t_slot.is_file():
-            if _read_private(t_slot).strip() == value:
+            raise CopyRefused(f"{self.src_label} does not hold one single-line value", "source-unreadable")
+        _no_symlinks(self.t_slot)
+        if self.t_slot.exists() and not self.t_slot.is_file():
+            raise CopyRefused(f"{self.t_label} in {shown_path(self.store)} is not a regular file", "target-unsafe")
+        if self.t_slot.is_file():
+            if _read_private(self.t_slot).strip() == value:
                 return "unchanged"
-            if not replace:
-                raise CopyRefused(f"{t_label} in {shown_path(store)} already holds another value; pass --replace "
-                                  f"to archive it there and write this one", "target-slot-filled")
+            if not self.replace:
+                raise CopyRefused(f"{self.t_label} in {shown_path(self.store)} already holds another value; pass "
+                                  f"--replace to archive it there and write this one", "target-slot-filled")
             return "replaced"
         return "copied"
 
+    @staticmethod
     def target_side(exc: Exception) -> CopyRefused:
         """A refusal of the vault's own boundaries on the target side (a link below `projects/`, a slot or metadata
         file that is not owner-only, does not parse or is not UTF-8) under one code, never the source's
@@ -1155,132 +1162,173 @@ def copy_slot(project: str, env: str, name: str, to_store: str, *, to_slot: str 
             return CopyRefused("a file in the target store is not UTF-8 text", "target-unsafe")
         return CopyRefused("a file in the target store could not be read as the vault reads its files", "target-unsafe")
 
-    try:
-        checked(source_value())
-        if target_vault.is_dir():
-            # A Git working tree below `projects/` (a project folder that is a checkout) is refused like one around it.
-            _refuse_a_work_tree(_deepest_existing(t_slot.parent, target_vault), store)
-    except (VaultBoundaryError, ValueError) as exc:
-        raise target_side(exc) from None
-    except OSError as exc:
-        raise CopyRefused(f"the file system refused before anything was written ({type(exc).__name__})",
-                          "filesystem-refused") from None
-    try:
-        key, key_id = _copy_digest_key()
-    except (VaultBoundaryError, ValueError, OSError):
-        # The estate key lives in the source's vault: a key file that cannot be read is the source's problem.
-        raise CopyRefused("the source store's estate key cannot be read as a private file; restore it with "
-                          "`full vault-digests key import FILE`", "source-unreadable") from None
-
-    import vault_digests  # on the path `_copy_digest_key` put it on
-
-    def keyed(text: str) -> str:
+    def keyed(self, text: str) -> str:
+        import vault_digests  # on the path `_copy_digest_key` put it on
         # The estate digest exactly as `full vault-digests` computes it, so the two never drift apart.
-        return vault_digests.digest(key, text)
+        return vault_digests.digest(self.key, text)
 
-    # What this call creates in the target store is removed again when a refusal comes after it (the slots changed
-    # while the copy waited for the locks, or a target file failed the vault's checks): the store folder and the
-    # vault folder when they are empty, and the lock file only from a vault folder this call made that holds nothing
-    # else. A lock file left in an existing vault is harmless and is kept.
-    created = vault_created = False
-    outcome = archived = digest = None
-    written = False
-    try:
+    # -- step 1: every refusal before anything is written --------------------------------------------------------
+
+    def preflight(self) -> None:
+        self._refuse_same_or_nested_stores()
+        try:
+            if not self.src.is_file():
+                raise CopyRefused(f"nothing at {self.src_label} to copy; `vault.py list {self.project}` shows the slots",
+                                  "source-empty")
+            self.leak_check()
+            _writable_by_this_account(self.store)
+        except OSError as exc:
+            raise CopyRefused(f"the file system refused before anything was written ({type(exc).__name__})",
+                              "filesystem-refused") from None
+        try:
+            self.checked(self.source_value())
+            if self.target_vault.is_dir():
+                # A Git working tree below `projects/` (a project folder that is a checkout) is refused like one around it.
+                _refuse_a_work_tree(_deepest_existing(self.t_slot.parent, self.target_vault), self.store)
+        except (VaultBoundaryError, ValueError) as exc:
+            raise self.target_side(exc) from None
+        except OSError as exc:
+            raise CopyRefused(f"the file system refused before anything was written ({type(exc).__name__})",
+                              "filesystem-refused") from None
+        try:
+            self.key, self.key_id = _copy_digest_key()
+        except (VaultBoundaryError, ValueError, OSError):
+            # The estate key lives in the source's vault: a key file that cannot be read is the source's problem.
+            raise CopyRefused("the source store's estate key cannot be read as a private file; restore it with "
+                              "`full vault-digests key import FILE`", "source-unreadable") from None
+
+    def _refuse_same_or_nested_stores(self) -> None:
+        store, target_vault = self.store, self.target_vault
+        if _holds(target_vault, STORE) and _holds(STORE, target_vault):
+            raise CopyRefused("the target store is this store; a slot is copied into another one", "same-store")
+        # The source's store is its vault folder's parent when the vault is a store's `projects/`, as by default.
+        source_side = (STORE, STORE.parent) if STORE.name == "projects" else (STORE,)
+        for outer, inner in [(store, STORE)] + [(side, store) for side in source_side]:
+            if _holds(outer, inner):
+                raise CopyRefused(f"the stores are nested ({shown_path(outer.resolve())} holds "
+                                  f"{shown_path(inner.resolve())}); copy between two separate stores", "nested-stores")
+
+    # -- step 2: the copy under both locks -----------------------------------------------------------------------
+
+    def write(self) -> None:
+        """What this call creates in the target store is removed again when a refusal comes after it (the slots
+        changed while the copy waited for the locks, or a target file failed the vault's checks): the store folder
+        and the vault folder when they are empty, and the lock file only from a vault folder this call made that
+        holds nothing else. A lock file left in an existing vault is harmless and is kept."""
+        try:
+            self._make_target_folders()
+            # One order for the two locks, by the folders' identity, so two copies in opposite directions never wait
+            # on each other however each spells the stores.
+            first, second = sorted((STORE, self.target_vault), key=lambda f: (f.stat().st_dev, f.stat().st_ino))
+            with _mutation_lock(first), _mutation_lock(second):
+                try:
+                    self._copy_locked()
+                except (VaultBoundaryError, OSError, ValueError):
+                    # Undone while both locks are still held: a writer waiting for the target's lock then finds its
+                    # file gone and refuses (`_mutation_lock` re-locks the file at the path, and the folder is gone),
+                    # never holding a lock file this call removed under it.
+                    if not self.written and self.vault_created:
+                        _undo_new_vault(self.target_vault, self.store if self.created else None)
+                    raise
+        except (VaultBoundaryError, OSError, ValueError) as exc:
+            self._refused(exc)
+
+    def _make_target_folders(self) -> None:
         # Made by this call only when its own mkdir succeeds: another copy may make the same store a moment
         # earlier, and what that copy made is never removed by this one.
         try:
-            store.mkdir(mode=0o700)
-            created = True
-            osprivacy.private_folder(store)
+            self.store.mkdir(mode=0o700)
+            self.created = True
+            osprivacy.private_folder(self.store)
         except FileExistsError:
             pass
         try:
-            target_vault.mkdir(mode=0o700)
-            vault_created = True
+            self.target_vault.mkdir(mode=0o700)
+            self.vault_created = True
         except FileExistsError:
             pass
-        _private_dirs(target_vault, target_vault)
-        # One order for the two locks, by the folders' identity, so two copies in opposite directions never wait on
-        # each other however each spells the stores.
-        first, second = sorted((STORE, target_vault), key=lambda f: (f.stat().st_dev, f.stat().st_ino))
-        with _mutation_lock(first), _mutation_lock(second):
-            try:
-                if not src.is_file():
-                    raise CopyRefused(f"nothing at {src_label} to copy", "source-empty")
-                leak_check()
-                value = source_value()
-                outcome = checked(value)
-                _refuse_a_work_tree(_deepest_existing(t_slot.parent, target_vault), store)
-                digest_from = keyed(value)
-                if outcome != "unchanged":
-                    try:
-                        source_meta = _read_meta(src)
-                    except VaultBoundaryError as exc:
-                        raise CopyRefused(f"{src_label}'s metadata cannot be read ({exc})", "source-unreadable") from None
-                    except ValueError:
-                        raise CopyRefused(f"{src_label}'s metadata is not UTF-8 text", "source-unreadable") from None
-                    # A metadata file left without its slot describes no value: a new value starts from nothing.
-                    meta = _read_meta(t_slot) if outcome == "replaced" else {}
-                    written = True
-                    if outcome == "replaced":
-                        old = _read_private(t_slot).strip()
-                        stamp = now().replace(":", "") + "-" + uuid.uuid4().hex[:12]
-                        archive = t_slot.with_name(f"{t_slot.name}.retired-{stamp}")
-                        _atomic_write(archive, old, root=target_vault)
-                        archived = archive.name
-                        meta["rotated"] = now()
-                        meta["rotations"] = int(meta.get("rotations") or 0) + 1
-                    _atomic_write(t_slot, value, root=target_vault)
-                    meta.setdefault("created", now())
-                    meta["updated"] = now()
-                    key_expiry.clear(meta)
-                    meta.pop("provenance", None)
-                    meta.pop("source", None)
-                    carried = [k for k in COPY_META if k in source_meta]
-                    meta.update({k: source_meta[k] for k in carried})
-                    meta["copied_from"] = {"store": source_store, "slot": src_label, "at": now()}
-                    _atomic_write(_meta_path(t_slot), json.dumps(meta, indent=1), 0o600, root=target_vault)
-                else:
-                    carried = []
-                digest_to = keyed(_read_private(t_slot).strip())
-                digest = {"algorithm": "HMAC-SHA-256", "key": "estate" if key_id else "one-time", "keyId": key_id,
-                          "from": digest_from, "to": digest_to, "match": digest_from == digest_to}
-                if outcome != "unchanged":
-                    # A digest under a one-time key means nothing once the copy is over, so only an estate digest is kept.
-                    common = {"tool": tool, "outcome": outcome, "digest_key": digest["key"],
-                              **({"key_id": key_id, "digest": digest_from} if key_id else {})}
-                    journal("copied", src_label, to_store=shown_path(store), to_slot=t_label, **common)
-                    journal("copied", t_label, _store=target_vault, from_store=source_store,
-                            from_slot=src_label, **({"archived": archived} if archived else {}), **common)
-            except (VaultBoundaryError, OSError, ValueError):
-                # Undone while both locks are still held: a writer waiting for the target's lock then finds its
-                # file gone and refuses (`_mutation_lock` re-locks the file at the path, and the folder is gone),
-                # never holding a lock file this call removed under it.
-                if not written and vault_created:
-                    _undo_new_vault(target_vault, store if created else None)
-                raise
-    except (VaultBoundaryError, OSError, ValueError) as exc:
-        if written:
+        _private_dirs(self.target_vault, self.target_vault)
+
+    def _copy_locked(self) -> None:
+        if not self.src.is_file():
+            raise CopyRefused(f"nothing at {self.src_label} to copy", "source-empty")
+        self.leak_check()
+        value = self.source_value()
+        self.outcome = self.checked(value)
+        _refuse_a_work_tree(_deepest_existing(self.t_slot.parent, self.target_vault), self.store)
+        digest_from = self.keyed(value)
+        if self.outcome != "unchanged":
+            self._write_value(value)
+        digest_to = self.keyed(_read_private(self.t_slot).strip())
+        self.digest = {"algorithm": "HMAC-SHA-256", "key": "estate" if self.key_id else "one-time",
+                       "keyId": self.key_id, "from": digest_from, "to": digest_to, "match": digest_from == digest_to}
+        if self.outcome != "unchanged":
+            self._journal(digest_from)
+
+    def _write_value(self, value: str) -> None:
+        t_slot, target_vault = self.t_slot, self.target_vault
+        try:
+            source_meta = _read_meta(self.src)
+        except VaultBoundaryError as exc:
+            raise CopyRefused(f"{self.src_label}'s metadata cannot be read ({exc})", "source-unreadable") from None
+        except ValueError:
+            raise CopyRefused(f"{self.src_label}'s metadata is not UTF-8 text", "source-unreadable") from None
+        # A metadata file left without its slot describes no value: a new value starts from nothing.
+        meta = _read_meta(t_slot) if self.outcome == "replaced" else {}
+        self.written = True
+        if self.outcome == "replaced":
+            old = _read_private(t_slot).strip()
+            stamp = now().replace(":", "") + "-" + uuid.uuid4().hex[:12]
+            archive = t_slot.with_name(f"{t_slot.name}.retired-{stamp}")
+            _atomic_write(archive, old, root=target_vault)
+            self.archived = archive.name
+            meta["rotated"] = now()
+            meta["rotations"] = int(meta.get("rotations") or 0) + 1
+        _atomic_write(t_slot, value, root=target_vault)
+        meta.setdefault("created", now())
+        meta["updated"] = now()
+        key_expiry.clear(meta)
+        meta.pop("provenance", None)
+        meta.pop("source", None)
+        self.carried = [k for k in COPY_META if k in source_meta]
+        meta.update({k: source_meta[k] for k in self.carried})
+        meta["copied_from"] = {"store": self.source_store, "slot": self.src_label, "at": now()}
+        _atomic_write(_meta_path(t_slot), json.dumps(meta, indent=1), 0o600, root=target_vault)
+
+    def _journal(self, digest_from: str) -> None:
+        # A digest under a one-time key means nothing once the copy is over, so only an estate digest is kept.
+        common = {"tool": self.tool, "outcome": self.outcome, "digest_key": self.digest["key"],
+                  **({"key_id": self.key_id, "digest": digest_from} if self.key_id else {})}
+        journal("copied", self.src_label, to_store=shown_path(self.store), to_slot=self.t_label, **common)
+        journal("copied", self.t_label, _store=self.target_vault, from_store=self.source_store,
+                from_slot=self.src_label, **({"archived": self.archived} if self.archived else {}), **common)
+
+    def _refused(self, exc: Exception) -> None:
+        if self.written:
             # Past the first write a refusal is a failure: something may be in the target, and it is reported by
             # `cmd_copy` as `failed`, never undone blind.
             if isinstance(exc, OSError):
-                raise
+                raise exc
             raise OSError("the target store refused a write midway") from None
         # Before the locks, nothing is unlinked (another copy may already hold the new vault's lock file): only
         # the folders this call made, if they are still empty.
-        for folder, made in ((target_vault, vault_created), (store, created)):
+        for folder, made in ((self.target_vault, self.vault_created), (self.store, self.created)):
             if made:
                 with contextlib.suppress(OSError):
                     folder.rmdir()
         if isinstance(exc, OSError):
             raise CopyRefused(f"the file system refused before anything was written ({type(exc).__name__})",
                               "filesystem-refused") from None
-        raise target_side(exc) from None
-    return {"schema": COPY_SCHEMA, "outcome": outcome, "at": now(),
-            "from": {"store": source_store, "slot": src_label, "kept": True},
-            "to": {"store": shown_path(store), "slot": t_label, "storeCreated": created, "archived": archived},
-            "carried": carried, "digest": digest}
+        raise self.target_side(exc) from None
 
+    # -- step 3: the receipt ---------------------------------------------------------------------------------------
+
+    def receipt(self) -> dict:
+        return {"schema": COPY_SCHEMA, "outcome": self.outcome, "at": now(),
+                "from": {"store": self.source_store, "slot": self.src_label, "kept": True},
+                "to": {"store": shown_path(self.store), "slot": self.t_label, "storeCreated": self.created,
+                       "archived": self.archived},
+                "carried": self.carried, "digest": self.digest}
 
 def _undo_new_vault(target_vault: pathlib.Path, store: pathlib.Path | None) -> None:
     """Remove a vault folder a refused copy made, with its lock file, and the store folder it made, while the copy

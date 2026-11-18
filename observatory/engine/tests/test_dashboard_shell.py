@@ -505,5 +505,114 @@ class OneTimeEveryPage(unittest.TestCase):
             self.assertIn(self.SHOWN, text(page), f"the {name} page writes the time another way")
 
 
+class NoCommandEveryPage(unittest.TestCase):
+    """OBS-629: a source's reason reaches every page through `page_util.reason_html`, which shows a person no command
+    (CP-01), while the JSON and MCP answers keep the command for agents. A reason naming one is cut to the words before
+    it; one that is all command is replaced by a sentence."""
+    CMD = "the provider refused the token; run `project-observatory full frobnicate` again"
+    KEPT = "the provider refused the token"
+    BARE = "run `project-observatory full frobnicate`"
+    SAID = {"en": "The reason names a command; an agent reads it through MCP.",
+            "ru": "Причина содержит команду; агент читает её через MCP."}
+
+    def test_the_function(self):
+        import page_util
+        from i18n import Translator
+        en, ru = Translator("en"), Translator("ru")
+        self.assertEqual(page_util.plain(self.CMD), self.KEPT)
+        self.assertEqual(page_util.plain("not read: run `x` first"), "not read")
+        self.assertEqual(page_util.plain("not surveyed yet: enable features.machine_watch, or run "
+                                         "`project-observatory full machine`"),
+                         "not surveyed yet: enable features.machine_watch")
+        self.assertEqual(page_util.plain("Not measured yet: run project-observatory full machine"), "Not measured yet")
+        self.assertEqual(page_util.plain(self.BARE), "", "nothing stands before the command")
+        self.assertEqual(page_util.plain("the store is locked"), "the store is locked")
+        self.assertEqual(text(page_util.reason_html(self.CMD, en)), self.KEPT)
+        self.assertEqual(text(page_util.reason_html(self.BARE, ru)), self.SAID["ru"])
+        self.assertEqual(text(page_util.reason_html(self.CMD, en, tile=True)), "Not read yet; its page says why.")
+        self.assertEqual(text(page_util.reason_html("the store is locked", en)), "the store is locked")
+        self.assertEqual(text(page_util.reason_html(None, en)), "")
+        surveyed = {"source": "machine.json", "code": "not-surveyed",
+                    "reason": "not surveyed yet: enable features.machine_watch, or run `project-observatory full machine`"}
+        self.assertEqual(text(page_util.reason_html(surveyed, ru)), "ещё не обследовано")
+        self.assertEqual(text(page_util.reason_html(surveyed, en, tile=True)), "This machine has not been surveyed yet.")
+        broken = {"source": "store", "code": "unreadable", "error": "OSError"}
+        self.assertEqual(text(page_util.reason_html(broken, en)), "unreadable: OSError")
+        self.assertEqual(text(page_util.reason_html({"source": "s", "reason": self.CMD}, en)), self.KEPT)
+
+    def places(self):
+        """Every place a page shows a source's reason, as a function of the reason."""
+        import agents_page
+        import disk_page
+        import infra_page
+        import integrations_page
+        import key_sweep_page
+        import machine_page
+        import mcp_page
+        import tools_page
+        resource = lambda r: {"resources": [{"id": "r1", "name": "alpha-worker", "kind": "worker", "state": "running",
+                                             "unlinked_reason": r, "cost_note": r}]}
+        return {
+            "machine, not measured": lambda r, t: machine_page.machine_html(
+                {"machine": {"degraded": [{"source": "cleanup.json", "reason": r}]}}, t),
+            "tools, not fully read": lambda r, t: tools_page.tools_html(
+                {"tooling": {"degraded": [{"source": "settings.json", "reason": r}]}}, t),
+            "disk, kept by the guard": lambda r, t: disk_page.guard_html(
+                {"at": "2026-10-26T17:20:05Z", "kept": [{"target": "~/.cache/example", "reason": r}]}, t),
+            "disk, cleaned": lambda r, t: disk_page._journal(
+                {"journal": [{"at": "2026-10-26T17:20:05Z", "class": "cache", "target": "~/.cache/example",
+                              "result": "skipped", "reason": r}]}, t),
+            "disk, not measured": lambda r, t: disk_page._degraded(
+                {}, {"degraded": [{"source": "configuration", "reason": r}]}, t),
+            "integrations, issue": lambda r, t: integrations_page.issues_html(
+                {"issues": {"issues": [{"repo": "example-org/alpha-web", "state": "deferred", "type": "key",
+                                        "reason": r}]}}, t),
+            "integrations, not fully read": lambda r, t: integrations_page.degraded_html(
+                {"degraded": [{"source": "github", "reason": r}]}, t),
+            "agents, not read": lambda r, t: agents_page.agents_html(
+                {"agents": {"degraded": [{"source": "store", "reason": r}]}}, t),
+            "infra, not read": lambda r, t: infra_page._degraded(
+                {"degraded": [{"source": "cloudflare", "reason": r}], "resources": []},
+                infra_page.PROVIDERS["cloudflare"], t),
+            "infra, resource notes": lambda r, t: infra_page._resources(resource(r), [], {}, t),
+            "mcp, not read": lambda r, t: mcp_page._degraded({"degraded": [{"source": "supply", "reason": r}]}, t),
+            "key sweep, not fully read": lambda r, t: key_sweep_page.key_sweep_html(
+                {"key_sweep": {"state": "ran", "at": "2026-10-26T17:20:05Z", "degraded": [r],
+                               "rows": [{"repo": "example-org/alpha-web", "by_rule": {}, "open": 0, "history": "part",
+                                         "degraded": [r]}]}}, t),
+        }
+
+    def test_no_page_shows_a_reasons_command_in_either_language(self):
+        from i18n import Translator
+        for place, render in self.places().items():
+            for locale in ("en", "ru"):
+                t = Translator(locale)
+                with self.subTest(place=place, locale=locale):
+                    cut = render(self.CMD, t)
+                    self.assertNotIn("frobnicate", cut)
+                    self.assertNotIn("`", cut)
+                    self.assertIn(self.KEPT, text(cut), "the words before the command stay")
+                    bare = render(self.BARE, t)
+                    self.assertNotIn("frobnicate", bare)
+                    self.assertIn(self.SAID[locale], text(bare), "a reason that is all command is said in a sentence")
+
+    def test_the_machine_page_names_no_command(self):
+        """The survey's reason names the command that runs it (machine_view._load), for agents; the page says which
+        survey has not run, in the reader's language (OBS-629)."""
+        import machine_page
+        from i18n import Translator
+        summary = {"degraded": [
+            {"source": "machine.json", "code": "not-surveyed",
+             "reason": "not surveyed yet: enable features.machine_watch, or run `project-observatory full machine`"},
+            {"source": "git-hygiene.json", "code": "not-surveyed",
+             "reason": "not surveyed yet: enable features.machine_watch, or run `project-observatory full cleanup`"}]}
+        for locale, said in (("en", "not surveyed yet"), ("ru", "ещё не обследовано")):
+            with self.subTest(locale=locale):
+                page = machine_page.machine_html({"machine": summary}, Translator(locale))
+                self.assertNotIn("project-observatory", page)
+                self.assertNotIn("--explain", page)
+                self.assertIn(said, text(page))
+
+
 if __name__ == "__main__":
     unittest.main()

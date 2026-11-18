@@ -517,11 +517,31 @@ def finish_receipt(path: pathlib.Path, row: dict, code: int) -> int:
     return code
 
 
-def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
-               spec_envs: list[str], wait: float) -> int:
-    # A repeatable flag names a set of consumers, never repeated mutations.
-    apps = list(dict.fromkeys(apps))
-    # 1. everything we need, before anything changes
+class _Rotation:
+    """What step 1 of `cmd_rotate` gathered before anything changes (OBS-609 split the function into its steps)."""
+
+    def __init__(self, ref: str, user: str, db: str | None, to: str, apps: list[str], wait: float) -> None:
+        self.ref, self.user, self.db, self.to, self.apps, self.wait = ref, user, db, to, apps, wait
+        self.where: dict = {}
+        self.c: dict = {}
+        self.literal: dict[str, list[str]] = {}
+        self.specs: dict = {}
+        self.forms: dict = {}
+        self.every: list[str] = []
+        self.before: dict = {}
+        self.receipt_path: pathlib.Path | None = None
+        self.receipt: dict = {}
+
+    def credential_command(self) -> str:
+        """The door command that reads the current value into the vault without another reset."""
+        return (f"digitalocean.py db credential {self.ref} {self.user}"
+                + (f" --db {self.db}" if self.db else "") + f" --to {self.to}")
+
+
+def _rotate_prepare(ref: str, user: str, db: str | None, to: str, apps: list[str], spec_envs: list[str],
+                    wait: float) -> _Rotation:
+    """Step 1: everything we need, before anything changes."""
+    r = _Rotation(ref, user, db, to, apps, wait)
     try:
         checked_name(ref, "cluster")
         checked_name(user, "database user")
@@ -529,11 +549,11 @@ def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
             checked_name(db, "database")
         for app in apps:
             checked_name(app, "app id")
-        where = plan(to)
+        r.where = plan(to)
         print(context_line())
-        c = cluster(ref)
+        c = r.c = cluster(ref)
         validate_connection(c, user, db)
-        literal: dict[str, list[str]] = {}
+        literal = r.literal
         for item in spec_envs:
             app, _, key = item.partition(":")
             if not key:
@@ -541,9 +561,8 @@ def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
             checked_name(app, "app id")
             checked_name(key, "environment key")
             literal.setdefault(app, []).append(key)
-        specs = {app: doctl("apps", "spec", "get", app, "--format", "json") for app in literal}
+        specs = r.specs = {app: doctl("apps", "spec", "get", app, "--format", "json") for app in literal}
         current = user_password(c, user) if literal else None
-        forms = {}
         for app, keys in literal.items():
             # EVERY LEVEL, not a merged view (review round 3): a key set at app
             # AND service level is two literals, and step 4 writes both.
@@ -560,57 +579,54 @@ def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
                                     f"with a redeploy, so name the app with --app, not --spec-env")
             for e in levels:
                 if e["key"] in keys and "${" not in str(e.get("value", "")):
-                    forms[id(e)] = check_literal(app, e["key"], str(e.get("value", "")), user, db, c, current)
+                    r.forms[id(e)] = check_literal(app, e["key"], str(e.get("value", "")), user, db, c, current)
         del current
-        every = list(dict.fromkeys([*apps, *literal]))
-        before = {app: deployments(app) for app in every}
-        receipt_path, receipt = start_receipt(ref, user, every)
+        r.every = list(dict.fromkeys([*apps, *literal]))
+        r.before = {app: deployments(app) for app in r.every}
+        r.receipt_path, r.receipt = start_receipt(ref, user, r.every)
     except PHASE_ERRORS as e:
         # DoorError diagnostics above are static or validated names, never provider bodies.
         reason = str(e) if isinstance(e, DoorError) else type(e).__name__
         raise DoorError(f"{reason}: nothing was reset") from None
-    # 2. Exactly one request. Even a nonzero exit can follow a committed reset.
+    return r
+
+
+def _rotate_reset(r: _Rotation) -> str | None:
+    """Step 2: exactly one request. Even a nonzero exit can follow a committed reset, so a reply without the new
+    password is an unknown outcome (None), never a reason to ask again."""
     try:
-        reset = one(doctl("databases", "user", "reset", c["id"], user, tries=1))
+        reset = one(doctl("databases", "user", "reset", r.c["id"], r.user, tries=1))
     except PHASE_ERRORS:
         reset = None
-    pw = reset.get("password") if isinstance(reset, dict) and reset.get("name") == user else None
-    if not isinstance(pw, str) or not pw:
-        print(f"digitalocean: reset outcome unknown for {user} on {c['name']}; the password may have "
-              "changed. No consumer was moved. Do not repeat db rotate. Next: "
-              f"`digitalocean.py db credential {ref} {user}"
-              + (f" --db {db}" if db else "") + f" --to {to}` reads the current value into the vault; "
-              "then reconcile every named consumer without another reset", file=sys.stderr)
-        receipt["phase"] = "reconciliation_required"
-        return finish_receipt(receipt_path, receipt, EXIT_RESET)
-    receipt["reset"] = "confirmed"
-    print(f"reset {c['name']} user {user}")
-    url = connection_url(c, user, pw, db)
-    code = 0
-    vault_failed = False
-    # 3. the vault — a refusal now does not stop the apps from moving
+    pw = reset.get("password") if isinstance(reset, dict) and reset.get("name") == r.user else None
+    return pw if isinstance(pw, str) and pw else None
+
+
+def _rotate_vault(r: _Rotation, url: str) -> bool:
+    """Step 3: the vault. A refusal now does not stop the apps from moving; answers whether the vault failed."""
     try:
-        print(deliver(url, where))
+        print(deliver(url, r.where))
+        return False
     except PHASE_ERRORS as e:
-        code, vault_failed = max(code, EXIT_VAULT), True
-        print(f"digitalocean: the password of {user} on {c['name']} WAS reset, but the vault did not take "
+        print(f"digitalocean: the password of {r.user} on {r.c['name']} WAS reset, but the vault did not take "
               f"it ({type(e).__name__}); moving the apps anyway so none sits on a dead password", file=sys.stderr)
-    receipt["vault"] = "failed" if vault_failed else "delivered"
-    # 4. literals → apps update (redeploys); 5. bindings → redeploy. A failure is
-    # recorded and the rest still move: stopping would leave them on a dead password.
-    done: list[str] = []
-    left: list[str] = []
-    outcomes: dict[str, str] = {}
-    for app, keys in literal.items():
-        spec = specs[app]
+        return True
+
+
+def _rotate_literals(r: _Rotation, pw: str, outcomes: dict[str, str], done: list[str], left: list[str]) -> int:
+    """Step 4: literals → apps update (redeploys). A failure is recorded and the rest still move: stopping would
+    leave them on a dead password. Answers the exit code a failed temporary-spec cleanup adds."""
+    code = 0
+    for app, keys in r.literal.items():
+        spec = r.specs[app]
         path = None
         attempted = False
         try:
             for scope in _scopes(spec):
                 for e in scope.get("envs") or []:
-                    if e["key"] in keys and id(e) in forms:
+                    if e["key"] in keys and id(e) in r.forms:
                         old_value = str(e.get("value", ""))
-                        if forms[id(e)] == "password":
+                        if r.forms[id(e)] == "password":
                             e["value"] = pw
                         else:
                             e["value"] = with_password(old_value, pw)
@@ -637,9 +653,13 @@ def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
                     code = max(code, EXIT_APP)
                     print(f"digitalocean: password WAS reset; temporary spec cleanup failed for {app}; "
                           "a private temporary file may remain", file=sys.stderr)
-    del pw, url
-    for app in apps:
-        if app in literal:
+    return code
+
+
+def _rotate_redeploys(r: _Rotation, outcomes: dict[str, str], done: list[str], left: list[str]) -> None:
+    """Step 5: bindings → redeploy, for the apps named with --app and no literal."""
+    for app in r.apps:
+        if app in r.literal:
             continue
         try:
             doctl("apps", "create-deployment", app, tries=1)
@@ -650,20 +670,14 @@ def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
             outcomes[app] = "unknown"
             print(f"digitalocean: app {app} redeploy outcome unknown ({type(e).__name__}); "
                   "reconcile before any retry", file=sys.stderr)
-    if left:
-        code = max(code, EXIT_APP)
-        print(f"The database password WAS reset. apps done: {', '.join(done) or 'none'}; apps left: "
-              f"{', '.join(left)} — their OLD password may still be in use. Mutation results can be "
-              "unknown. Do not retry app updates, redeploys or db rotate blindly. Next: read each "
-              "app's current spec and deployment state, then reconcile its credential against "
-              f"`digitalocean.py db credential {ref} {user}"
-              + (f" --db {db}" if db else "") + f" --to {to}`. A redeploy alone keeps an old literal.",
-              file=sys.stderr)
-    # 6. wait
+
+
+def _rotate_wait(r: _Rotation, left: list[str]) -> list[str]:
+    """Step 6: wait for each moved app's new deployment; answers the apps not confirmed ACTIVE."""
     failed = []
-    for app in [a for a in every if a not in left]:
+    for app in [a for a in r.every if a not in left]:
         try:
-            state = wait_new(app, before[app], wait)
+            state = wait_new(app, r.before[app], r.wait)
             if not isinstance(state, dict) or state.get("phase") not in DEPLOYMENT_PHASES:
                 raise DoorError("deployment confirmation unavailable")
             if state.get("id") is not None:
@@ -675,16 +689,55 @@ def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
         if not active:
             failed.append(app)
         print(f"  app {app} deployment {shown}")
+    return failed
+
+
+def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
+               spec_envs: list[str], wait: float) -> int:
+    # A repeatable flag names a set of consumers, never repeated mutations.
+    apps = list(dict.fromkeys(apps))
+    r = _rotate_prepare(ref, user, db, to, apps, spec_envs, wait)
+    c, receipt, receipt_path, where = r.c, r.receipt, r.receipt_path, r.where
+    pw = _rotate_reset(r)
+    if pw is None:
+        print(f"digitalocean: reset outcome unknown for {user} on {c['name']}; the password may have "
+              "changed. No consumer was moved. Do not repeat db rotate. Next: "
+              f"`{r.credential_command()}` reads the current value into the vault; "
+              "then reconcile every named consumer without another reset", file=sys.stderr)
+        receipt["phase"] = "reconciliation_required"
+        return finish_receipt(receipt_path, receipt, EXIT_RESET)
+    receipt["reset"] = "confirmed"
+    print(f"reset {c['name']} user {user}")
+    url = connection_url(c, user, pw, db)
+    code = 0
+    vault_failed = _rotate_vault(r, url)
+    if vault_failed:
+        code = max(code, EXIT_VAULT)
+    receipt["vault"] = "failed" if vault_failed else "delivered"
+    done: list[str] = []
+    left: list[str] = []
+    outcomes: dict[str, str] = {}
+    code = max(code, _rotate_literals(r, pw, outcomes, done, left))
+    del pw, url
+    _rotate_redeploys(r, outcomes, done, left)
+    if left:
+        code = max(code, EXIT_APP)
+        print(f"The database password WAS reset. apps done: {', '.join(done) or 'none'}; apps left: "
+              f"{', '.join(left)} — their OLD password may still be in use. Mutation results can be "
+              "unknown. Do not retry app updates, redeploys or db rotate blindly. Next: read each "
+              "app's current spec and deployment state, then reconcile its credential against "
+              f"`{r.credential_command()}`. A redeploy alone keeps an old literal.",
+              file=sys.stderr)
+    failed = _rotate_wait(r, left)
     if failed:
         code = max(code, EXIT_NOT_ACTIVE)
         print("The database password WAS reset, and a consumer is not confirmed ACTIVE: its running copy may "
               "still hold the OLD password. Check it now: "
               + "; ".join(f"`doctl apps logs {app} --type deploy`" for app in failed), file=sys.stderr)
     if vault_failed and not left:
-        print(f"next: put the current password in the vault — `digitalocean.py db credential {ref} {user}"
-              + (f" --db {db}" if db else "") + f" --to {to}` — it reads the reset value from the API",
-              file=sys.stderr)
-    receipt["apps"] = {a: (outcomes[a] if a in left else "unconfirmed" if a in failed else "active") for a in every}
+        print(f"next: put the current password in the vault — `{r.credential_command()}` — it reads the reset "
+              "value from the API", file=sys.stderr)
+    receipt["apps"] = {a: (outcomes[a] if a in left else "unconfirmed" if a in failed else "active") for a in r.every}
     receipt["phase"] = "consumers_checked"
     code = finish_receipt(receipt_path, receipt, code)
     if code:
@@ -692,7 +745,6 @@ def cmd_rotate(ref: str, user: str, db: str | None, to: str, apps: list[str],
     print(f"next: verify each consumer's health, then `vault.py settle {where['project']} {where['env']} "
           f"{where['name']} --how … --revocation-evidence … --consumer-evidence …` if this closes a leak")
     return 0
-
 
 # ══ teams and tokens (OBS-155) ═════════════════════════════════════════════════
 #

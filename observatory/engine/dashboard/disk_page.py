@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from i18n import Translator
 from machine_page import EMPTY, GUARD_CLASSES, HEADING, NUM, ROWS, _gigabytes, _table, _word
-from page_util import escape as _e, stamp
+from page_util import escape as _e, reason_html, stamp
 
 HINT = ' class="machine-hint"'
 #: A value nobody measured (an en dash, as a table's empty cell).
@@ -178,7 +178,7 @@ def guard_html(g: dict | None, t: Translator) -> str:
         # Live state an agent service keeps under a cleanup root (OBS-203): shown, so a person
         # sees why a large folder there is never freed.
         parts.append(_table(t, "Kept by the guard", [("Folder", False), ("Why kept", False)],
-                            [[f'<span class="mono">{_e(k["target"])}</span>', t.known(k.get("reason"))]
+                            [[f'<span class="mono">{_e(k["target"])}</span>', reason_html(k.get("reason"), t)]
                              for k in kept], ""))
     parts.append(t.mark("From the maintenance job when auto cleanup is on: hourly while space is normal, every "
                         "15 minutes below the low line; never anything a process holds, maps, runs from or works "
@@ -453,7 +453,7 @@ def _journal(cleanup: dict | None, t: Translator) -> str:
                   [("When", False), ("What", False), ("Item", False), ("Result", False)],
                   [[t.date(stamp(r.get("at"))), _word(t, r.get("class")),
                     f'<span class="mono">{_e(r.get("target"))}</span>',
-                    _word(t, r.get("result")) + (" · " + t.known(r["reason"]) if r.get("reason") else "")]
+                    _word(t, r.get("result")) + (" · " + reason_html(r["reason"], t) if r.get("reason") else "")]
                    for r in ((cleanup or {}).get("journal") or [])[:ROWS]],
                   "Nothing was cleaned in the last 7 days.")
 
@@ -517,12 +517,7 @@ def _degraded(m: dict, listing: dict | None, t: Translator) -> str:
     items = []
     for d in [d for d in m.get("degraded") or [] if isinstance(d, dict) and d.get("source") in SOURCES] \
             + list((listing or {}).get("degraded") or []):
-        if d.get("code") == "not-surveyed":
-            why = t.mark("not surveyed yet")
-        elif d.get("code") == "unreadable":
-            why = t.mark("unreadable")
-        else:
-            why = t.known(d.get("reason"))
+        why = t.mark("unreadable") if d.get("code") == "unreadable" else reason_html(d, t)
         items.append(f'<li><span class="mono">{_e(d.get("source"))}</span> · {why}</li>')
     if not items:
         return ""

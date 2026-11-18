@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from i18n import Translator
 from machine_page import EMPTY, HEADING, _table
-from page_util import escape as _e
+from page_util import escape as _e, reason_html
 
 HINT = ' class="machine-hint"'
 #: The tool an agent reads this with; named in the disabled control's tooltip.
@@ -128,7 +128,7 @@ def issues_html(view: dict, t: Translator) -> str:
         rows.append([f'<span class="mono">{link}</span>', t.known(ISSUE_STATES.get(i.get("state"), i.get("state"))),
                      f'<span class="mono">{_e(i.get("type"))}</span>',
                      t.date(i["filed_on"]) if i.get("filed_on") else "",
-                     t.known(i.get("reason")) if i.get("reason") else ""])
+                     reason_html(i.get("reason"), t) if i.get("reason") else ""])
     last = issues.get("lastRun") or {}
     note = ""
     if last:
@@ -147,7 +147,7 @@ def degraded_html(view: dict, t: Translator) -> str:
             if isinstance(d, dict)]
     if not rows:
         return ""
-    items = "".join(f"<li><span class=\"mono\">{_e(d.get('source'))}</span> {t.known(d.get('reason'))}</li>"
+    items = "".join(f"<li><span class=\"mono\">{_e(d.get('source'))}</span> {reason_html(d, t)}</li>"
                     for d in rows)
     return (f'<section class="card panel">{t.mark("Not fully read", tag="h2", attrs=HEADING)}<ul>{items}</ul>'
             "</section>")
