@@ -141,6 +141,7 @@ class Origins(unittest.TestCase):
         witr = json.dumps({"Process": {"PID": 80, "Env": ["SECRET=value"], "Cmdline": "python3 --token=value"},
                            "Source": {"Type": "launchd"}, "Warnings": [], "Ancestry": [{"PID": 1, "Command": "launchd"}]})
         with patch.object(sm, "process_table", return_value=self.TABLE), \
+                patch.object(sm, "this_account", return_value="u"), \
                 patch.object(sm, "launchd_labels", return_value=self.LABELS), \
                 patch.object(sm, "simulator_names", return_value={}), \
                 patch.object(sm.shutil, "which", return_value="/usr/bin/witr"), \
@@ -151,6 +152,57 @@ class Origins(unittest.TestCase):
         self.assertNotIn("--token=value", text)
         self.assertEqual(out["origin"], "launchd:com.example.worker")
         self.assertEqual(out["witr"]["source"]["Type"], "launchd")
+
+
+class OtherAccounts(unittest.TestCase):
+    """OBS-634: on a machine several people share, another person's processes are counts only."""
+    TABLE = {
+        10: {"pid": 10, "ppid": 1, "exe": "/opt/me/worker", "user": "me", "rss_kb": 2048, "cpu": 1.0},
+        20: {"pid": 20, "ppid": 1, "exe": "/Applications/Secret Studio.app/Contents/MacOS/Secret", "user": "neighbour",
+             "rss_kb": 4096, "cpu": 2.0},
+        21: {"pid": 21, "ppid": 20, "exe": "/srv/neighbour/private-project/run", "user": "neighbour",
+             "rss_kb": 1024, "cpu": 0.5},
+        30: {"pid": 30, "ppid": 1, "exe": "/usr/sbin/cfprefsd", "user": "root", "rss_kb": 512, "cpu": 0.0},
+    }
+    LABELS = {10: "com.me.worker", 20: "com.neighbour.private-label"}
+
+    def survey(self):
+        import scan_machine as sm
+        kinds = {"me": "own", "neighbour": "other", "root": "system"}
+        with patch.object(sm, "process_table", return_value=self.TABLE), \
+                patch.object(sm, "launchd_labels", return_value=self.LABELS), \
+                patch.object(sm, "simulator_names", return_value={}), \
+                patch.object(sm, "working_dirs", return_value={21: "/srv/neighbour/private-project"}), \
+                patch.object(sm, "project_folders", return_value=[]), \
+                patch.object(sm, "this_account", return_value="me"), \
+                patch.object(sm, "account_kind", side_effect=lambda u, me: kinds[u]), \
+                patch.object(sm, "script_of", return_value=""):
+            return sm.survey_processes()
+
+    def test_another_accounts_process_leaves_no_label_or_name(self):
+        out = self.survey()
+        text = json.dumps(out)
+        for private in ("private-label", "Secret Studio", "neighbour", "private-project", "/srv/neighbour"):
+            self.assertNotIn(private, text)
+        self.assertEqual(out["other_accounts"], {"accounts": 1, "processes": 2, "rss_mb": 5.0, "cpu": 2.5})
+        self.assertEqual({t["pid"] for t in out["top"]}, {10, 30})
+        self.assertIn("launchd:com.me.worker", {g["origin"] for g in out["groups"]})
+
+    def test_explain_refuses_another_accounts_process(self):
+        import scan_machine as sm
+        with patch.object(sm, "process_table", return_value=self.TABLE), \
+                patch.object(sm, "this_account", return_value="me"), \
+                patch.object(sm, "account_kind", side_effect=lambda u, me: "other" if u == "neighbour" else "own"):
+            out = sm.explain(20)
+        self.assertNotIn("Secret", json.dumps(out))
+        self.assertIn("another account", out["error"])
+
+    def test_account_kind(self):
+        import scan_machine as sm
+        self.assertEqual(sm.account_kind("me", "me"), "own")
+        self.assertEqual(sm.account_kind("root", "me"), "system")
+        self.assertEqual(sm.account_kind("_spotlight", "me"), "system")
+        self.assertEqual(sm.account_kind("no-such-account-obs634", "me"), "other")
 
 
 class DiskBudget(Base):

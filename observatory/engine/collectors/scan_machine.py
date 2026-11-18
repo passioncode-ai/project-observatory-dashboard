@@ -81,6 +81,35 @@ def process_table() -> dict[int, dict]:
     return table
 
 
+#: Below this uid an account is the system's own (root, `_spotlight`, `daemon`): macOS gives people 501 and up,
+#: Linux 1000 and up. Their processes are the machine's, not another person's.
+SYSTEM_UID_LIMIT = 500 if sys.platform == "darwin" else 1000
+
+
+def this_account() -> str:
+    """The name of the account the engine runs as, as `ps` prints it in its `user` column."""
+    try:
+        import pwd
+        return pwd.getpwuid(os.getuid()).pw_name
+    except (ImportError, KeyError, AttributeError):
+        return os.environ.get("USER") or os.environ.get("USERNAME") or ""
+
+
+def account_kind(user: str, me: str) -> str:
+    """`own`, `system` or `other` (OBS-634). On a machine several people share, a process of another person's account
+    is theirs: the inventory keeps only its count, memory and CPU, never its label, program, path or project. An
+    account whose uid cannot be read counts as another person's, so nothing of it leaks by default."""
+    if user == me:
+        return "own"
+    if user == "root" or user.startswith("_"):
+        return "system"
+    try:
+        import pwd
+        return "system" if pwd.getpwnam(user).pw_uid < SYSTEM_UID_LIMIT else "other"
+    except (ImportError, KeyError):
+        return "other"
+
+
 def script_of(pid: int) -> str:
     """For an interpreter, the script or module it runs; never the rest of argv."""
     out = run(["ps", "-o", "args=", "-p", str(pid)], timeout=5)
@@ -234,8 +263,21 @@ def survey_processes() -> dict:
     groups: dict[str, dict] = {}
     by_project: dict[str, dict] = {}
     rows = []
+    me = this_account()
+    kinds = {user: account_kind(user, me) for user in {row.get("user", "") for row in table.values()}}
+    others = {"accounts": set(), "processes": 0, "rss_mb": 0.0, "cpu": 0.0}
+    # Origins are read over the visible processes only: another person's process is never an ancestor that names one.
+    visible = {pid: row for pid, row in table.items() if kinds[row.get("user", "")] != "other"}
     for pid, row in table.items():
-        label, root = origin(pid, table, labels, sims)
+        user = row.get("user", "")
+        if kinds[user] == "other":
+            # Counts only (OBS-634): no label, program, path, project or account name of another person's process.
+            others["accounts"].add(user)
+            others["processes"] += 1
+            others["rss_mb"] += row["rss_kb"] / 1024
+            others["cpu"] += row["cpu"]
+            continue
+        label, root = origin(pid, visible, labels, sims)
         g = groups.setdefault(label, {"origin": label, "processes": 0, "rss_mb": 0.0, "cpu": 0.0, "roots": set()})
         g["processes"] += 1
         g["rss_mb"] += row["rss_kb"] / 1024
@@ -264,7 +306,9 @@ def survey_processes() -> dict:
     for g in sorted(groups.values(), key=lambda g: -g["rss_mb"]):
         out_groups.append({"origin": g["origin"], "processes": g["processes"], "sessions": len(g["roots"]),
                            "rss_mb": round(g["rss_mb"], 1), "cpu": round(g["cpu"], 1)})
-    return {"count": len(table), "groups": out_groups,
+    other_accounts = {"accounts": len(others["accounts"]), "processes": others["processes"],
+                      "rss_mb": round(others["rss_mb"], 1), "cpu": round(others["cpu"], 1)}
+    return {"count": len(table), "groups": out_groups, "other_accounts": other_accounts,
             "projects": sorted(({**b, "rss_mb": round(b["rss_mb"], 1)} for b in by_project.values()),
                                key=lambda b: -b["rss_mb"]),
             "top": top, "degraded": [] if labels or sys.platform != "darwin" else
@@ -686,6 +730,9 @@ def explain(pid: int) -> dict:
     table = process_table()
     if pid not in table:
         return {"pid": pid, "error": "no such process"}
+    if account_kind(table[pid].get("user", ""), this_account()) == "other":
+        # Another person's process on a shared machine (OBS-634): nothing about it is explained here.
+        return {"pid": pid, "error": "another account's process; only its count is kept"}
     labels = launchd_labels()
     label, root = origin(pid, table, labels, simulator_names())
     native = {"pid": pid, "origin": label, "origin_pid": root,

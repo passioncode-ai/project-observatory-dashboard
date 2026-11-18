@@ -13,6 +13,16 @@ while the major version is 0, a minor release may change behaviour and says so h
   from the checked-out commit. 0.43.0 stays tagged and unpublished: every change in it ships in 0.44.0. Its
   released section keeps its text as tagged.
 
+## Unreleased
+
+### Fixed
+
+- **The machine inventory keeps another person's processes as counts only** (OBS-634): on a machine several people
+  share, `scan_machine` read every account's processes and wrote their launchd labels, program names and projects
+  into `machine.json`. Now only the account the engine runs as and the system's own accounts are listed; every other
+  account is one `other_accounts` entry (accounts, processes, memory, CPU), origins are read over the visible processes
+  only, and `explainPid` refuses another account's process.
+
 ## 0.44.0 (2026-11-18)
 
 Waves R5 and the first board fixes of the control plane refactor: the documents say what the code does, Integrations
