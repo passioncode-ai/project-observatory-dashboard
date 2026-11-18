@@ -1088,8 +1088,8 @@
       "path": "engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "16ba63223f306937b2678f08e115a0e1a27c2a6b53bdbb492c87e87189ab2e9f",
-      "bytes": 100232
+      "export_sha256": "b68492199e24e3b235255d59297d24018d8cc85c6ae870c28146288896345b20",
+      "bytes": 106716
     },
     {
       "path": "estate.py",
@@ -5396,8 +5396,8 @@
       "path": "tests/test_engine_update.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "4884811379e162f68977a69f9f20767336fb068d0ef0783d73c1ceff7b26ffdb",
-      "bytes": 84203
+      "export_sha256": "299a1555e48dd200266dddcd32d9b90cdd5541dc8ba7b0cd65ee1d85157f3354",
+      "bytes": 91965
     },
     {
       "path": "tests/test_env_inventory.py",
@@ -6763,8 +6763,8 @@
       "path": "tests/test_runtime_receipts.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "5bef02d68720c39aca8764c65a71b0242da7490dae1813035b30fa07e7bb5544",
-      "bytes": 19806
+      "export_sha256": "dc00a7eea35b487734cf3198615d0eae47f8a03d8c5dda2157d0f79d6d5c0fb4",
+      "bytes": 19827
     },
     {
       "path": "tests/test_scan_agents.py",
@@ -7335,8 +7335,8 @@
     {
       "path": "tests/test_workspace_upgrade.py",
       "source_sha256": "baf6fb326428105e87a6acab67b3f89adc29038c5df488c822ab210c3e65fea3",
-      "export_sha256": "7c974a9601dfa33f7f29f55ac4bcb62248b7e99f7e7d147543bf427672d6093f",
-      "bytes": 164359,
+      "export_sha256": "8ddeff9a5094d64ab433040e689b7ae2a58fad8ac8320f19608a89065ea6774a",
+      "bytes": 175401,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
@@ -8491,8 +8491,8 @@
     {
       "path": "workspace_upgrade.py",
       "source_sha256": "d9816f9711b69badae87382cbae34e5a303e0942823587aecf4361026828277d",
-      "export_sha256": "376145ac6bf52c338fa10f647365289303ec2ac9fdaee477afc8de0c93e91553",
-      "bytes": 93434,
+      "export_sha256": "7960f4b3be25c398a57d9653c2a19927bc32187096664499f5660f73d6e6bbc5",
+      "bytes": 105244,
       "python_comments_removed": 5,
       "python_docstrings_removed": 5,
       "tool_descriptions_retained": 0,
