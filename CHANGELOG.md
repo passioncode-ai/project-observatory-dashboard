@@ -12,7 +12,8 @@ and everything in it ships here.
 
 - **A slow test suite no longer holds a release** (OBS-639): the `engine_update` suite ran 100 to 112 s on macOS under
   the portable runner's default 120 s and passed it on the v0.45.0 tag's check, which the release guard reads. It now
-  has 300 s, like the other suites measured past the default.
+  has 300 s, like the other suites measured past the default. On Windows it now finishes instead of timing out, so
+  the 14 later checks that fail there for the known reasons (SSL context, `os.getuid`) join its known list.
 
 ## 0.45.0 (2026-11-18)
 
