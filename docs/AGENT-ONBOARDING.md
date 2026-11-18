@@ -88,7 +88,7 @@ account this space reaches, each under one organization with the source of that 
 `personal` or `ambiguous`, with why). Both are read-only and carry names only: never open a vault
 slot or a door's stash to check one. An `ambiguous` key or a `needsDecision` account is mine to
 decide; propose a rule in `config/organizations.json` (`github_owners`, `digitalocean_teams`,
-`cloudflare_accounts`, `heroku_teams`, `openrouter_accounts`) and say what it would change. A door's
+`cloudflare_accounts`, `heroku_teams`, `heroku_users`, `openrouter_accounts`) and say what it would change. A door's
 admin key under `notMovable` is never handed over. A project whose organization is not decided (a
 conflict) gets no analytics property, design file or cloud resource until I decide.
 

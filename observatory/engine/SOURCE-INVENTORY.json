@@ -1031,8 +1031,8 @@
     {
       "path": "docs/AGENT-ONBOARDING.md",
       "source_sha256": "2343d8269742b995f2bdc646348ba095a37dbe352b457a161ac196f52935c62d",
-      "export_sha256": "c95267b097d4f02a41db3aadfdbc676d9a4edf721de98952af99c097ae5be745",
-      "bytes": 41459,
+      "export_sha256": "cabdf67413e8314b5c65727453e6e0217546835198f74950cb7628939ede4004",
+      "bytes": 41475,
       "upstream_modified": true
     },
     {
@@ -1052,8 +1052,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "4406ef79ab36cd76bb5e89fcee96d949710abe80048bc94fdee7732794cde8ca",
-      "bytes": 335219,
+      "export_sha256": "a2a8ed0fa4f03ac318c2ff4cfc2a387a9232592648f0c423d978d79a14e7e8eb",
+      "bytes": 335712,
       "upstream_modified": true
     },
     {
@@ -3565,8 +3565,8 @@
     {
       "path": "mcp/server.py",
       "source_sha256": "7b7f784efa836b3cb47444a837f7c19e42d29f812487f2aede0bfa2092fe6d81",
-      "export_sha256": "49473cadb9841b580132edb04943484bc4462df121c65f7f33b08abd6ffd1f41",
-      "bytes": 172399,
+      "export_sha256": "2d56fb65cc67ed7301e3a6207cd668fc9ca3b108ed7c2899048d8d11cd78d060",
+      "bytes": 172476,
       "python_comments_removed": 80,
       "python_docstrings_removed": 13,
       "tool_descriptions_retained": 9,
@@ -3929,15 +3929,15 @@
       "path": "org_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "cf5f53d4136b19282fd868017b0e35340d60ad0a6910ebda8a266764100111dc",
-      "bytes": 60432
+      "export_sha256": "f98d38c05f0b89523f88b8260ae411e51a61dfd7defc63420abf0266fb686c34",
+      "bytes": 62767
     },
     {
       "path": "organizations.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "ad43e554580aa78832f8d46c0bb5896a9a141be7362caa8a0d844ba076181c18",
-      "bytes": 28676
+      "export_sha256": "408923789ac686be90661335d8f06478b40dea6aa2c4c20fee07baae32f130c7",
+      "bytes": 29350
     },
     {
       "path": "oslocks.py",
@@ -5829,8 +5829,8 @@
       "path": "tests/test_key_source.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f07730e9e9793c636b81f029b8b25ae490c94026d5bfb2ed12f649b2f2b13bc5",
-      "bytes": 27684
+      "export_sha256": "33614dbb6727a1424b6e2629b07ac799a98ac7e687cdd051be7f130f7a701299",
+      "bytes": 27686
     },
     {
       "path": "tests/test_key_sweep.py",
@@ -6345,8 +6345,8 @@
       "path": "tests/test_organizations.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d1e2b7665be6f08348aaafb0b5128bc0619515f9151be277875232bfe15e3064",
-      "bytes": 68381
+      "export_sha256": "10335323567de61a75e7ac5e6ae76d53457790265c25993e2f88fe74923fb034",
+      "bytes": 73387
     },
     {
       "path": "tests/test_oslocks.py",

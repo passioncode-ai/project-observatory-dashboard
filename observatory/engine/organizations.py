@@ -24,6 +24,7 @@ so a workspace that never configures this sees no change):
                              "digitalocean_teams": ["<team uuid or name>"],
                              "cloudflare_accounts": ["<account id>"],
                              "heroku_teams": ["<team name>"],
+                             "heroku_users": ["<the Heroku user's email or id, as its admin stash records it>"],
                              "openrouter_accounts": ["<the label the door stashed it as>"]}}},
      "projects": {"project:<slug>": {"organization": "<name>", "why": "..."}}}
 
@@ -38,6 +39,12 @@ THE ORDER, first answer wins:
   3. external  — every repository owner is outside the estate (ownership.json):
                  a clone of somebody else's code has no accounts of ours;
   4. default   — the organization marked `default`.
+
+THE HEROKU USER (OBS-628). `heroku_users` names the Heroku user whose admin token the Heroku door stashed, by the
+email or the account id that stash's record holds (`heroku.py stash` writes both). It decides that user's own
+organization (`full org accounts`, the account `heroku:user`) and the issuer side of the keys the user issued
+(`full org keys`), never a project's, like `openrouter_accounts`. A user no rule names keeps the default
+organization, as before the rule existed.
 
 PROVIDER ACCOUNTS (OBS-412 part 1; rule ORG-R04 of the organization onboarding design). A provider
 account named under `match` is a rule of step 2 too, beside a repository owner and a product. `digitalocean_teams`,
@@ -76,12 +83,13 @@ DECIDED = ("declared", "rule", "default")
 ACCOUNT_RULES = {"digitalocean_teams": ("digitalocean", "DigitalOcean team"),
                  "cloudflare_accounts": ("cloudflare", "Cloudflare account"),
                  "heroku_teams": ("heroku", "Heroku team"),
+                 "heroku_users": ("heroku-user", "Heroku user"),
                  "openrouter_accounts": ("openrouter", "OpenRouter account")}
 #: `match` rules on repository owners: `github_owners` is the onboarding design's name for `repository_owners`.
 OWNER_RULES = ("repository_owners", "github_owners")
 MATCH_RULES = (*OWNER_RULES, "products", *ACCOUNT_RULES)
 #: Providers whose accounts a rule names but whose resources never decide a project (see the docstring).
-ACCOUNT_ONLY = ("openrouter",)
+ACCOUNT_ONLY = ("openrouter", "heroku-user")
 
 
 def load() -> dict:

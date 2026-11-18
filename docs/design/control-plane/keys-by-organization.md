@@ -1,4 +1,4 @@
-# Keys by organization (OBS-604, CP-10)
+# Keys by organization (OBS-604, OBS-628, CP-10)
 
 Status: built 2026-11-18 on `refactor/r4-org-keys`, wave R4 of the [refactor plan](refactor-plan.md). It finishes
 the halves [keys-by-source.md](keys-by-source.md) (OBS-556) left: what `shared` means, whose each key is, and who
@@ -68,7 +68,35 @@ Keys page, Project secrets, Credential cell:
 | a consumer source cannot be read | its own code (`token-unreadable`, `config-unreadable`, `scan-missing`, ...), named once per answer |
 | a recipient label that is not a plain label | shown as "a recipient whose label is not shown" |
 
+## The Heroku user in the organization rules (OBS-628)
+
+`config/organizations.json` gains `match.heroku_users`: the Heroku user an organization's keys are issued by, named by
+the email or the account id the Heroku door recorded beside its admin stash (`heroku-admin/<label>.meta.json`,
+written by `heroku.py stash`). The Heroku ledger row of a key issued by the user names that stash (`admin`); a row
+that names none is read against every stashed user.
+
+```
+org accounts                                   org keys --org acme
+  heroku user your Heroku user: 1 key(s)         organization  acme-web/prod/HEROKU_TOKEN:
+    [rule]  match.heroku_users names it            the project is acme's (rule ...), and it was issued in
+                                                   heroku account your Heroku user, which is acme's
+```
+
+- `organizations.ACCOUNT_RULES` gains `heroku_users` for the provider `heroku-user`, an account-only rule like
+  `openrouter_accounts`: it decides the account's organization and the issuer side of its keys, never a project.
+- `org_view.issuers` gives the Heroku user's keys the rule `heroku-user` and the user's email and id;
+  `org_view.issuer_organization` is the one reading of an issuer's organization (`org keys`, the not-movable admin
+  tokens, the foreign-issuer finding). A Heroku user no rule names keeps the default organization, as before; two
+  organizations naming it is a conflict, as for any account.
+- `org accounts` names the account `heroku:user` by the same keys, so its row reads `rule` with the rule's why.
+- The configuration door declares `organizations.organizations` as one object, so the rule needs no new door key;
+  `organizations.validate` accepts it as a list of strings, like every `match` rule.
+
 ## Tests
+
+`observatory/engine/tests/test_organizations.py` (suite `organizations`), class `HerokuUsers`: without the rule the
+key stays ambiguous and the user personal; the rule by email (any case) and by id attributes the key, the account and
+the admin token's reach; a ledger row without `admin`; a user two organizations name; the rule's validation.
 
 `observatory/engine/tests/test_key_source.py` (suite `key_source`): `OutwardShares` (a sent peer share, an issued
 key shared out, a credential request into an organization's context, a hand-over, an unreadable share record),

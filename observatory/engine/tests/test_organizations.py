@@ -568,8 +568,8 @@ class RulesPart2(Base):
 STAND_IN_VALUE = "synthetic-not-a-value"
 
 
-class Views(Base):
-    """OBS-411 and OBS-415: `full org accounts` and `full org keys`, read-only and without a value."""
+class ViewsFixture(Base):
+    """The synthetic estate the organization views read: registry documents, door records and a vault."""
 
     def setUp(self):
         super().setUp()
@@ -667,6 +667,11 @@ class Views(Base):
         for path in self.secrets.rglob("*"):
             if path.is_file() and not path.name.endswith((".json", ".jsonl")):
                 path.chmod(0)
+
+
+
+class Views(ViewsFixture):
+    """OBS-411 and OBS-415: `full org accounts` and `full org keys`, read-only and without a value."""
 
     def test_every_account_once_under_one_organization_or_a_decision(self):
         v = self.view.accounts()
@@ -1036,6 +1041,84 @@ class Views(Base):
         with contextlib.redirect_stderr(err):
             self.assertEqual(org_cli.main(["keys", "--org", "company", "--json"]), 1)
         self.assertEqual(json.loads(err.getvalue())["error"], "no-organizations")
+
+
+class HerokuUsers(ViewsFixture):
+    """OBS-628: `match.heroku_users` names the Heroku user (by the email or the id its admin stash records) whose keys
+    are an organization's, so a key that user issued for the organization's project is attributed, not ambiguous."""
+
+    def setUp(self):
+        super().setUp()
+        self.private("heroku-admin/me", STAND_IN_VALUE)
+        self.private("heroku-admin/me.meta.json", json.dumps(
+            {"kind": "admin", "account_id": "00000000-aaaa-4aaa-8aaa-000000000001", "email": "ops@example.com"}))
+        self.private("heroku-issued.json", json.dumps({"issued": {
+            "co-web/prod/DEPLOY_HEROKU_TOKEN": {"team": "co-apps"},
+            "co-web/prod/HEROKU_USER_TOKEN": {"team": None, "admin": "me"}}}))
+        self.private("projects/co-web/prod/HEROKU_USER_TOKEN", STAND_IN_VALUE)
+
+    def name_user(self, *values):
+        orgs = json.loads(self.home.joinpath("config", "organizations.json").read_text())
+        orgs["organizations"]["company"]["match"]["heroku_users"] = list(values)
+        self.write("organizations.json", orgs)
+
+    def test_without_the_rule_the_user_s_key_stays_ambiguous_and_the_user_personal(self):
+        self.seal_values()
+        k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
+        self.assertEqual(k["co-web/prod/HEROKU_USER_TOKEN"]["class"], "ambiguous")
+        self.assertEqual(k["co-web/prod/HEROKU_USER_TOKEN"]["issuer"]["source"], "default")
+        rows = {r["id"]: r for r in self.view.accounts()["accounts"]}
+        self.assertEqual((rows["heroku:user"]["organization"], rows["heroku:user"]["source"]), ("person", "default"))
+
+    def test_the_rule_by_email_attributes_the_key_and_the_account(self):
+        self.name_user("OPS@example.com")
+        self.seal_values()
+        v = self.view.keys("company")
+        k = {r["slot"]: r for r in v["keys"]}
+        user = k["co-web/prod/HEROKU_USER_TOKEN"]
+        self.assertEqual((user["class"], user["selected"]), ("organization", True))
+        self.assertEqual((user["issuer"]["accountId"], user["issuer"]["organization"], user["issuer"]["source"]),
+                         ("heroku:user", "company", "rule"))
+        rows = {r["id"]: r for r in self.view.accounts()["accounts"]}
+        self.assertEqual((rows["heroku:user"]["organization"], rows["heroku:user"]["source"]), ("company", "rule"))
+        self.assertIn("match.heroku_users", rows["heroku:user"]["why"])
+        heroku = next(n for n in v["notMovable"] if n["provider"] == "heroku")
+        self.assertEqual(heroku["accounts"][0], {"account": "your Heroku user", "organization": "company",
+                                                 "source": "rule"})
+        self.assertNotIn(STAND_IN_VALUE, json.dumps(v) + json.dumps(self.view.accounts()))
+        self.assertEqual(self.orgs.validate(json.loads(self.home.joinpath("config", "organizations.json").read_text())),
+                         [])
+
+    def test_the_rule_by_id_reads_the_same(self):
+        self.name_user("00000000-aaaa-4aaa-8aaa-000000000001")
+        k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
+        self.assertEqual(k["co-web/prod/HEROKU_USER_TOKEN"]["class"], "organization")
+
+    def test_a_ledger_row_with_no_admin_reads_every_stashed_user(self):
+        self.private("heroku-issued.json", json.dumps({"issued": {
+            "co-web/prod/HEROKU_USER_TOKEN": {"team": "personal"}}}))
+        self.name_user("ops@example.com")
+        k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
+        self.assertEqual(k["co-web/prod/HEROKU_USER_TOKEN"]["issuer"]["organization"], "company")
+
+    def test_a_user_two_organizations_name_is_shared_and_decides_nothing(self):
+        self.name_user("ops@example.com")
+        orgs = json.loads(self.home.joinpath("config", "organizations.json").read_text())
+        orgs["organizations"]["person"]["match"]["heroku_users"] = ["ops@example.com"]
+        self.write("organizations.json", orgs)
+        rows = {r["id"]: r for r in self.view.accounts()["accounts"]}
+        self.assertEqual((rows["heroku:user"]["source"], rows["heroku:user"]["claimedBy"]),
+                         ("conflict", ["company", "person"]))
+        k = {r["slot"]: r for r in self.view.keys("company")["keys"]}
+        self.assertEqual(k["co-web/prod/HEROKU_USER_TOKEN"]["class"], "ambiguous")
+
+    def test_the_rule_validates_and_a_non_list_is_named(self):
+        orgs = json.loads(json.dumps(ORGS))
+        orgs["organizations"]["company"]["match"]["heroku_users"] = ["ops@example.com"]
+        self.assertEqual(self.orgs.validate(orgs), [])
+        orgs["organizations"]["company"]["match"]["heroku_users"] = "ops@example.com"
+        self.assertTrue(any("match.heroku_users must be a list of strings" in p for p in self.orgs.validate(orgs)))
+        self.assertIn("heroku_users", self.orgs.MATCH_RULES)
 
 
 if __name__ == "__main__":

@@ -712,7 +712,7 @@ def observatory_org_accounts() -> dict[str, Any]:
     Heroku teams and the Heroku user, OpenRouter accounts), each under exactly one organization (the default
     Personal, another of `config/organizations.json`, or Not ours) with `source` (`rule`: a `match` rule names it;
     `default`: a repository owner of yours no rule names, whose projects take the default organization, the Heroku
-    user, which no rule kind names, or every account when no organizations are configured; `external`: a
+    user when no `match.heroku_users` names it, or every account when no organizations are configured; `external`: a
     repository owner outside `config/ownership.json`), or listed in `needsDecision` with the reason: `conflict`
     (two organizations claim it), `none` (a provider account no rule names, which decides no project until a rule
     in `config/organizations.json` does), or seen and not connected (with the door's command that connects it).
@@ -724,7 +724,8 @@ def observatory_org_accounts() -> dict[str, Any]:
     context is compared with the stashed tokens in memory by the DigitalOcean door, as `digitalocean.py teams`
     does). The same answer as `project-observatory full org accounts --json` (schema `org-accounts/1`). Saying which organization an account
     belongs to is a rule in `organizations.json` (`match.github_owners`, `digitalocean_teams`,
-    `cloudflare_accounts`, `heroku_teams`, `openrouter_accounts`)."""
+    `cloudflare_accounts`, `heroku_teams`, `heroku_users` (by the email or id its admin stash records),
+    `openrouter_accounts`)."""
     import org_view
     return org_view.accounts()
 

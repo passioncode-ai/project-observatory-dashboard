@@ -59,6 +59,8 @@ DOORS = {
     "heroku": "heroku-admin",
 }
 ACCOUNTS_CMD = "project-observatory full org accounts"
+#: The provider a `match.heroku_users` rule names (OBS-628): the Heroku user, apart from its teams.
+HEROKU_USER = "heroku-user"
 
 
 class Refusal(ValueError):
@@ -146,6 +148,20 @@ def _labels(folder: pathlib.Path, degraded: list, source: str) -> list[str]:
 def _stash_meta(door: str, label: str, degraded: list) -> dict:
     doc = _private_json(_secret_store() / DOORS[door] / f"{label}.meta.json", degraded, f"{door}:{label}")
     return doc if isinstance(doc, dict) else {}
+
+
+def _heroku_users(degraded: list) -> dict[str, list[str]]:
+    """admin stash label -> what a `match.heroku_users` rule may name its Heroku user by: the email and the account id
+    `heroku.py stash` recorded beside it (OBS-628). Names only: no value file is opened."""
+    out: dict[str, list[str]] = {}
+    for label in _labels(_secret_store() / DOORS["heroku"], degraded, "heroku:stash"):
+        m = _stash_meta("heroku", label, degraded)
+        out[label] = [str(v) for v in (m.get("email"), m.get("account_id")) if isinstance(v, str) and v]
+    return out
+
+
+def _all_users(users: dict[str, list[str]]) -> list[str]:
+    return sorted({k for keys in users.values() for k in keys})
 
 
 def _openrouter_ledger(degraded: list) -> dict:
@@ -248,6 +264,7 @@ def issuers(degraded: list, cloudflare_accounts: dict[str, str] | None = None,
     A door's own record wins over the journal: the journal only names slots no other door recorded, and of
     its rows the latest for a slot."""
     out: dict[str, dict] = {}
+    users = _heroku_users(degraded)
     for name, row in sorted(_openrouter_ledger(degraded).items()):
         if not isinstance(row, dict):
             continue
@@ -273,7 +290,10 @@ def issuers(degraded: list, cloudflare_accounts: dict[str, str] | None = None,
             out[slot] = {"provider": "heroku", "rule": "heroku", "keys": [str(team)], "account": str(team),
                          "accountId": f"heroku:team:{team}", "record": "heroku ledger"}
         else:
-            out[slot] = {"provider": "heroku", "rule": None, "keys": [], "account": "your Heroku user",
+            # The user the row's admin stash names (OBS-628); a row that names none reads every stashed user.
+            admin = row.get("admin")
+            keys = users.get(admin) if isinstance(admin, str) and admin in users else _all_users(users)
+            out[slot] = {"provider": "heroku", "rule": HEROKU_USER, "keys": keys, "account": "your Heroku user",
                          "accountId": "heroku:user", "record": "heroku ledger"}
     names = cloudflare_accounts or {}
     unresolved: set[str] = set()
@@ -505,12 +525,14 @@ def accounts() -> dict:
     hk = _quiet("heroku-apps.json")
     _passed_on("heroku", hk, degraded)
     hteams = {t for t in _list(hk, "teams") if isinstance(t, str)}
+    user_keys = _all_users(_heroku_users(degraded))
     for app in _rows(hk, "apps"):
         team = app.get("team") if isinstance(app.get("team"), str) else None
         ident = f"heroku:team:{team}" if team and team != "personal" else "heroku:user"
         row = acc.add(ident, "heroku", "team" if ident != "heroku:user" else "user",
                       team if ident != "heroku:user" else "your Heroku user",
-                      [str(team)] if ident != "heroku:user" else [], "heroku" if ident != "heroku:user" else None,
+                      [str(team)] if ident != "heroku:user" else user_keys,
+                      "heroku" if ident != "heroku:user" else HEROKU_USER,
                       connected=True, via="registry/heroku-apps.json", measured=(hk or {}).get("scanned_on"))
         row["resources"] += 1
         if isinstance(app.get("project"), str):
@@ -522,7 +544,7 @@ def accounts() -> dict:
     if hk_stashed and hk is None:
         _not_scanned("heroku", degraded)
     for label in hk_stashed:
-        acc.add("heroku:user", "heroku", "user", "your Heroku user", [], None, connected=True,
+        acc.add("heroku:user", "heroku", "user", "your Heroku user", user_keys, HEROKU_USER, connected=True,
                 via=f"admin token ({label})")
 
     # OpenRouter: the provisioning keys stashed by label, and the accounts the ledger names.
@@ -698,6 +720,9 @@ def _decide(row: dict, a: "organizations.Assigner", default: str | None, estate:
     out = {k: row[k] for k in ("id", "provider", "kind", "name", "connected", "via", "measuredOn")}
     out["holds"] = {"projects": sorted(row["projects"]), "resources": row["resources"], "keys": row["keys_issued"]}
     ans = a.account(row["rule"], row["keys"]) if (a.active and row["rule"]) else None
+    rule = row["rule"]
+    if rule == HEROKU_USER and (ans is None or ans["organization_source"] == "none"):
+        ans, rule = None, None                     # a Heroku user no rule names keeps the default (OBS-628)
     if ans and ans["organization_source"] == "rule":
         out.update(organization=ans["organization"], source="rule", why=ans["organization_why"])
     elif ans and ans["organization_source"] == "conflict":
@@ -713,12 +738,13 @@ def _decide(row: dict, a: "organizations.Assigner", default: str | None, estate:
         if row["kind"] == "doctl-context":
             why = "its team is unknown until its token is stashed; " + why
         out.update(organization=default, source="default", why=why)
-    elif default and (row["kind"] == "owner" or row["rule"] is None):
+    elif default and (row["kind"] == "owner" or rule is None):
         why = ("no rule names it, so its projects take the default organization" if row["kind"] == "owner" else
-               "no rule kind names a Heroku user account; its own apps are the default organization's")
+               "no organization's match.heroku_users names this Heroku user; its own apps are the default "
+               "organization's")
         out.update(organization=default, source="default", why=why)
     else:
-        if row["rule"] is None:
+        if rule is None:
             why = _no_rule_kind(a)["organization_why"]
         elif row["kind"] == "doctl-context":
             why = "its team is unknown until its token is stashed, so no rule can name it yet"
@@ -842,8 +868,7 @@ def keys(org: str, chosen: "list[str] | tuple[str, ...] | None" = None) -> dict:
         pid = resolve(folder)
         side = scope.get(pid or "")
         issuer = who.get(slot)
-        iorg = (a.account(issuer["rule"], issuer["keys"]) if issuer and issuer["rule"]
-                else _no_rule_kind(a) if issuer else None)
+        iorg = issuer_organization(a, issuer)
         if side is None and not (iorg and iorg["organization"] == org):
             continue
         cls, why = _classify(org, a.default, side, issuer, iorg)
@@ -862,7 +887,7 @@ def keys(org: str, chosen: "list[str] | tuple[str, ...] | None" = None) -> dict:
         rows.append(row)
     heroku_teams = sorted(({t for t in _list(hk, "teams") if isinstance(t, str)}
                            | {str(x.get("team")) for x in _rows(hk, "apps") if x.get("team")}) - {"personal"})
-    fixed = _not_movable(org, a, degraded, do_by_uuid, heroku_teams)
+    fixed = _not_movable(org, a, degraded, do_by_uuid, heroku_teams, _heroku_users(degraded))
     degraded = _once(degraded)
     counts = {c: sum(1 for r in rows if r["class"] == c) for c in ("organization", "personal", "ambiguous")}
     counts["notMovable"] = len(fixed)
@@ -879,12 +904,25 @@ def keys(org: str, chosen: "list[str] | tuple[str, ...] | None" = None) -> dict:
 
 
 def _no_rule_kind(a) -> dict:
-    """The Heroku user, which no rule kind can name: the default organization's, as `accounts()` reads it."""
+    """A Heroku user no `match.heroku_users` rule names: the default organization's, as `accounts()` reads it."""
     if a.default:
         return {"organization": a.default, "organization_source": "default",
-                "organization_why": "no rule kind names a Heroku user account; its own apps are the default's"}
+                "organization_why": "no organization's match.heroku_users names this Heroku user; its own apps are "
+                                    "the default's"}
     return {"organization": None, "organization_source": "none",
-            "organization_why": "no rule kind names a Heroku user account, and no organization is the default"}
+            "organization_why": "no organization's match.heroku_users names this Heroku user, and no organization "
+                                "is the default"}
+
+
+def issuer_organization(a, issuer: dict | None) -> dict | None:
+    """The organization of the account that issued a key (`issuers()` row), as `full org keys` reads it: a rule's
+    answer for the account, and for a Heroku user no rule names, the default organization (OBS-628)."""
+    if issuer is None:
+        return None
+    if issuer["rule"] == HEROKU_USER:
+        ans = a.account(HEROKU_USER, issuer["keys"]) if issuer["keys"] else None
+        return ans if ans and ans["organization_source"] != "none" else _no_rule_kind(a)
+    return a.account(issuer["rule"], issuer["keys"]) if issuer["rule"] else _no_rule_kind(a)
 
 
 def _classify(org: str, default: str | None, side: dict | None, issuer: dict | None, iorg: dict | None):
@@ -910,7 +948,7 @@ def _classify(org: str, default: str | None, side: dict | None, issuer: dict | N
 
 
 def _not_movable(org: str, a, degraded: list, do_by_uuid: dict[str, list[str]] | None = None,
-                 heroku_teams: list[str] | None = None) -> list[dict]:
+                 heroku_teams: list[str] | None = None, users: dict[str, list[str]] | None = None) -> list[dict]:
     """ORG-R07: the admin and provisioning keys a door keeps. Never handed over: the organization's space
     stashes its own, then a personal copy for an account of the organization is revoked. Each key is read
     against every account it reaches, named as `accounts()` names them: a DigitalOcean team by what a rule may
@@ -929,10 +967,12 @@ def _not_movable(org: str, a, degraded: list, do_by_uuid: dict[str, list[str]] |
             elif provider == "cloudflare":
                 accts = [("cloudflare", [str(x["id"])], x.get("name") or x["id"]) for x in _stash_accounts(m)]
             else:
-                accts = [(None, [], "your Heroku user")] + [("heroku", [t], t) for t in heroku_teams or []]
+                accts = ([(HEROKU_USER, (users or {}).get(label) or [], "your Heroku user")]
+                         + [("heroku", [t], t) for t in heroku_teams or []])
             named = []
             for rule, keys_, name in accts:
-                ans = (a.account(rule, keys_) if rule and keys_ else _no_rule_kind(a) if rule is None
+                ans = (issuer_organization(a, {"rule": rule, "keys": keys_}) if rule == HEROKU_USER
+                       else a.account(rule, keys_) if rule and keys_ else _no_rule_kind(a) if rule is None
                        else {"organization": None, "organization_source": "none"})
                 named.append({"account": name, "organization": ans["organization"],
                               "source": ans["organization_source"]})
