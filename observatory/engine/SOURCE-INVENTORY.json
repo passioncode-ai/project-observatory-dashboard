@@ -7349,8 +7349,8 @@
     {
       "path": "tests/test_workspace_upgrade.py",
       "source_sha256": "baf6fb326428105e87a6acab67b3f89adc29038c5df488c822ab210c3e65fea3",
-      "export_sha256": "0c63d3a87186226a5bff2468a10db9ee67309b6d1108d306c73ee05a267ae284",
-      "bytes": 177311,
+      "export_sha256": "025fda1f3fd3878cce178954ac5e8bfcab0a761597781c88c54719664b096fcb",
+      "bytes": 177268,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,

@@ -964,8 +964,8 @@ class WindowsSync(unittest.TestCase):
     opened for it, so there sync_tree syncs the files through read-write handles and leaves the folders."""
 
     def setUp(self):
-        self.root = Path(tempfile.mkdtemp(prefix='obs-win-sync-'))
-        self.addCleanup(shutil.rmtree, self.root, ignore_errors=True)
+        import tmp as tmpdir
+        self.root = Path(tmpdir.mkdtemp(prefix='obs-win-sync-'))
         (self.root / 'a' / 'b').mkdir(parents=True)
         (self.root / 'a' / 'b' / 'inner.txt').write_text('x')
         (self.root / 'outer.txt').write_text('y')
