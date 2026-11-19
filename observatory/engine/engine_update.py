@@ -1668,6 +1668,16 @@ class Transaction:
                     human.append(f"Restore the pre-update snapshot {snapshot} into a new home "
                                  f"(`full restore`), it could not be swapped in: {exc}")
                     self.step("workspace-restore-failed")
+                    snapshot = None     # the person's way back: left where the step above names it
+        if self.has_ws and snapshot is not None and snapshot.is_dir():
+            # bee9ce32: the snapshot of a rolled-back update goes the way a finished one's does,
+            # encrypted into the backup root or rotated with the other local `before-update` copies.
+            # Before, each failed retry of one version left one more plaintext workspace in backups/.
+            try:
+                report["snapshot"] = backup_vault.after_snapshot(self.base, snapshot, "before-update")
+            except Exception as exc:  # noqa: BLE001 — the rollback is done; the snapshot exists either way
+                report["snapshot"] = {"snapshot": str(snapshot), "encrypted": False,
+                                      "export_error": f"{type(exc).__name__}: {exc}"}
         failed = self.start_writers() if self.stopped else []
         if failed:
             report["services_not_restarted"] = failed

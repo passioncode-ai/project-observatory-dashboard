@@ -134,10 +134,17 @@ def inventory(base: Path) -> dict[str, tuple[int, int, str]]:
                 continue
             if file.is_symlink():
                 raise config.ConfigurationError('Snapshot refuses symbolic links')
-            if not stat.S_ISREG(file.stat().st_mode):
-                raise config.ConfigurationError('Snapshot refuses special files')
-            info = file.stat()
-            result[rel.as_posix()] = (info.st_size,info.st_mtime_ns,known_digest(file, info))
+            try:
+                info = file.stat()
+                if not stat.S_ISREG(info.st_mode):
+                    raise config.ConfigurationError('Snapshot refuses special files')
+                result[rel.as_posix()] = (info.st_size,info.st_mtime_ns,known_digest(file, info))
+            except FileNotFoundError:
+                # Gone between the listing and its stat: SQLite removes `-wal` and `-shm` when the
+                # last connection closes, which refused the v0.44.0 update here (2026-11-18). A file
+                # that is gone is not in the workspace; a steady one that went is still a change the
+                # snapshot's second inventory names.
+                continue
     return result
 
 
@@ -435,12 +442,18 @@ def _snapshot(base: Path, output: Path, *, carry_stores: bool = False,
             if name.endswith(('-wal', '-journal', '-shm')) and name.rsplit('-', 1)[0] in databases:
                 continue
             source, dest = base / name, stage / 'data' / name
-            if name in databases:
-                copy_database(source, dest)
-                sha = digest(dest)
-            else:
-                # A clone, or one pass that hashes what it writes (OBS-626).
-                sha = _copy_file(source, dest)
+            try:
+                if name in databases:
+                    copy_database(source, dest)
+                    sha = digest(dest)
+                else:
+                    # A clone, or one pass that hashes what it writes (OBS-626).
+                    sha = _copy_file(source, dest)
+            except FileNotFoundError:
+                # Listed, then removed by a writer before its copy: the same refusal as any other
+                # change during the snapshot, which the automatic update retries the next hour.
+                raise config.ConfigurationError(
+                    f'Workspace changed during snapshot; stop all writers and retry ({name})') from None
             entries.append({'path':name, 'sha256':sha, 'size':dest.stat().st_size,
                             'kind':'sqlite' if name in databases else 'file'})
         # WHAT MUST HOLD STILL is everything but the databases and the append-only logs.
