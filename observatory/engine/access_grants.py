@@ -61,6 +61,9 @@ REVOKED_REASONS = {
 ROTATION_REASONS = frozenset({"rotated", "stale-successor"})
 #: How long one account's listing is reused: a host reads the list every few minutes.
 LISTING_TTL = 120.0
+#: How long an answer waits for the providers' listings, read in parallel. An account not read by then reads as
+#: unknown spend, named in `degraded`: a host's call never waits on a slow provider.
+SPEND_BUDGET = 20.0
 PAGE_MAX = 500
 DEGRADED_MAX = 16
 OPAQUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -202,6 +205,26 @@ def _movements() -> list[dict]:
 
 
 _LISTINGS: dict[str, tuple[float, str, dict[str, float | None]]] = {}
+#: One read per account at a time, shared by every answer waiting on it: a provider that does not answer holds one
+#: thread, never one per call. A read still running when an answer's budget ends finishes and fills the cache.
+_INFLIGHT: dict[tuple[int, str], Any] = {}
+_POOL: Any = None
+_POOL_LOCK = __import__("threading").Lock()
+
+
+def _in_flight(fetch: Callable[[str], Any], account: str) -> Any:
+    import concurrent.futures as cf
+    global _POOL
+    with _POOL_LOCK:
+        key = (id(fetch), account)
+        future = _INFLIGHT.get(key)
+        if future is not None and not future.done():
+            return future
+        if _POOL is None:
+            _POOL = cf.ThreadPoolExecutor(max_workers=8, thread_name_prefix="access-grants")
+        future = _POOL.submit(fetch, account)
+        _INFLIGHT[key] = future
+        return future
 
 
 def _spend(account: str) -> tuple[str, dict[str, float | None]]:
@@ -299,6 +322,29 @@ class _Builder:
         self.listings: dict[str, tuple[str, dict] | None] = {}
         self.holder_failed = False
 
+    def prefetch(self, accounts: set[str]) -> None:
+        """Every account's listing in parallel, within SPEND_BUDGET; one not read in time reads as unknown."""
+        import concurrent.futures as cf
+        if not accounts:
+            return
+        futures = {_in_flight(self.s.spend, a): a for a in sorted(accounts)}
+        done, waiting = cf.wait(futures, timeout=SPEND_BUDGET)
+        for future in done:
+            account = futures[future]
+            try:
+                self.listings[account] = future.result()
+            except Unread as exc:
+                self.unread(account, str(exc))
+            except Exception as exc:                                         # noqa: BLE001  degraded, named
+                self.unread(account, type(exc).__name__)
+        for future in waiting:
+            self.unread(futures[future], f"not read within {int(SPEND_BUDGET)} s")
+
+    def unread(self, account: str, why: str) -> None:
+        self.listings[account] = None
+        self.note(f"account {_account_ref(account)}: the provider's listing was not read ({why}); its keys' spend "
+                  f"today is unknown")
+
     def note(self, text: str) -> None:
         if len(self.degraded) < DEGRADED_MAX and text[:200] not in self.degraded:
             self.degraded.append(text[:200])
@@ -333,12 +379,7 @@ class _Builder:
 
     def spent(self, account: str, key_hash: Any) -> float | None:
         if account not in self.listings:
-            try:
-                self.listings[account] = self.s.spend(account)
-            except Unread as exc:
-                self.listings[account] = None
-                self.note(f"account {_account_ref(account)}: the provider's listing was not read ({exc}); its "
-                          f"keys' spend today is unknown")
+            self.prefetch({account})
         listing = self.listings[account]
         if listing is None or not isinstance(key_hash, str) or not key_hash:
             return None
@@ -434,12 +475,14 @@ def list_grants(arguments: dict | None = None, sources: Sources | None = None) -
         out["degraded"] = b.degraded
         return out
     grants: list[dict] = []
+    include_revoked = args.get("includeRevoked") is True
+    b.prefetch({str(r.get("account") or "") for r in (doc.get("issued") or {}).values()
+                if isinstance(r, dict) and not r.get("pending") and r.get("hash")})
     for name, rec in sorted((doc.get("issued") or {}).items()):
         if isinstance(rec, dict):
             g = b.active(str(name), rec)
             if g is not None:
                 grants.append(g)
-    include_revoked = args.get("includeRevoked") is True
     if include_revoked:
         for stone in doc.get("retired") or []:
             if isinstance(stone, dict):
