@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.46.0/observatory/engine/fabric/schemas/access-grants-list-input.schema.json",
+  "title": "access.grants.list: input",
+  "description": "The input of access.grants.list: fabric-agent-contract DEC-0187 $defs/listInput at commit 320c7ab9 (fabric/access-grants/). Every member optional; absent filters answer every grant this engine issued that admits now.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "holder": {
+      "$ref": "#/$defs/serviceKey",
+      "description": "Only grants this agent holds."
+    },
+    "subject": {
+      "$ref": "#/$defs/serviceKey",
+      "description": "Only grants that open this agent (a grant without subject opens the issuer)."
+    },
+    "includeRevoked": {
+      "type": "boolean",
+      "description": "true: revoked and expired grants too. Absent or false: only those that admit now."
+    },
+    "cursor": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 256
+    },
+    "limit": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 500
+    }
+  },
+  "$defs": {
+    "serviceKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,62}\\.[a-z][a-z0-9-]{0,31}$",
+      "description": "A service key <id>.<instance> (service.md, Descriptor), the name Fabric Dashboards and the estate know an agent by."
+    }
+  }
+}

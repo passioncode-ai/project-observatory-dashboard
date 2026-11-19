@@ -2576,6 +2576,15 @@ def capability_ops_digest_record(arguments: dict[str, Any], span: Any) -> dict[s
     return ops_digest_store.record_call(arguments, registry=_resolve_registry)
 
 
+@server.capability("access.grants.list")
+def capability_access_grants_list(arguments: dict[str, Any], span: Any) -> dict[str, Any]:
+    """Who holds the provider keys this engine issued, `access-grants/1` (OBS-658, contract DEC-0187): the
+    OpenRouter door's ledger joined with the vault's journal, the providers' listings and the registry. Read-only; a
+    source it could not read is named in `degraded`, and no key value or hash is read into the answer."""
+    import access_grants
+    return access_grants.list_grants(arguments)
+
+
 @server.capability("project.resolve")
 def capability_project_resolve(arguments: dict[str, Any], span: Any) -> dict[str, Any]:
     """The same answer as the MCP tool, cut to the published output schema like every

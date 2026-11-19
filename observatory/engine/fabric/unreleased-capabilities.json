@@ -1,4 +1,46 @@
 {
  "about": "Capabilities this engine serves before the release that publishes their schemas declares them. A capability added between releases pins its schemas at the tag of the release that will ship it (AGENTS.md, Releasing; ENG-018), and fabric-agent.json may not pin a tag newer than the engine's version (tools/check_manifest_urls.py), so the declaration waits here and interop.mcp_capabilities serves it from here. The release whose version reaches the pinned tag moves each entry into fabric-agent.json's capabilities (provider.revision + 1, tools/fabric_hash.py), empties this list and updates the probe and revision counts; tests/test_ops_digest_record.py fails until it does.",
- "capabilities": []
+ "capabilities": [
+  {
+   "id": "https://github.com/ssheleg/project-observatory-open-source/capabilities/access.grants.list",
+   "name": "access.grants.list",
+   "inputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.46.0/observatory/engine/fabric/schemas/access-grants-list-input.schema.json",
+   "outputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.46.0/observatory/engine/fabric/schemas/access-grants-list-output.schema.json",
+   "effect": "none",
+   "idempotency": "supported",
+   "dataClasses": [
+    "project-internal"
+   ],
+   "profile": {
+    "kind": "mcp",
+    "protocolRevision": "2026-07-28",
+    "connection": {
+     "mode": "stdio",
+     "executableRef": "observatory-install:mcp-server",
+     "args": [
+      "--stdio"
+     ]
+    },
+    "requiredFeatures": [
+     "tool:access.grants.list"
+    ],
+    "probes": [
+     {
+      "id": "access-grants-list-synthetic-workspace",
+      "description": "A bounded probe against an explicitly selected synthetic fixture workspace, which holds no OpenRouter door ledger.",
+      "inputFixture": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.46.0/observatory/engine/fabric/fixtures/access-grants-list-input.json",
+      "outputSchema": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.46.0/observatory/engine/fabric/schemas/access-grants-list-output.schema.json",
+      "timeoutMs": 30000,
+      "sideEffectCeiling": "none",
+      "assertions": [
+       "result validates against access-grants-list-output.schema.json",
+       "protocol is access-grants/1 and issuer is this engine's service key",
+       "FAC-SEM-185 finds nothing in the answer"
+      ]
+     }
+    ]
+   },
+   "description": "Who holds the provider keys this engine's OpenRouter door issued (fabric-agent-contract DEC-0187, access-grants/1, commit 320c7ab9): one grant per key, and with includeRevoked per key it revoked and per key that expired. The holder is an agent by service key when measured (the key's vault folder resolves to one project and the registry attributes one service to it; a key delivered to this engine is the engine's), else unresolved with the key's ledger name; the subject is the OpenRouter account; the ceiling and its window from the ledger; today's spend from the provider's listing of the account, read in parallel within 20 s, null when unknown and named in degraded. Issue and revoke times come from the vault's movements journal. No key value, prefix, hash, person's name or address. Read-only; the doors arrive with OBS-659."
+  }
+ ]
 }

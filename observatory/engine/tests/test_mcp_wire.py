@@ -64,6 +64,8 @@ GOLDEN_TOOLS = [
     "grant.check",
     # products' daily operations digests (OBS-330): a binding over stdio, a delegation token over HTTP (1)
     "ops.digest.record",
+    # who holds the provider keys this engine issued (OBS-658, DEC-0187) (1)
+    "access.grants.list",
 ]
 FAILURES: list[str] = []
 

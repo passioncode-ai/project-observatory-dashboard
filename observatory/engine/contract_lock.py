@@ -143,6 +143,9 @@ PIN_CHECK_EXCLUDES: dict[str, str] = {
     "fabric/agent-health": "vendored at the contract's commit db0d8f15 (DEC-0179, OBS-577): the agent-health/1 "
                            "schema, vectors and fixtures, which the pin predates; moving the pin re-vendors every "
                            "other folder and is its own review",
+    "fabric/access-grants": "vendored at the contract's commit 320c7ab9 (DEC-0187, OBS-658): the access-grants/1 "
+                            "schema, which the pin predates; moving the pin re-vendors every other folder and is its "
+                            "own review",
 }
 
 
@@ -242,6 +245,8 @@ VENDORED_AT_OTHER_COMMITS: dict[str, dict[str, str]] = {
         "eac1a594aa131851f079da8bb7b2149e1951f35f": PIN_CHECK_EXCLUDES["fabric/ops-digest"]},
     "fabric/agent-health": {
         "db0d8f15994822724356d0a7e7ccc98dbcca604d": PIN_CHECK_EXCLUDES["fabric/agent-health"]},
+    "fabric/access-grants": {
+        "320c7ab9b8397cb392ca5f3ac4d56dcc5c7786a1": PIN_CHECK_EXCLUDES["fabric/access-grants"]},
 }
 
 

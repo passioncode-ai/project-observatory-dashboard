@@ -80,6 +80,15 @@
         "schemas/ops-digest-record-input.schema.json",
         "schemas/ops-digest-record-output.schema.json"
       ]
+    },
+    {
+      "release": "v0.46.0",
+      "repository": "passioncode-ai/project-observatory-dashboard",
+      "files": [
+        "fixtures/access-grants-list-input.json",
+        "schemas/access-grants-list-input.schema.json",
+        "schemas/access-grants-list-output.schema.json"
+      ]
     }
   ],
   "externalHostAdmission": "unverified",
