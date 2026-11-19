@@ -393,6 +393,57 @@ class Watch(unittest.TestCase):
         self.assertFalse(again["complete"])
         self.assertTrue(any("2026-11-14" in d["reason"] for d in again["degraded"]))
 
+    def test_a_pass_the_step_time_cuts_writes_what_it_read_and_never_calls_the_rest_clean(self):
+        """OBS-661: on a large estate every pass was stopped at its limit and nothing was written. With the step's
+        deadline near, the pass stops asking, keeps the packages it asked, names the rest, and is not complete."""
+        import step_budget
+        import time
+        fake = FakeOSV({("npm", "lodash", "4.17.20"): [("GHSA-1", "2024-01-01T00:00:00Z")],
+                        ("PyPI", "flask", "3.0.0"): [("GHSA-2", "2024-01-01T00:00:00Z")]},
+                       {"GHSA-1": advisory("GHSA-1", "2024-01-01T00:00:00Z"),
+                        "GHSA-2": advisory("GHSA-2", "2024-01-01T00:00:00Z")})
+        saved_batch, saved_env = vw.BATCH, os.environ.get(step_budget.DEADLINE_ENV)
+        vw.BATCH = 1
+        os.environ[step_budget.DEADLINE_ENV] = str(time.time() + vw.RESERVE + vw.TIMEOUT - 5)
+        try:
+            doc = self.run_watch(fake)
+        finally:
+            vw.BATCH = saved_batch
+            if saved_env is None:
+                os.environ.pop(step_budget.DEADLINE_ENV, None)
+            else:
+                os.environ[step_budget.DEADLINE_ENV] = saved_env
+        self.assertEqual(len(fake.posts), 1, "the second batch is not started so near the limit")
+        self.assertEqual(doc["queried"], 1)
+        self.assertFalse(doc["complete"])
+        self.assertTrue(any("1 package(s) not asked" in d["reason"] for d in doc["degraded"]), doc["degraded"])
+        asked = {(m["ecosystem"], m["name"]) for m in doc["matches"]}
+        self.assertLessEqual(len(asked), 1, "a package not asked is neither a match nor clean")
+
+    def test_records_are_read_in_parallel_and_cached_as_they_arrive(self):
+        import threading
+        import time
+        ids = [f"GHSA-{n}" for n in range(8)]
+        seen = {"now": 0, "most": 0}
+        lock = threading.Lock()
+
+        class Slow(FakeOSV):
+            def __call__(self, method, url, body=None, timeout=30):
+                if "/vulns/" in url:
+                    with lock:
+                        seen["now"] += 1
+                        seen["most"] = max(seen["most"], seen["now"])
+                    time.sleep(0.2)
+                    with lock:
+                        seen["now"] -= 1
+                return super().__call__(method, url, body, timeout)
+        fake = Slow({("npm", "lodash", "4.17.20"): [(i, "2024-01-01T00:00:00Z") for i in ids]},
+                    {i: advisory(i, "2024-01-01T00:00:00Z") for i in ids})
+        doc = self.run_watch(fake)
+        self.assertGreater(seen["most"], 1, "records are fetched concurrently")
+        self.assertEqual(sorted(doc["advisories"]), sorted(ids))
+        self.assertEqual(len(list(self.cache.glob("GHSA-*.json"))), len(ids))
+
     def test_switched_off_and_offline_runs(self):
         self.assertTrue(vw.switched_on({"integrations": {}}, environ={}), "on by default")
         self.assertFalse(vw.switched_on({"integrations": {"vulnerabilities": False}}, environ={}))

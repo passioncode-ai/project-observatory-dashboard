@@ -5291,8 +5291,8 @@
       "path": "tests/test_dependencies.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "1f1e12c32c3b988d4ffd32b2e0d76d275d199590dd8c73845c6605fbe2ff4d61",
-      "bytes": 29901
+      "export_sha256": "a27d844305a432700b91a13d19b7e6e08f7716325c870ce71ea38516813fa119",
+      "bytes": 32679
     },
     {
       "path": "tests/test_deployed_commit.py",
@@ -8447,8 +8447,8 @@
       "path": "tools/vuln_watch.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "cbf84f1920fdd55cb924c82c5d34ad5b419fa1662e5292588d72715092e5cd32",
-      "bytes": 22486
+      "export_sha256": "66f3f24c9d005e7279d2f66f0b0df256002f7684e25a6b6fcd685ad1799c54ab",
+      "bytes": 25285
     },
     {
       "path": "tools/workflow_cli.py",
