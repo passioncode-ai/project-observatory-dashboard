@@ -669,7 +669,11 @@ SUITE_SECONDS = {'ssh_keys': 300, 'credential_doors': 600, 'maintenance': 480, '
                  'disk_guard': 300,
                  # 150 cases with real snapshots, restores and encryption: 99.85 s alone on a Mac, past
                  # 120 s under load in the 2026-11-11 scenario sweep.
-                 'workspace_upgrade': 300}
+                 'workspace_upgrade': 300,
+                 # 108 cases over the update with real snapshots, a staged install and rollbacks: 100.5 s
+                 # (run 44379342338) and 112.0 s (run 44317200456) on macos-latest, then 122.1 s and a
+                 # timeout on the v0.45.0 tag (run 44392489139), which held the release.
+                 'engine_update': 300}
 
 
 def suite_timeout(name: str, timeout: int) -> int:
