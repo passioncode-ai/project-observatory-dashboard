@@ -134,6 +134,16 @@
       "note": "the MCP page's Accept buttons make the definitions a probe found the pinned ones: the same function (mcp_supply.accept_pending), by server and tool or for every changed tool"
     },
     {
+      "action": "session-terminal",
+      "kind": "dashboard",
+      "where": "tools/keyserver.py: act_session_terminal",
+      "tool": null,
+      "gate": {
+        "reason": "opens a terminal window on the person's screen in a running session's folder; an agent works in that folder with its own shell, and observatory_sessions gives it the session's id and Fabric's links (fabric-session-links/1)"
+      },
+      "status": "gate"
+    },
+    {
       "action": "assistant",
       "kind": "dashboard",
       "where": "tools/keyserver.py: act_assistant",

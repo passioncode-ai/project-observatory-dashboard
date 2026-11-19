@@ -49,6 +49,7 @@ from typing import Callable
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import paths                                                                       # noqa: E402
+import session_links                                                               # noqa: E402
 # The clock and the stored form of an instant are the pages' own (OBS-598); appended, so no
 # dashboard module shadows a name this module imports.
 sys.path.append(str(pathlib.Path(__file__).resolve().parent / "dashboard"))
@@ -240,7 +241,7 @@ def session_rows(doc: dict | None, ledger: list[dict] | None) -> list[dict]:
     return mark_active(rows, recent)
 
 
-def _row(raw, attribute, degraded_attribution: list[str]) -> dict | None:
+def _row(raw, attribute, degraded_attribution: list[str], resolve=None) -> dict | None:
     if not isinstance(raw, dict):
         return None
     pid, agent = raw.get("pid"), raw.get("agent")
@@ -255,24 +256,34 @@ def _row(raw, attribute, degraded_attribution: list[str]) -> dict | None:
             degraded_attribution.append(type(exc).__name__)
     group = raw.get("pool") if isinstance(raw.get("pool"), str) else raw.get("account_group")
     quiet = raw.get("quiet") is True
+    # The runner's own session id (fabric-session-links/1): the manager's row may carry it; else Claude Code's
+    # per-process file names it (session_links.resolver). Never guessed: no id, no open or continue link.
+    sid = raw.get("session_id") if isinstance(raw.get("session_id"), str) else None
+    if sid is None and resolve is not None:
+        try:
+            sid = resolve(pid, raw.get("started_at"), agent)
+        except Exception:  # noqa: BLE001: a session without its id, never a lost session
+            sid = None
+    sid = sid if sid and session_links.SESSION_ID.fullmatch(sid) else None
     return {"agent": agent, "project": project if isinstance(project, str) else None,
             "folder_name": _folder_name(folder), "pid": pid, "managed": raw.get("managed") is True,
             "launch_id": raw.get("launch_id") if isinstance(raw.get("launch_id"), str) else None,
             "account_group": group if isinstance(group, str) else None,
             "last_turn_at": _epoch_iso(raw.get("last_write_at")), "quiet": quiet,
-            "state": "quiet" if quiet else "working"}
+            "state": "quiet" if quiet else "working", "session_id": sid, "links": session_links.links(sid)}
 
 
 def summary(home: pathlib.Path | None = None, *, now: datetime | None = None,
             runner: Callable[[list[str], float], tuple[int, str]] | None = None,
-            manager=_UNSET, attribute=_UNSET) -> dict:
+            manager=_UNSET, attribute=_UNSET, session_dirs=_UNSET) -> dict:
     """The contract `sessions_view.summary()` (CONTROL-PLANE.md): processes per agent, of them
     managed, of them with a turn in the last hour, the sessions, the sources and `degraded`.
 
     `home` is a workspace (its `store/`); None reads this engine's own. `runner`, `manager`
     (the CLI's path, None for not installed) and `attribute` (folder -> project id) are
     injected by tests; by default the CLI is found, run once, and folders are attributed by
-    the contract's path rules."""
+    the contract's path rules. `session_dirs` are the folders of Claude Code's per-process session files
+    (session_links.session_dirs by default); a test hands its own."""
     now = now or _now()
     scratch = pathlib.Path(home) / "store" / "raw" if home else paths.SCRATCH  # paths-check: allow: a workspace home the caller names, not this engine's
     db = pathlib.Path(home) / "store" / "observatory.db" if home else paths.DB  # paths-check: allow: a workspace home the caller names, not this engine's
@@ -291,9 +302,15 @@ def summary(home: pathlib.Path | None = None, *, now: datetime | None = None,
                                      f"projects could not be read for attribution: {type(exc).__name__}"))
                 attribute = None
         failed: list[str] = []
+        try:
+            resolve = session_links.resolver(None if session_dirs is _UNSET else session_dirs)
+        except Exception as exc:  # noqa: BLE001: sessions without their ids, never no sessions
+            degraded.append(_gap("session-ids", "unreadable",
+                                 f"the runners' session files could not be read: {type(exc).__name__}"))
+            resolve = None
         raw = data["sessions"]
         for item in raw[:MAX_SESSIONS]:
-            r = _row(item, attribute, failed)
+            r = _row(item, attribute, failed, resolve)
             if r is not None:
                 sessions.append(r)
         skipped = min(len(raw), MAX_SESSIONS) - len(sessions)
@@ -427,7 +444,8 @@ def by_project(doc: dict | None, ledger: list[dict] | None, workflows: list[dict
         pid = s.get("project")
         if isinstance(pid, str) and pid:
             block(pid)["live"].append({k: s.get(k) for k in (
-                "agent", "folder_name", "managed", "account_group", "launch_id", "state", "last_turn_at", "active")})
+                "agent", "folder_name", "managed", "account_group", "launch_id", "state", "last_turn_at", "active",
+                "session_id", "links")})
     flows: dict[str, dict] = {}
     for w in workflows or []:
         if not isinstance(w, dict) or not isinstance(w.get("workflowId"), str):
@@ -444,7 +462,8 @@ def by_project(doc: dict | None, ledger: list[dict] | None, workflows: list[dict
             continue
         w = flows.get(s.get("workflowId")) if s.get("workflowId") else None
         block(pid)["recent"].append({
-            "sessionId": s.get("sessionId"), "lastTurnAt": s.get("lastTurnAt"), "turns": s.get("turns"),
+            "sessionId": s.get("sessionId"), "links": session_links.links(s.get("sessionId")),
+            "lastTurnAt": s.get("lastTurnAt"), "turns": s.get("turns"),
             "active": s.get("active") is True,
             "workflow": _workflow_line(w) if w else (
                 {"workflowId": s["workflowId"]} if s.get("workflowId") else None)})

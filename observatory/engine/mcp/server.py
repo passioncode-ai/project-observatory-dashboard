@@ -1145,7 +1145,11 @@ def observatory_sessions(
     `active` (the one rule for "working": it runs and its project recorded a turn in the last hour;
     null when the ledger was not read; `active_hour` counts these rows) and `state` (the account
     manager's own word, quiet after 30 silent minutes), and where each number came from (`sources`).
-    A project's `counts.working` counts its `active` rows.
+    A project's `counts.working` counts its `active` rows. Each session also carries `session_id` (the
+    runner's own id, null when it is not known, never guessed) and `links` ({open, continue}: the
+    `fabric://session/...` links of fabric-session-links/1 that hand it to Fabric; null without an id);
+    a project's `recent` rows carry `links` too. Observatory starts no session: a new one is
+    `fabric://session/new?project=<slug>&from=project-observatory`, confirmed by the person in Fabric.
 
     Read-only. A source that could not be read is null with its reason in `degraded`, never 0:
     `managed: null` means the account manager is not installed or did not answer. No folder path

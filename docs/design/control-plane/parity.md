@@ -48,10 +48,10 @@ first proves the unmodified list passes.
 | status | count |
 |---|---|
 | covered | 39 |
-| gate | 8 |
+| gate | 9 |
 | missing | 72 |
 
-119 actions: 15 dashboard (the reveal a gate, the other fourteen covered: the key page's eight acts, the Disk page's `configure`, the Agents page's `workflow-handoff`, the MCP page's `mcp-accept`, the issues notice's `issues-banner` and the Assistant page's `assistant` and `doctor`) and 104 CLI verbs (25 covered, 7 gates, 72 missing).
+120 actions: 16 dashboard (the reveal and the Agents page's `session-terminal` gates, the other fourteen covered: the key page's eight acts, the Disk page's `configure`, the Agents page's `workflow-handoff`, the MCP page's `mcp-accept`, the issues notice's `issues-banner` and the Assistant page's `assistant` and `doctor`) and 104 CLI verbs (25 covered, 7 gates, 72 missing).
 79 top-level commands are excluded by name and the `test*` and `scan-*` families by prefix.
 
 Covered today: `workflow handoff` (`observatory_handoff_create`, `observatory_handoff_accept`), `workflow

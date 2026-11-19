@@ -1306,6 +1306,17 @@ def build():
                 {"source": "project-sessions", "reason": f"{type(exc).__name__}"[:200]}]}
     except Exception as exc:  # noqa: BLE001: a page, not a crash
         PAYLOAD["sessions"] = {"degraded": [{"source": "sessions", "reason": f"{type(exc).__name__}: {exc}"[:200]}]}
+    # A NEW SESSION FROM A PROJECT (fabric-session-links/1): the project panel's link into Fabric's one launch
+    # path, by Fabric's own id for the project when Observatory pulled it (OBS-160), else by its slug.
+    try:
+        import fabric_attribution
+        import session_links
+        fab = fabric_attribution.aliases(fabric_attribution.load() or {})
+        PAYLOAD["session_new"] = {r["id"]: link for r in PAYLOAD.get("rows") or []
+                                  if isinstance(r, dict) and isinstance(r.get("id"), str)
+                                  and (link := session_links.new_session(r["id"], (fab.get(r["id"]) or {}).get("alias")))}
+    except Exception:  # noqa: BLE001: the panel then names no link, never a broken one
+        PAYLOAD["session_new"] = {}
     build.last_payload = PAYLOAD
     build.last_stamp = built_from
     payload = json.dumps(PAYLOAD, ensure_ascii=False)
@@ -3308,6 +3319,12 @@ function detail(id) {
                                                           ""}
     <h3 id="panel-sessions">${T("Who works on it now")}</h3>
     ${(() => {
+      // fabric-session-links/1: a new session starts in Fabric's one launch path; Fabric asks before it starts.
+      const link = (D.session_new || {})[r.id];
+      return link ? `<p class="session-new"><a class="chip-btn" href="${E(link)}">${T("New session")}</a>` +
+                    `<span class="none"> · ${T("opens the launch in Fabric; it starts when you press Start there")}</span></p>` : "";
+    })()}
+    ${(() => {
       // Sessions per project: the account manager's live rows attributed here, the ledger's
       // sessions of the last day with the step their workflow last wrote, and the open workflows.
       // A live row is "working" by `active` alone (OBS-599, sessions_view.session_rows), never by `state`.
@@ -3321,15 +3338,24 @@ function detail(id) {
         ? `<span class="mono">${E(w.stepId)}</span>${w.stepStatus ? " · " + E(w.stepStatus) : ""}${w.stepAt ? " · " + E(w.stepAt) : ""}` +
           (w.stalled ? ` ${chip(T("stalled"), "warn")}` : "") + (w.goal ? `<span class="none"> · ${E(w.goal)}</span>` : "")
         : (w && w.workflowId ? `<span class="mono">${E(w.workflowId)}</span>` : `<span class="none">${T("no workflow")}</span>`);
+      // A session's acts (fabric-session-links/1): open it and move it into Fabric are links Fabric confirms;
+      // the terminal is the key server's `session-terminal`, enabled only on a page it serves (LIVE).
+      const acts = (sid, ln, live) => !(ln && ln.open && ln.continue) ? "" :
+        ` <span class="session-acts"><a href="${E(ln.open)}">${T("Open session")}</a>` +
+        (live ? ` <button type="button" class="chip-btn" data-session-terminal="${E(sid)}"${LIVE ? "" : " disabled"}` +
+                `${LIVE ? "" : ` title="${E(T("Opened as a file, this page cannot open a terminal. The session's links work in Fabric."))}"`}>` +
+                `${T("Open terminal")}</button>` : "") +
+        ` <a href="${E(ln.continue)}">${T("Open in Fabric")}</a></span>` +
+        (live ? `<span class="none" data-session-said="${E(sid)}" role="status" aria-live="polite"></span>` : "");
       const live = list(ps.live, T("no coding session runs in this project now"),
         s => `<li>${E(s.agent || "?")} · ${s.active === true ? chip(T("working")) : s.active === false ? chip(T("quiet"), "warn") : chip(T("not read"), "warn")}` +
              ` ${s.managed ? chip(T("managed")) : chip(T("not managed"), "warn")}` +
              `<span class="none">${s.folder_name ? " · " + E(s.folder_name) : ""}${s.account_group ? " · " + E(s.account_group) : ""}` +
-             `${s.last_turn_at ? " · " + T("last turn") + " " + E(s.last_turn_at) : ""}</span></li>`);
+             `${s.last_turn_at ? " · " + T("last turn") + " " + E(s.last_turn_at) : ""}</span>${acts(s.session_id, s.links, true)}</li>`);
       const recent = list(ps.recent, T("no session recorded a turn here in the last day"),
         s => `<li><span class="mono">${E(String(s.sessionId || "").slice(0, 8))}</span>` +
              ` · ${E(s.lastTurnAt || "")} · ${T("{n} turns", {n: Number(s.turns || 0)})}` +
-             `${s.active ? " " + chip(T("active")) : ""} · ${step(s.workflow)}</li>`);
+             `${s.active ? " " + chip(T("active")) : ""} · ${step(s.workflow)}${acts(s.sessionId, s.links, false)}</li>`);
       const flows = list(ps.workflows, T("no open workflow"),
         w => `<li>${step(w)}${w.executor ? `<span class="none"> · ${E(w.executor)}</span>` : ""}</li>`);
       return `<h4>${T("Running now")}</h4>${live}<h4>${T("What each session last did")}</h4>${recent}` +
@@ -5162,6 +5188,36 @@ if (PAGE === "agents" && typeof document !== "undefined" && document.addEventLis
     }
   });
 }
+// A SESSION'S TERMINAL (fabric-session-links/1), on the Agents page and a project's panel. Built disabled; served
+// by the key server with its token (LIVE) it posts `session-terminal`, which finds the running session's folder by
+// its id on this machine and opens a terminal there: the folder never reaches the page. Open and Open in Fabric
+// are plain `fabric://` links, which Fabric confirms before it acts.
+function sessionTerminals() {
+  if (!LIVE || typeof document === "undefined" || !document.querySelectorAll) return;
+  for (const el of document.querySelectorAll("[data-session-terminal]")) {
+    el.disabled = false;
+    for (const a of ["title", "data-t-title", "data-t-title-args"]) el.removeAttribute(a);
+  }
+}
+if (typeof document !== "undefined" && document.addEventListener) {
+  sessionTerminals();
+  document.addEventListener("click", async ev => {
+    const btn = ev.target && ev.target.closest && ev.target.closest("[data-session-terminal]");
+    if (!btn || btn.disabled || !LIVE) return;
+    const sid = btn.dataset.sessionTerminal;
+    const said = document.querySelector(`[data-session-said="${sid}"]`);
+    const say = text => { if (said) said.textContent = " " + text; };
+    btn.disabled = true;
+    try {
+      await call("session-terminal", {sessionId: sid});
+      say(T("A terminal opened in the session's folder."));
+    } catch (err) {
+      say(err instanceof Uncertain ? T("the outcome is unknown: {why}", {why: err.message})
+                                   : T("no terminal: {why}", {why: err.message}));
+    }
+    btn.disabled = false;
+  });
+}
 // THE MCP PAGE'S ACCEPT BUTTONS (OBS-555, CP-09). A tool whose definition changed since it was pinned is accepted
 // through the key server's `mcp-accept` action, the same function as the agent's observatory_mcp_accept. Built
 // disabled; enabled only when the key server serves the page with its token (LIVE).
@@ -5437,6 +5493,7 @@ if (PAGE === "agents" && typeof document !== "undefined" && document.addEventLis
       last = sig;
       box.replaceWith(fresh);
       agentsActions();
+      sessionTerminals();
       formRestore(fresh, form);
       if (focused) {
         const again = [...fresh.querySelectorAll("details summary")].find(
