@@ -3,6 +3,25 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.45.2 (2026-11-19)
+
+### Fixed
+
+- **An update's snapshot survives a vanishing `-wal`** (OBS-640): SQLite removes a database's `-wal` and `-shm` when
+  its last connection closes, and a snapshot that listed one and then found it gone refused the whole update (this
+  machine stayed on an older release that way). A companion that vanishes during the walk is left out; a file removed
+  before its copy says the workspace changed during the snapshot.
+- **A rolled-back update leaves no plaintext copy** (OBS-640): the snapshot an update takes and then restores from is
+  encrypted when a backup passphrase is set, and rotated like the other snapshots, so failed retries of one version
+  keep no more copies than the rotation.
+- **Abandoned workflows are closed** (OBS-641): retention closes a workflow whose run ended 24 hours ago or that has
+  been silent for 14 days, with its reason, and releases its lease; `retention plan` lists them first.
+- **Wiki edits outside `inventory/` no longer hold the projection** (OBS-642): on a branch with an upstream the
+  projection commits `inventory/` and names the other paths in its receipt and in the info finding "Wiki edits left
+  uncommitted".
+- **Loopback listeners keep their port to themselves on Windows** (OBS-643): the relay, the node server and the key
+  page set `SO_REUSEADDR` only off Windows, where it let a bind succeed on a port another live socket held.
+
 ## 0.45.1 (2026-11-18)
 
 The 0.45.0 changes, published: its tag's check timed out on one slow test suite, so 0.45.0 stays tagged and unpublished
