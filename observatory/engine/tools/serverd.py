@@ -981,8 +981,11 @@ class LoopbackServer(http.server.ThreadingHTTPServer):
     http.server.HTTPServer.server_bind() calls socket.getfqdn(host) between bind() and
     listen(). A Mac with a slow or broken resolver stalls there with the port bound but
     not listening, so a probe neither connects nor is refused. A loopback service knows
-    its own name.
+    its own name. SO_REUSEADDR only off Windows, where it would let the bind take a port
+    another live socket holds (OBS-643).
     """
+
+    allow_reuse_address = os.name != 'nt'
 
     def server_bind(self) -> None:
         socketserver.TCPServer.server_bind(self)
