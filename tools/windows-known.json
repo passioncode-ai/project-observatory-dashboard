@@ -1966,6 +1966,7 @@
         "WorkspaceUpgrade.test_a_snapshot_names_the_machine_it_was_taken_on",
         "WorkspaceUpgrade.test_a_snapshot_naming_no_machine_is_another_machines_unless_asked",
         "WorkspaceUpgrade.test_a_snapshot_of_this_place_from_another_device_is_a_clones",
+        "WorkspaceUpgrade.test_a_snapshot_survives_a_companion_that_vanishes_mid_walk",
         "WorkspaceUpgrade.test_a_write_while_the_upgrade_is_staged_is_kept_not_refused",
         "WorkspaceUpgrade.test_another_machine_never_takes_the_analytics_install_id_or_queue",
         "WorkspaceUpgrade.test_another_machine_never_takes_the_node_identity_or_the_schedules",
