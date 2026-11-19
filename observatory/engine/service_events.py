@@ -213,9 +213,12 @@ def _render(group: _Group, conn: sqlite3.Connection, labels: dict[str, str]) -> 
         severity = str(payload.get("severity") or "warning")
         title = str(payload.get("title") or "a finding on the dashboard needs a look")
         subject = {"type": "finding", "id": (fid or "finding")[:128], "label": title[:120]}
+        # Only a critical finding asks the host to notify: a host forwards `notify` events to the operator's
+        # Telegram, and every new warning did so, 148 in one day on 2026-11-19 (OBS-657). Warnings stay in the
+        # feed, on the page and in the desktop notification.
         return fs.make_event(ident, at, "finding.opened", SEVERITY_LEVEL.get(severity, "warning"),
                              _sentence(f"New {severity} finding: {title}"), subject=subject,
-                             link=finding_link(fid), notify=True)
+                             link=finding_link(fid), notify=severity == "critical")
     if kind == "finding.cleared":
         fid = _finding_id(head["ref"])
         title = _title_of(conn, fid)

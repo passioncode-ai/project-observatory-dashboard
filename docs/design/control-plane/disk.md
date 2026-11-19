@@ -13,7 +13,8 @@ the guard and the cleanup is shown and can be changed from the page.
 
 - `machine_view.summary()`, as the Machine page reads it: `disk.volume` (free space now), `guard` (the last pass: free
   before and after, pressure, planned classes, `kept`, `largeFiles`), `cleanup` (`autoEnabled`, `counts`, `journal`,
-  `guardRuns` and `guardTotals`, the guard's run summaries of 7 days, freed by the disk's own count) and `degraded`
+  `guardRuns`, newest first as `guardRunsOrder` says, `guardLast`, the last pass on its own, and `guardTotals`, the
+  guard's run summaries of 7 days, freed by the disk's own count) and `degraded`
   (the page names the gaps of `machine.json`, `disk-guard.json` and `cleanup-plan.json`).
 - `machine.diskSettings`: `configuration_door.listing()` cut by `disk_page.settings_of` to the keys in
   `configuration_door.DISK_SCOPE` (`features.auto_cleanup`, `guard.*`, `cleanup.auto.*`), each row with `value`,
