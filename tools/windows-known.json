@@ -1717,6 +1717,7 @@
         "`where` names the file",
         "and it IS the process serve was (exec, no pump in between)",
         "the refusal names the environment searched and the file that holds it",
+        "the service starts with the key",
         "with no --env the unlabeled file still answers"
       ]
     },

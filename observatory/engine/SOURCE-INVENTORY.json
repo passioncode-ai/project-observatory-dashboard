@@ -4759,8 +4759,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "44976b2afd3d16651f7de421391836036d2256081b627767a2640f8275ab665e",
-      "bytes": 62289,
+      "export_sha256": "49f0463c3edc360f220cacef7ed62973e829c4161d1e4defc9248898cb101906",
+      "bytes": 62502,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -6303,8 +6303,8 @@
       "path": "tests/test_open_unlinked.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "b595175e6a4f6aeabfdb9ff6e6953c545864e57a8737abd0492a20aa5ef93303",
-      "bytes": 8759
+      "export_sha256": "8dc0720a295a10cc49ba5a01c2b0a10395bdef7a668be19d5fce62e5f9faa607",
+      "bytes": 8885
     },
     {
       "path": "tests/test_openrouter_keys.py",

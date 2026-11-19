@@ -73,6 +73,7 @@ class Observation(unittest.TestCase):
         result = subject.capture([sys.executable, '-c', 'import time;time.sleep(10)'], seconds=.05)
         self.assertEqual(result['reason'], 'command-timeout')
 
+    @unittest.skipIf(os.name == 'nt', 'capture() reads pipes through selectors, which Windows does not offer; lsof is POSIX')
     def test_a_child_that_outlives_its_kill_is_a_timeout_not_an_exception(self):
         # Task a578af27: under load lsof stayed in the kernel after the kill, and the second wait raised
         # TimeoutExpired out of `full machine --open-unlinked`.
