@@ -673,8 +673,8 @@
       "path": "dashboard/finding_types.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d89419bc8f9eea5d41fdfbaeb32f6a57195f55f28d82bbfea03e119261467352",
-      "bytes": 18638
+      "export_sha256": "235ce8f8f4d674684b778f70cb9e064d0335a18d0c02f0b288a2c16726e91285",
+      "bytes": 18699
     },
     {
       "path": "dashboard/home_page.py",
@@ -722,8 +722,8 @@
       "path": "dashboard/locales/ru.json",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d316f2d2d63983be07959cce4e3dca863095a7606e3b22a8ad7be3970ee04a36",
-      "bytes": 260430
+      "export_sha256": "e9da3c7fd6a24580d7de55018d47c342e5a2148d0b28ffde762c1e771cf9ebc2",
+      "bytes": 260690
     },
     {
       "path": "dashboard/machine_page.py",
@@ -4204,7 +4204,7 @@
       "path": "requirements-full.lock",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "2b2fe5f8d68be7142e287c62147e7fc697ea5253a6566ab1d1d1980488978e22",
+      "export_sha256": "d55de888d99da926ae0a64acc34e87ffb0b7a1f53f5322c07b92b8b8a0365878",
       "bytes": 711
     },
     {
@@ -6525,8 +6525,8 @@
       "path": "tests/test_projection_mirror.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "37b10e9e799aa71522e3d583f2a2e73b375ef8341dc3b3672f65b71884f57a97",
-      "bytes": 25437
+      "export_sha256": "33346d408ab070f2b69b84559c0e71cf1b69487971e7acc9c1329fcee25f8eb0",
+      "bytes": 29742
     },
     {
       "path": "tests/test_provenance.py",
@@ -7507,8 +7507,8 @@
     {
       "path": "tools/build_findings.py",
       "source_sha256": "03136ce1f366d180307f7f0c17ab41a3de82631103750f081a6d79758569e0b3",
-      "export_sha256": "ca554d274c852a013cfd1375257aedeb62cf4d73cbf3f601447dae6c01d58110",
-      "bytes": 302065,
+      "export_sha256": "d28b71c6ef615fe04d24504c20f7ac3b1113332f74d11ef1864d0e14e44156ba",
+      "bytes": 303432,
       "python_comments_removed": 996,
       "python_docstrings_removed": 28,
       "tool_descriptions_retained": 0,
@@ -7595,8 +7595,8 @@
     {
       "path": "tools/commit_projection.py",
       "source_sha256": "01d9eb2296bb221993f6de4f23c2ae9e982b3ec7b324e770d7f9e18e83ba1844",
-      "export_sha256": "ee198ff3c7d7f19e1cc175fa34d86105204e15d8db43866ceeeb6a5482a403d7",
-      "bytes": 14443,
+      "export_sha256": "4027c0340c35e750fed141a5892d70df7af024e4c2ba84c6a7fd3185d130b99b",
+      "bytes": 16076,
       "python_comments_removed": 6,
       "python_docstrings_removed": 3,
       "tool_descriptions_retained": 0,

@@ -2089,6 +2089,23 @@ def collect() -> list[dict]:
                 "action": "commit or discard the changes in the wiki by hand, then "
                           "`project-observatory full commit-projection`",
                 "evidence": ["store/raw/commit-projection.json#outcome"]})
+        # Edits outside the projection no longer hold it on a branch with an upstream (Fabric task e0bd0bb6): the
+        # projection is committed and the edits are left alone. They are a finding of their own only once they have
+        # stood past the same horizon, by path, so an operator mid-edit is not a fault.
+        outside = [str(x) for x in (pj.get("outside") or []) if isinstance(x, str)]
+        standing = hours_since(pj.get("outside_since") or "")
+        if outside and not outcome.startswith("refused") and standing is not None \
+                and standing > PROJECTION_COMMIT_HOURS:
+            out.append({
+                "type": "wiki.uncommitted_edits", "subject": "wiki:edits", "severity": "info",
+                **titled("edits outside the wiki's projection have stood uncommitted for {hours}h",
+                         hours=int(standing)),
+                "detail": clipped(f"{len(outside)} path(s): {', '.join(outside[:8])}"
+                                  + (" and more" if len(outside) > 8 else "")
+                                  + ". The projection is committed without them; they are someone's work in progress "
+                                    "or a change nobody saved."),
+                "action": "commit or discard them in the wiki by hand",
+                "evidence": ["store/raw/commit-projection.json#outside"]})
 
     # THE CAUSE, NOT FOUR SYMPTOMS. On 2026-09-07 the volume filled and
     # `scan-fs`, `scan-gh`, `scan-vault` and `scan-sessions` all exited 1 in the
