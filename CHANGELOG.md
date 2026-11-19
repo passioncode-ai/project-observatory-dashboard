@@ -3,6 +3,18 @@
 All notable changes to Project Observatory. Versions follow [semantic versioning](https://semver.org/);
 while the major version is 0, a minor release may change behaviour and says so here.
 
+## 0.45.3 (2026-11-19)
+
+### Fixed
+
+- **The dashboard opens on a Mac whose socket table is restricted** (OBS-646): on macOS 27 with two accounts, a port
+  nobody listens on was read as taken, every block of 47400-47999 looked taken, and `full open --serve` stopped with
+  "port-range-exhausted". Such a port is now free when it binds.
+- **Snapshots work on Windows** (OBS-644): staged files are flushed through handles that may write, and no folder is
+  opened for it, so snapshots and updates no longer stop at "Bad file descriptor" there.
+- **A key issued without a limit gets 100 USD a month** (OBS-645): an OpenRouter key issued without `--limit`, or
+  rotated from a record with no ceiling, had a 10 USD ceiling.
+
 ## 0.45.2 (2026-11-19)
 
 ### Fixed
