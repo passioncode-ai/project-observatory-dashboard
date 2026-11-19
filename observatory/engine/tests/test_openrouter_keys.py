@@ -549,6 +549,24 @@ def test_a_claimed_key_is_never_lost_skipped_or_guessed():
             setattr(door, k, v)
 
 
+def test_a_key_issued_without_a_limit_gets_the_agent_default() -> None:
+    """OBS-645: no default ceiling as low as 5 or 10 (the operator, 2026-11-19); a key issued without --limit, and a
+    rotated row that recorded none, get USD 100 a month, the agent default of 2026-11-07."""
+    sys.path.insert(0, str(ROOT / "tools"))
+    import importlib, unittest.mock as mock
+    door = importlib.import_module("openrouter")
+    check("the door's default ceiling is USD 100", door.DEFAULT_LIMIT_USD == 100.0, str(door.DEFAULT_LIMIT_USD))
+    seen = {}
+
+    def capture(name, limit, account, to, project, reset, *rest):
+        seen["limit"], seen["reset"] = limit, reset
+        return 0
+    with mock.patch.object(door, "cmd_issue", capture), \
+            mock.patch.object(sys, "argv", ["openrouter.py", "issue", "--name", "agent-x", "--to", "observatory"]):
+        door.main()
+    check("issue without --limit asks for USD 100 a month", seen == {"limit": 100.0, "reset": "monthly"}, str(seen))
+
+
 def test_byok_lists_follow_the_ledger_per_workspace() -> None:
     """OBS-544: each workspace's openai credential allows exactly the ledger's keys there. Two accounts that share a
     workspace make ONE list (a per-account list would overwrite the other's); an excluded key and a foreign hash are
@@ -652,7 +670,8 @@ if __name__ == "__main__":
                test_the_door_reads_every_page_of_keys,
                test_a_key_minted_elsewhere_is_claimed_by_its_hash_and_never_guessed,
                test_a_claimed_key_is_never_lost_skipped_or_guessed,
-               test_byok_lists_follow_the_ledger_per_workspace):
+               test_byok_lists_follow_the_ledger_per_workspace,
+               test_a_key_issued_without_a_limit_gets_the_agent_default):
         fn()
     print()
     if FAILURES:

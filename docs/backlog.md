@@ -1,6 +1,6 @@
 # Local backlog
 
-**Next free ID:** `OBS-645`
+**Next free ID:** `OBS-646`
 
 **Vacant ids:** `OBS-91` (skipped when the OBS register began reserving: #277 wrote OBS-92 and OBS-93, and no row was ever written under 91); `OBS-422` (reserved on 2026-11-08 for the provider-account organization rules, which became OBS-412 part 1 when the organization onboarding rows OBS-411 to OBS-420 were written)
 
@@ -664,3 +664,4 @@ still open and needs nothing, and a reservation older than that with no row must
 | OBS-642 | An edit outside `inventory/` no longer holds the wiki's projection on a branch with an upstream: the projection commits `inventory/` and names the other paths (and since when) in its receipt and as the info finding `wiki.uncommitted_edits` | done in 0.45.2 | `tools/commit_projection.py` refused on any dirty path outside `inventory/`; Fabric task e0bd0bb6; PR #596 |
 | OBS-643 | Loopback listeners (the relay, the node server, the key page) set `SO_REUSEADDR` only off Windows, where it lets a bind succeed on a port another live socket holds; the vendored `fabric_service.py` waits for the kit (board request `fdb8b224`) | done in 0.45.2 | PR #594's Windows job, run 44450501545: `node_session` refused a relay's hello as `wrong-origin`; PR #597 |
 | OBS-644 | Snapshots on Windows fsync staged files through handles that may write and open no folder for fsync (Windows answers EBADF on a read-only handle and cannot open a folder), the cause of most of OBS-278's snapshot failures | done — merged (#598), unreleased | run 44450501545, `workspace_upgrade` log: `sync_tree`, `os.fsync(fd)`, `OSError: [Errno 9]`; Fabric task 04d25f5e; PR #598 |
+| OBS-645 | An OpenRouter key issued without `--limit`, and a rotated row that recorded no ceiling, get USD 100 a month instead of 10: the agent default of 2026-11-07, and the operator's order of 2026-11-19 that no default ceiling is as low as 5 or 10 | done — merged (#600), unreleased | Fabric board request `12caaa48` (thread `445c6a1c`); `tools/openrouter.py` issued at `--limit` default 10.0 |
