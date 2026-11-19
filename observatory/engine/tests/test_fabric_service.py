@@ -405,6 +405,19 @@ class Events(Sandbox):
         self.assertNotIn("notify", first)
         self.assertTrue(events[1]["text"].startswith("Commit in Site by A. Author: “change 10”"))
 
+    def test_only_a_critical_finding_asks_the_host_to_notify(self):
+        # OBS-657: a host forwards `notify` events to the operator's Telegram; 148 new warnings did so in one day.
+        add_event(self.conn, "ev:notify:w", "finding.notified", "2026-09-28T11:00:00Z",
+                  ref="claude.instructions_long:file:x@warning#0", actor="tool:notify_findings",
+                  payload={"title": "a long instruction file", "severity": "warning", "delivered": True})
+        add_event(self.conn, "ev:notify:c", "finding.notified", "2026-09-28T11:05:00Z",
+                  ref="clone.diverged:repository:owner/y@critical#0", actor="tool:notify_findings",
+                  payload={"title": "owner/y has diverged from its remote", "severity": "critical", "delivered": True})
+        warning, critical = self.page()["events"]
+        self.assertEqual(warning["kind"], "finding.opened")
+        self.assertNotIn("notify", warning, "a warning stays in the feed without asking to notify")
+        self.assertTrue(critical["notify"])
+
     def test_sessions_findings_and_unknown_kinds_read_as_sentences(self):
         add_event(self.conn, "session:1", "session", "2026-09-28T10:00:00.123Z", project="project:alpha-web",
                   ref="s1:project:alpha-web", actor="operator", payload={"prompts": 13})
