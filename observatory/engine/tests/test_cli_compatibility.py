@@ -202,11 +202,15 @@ class PortableRunnerTests(unittest.TestCase):
         # a named allowance raises it, a larger --timeout still wins, others are unchanged.
         import run_portable as runner
         self.assertGreaterEqual(runner.suite_timeout("maintenance", 120), 300)
-        self.assertEqual(runner.suite_timeout("maintenance", 900), 900)
+        self.assertEqual(runner.suite_timeout("maintenance", 1500), 1500)
         self.assertEqual(runner.suite_timeout("pages", 120), 120)
         # engine_update ran 100-112 s on macos-latest and timed out at 122 s on the v0.45.0 tag.
         self.assertGreaterEqual(runner.suite_timeout("engine_update", 120), 300)
         self.assertGreaterEqual(runner.suite_timeout("backup_vault", 120), 600)
+        # On windows-latest after OBS-644 these timed out part of the way through (run 44470507467; OBS-653).
+        for name, at_least in (("maintenance", 1200), ("workspace_upgrade", 600), ("disk_guard", 600),
+                               ("machine_backup", 600)):
+            self.assertGreaterEqual(runner.suite_timeout(name, 120), at_least, name)
         for name in runner.SUITE_SECONDS:
             self.assertIn(name, runner.SUITES, f"{name} is not a suite the runner knows")
 
