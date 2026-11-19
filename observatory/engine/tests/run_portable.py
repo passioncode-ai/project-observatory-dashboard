@@ -640,8 +640,12 @@ runpy.run_path(sys.argv[0],run_name='__main__')
 #: tools/check_paths.py over the tree since 0.20.0, took 14 s alone and passed 120 s at a load
 #: average near 150).
 #: A larger --timeout still wins; a smaller one never cuts these short.
-SUITE_SECONDS = {'ssh_keys': 300, 'credential_doors': 600, 'maintenance': 480, 'tick_py': 300, 'conformance_receipt': 360, 'backup_vault': 300, 'dashboard_render': 600,
+SUITE_SECONDS = {'ssh_keys': 300, 'credential_doors': 600, 'maintenance': 480, 'tick_py': 300, 'conformance_receipt': 360, 'dashboard_render': 600,
                  'workspace': 300, 'interop': 300, 'indexer_load': 300, 'api_listings': 300,
+                 # 52-104 s alone (2026-10-06); 196.7 s and 204.0 s on windows-latest (runs 44450501545,
+                 # 44462551221), then a timeout at 302.4 s with 79 of its cases done on a slower runner
+                 # (run 44463421464), which held the 0.45.2 release PR.
+                 'backup_vault': 600,
                  # 128 cases, each driving the real hooks and git: ~70 s idle, ~310 s at a
                  # load average of 300 (OBS-135 tracks making it cheaper).
                  'ask_why': 600,
