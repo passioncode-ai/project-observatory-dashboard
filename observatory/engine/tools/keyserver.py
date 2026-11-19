@@ -1084,8 +1084,9 @@ class Server(socketserver.ThreadingMixIn, socketserver.TCPServer):
     """One thread per request (J-11 round 5): a door verb may wait up to the ledger lock's 150 s for another
     operation, and on a single-threaded server that wait froze the whole key page. The module holds no mutable
     state of its own, the audit log is written with O_APPEND, and every door verb that writes the ledger runs
-    under its lock. `block_on_close` stays on, so `--once` waits for its one request to finish."""
-    allow_reuse_address = True
+    under its lock. `block_on_close` stays on, so `--once` waits for its one request to finish. SO_REUSEADDR only
+    off Windows, where it would let the bind take a port another live socket holds (OBS-643)."""
+    allow_reuse_address = os.name != 'nt'
     daemon_threads = True
 
     def __init__(self, addr, handler, tok):
