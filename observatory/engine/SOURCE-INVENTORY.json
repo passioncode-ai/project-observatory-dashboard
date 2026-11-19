@@ -3887,8 +3887,8 @@
       "path": "open_unlinked.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "9f761f6be51fb08afbdee6c187003427c9f27125920638dc63d85deb679a750e",
-      "bytes": 12744
+      "export_sha256": "d77e0386cd119aedaf236ea34a57a9944f4029a7f900d3277cda779952a22607",
+      "bytes": 13288
     },
     {
       "path": "ops_acts.py",
@@ -6303,8 +6303,8 @@
       "path": "tests/test_open_unlinked.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "df1a375e6b95113227b62170bbffde8c07b0aee756a99fa6ead6c58abae744b8",
-      "bytes": 7642
+      "export_sha256": "b595175e6a4f6aeabfdb9ff6e6953c545864e57a8737abd0492a20aa5ef93303",
+      "bytes": 8759
     },
     {
       "path": "tests/test_openrouter_keys.py",

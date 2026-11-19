@@ -73,6 +73,31 @@ class Observation(unittest.TestCase):
         result = subject.capture([sys.executable, '-c', 'import time;time.sleep(10)'], seconds=.05)
         self.assertEqual(result['reason'], 'command-timeout')
 
+    def test_a_child_that_outlives_its_kill_is_a_timeout_not_an_exception(self):
+        # Task a578af27: under load lsof stayed in the kernel after the kill, and the second wait raised
+        # TimeoutExpired out of `full machine --open-unlinked`.
+        import subprocess
+        out_r, out_w = os.pipe()
+        err_r, err_w = os.pipe()
+        self.addCleanup(lambda: [os.close(fd) for fd in (out_w, err_w)])
+
+        class Stuck:
+            def __init__(self, *args, **kwargs):
+                self.stdout, self.stderr = open(out_r, 'rb'), open(err_r, 'rb')
+                self.kills = 0
+            def poll(self):
+                return None
+            def kill(self):
+                self.kills += 1
+            def wait(self, timeout=None):
+                raise subprocess.TimeoutExpired('lsof', timeout)
+
+        with patch.object(subject.subprocess, 'Popen', Stuck):
+            result = subject.capture(['lsof', '-nP', '+L1'], seconds=.05)
+        self.assertEqual(result['reason'], 'command-timeout')
+        self.assertIsNone(result['returncode'])
+        self.assertEqual(result['stdout'], b'')
+
     def test_unsupported_has_no_process_or_false_zero(self):
         with patch.object(subject.sys, 'platform', 'win32'), patch.object(subject, 'capture', side_effect=AssertionError('spawn')):
             doc = subject.observe()
