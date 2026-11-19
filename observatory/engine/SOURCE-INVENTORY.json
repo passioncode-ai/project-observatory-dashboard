@@ -3814,8 +3814,8 @@
       "path": "node/relay_server.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "005781ea6989d2dd1f49d49e80af506f08dd516b2dadd651da5bba678d818ba7",
-      "bytes": 87841
+      "export_sha256": "8b1deacb0a3af39687d1285eb22ac923222f8a35087cfc0d8442511dd3b58bcc",
+      "bytes": 88556
     },
     {
       "path": "node/repair.py",
@@ -6659,8 +6659,8 @@
       "path": "tests/test_relay_server.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "d756433d47da7a10091f835796f9bf11d07e69306936bb0f153dcb842e45bfef",
-      "bytes": 69197
+      "export_sha256": "dd78878468defeb37e2d10d2d2c4a494646954e06d87e0b1ccf50984f5b6d98e",
+      "bytes": 70821
     },
     {
       "path": "tests/test_release_cadence.py",
@@ -7918,8 +7918,8 @@
     {
       "path": "tools/keyserver.py",
       "source_sha256": "5dfc52b15ea31b3d4d608cf4892bc16c274bacca224dacb28ef88c53fd92c571",
-      "export_sha256": "bcef14c1ccac0b88efd137ade753b4a822fa204e5caf48a6714874e1fae744f6",
-      "bytes": 61422,
+      "export_sha256": "a18b2909217a8efd24bd435970c3b4b9a110cccc3070f7ff7188a2c7fda66aad",
+      "bytes": 61545,
       "python_comments_removed": 46,
       "python_docstrings_removed": 15,
       "tool_descriptions_retained": 0,
@@ -8221,8 +8221,8 @@
     {
       "path": "tools/serverd.py",
       "source_sha256": "7b7dfc2976658a895b9a9df19cc5a0a8f60828d0b58e922c40d941dfa0cbe266",
-      "export_sha256": "331b59517db19b767392c0ad8dc034e82cf5c333055c6534b962d42a4d34ef22",
-      "bytes": 69147,
+      "export_sha256": "705ca1627458e68aa100e81e9d82e9f849b3eb9e411eadf77d65af3c1a082b1a",
+      "bytes": 69302,
       "python_comments_removed": 21,
       "python_docstrings_removed": 4,
       "tool_descriptions_retained": 0,
