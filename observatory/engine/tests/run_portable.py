@@ -640,9 +640,9 @@ runpy.run_path(sys.argv[0],run_name='__main__')
 #: tools/check_paths.py over the tree since 0.20.0, took 14 s alone and passed 120 s at a load
 #: average near 150).
 #: maintenance timed out at 486 s on windows-latest with 90 of its cases done once Windows snapshots
-#: worked (run 44470507467; OBS-653), so it has 1200 s.
+#: worked (run 44470507467; OBS-653) and 910 s for all its cases on the next run (44510220173), so it has 1500 s.
 #: A larger --timeout still wins; a smaller one never cuts these short.
-SUITE_SECONDS = {'ssh_keys': 300, 'credential_doors': 600, 'maintenance': 1200, 'tick_py': 300, 'conformance_receipt': 360, 'dashboard_render': 600,
+SUITE_SECONDS = {'ssh_keys': 300, 'credential_doors': 600, 'maintenance': 1500, 'tick_py': 300, 'conformance_receipt': 360, 'dashboard_render': 600,
                  'workspace': 300, 'interop': 300, 'indexer_load': 300, 'api_listings': 300,
                  # 52-104 s alone (2026-10-06); 196.7 s and 204.0 s on windows-latest (runs 44450501545,
                  # 44462551221), then a timeout at 302.4 s with 79 of its cases done on a slower runner
@@ -653,8 +653,9 @@ SUITE_SECONDS = {'ssh_keys': 300, 'credential_doors': 600, 'maintenance': 1200, 
                  'ask_why': 600,
                  # 36 cases with real git checkouts, restores and three killed subprocesses:
                  # 71 s idle (2026-10-19), so twice the default leaves room for a loaded runner; on windows-latest
-                 # it timed out at 305 s with 113 of its cases done (run 44470507467, after OBS-644 made Windows snapshots work; OBS-653).
-                 'machine_backup': 600,
+                 # it timed out at 305 s with 113 of its cases done (run 44470507467, after OBS-644 made Windows snapshots work; OBS-653),
+                 # then took 494 s there (run 44510220173).
+                 'machine_backup': 900,
                  # 127 cases with real key generation: 34 s alone on windows-latest, 119 s and once past 120 s
                  # under the job's --jobs 4 there (runs 40573876802, 40579710612; OBS-277).
                  'node_org': 300,
@@ -673,8 +674,9 @@ SUITE_SECONDS = {'ssh_keys': 300, 'credential_doors': 600, 'maintenance': 1200, 
                  'org_selection': 600,
                  # 229 cases over the guard with real trees and git: 107 s alone on a Mac at a load average
                  # near 40 and past 120 s beside other suites there (2026-11-11); on windows-latest it timed out at
-                 # 306 s with 166 of its cases done (run 44470507467, after OBS-644 made Windows snapshots work; OBS-653).
-                 'disk_guard': 600,
+                 # 306 s with 166 of its cases done (run 44470507467, after OBS-644 made Windows snapshots work; OBS-653),
+                 # then took 594 s of 600 there for all 272 (run 44510220173).
+                 'disk_guard': 900,
                  # 150 cases with real snapshots, restores and encryption: 99.85 s alone on a Mac, past
                  # 120 s under load in the 2026-11-11 scenario sweep; on windows-latest it timed out at 305 s with
                  # 122 of its cases done (run 44470507467, after OBS-644 made Windows snapshots work; OBS-653).
