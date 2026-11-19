@@ -101,6 +101,12 @@ REASONS_WITHOUT_TOKEN = ("limit", "crash", "restart")
 #: session thinking for a long time without touching anything can read as
 #: stalled — the view says which signal it saw last, not that the agent died.
 STALL_SECONDS = 1800
+#: An open workflow nobody continues (task 32dcd2e6): a run Fabric dispatched is abandoned a day after its window
+#: closed with nothing written since; any other workflow after two silent weeks. A live handoff offer keeps it open.
+ABANDONED_AFTER_RUN = timedelta(hours=24)
+ABANDONED_AFTER_SILENCE = timedelta(days=14)
+#: Who closes an abandoned workflow: the store's own retention, never the operator's name.
+SWEEPER = "service:observatory-retention"
 #: One offer per workflow per this many seconds without the token, so a loop of
 #: superseding offers cannot fill the store with packs.
 OFFER_INTERVAL_SECONDS = 60
@@ -1488,6 +1494,88 @@ def retention_candidates(conn: sqlite3.Connection, *, closed_checkpoint_days: in
     return out
 
 
+def _close(conn: sqlite3.Connection, workflow_id: str, *, owner: str, said: str, reason: str,
+           now: datetime) -> dict:
+    """Close an open workflow without its lease: a final checkpoint revision by `owner` saying why, the workflow
+    closed, every lease and pending offer ended. Inside the caller's transaction."""
+    prior = _latest_checkpoint(conn, workflow_id)
+    revision = None
+    if prior is not None:
+        mid = _checkpoint_id(workflow_id)
+        revision = prior["revision"] + 1
+        L.insert_revision(conn, dict(
+            memory_id=mid, revision=revision, kind="checkpoint",
+            project_id=prior["project_id"], agent_id=prior["agent_id"], run_id=None,
+            session_id=None, function="working", scope="run",
+            statement=f"{prior['statement']} — {said}: {reason}"[:L.MAX_TEXT],
+            why=reason, state="observed", confidence=None, owner=owner,
+            classification=prior["classification"], valid_from=None, valid_to=None,
+            supersedes=[f"{mid}@{prior['revision']}"], conflicts_with=[],
+            provenance=[{"source": "checkpoint", "status": _status_of(prior), "closedBy": owner}],
+            evidence=[], created_at=_iso(now), workflow_id=workflow_id,
+            step_id=prior["step_id"],
+            executor=json.loads(prior["executor_json"]) if prior["executor_json"] else None,
+            body=json.loads(prior["body_json"] or "{}")))
+    conn.execute("UPDATE workflows SET status = 'closed', closed_at = ?, closed_by = ?"
+                 " WHERE workflow_id = ?", (_iso(now), owner, workflow_id))
+    ended = conn.execute("UPDATE workflow_leases SET state = 'ended', ended_at = ?,"
+                         " ended_reason = 'closed' WHERE workflow_id = ? AND state IN"
+                         " ('active','offered')", (_iso(now), workflow_id)).rowcount
+    return {"workflowId": workflow_id, "closed": True, "closedAt": _iso(now),
+            "checkpointRevision": revision, "leasesEnded": ended}
+
+
+def _abandoned_why(conn: sqlite3.Connection, w: sqlite3.Row, now: datetime) -> str | None:
+    """Why the open workflow `w` is abandoned at `now`, or None while it may still be continued."""
+    import dispatch_packet
+    wid = w["workflow_id"]
+    offer = _offer(conn, wid)
+    if offer is not None and _parse(offer["expires_at"]) > now:
+        return None                                         # someone may still take it
+    seen = max(x for x in (w["created_at"], conn.execute(
+        "SELECT max(created_at) FROM ledger WHERE workflow_id = ? AND kind IN ('checkpoint','session')",
+        (wid,)).fetchone()[0]) if x)
+    quiet = now - _parse(seen)
+    packet = dispatch_packet.packet_of(conn, wid) or {}
+    ends = packet.get("runEndsAt")
+    if ends:
+        try:
+            ended = datetime.fromisoformat(str(ends).replace("Z", "+00:00"))
+        except ValueError:
+            ended = None
+        if ended is not None and now - ended > ABANDONED_AFTER_RUN and quiet > ABANDONED_AFTER_RUN:
+            return (f"abandoned: its dispatched run ended at {ends} and nothing was written for "
+                    f"{int(quiet.total_seconds() // 3600)} h")
+    if quiet > ABANDONED_AFTER_SILENCE:
+        return f"abandoned: nothing was written for {quiet.days} days"
+    return None
+
+
+def close_abandoned(conn: sqlite3.Connection, *, now: datetime | None = None) -> list[dict]:
+    """Close every open workflow nobody will continue (task 32dcd2e6): a session that ended without its final
+    checkpoint left the workflow open and its lease active for ever, and an open workflow's checkpoint is kept
+    whatever its age. Closed by `SWEEPER`, with a final checkpoint saying why; retention then ages it out like any
+    closed one. Commits its own transaction."""
+    now = (now or _now()).astimezone(timezone.utc).replace(microsecond=0)
+    out = []
+    with conn:
+        for found in abandoned_workflows(conn, now=now):
+            out.append({**_close(conn, found["workflowId"], owner=SWEEPER, said="closed by retention",
+                                 reason=found["why"], now=now), "why": found["why"]})
+    return out
+
+
+def abandoned_workflows(conn: sqlite3.Connection, *, now: datetime | None = None) -> list[dict]:
+    """The open workflows `close_abandoned` would close at `now`, each with why. Reads only: `retention plan`."""
+    now = (now or _now()).astimezone(timezone.utc).replace(microsecond=0)
+    found = []
+    for w in conn.execute("SELECT * FROM workflows WHERE status = 'open' ORDER BY created_at").fetchall():
+        why = _abandoned_why(conn, w, now)
+        if why:
+            found.append({"workflowId": w["workflow_id"], "projectId": w["project_id"], "why": why})
+    return found
+
+
 def close_workflow(conn: sqlite3.Connection, *, workflow_id: str, by: str, why: str,
                    idempotency_key: str) -> dict:
     """The operator closes a workflow nobody will continue, without its lease.
@@ -1507,36 +1595,11 @@ def close_workflow(conn: sqlite3.Connection, *, workflow_id: str, by: str, why: 
                            "not a value")
 
     def work() -> dict:
-        now = _now()
         wf = _workflow(conn, workflow_id)
         if wf["status"] != "open":
             raise WorkflowClosed(f"{workflow_id} was already closed at {wf['closed_at']}")
-        prior = _latest_checkpoint(conn, workflow_id)
-        revision = None
-        if prior is not None:
-            mid = _checkpoint_id(workflow_id)
-            revision = prior["revision"] + 1
-            L.insert_revision(conn, dict(
-                memory_id=mid, revision=revision, kind="checkpoint",
-                project_id=prior["project_id"], agent_id=prior["agent_id"], run_id=None,
-                session_id=None, function="working", scope="run",
-                statement=f"{prior['statement']} — closed by the operator: {reason}"[:L.MAX_TEXT],
-                why=reason, state="observed", confidence=None, owner=L.OPERATOR,
-                classification=prior["classification"], valid_from=None, valid_to=None,
-                supersedes=[f"{mid}@{prior['revision']}"], conflicts_with=[],
-                provenance=[{"source": "checkpoint", "status": _status_of(prior),
-                             "closedBy": L.OPERATOR}],
-                evidence=[], created_at=_iso(now), workflow_id=workflow_id,
-                step_id=prior["step_id"],
-                executor=json.loads(prior["executor_json"]) if prior["executor_json"] else None,
-                body=json.loads(prior["body_json"] or "{}")))
-        conn.execute("UPDATE workflows SET status = 'closed', closed_at = ?, closed_by = ?"
-                     " WHERE workflow_id = ?", (_iso(now), L.OPERATOR, workflow_id))
-        ended = conn.execute("UPDATE workflow_leases SET state = 'ended', ended_at = ?,"
-                             " ended_reason = 'closed' WHERE workflow_id = ? AND state IN"
-                             " ('active','offered')", (_iso(now), workflow_id)).rowcount
-        return {"workflowId": workflow_id, "closed": True, "closedAt": _iso(now),
-                "checkpointRevision": revision, "leasesEnded": ended}
+        return _close(conn, workflow_id, owner=L.OPERATOR, said="closed by the operator", reason=reason,
+                      now=_now())
 
     return _atomic(conn, by, "workflow.close", idempotency_key,
                    {"workflowId": workflow_id, "why": reason}, work)
