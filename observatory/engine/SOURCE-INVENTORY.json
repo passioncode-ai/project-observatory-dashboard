@@ -1052,8 +1052,8 @@
     {
       "path": "docs/ONBOARDING.md",
       "source_sha256": "4460194f12893e0e451109259d156627aae5bc71e812b0fce2a84e8f69fb3c2c",
-      "export_sha256": "c7121cfe90767add45247defa6f0042f410364084dffdc570fbcb60f4b114456",
-      "bytes": 336853,
+      "export_sha256": "57f87d216e4df4d6721b6f38057d720b4ce978dd1c0ba0827f44b94b14c4065e",
+      "bytes": 336871,
       "upstream_modified": true
     },
     {
@@ -5155,8 +5155,8 @@
     {
       "path": "tests/test_credential_doors.py",
       "source_sha256": "f008811e75e70131f87e329de7768c58b166901a4900dcfa483f4bc570c29afc",
-      "export_sha256": "9a328f574696274f9d41ed9c047c90d49b2926e8f8b76b6d03ad5d321f6a81fe",
-      "bytes": 229614,
+      "export_sha256": "9a660855d1e036ff8beb80f8437001436c5eab2df98cae8b96b4cc46c03e96b0",
+      "bytes": 229827,
       "python_comments_removed": 14,
       "python_docstrings_removed": 9,
       "tool_descriptions_retained": 0,
@@ -7578,8 +7578,8 @@
     {
       "path": "tools/cloudflare.py",
       "source_sha256": "554f7d6d0d677c887404479e33a84d40e76f022ecd49ce15e85cf409d5e6738f",
-      "export_sha256": "b128180b17497c0c4824df066c1b475aac11dc38b19de1109c0a361724fea1fa",
-      "bytes": 145984,
+      "export_sha256": "eb60dd4b04e08c9b91bcec47a4f29b7fb6918dcf858396a37a716bdd4f4f464f",
+      "bytes": 146947,
       "python_comments_removed": 37,
       "python_docstrings_removed": 16,
       "tool_descriptions_retained": 0,
@@ -7650,8 +7650,8 @@
       "path": "tools/credential_requests.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0cee4b44ad19b8b8c0b141cfb5ebbb5d09a31c821656511b3649c549e3d283cd",
-      "bytes": 79217
+      "export_sha256": "f0a60315a899fcdf562d42aaf98b2060f015b29bf3935e784c7352336574b77b",
+      "bytes": 79235
     },
     {
       "path": "tools/daily_doctor.py",

@@ -14,6 +14,7 @@
     python "$T/cloudflare.py" lifecycle --account <slug> --bucket NAME [--jurisdiction eu] \
         [--expire-days 92] [--lifecycle-rule staging/:2 ...]   # rules only, no key
     python "$T/cloudflare.py" issue --preset email-send --account <slug> --vault PROJECT/ENV/NAME
+    python "$T/cloudflare.py" issue --preset turnstile-edit --account <slug> --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset email-routing --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset email-sending-domain --zone example.com --vault PROJECT/ENV/NAME
     python "$T/cloudflare.py" issue --preset redirect-rules --zone example.com --vault PROJECT/ENV/NAME
@@ -223,6 +224,18 @@ PRESETS: dict[str, dict] = {
         "why": "writes the D1 databases of one account for the project named by the vault slot",
         "scope": "account-vault",
         "probe": "/accounts/{account_id}/d1/database?per_page=1",
+    },
+    # TURNSTILE WIDGETS, ONE ACCOUNT, INTO THE VAULT. A site that protects a form with Cloudflare Turnstile needs to
+    # create and rotate its widget (`/accounts/{id}/challenges/widgets`) and nothing else: Cloudflare offers the group
+    # at the account level only, so the account is the narrowest grant. Named after its slot so each project's token
+    # rolls on its own; verified by listing the account's widgets with the NEW value (Fabric board request 5b417e70).
+    "turnstile-edit": {
+        "name": "observatory-turnstile-edit {slot} (managed)",
+        "groups": ("Turnstile Sites Write",),
+        "level": "account",
+        "why": "creates and rotates the Turnstile widgets of one account for the project named by the vault slot",
+        "scope": "account-vault",
+        "probe": "/accounts/{account_id}/challenges/widgets?per_page=1",
     },
     # TRANSACTIONAL EMAIL, ONE ACCOUNT, INTO THE VAULT. An application that
     # sends through Cloudflare Email Service's REST API needs Email Sending on
