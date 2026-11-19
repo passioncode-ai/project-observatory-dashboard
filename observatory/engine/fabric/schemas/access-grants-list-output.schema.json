@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.46.0/observatory/engine/fabric/schemas/access-grants-list-output.schema.json",
   "title": "access.grants.list: output",
-  "description": "access-grants/1 (fabric-agent-contract DEC-0187 at commit 320c7ab9, vendored in fabric/access-grants/, whose schema this repeats with this file's own $id): the provider keys this engine's OpenRouter door issued, each with its holder by service key when that is measured, else unresolved; the provider account it opens; its ceiling and today's spend (null when unknown); when it was issued and revoked. No key value, prefix, hash or digits of one, and no person's name or address. Semantic rule FAC-SEM-185.",
+  "description": "access-grants/1 (fabric-agent-contract DEC-0187, vendored in fabric/access-grants/ at the commit its README names, whose schema this repeats with this file's own $id): the provider keys this engine's OpenRouter door issued, each with its holder by service key when that is measured, else unresolved; the provider account it opens; its ceiling and today's spend (null when unknown); when it was issued and revoked. No key value, prefix, hash or digits of one, and no person's name or address. Semantic rule FAC-SEM-185.",
   "type": "object",
   "additionalProperties": false,
   "required": [

@@ -40,7 +40,7 @@
      }
     ]
    },
-   "description": "Who holds the provider keys this engine's OpenRouter door issued (fabric-agent-contract DEC-0187, access-grants/1, commit 320c7ab9): one grant per key, and with includeRevoked per key it revoked and per key that expired. The holder is an agent by service key when measured (the key's vault folder resolves to one project and the registry attributes one service to it; a key delivered to this engine is the engine's), else unresolved with the key's ledger name; the subject is the OpenRouter account; the ceiling and its window from the ledger; today's spend from the provider's listing of the account, read in parallel within 20 s, null when unknown and named in degraded. Issue and revoke times come from the vault's movements journal. No key value, prefix, hash, person's name or address. Read-only; the doors arrive with OBS-659."
+   "description": "Who holds the provider keys this engine's OpenRouter door issued (fabric-agent-contract DEC-0187, access-grants/1, vendored in fabric/access-grants/): one grant per key, and with includeRevoked per key it revoked and per key that expired. The holder is an agent by service key when measured (the key's vault folder resolves to one project and the registry attributes one service to it; a key delivered to this engine is the engine's), else unresolved with the key's ledger name; the subject is the OpenRouter account; the ceiling and its window from the ledger; today's spend from the provider's listing of the account, read in parallel within 20 s, null when unknown and named in degraded. Issue and revoke times come from the vault's movements journal. No key value, prefix, hash, person's name or address. Read-only; the doors arrive with OBS-659."
   }
  ]
 }

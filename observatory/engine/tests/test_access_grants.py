@@ -158,6 +158,9 @@ class TheRulesPort(unittest.TestCase):
         self.assertIsNone(AG.grant_state([], now))
         self.assertIsNone(AG.grant_state({}, float("nan")))
 
+    def test_the_handler_reads_every_member_of_the_list_input(self) -> None:
+        self.assertEqual(sorted(AG.LIST_FIELDS), sorted(SCHEMA["$defs"]["listInput"]["properties"]))
+
     def test_the_schemas_inputs(self) -> None:
         self.assertEqual(schema_errors({}, "listInput"), [])
         self.assertEqual(schema_errors({"holder": "alpha-agent.cloud", "includeRevoked": True, "limit": 500},

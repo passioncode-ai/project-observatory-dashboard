@@ -348,6 +348,8 @@ BOUNDARY += ('relay_server',)
 BOUNDARY += ('ops_digest', 'ops_digest_record')
 # OBS-577: `observatory_health`, one agent-health/1 reading (contract DEC-0179) over the contract's vendored vectors.
 BOUNDARY += ('machine_health',)
+# OBS-658: `access.grants.list`, who holds the keys the OpenRouter door issued (contract DEC-0187).
+BOUNDARY += ('access_grants',)
 # OBS-331 part a: the daily learning review (lessons by class, rising failures from the digests, late arrivals, the
 # report's files) over synthetic clones, a synthetic ledger and digest store, at a fixed clock.
 BOUNDARY += ('learning_review',)
@@ -465,7 +467,7 @@ ROOT_FILES = (
     'ed25519_order.py',
     # The engine's own `node` package wherever `tools/node.py` took the name (OBS-507).
     'engine_node.py',
-    'fabric_service.py', 'dispatch_packet.py', 'machine_health.py', 'ops_digest.py', 'ops_digest_store.py', 'learning_review.py', 'service_connections.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'wiki_checkout.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'observatory-profile.lock.json', 'contract_lock.py', 'public-profile.json',
+    'fabric_service.py', 'dispatch_packet.py', 'machine_health.py', 'access_grants.py', 'ops_digest.py', 'ops_digest_store.py', 'learning_review.py', 'service_connections.py', 'mcp_inventory.py', 'interop.py', 'slow_command.py', 'step_budget.py', 'oslocks.py', 'osproc.py', 'osprivacy.py', 'holders.py', 'cleanup_lock.py', 'cleanup_safety.py', 'osschedule.py', 'safe_git.py', 'wiki_checkout.py', 'jobs.py', 'service_identity.py', 'service_health.py', 'service_events.py', 'fabric-agent.json', 'fabric-contract.lock.json', 'observatory-profile.lock.json', 'contract_lock.py', 'public-profile.json',
     # The tested dependency set: `require_runtime` and `full update` name or use it.
     'requirements-full.lock',
 )
@@ -511,6 +513,7 @@ def source_files() -> list[Path]:
     selected.add(ROOT / 'fabric/node-vectors/README.md')
     selected.add(ROOT / 'fabric/delegation-vectors/README.md')
     selected.add(ROOT / 'fabric/agent-health/README.md')      # OBS-577: its digests and the commit it was copied at
+    selected.add(ROOT / 'fabric/access-grants/README.md')     # OBS-658: its digest and the commit it was copied at
     selected.add(ROOT / 'fabric/ops-digest/README.md')        # its digests, and the release tag it was copied at
     selected.add(ROOT / 'fabric/memory-provider.json')
     selected.add(ROOT / 'fabric/unreleased-capabilities.json')   # OBS-330: served before its release declares it
@@ -540,6 +543,7 @@ def source_files() -> list[Path]:
     selected |= set((ROOT / 'fabric/node-vectors/actions').rglob('*.json'))    # OBS-291: actionDecision's vectors
     selected |= set((ROOT / 'fabric/node-vectors/activity').rglob('*.json'))   # OBS-76 OE-01a: telemetry-event's schema
     selected |= set((ROOT / 'fabric/agent-health').rglob('*.json'))            # OBS-577: DEC-0179's schema and vectors
+    selected |= set((ROOT / 'fabric/access-grants').rglob('*.json'))           # OBS-658: DEC-0187's schema
     selected |= set((ROOT / 'fabric/ops-digest').rglob('*.json'))              # OBS-330: DEC-0153's schemas and vectors
     selected |= set((ROOT / 'cloud').glob('*.mjs'))                            # OBS-263: the mailbox Worker
     out = []

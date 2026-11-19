@@ -62,6 +62,10 @@ def tool_parameters() -> dict[str, list[str]]:
     # `ops_digest_store.REQUEST_FIELDS`, and the input schema refuses any other.
     import ops_digest_store
     out["ops.digest.record"] = sorted(ops_digest_store.REQUEST_FIELDS)
+    # `access.grants.list` (OBS-658) is a capability handler too: `access_grants.LIST_FIELDS` are the members of the
+    # contract's listInput it reads.
+    import access_grants
+    out["access.grants.list"] = sorted(access_grants.LIST_FIELDS)
     return out
 
 

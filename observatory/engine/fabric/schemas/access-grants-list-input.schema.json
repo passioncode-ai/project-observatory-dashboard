@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.46.0/observatory/engine/fabric/schemas/access-grants-list-input.schema.json",
   "title": "access.grants.list: input",
-  "description": "The input of access.grants.list: fabric-agent-contract DEC-0187 $defs/listInput at commit 320c7ab9 (fabric/access-grants/). Every member optional; absent filters answer every grant this engine issued that admits now.",
+  "description": "The input of access.grants.list: fabric-agent-contract DEC-0187 $defs/listInput as vendored in fabric/access-grants/. Every member optional; absent filters answer every grant this engine issued that admits now.",
   "type": "object",
   "additionalProperties": false,
   "properties": {

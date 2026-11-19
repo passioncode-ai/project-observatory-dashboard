@@ -3,7 +3,7 @@
 Fabric Dashboards joins the answers of every product that issues access (Fabric's agent access, an account manager's
 seats, a media or text service's client keys, this vault's provider keys) by agent: an agent's Access tab and one Access
 page. This module is Observatory's half: the capability `access.grants.list` answers an `access-grants/1` document
-(fabric-agent-contract DEC-0187 at commit 320c7ab9, vendored in `fabric/access-grants/`) listing the OpenRouter keys the
+(fabric-agent-contract DEC-0187, vendored in `fabric/access-grants/` at the commit its README names) listing the OpenRouter keys the
 OpenRouter door issued (`tools/openrouter.py`, its ledger `openrouter-issued.json`).
 
 One grant per key the ledger records, and one per tombstone of a key it revoked:
@@ -64,6 +64,8 @@ LISTING_TTL = 120.0
 #: How long an answer waits for the providers' listings, read in parallel. An account not read by then reads as
 #: unknown spend, named in `degraded`: a host's call never waits on a slow provider.
 SPEND_BUDGET = 20.0
+#: The members of `$defs/listInput` this answer reads; the input schema refuses any other.
+LIST_FIELDS = ("holder", "subject", "includeRevoked", "cursor", "limit")
 PAGE_MAX = 500
 DEGRADED_MAX = 16
 OPAQUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -91,7 +93,7 @@ def parse_time(value: Any) -> dt.datetime | None:
     return when if when.tzinfo else when.replace(tzinfo=dt.timezone.utc)
 
 
-# ── FAC-SEM-185 and grantState, ported from the contract's src/access-grants-rules.ts at 320c7ab9 ────────────────
+# ── FAC-SEM-185 and grantState, ported from the contract's src/access-grants-rules.ts at the vendored commit ────────────────
 
 def _strict(value: Any) -> float:
     """`strictTime`: epoch seconds of an RFC 3339 date-time, NaN otherwise."""
