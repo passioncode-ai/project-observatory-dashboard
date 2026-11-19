@@ -1471,3 +1471,17 @@ code's path constants, so a path built another way is not seen (OBS-182).
   Each running row carries `active` (true, false, or null when the ledger was not read), and a project's
   `counts.working` counts active rows. The account manager's `quiet` and `state` stay in the data and no surface reads
   them as "working".
+
+## Capability: who holds the provider keys this engine issued (OBS-658, 0.46.0)
+
+Additive. One new capability, `access.grants.list` (effect `none`, idempotency `supported`), served as the MCP tool of
+that name with schemas published at `v0.46.0`; until that release declares it in the manifest, a build of `main`
+serves it from `observatory/engine/fabric/unreleased-capabilities.json`. No existing tool name, argument or answer field
+changes, and `contractVersion` stays `0.1.0`. Its input is fabric-agent-contract DEC-0187 `$defs/listInput`
+(`holder`, `subject`, `includeRevoked`, `cursor`, `limit`, each optional) and its answer an `access-grants/1`
+document: the OpenRouter door's keys, each with its holder by service key when measured (else `unresolved` with the
+key's name), the provider account, the ceiling and its window, today's spend (`null` when unknown) and its issue and
+revocation. The contract's schema is vendored in `observatory/engine/fabric/access-grants/`, which the engine's
+contract pin predates (`contract_lock` lists the folder). The door's tombstones (`openrouter-issued.json`, `retired`)
+gain `issued_on`, `destination`, `limit_usd` and `limit_reset` for keys retired from this release on; readers that
+ignore unknown members are unaffected.

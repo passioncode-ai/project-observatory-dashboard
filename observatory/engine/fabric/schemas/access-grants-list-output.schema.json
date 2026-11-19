@@ -1,0 +1,387 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/passioncode-ai/project-observatory-dashboard/v0.46.0/observatory/engine/fabric/schemas/access-grants-list-output.schema.json",
+  "title": "access.grants.list: output",
+  "description": "access-grants/1 (fabric-agent-contract DEC-0187, vendored in fabric/access-grants/ at the commit its README names, whose schema this repeats with this file's own $id): the provider keys this engine's OpenRouter door issued, each with its holder by service key when that is measured, else unresolved; the provider account it opens; its ceiling and today's spend (null when unknown); when it was issued and revoked. No key value, prefix, hash or digits of one, and no person's name or address. Semantic rule FAC-SEM-185.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "protocol",
+    "issuer",
+    "generatedAt",
+    "grants"
+  ],
+  "properties": {
+    "protocol": {
+      "const": "access-grants/1"
+    },
+    "issuer": {
+      "$ref": "#/$defs/serviceKey",
+      "description": "The service answering: the product that issued every grant listed (AG-1)."
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "doors": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The operations behind the issuing product's agent surface that issue and revoke a grant, each also declared as a dashboard action with gate relayed (AG-6). Absent: the product offers neither door to agents.",
+      "properties": {
+        "issue": {
+          "$ref": "#/$defs/operation",
+          "description": "The product's own issue operation; its input is the product's own, read from its search (DEC-0180 CM-3). Its answer never carries a key value."
+        },
+        "revoke": {
+          "$ref": "#/$defs/operation",
+          "description": "An operation taking $defs/revokeInput and answering $defs/revokeResult."
+        }
+      }
+    },
+    "grants": {
+      "type": "array",
+      "maxItems": 500,
+      "items": {
+        "$ref": "#/$defs/grant"
+      }
+    },
+    "nextCursor": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 256,
+      "description": "Present when more grants match the input: pass it as listInput.cursor."
+    },
+    "degraded": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 200
+      },
+      "description": "What the product could not read for this answer (a store, the spend counter). Absent or empty: the answer is whole."
+    }
+  },
+  "$defs": {
+    "serviceKey": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{1,62}\\.[a-z][a-z0-9-]{0,31}$",
+      "description": "A service key <id>.<instance> (service.md, Descriptor), the name Fabric Dashboards and the estate know an agent by."
+    },
+    "opaqueRef": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+      "description": "An opaque reference the product keeps (a member id, a machine id, a grant or audit record): never a name, an email address, a session id or a secret (DL-22). It admits no @ and no space."
+    },
+    "operation": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$",
+      "maxLength": 128
+    },
+    "grant": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "holder",
+        "scopes",
+        "issued"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/opaqueRef",
+          "description": "Stable across answers and unique in one (FAC-SEM-185); the revoke door names it."
+        },
+        "holder": {
+          "$ref": "#/$defs/holder"
+        },
+        "subject": {
+          "$ref": "#/$defs/subject",
+          "description": "What the grant opens. Absent: the issuing service itself (AG-3)."
+        },
+        "scopes": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^[A-Za-z0-9*][A-Za-z0-9._:*/+-]{0,127}$"
+          },
+          "description": "The product's own scope names, as it enforces them; empty when the grant has no scopes of its own (the whole subject)."
+        },
+        "limitUsd": {
+          "oneOf": [
+            {
+              "type": "number",
+              "exclusiveMinimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The grant's own ceiling in USD; null: no ceiling. Absent: the product does not meter money on this grant (AG-4)."
+        },
+        "limitPeriod": {
+          "enum": [
+            "day",
+            "week",
+            "month",
+            "total"
+          ],
+          "description": "The window of limitUsd: the current UTC day, ISO week or month (DEC-0183 SL-1), or the grant's whole life. Present exactly when limitUsd is a number (FAC-SEM-185)."
+        },
+        "spentDayUsd": {
+          "oneOf": [
+            {
+              "type": "number",
+              "minimum": 0
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Spent on this grant in the UTC day of generatedAt; null: unknown, never 0 for unknown. Absent: not metered."
+        },
+        "issued": {
+          "$ref": "#/$defs/act"
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the grant stops admitting; after issued.at (FAC-SEM-185)."
+        },
+        "revoked": {
+          "$ref": "#/$defs/revocation",
+          "description": "Present once the grant was revoked; a revoked grant is never admitted again (a new grant is a new id)."
+        }
+      }
+    },
+    "holder": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "agent"
+          ],
+          "properties": {
+            "kind": {
+              "const": "agent"
+            },
+            "agent": {
+              "$ref": "#/$defs/serviceKey"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "ref"
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "person",
+                "machine"
+              ]
+            },
+            "ref": {
+              "$ref": "#/$defs/opaqueRef"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "label"
+          ],
+          "properties": {
+            "kind": {
+              "const": "unresolved"
+            },
+            "label": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120,
+              "description": "The product's own earlier label, shown as written until the product maps it to a holder (AG-2); a host never guesses an agent from it."
+            }
+          }
+        }
+      ]
+    },
+    "subject": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "agent"
+          ],
+          "properties": {
+            "kind": {
+              "const": "agent"
+            },
+            "agent": {
+              "$ref": "#/$defs/serviceKey"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "provider",
+            "ref"
+          ],
+          "properties": {
+            "kind": {
+              "const": "account"
+            },
+            "provider": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9-]{0,63}$",
+              "description": "The provider whose account the grant opens (openrouter, anthropic, cloudflare)."
+            },
+            "ref": {
+              "$ref": "#/$defs/opaqueRef"
+            }
+          }
+        }
+      ]
+    },
+    "actCore": {
+      "type": "object",
+      "required": [
+        "at",
+        "by",
+        "via"
+      ],
+      "properties": {
+        "at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "by": {
+          "enum": [
+            "operator",
+            "person",
+            "agent",
+            "service"
+          ],
+          "description": "Whose decision: the operator (at the dashboard, or relayed by an agent with a decision, AP-2), another person of the context (an organization's administrator), an agent on its own account, or the service itself (a default, its configuration, an exposure it found)."
+        },
+        "via": {
+          "enum": [
+            "dashboard",
+            "agent",
+            "config",
+            "automatic"
+          ],
+          "description": "The door: a person at the dashboard, an agent's call, the configuration, or the service's own check."
+        },
+        "agent": {
+          "$ref": "#/$defs/serviceKey",
+          "description": "The agent that made the call, present exactly when via is agent (FAC-SEM-185)."
+        },
+        "ref": {
+          "$ref": "#/$defs/opaqueRef",
+          "description": "An opaque reference to the decision or the audit record; for by person, the person's opaque reference."
+        }
+      }
+    },
+    "act": {
+      "$ref": "#/$defs/actCore",
+      "type": "object",
+      "unevaluatedProperties": false
+    },
+    "revocation": {
+      "$ref": "#/$defs/actCore",
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      },
+      "unevaluatedProperties": false
+    },
+    "listInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The input of access.grants.list: every member optional; absent filters answer every grant the caller may read.",
+      "properties": {
+        "holder": {
+          "$ref": "#/$defs/serviceKey",
+          "description": "Only grants this agent holds."
+        },
+        "subject": {
+          "$ref": "#/$defs/serviceKey",
+          "description": "Only grants that open this agent (a grant without subject opens the issuer)."
+        },
+        "includeRevoked": {
+          "type": "boolean",
+          "description": "true: revoked and expired grants too. Absent or false: only those that admit now."
+        },
+        "cursor": {
+          "type": "string",
+          "minLength": 8,
+          "maxLength": 256
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        }
+      }
+    },
+    "revokeInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grantId",
+        "reason",
+        "idempotencyKey"
+      ],
+      "properties": {
+        "grantId": {
+          "$ref": "#/$defs/opaqueRef"
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500,
+          "description": "Recorded as revoked.reason."
+        },
+        "idempotencyKey": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "revokeResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grant"
+      ],
+      "properties": {
+        "grant": {
+          "$ref": "#/$defs/grant"
+        },
+        "repeated": {
+          "type": "boolean",
+          "description": "true when the idempotency key answered an earlier call, or the grant was already revoked (its first revocation is answered)."
+        }
+      }
+    }
+  }
+}

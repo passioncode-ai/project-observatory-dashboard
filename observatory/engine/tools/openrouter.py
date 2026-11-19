@@ -441,6 +441,11 @@ def _retire(doc: dict, name: str, rec: dict, key_hash: str | None, reason: str,
     retired[:] = [r for r in retired if keep(r)]
     stone = {"name": name, "account": rec.get("account"), "hash": key_hash, "project": rec.get("project"),
              "retired_on": now.isoformat(), "reason": reason, "deleted": deleted}
+    # What the access list needs to name the revoked grant as the live one was named (OBS-658): its day (the grant's
+    # id), its destination (its holder) and its ceiling. Names and numbers only, never a value.
+    for field in ("issued_on", "destination", "limit_usd", "limit_reset"):
+        if rec.get(field) is not None:
+            stone[field] = rec[field]
     stone.update(snapshot or {"usage": "unread", "usage_error": "no snapshot (no hash to read by)"})
     horizon = untracked_through(rec) if row_state else None
     if horizon:

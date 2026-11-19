@@ -690,6 +690,30 @@ async def assess_ops_digest_record(session, args: dict, out_schema: dict,
 
 #: probe id -> the assessor of a write capability's probe; any other probe of a write capability is
 #: `project.record`'s (`assess_record`).
+def assess_access_grants_list(data: dict, OUT_SCHEMA: dict) -> list[dict]:
+    """`access.grants.list` (OBS-658, DEC-0187): the synthetic workspace holds no door ledger, so the answer is an
+    `access-grants/1` document from this engine with whatever it lists passing FAC-SEM-185."""
+    import access_grants
+    a: list[dict] = []
+
+    def say(text: str, ok: bool, note: str = "") -> None:
+        a.append({"assertion": text, "verdict": "PASS" if ok else "FAIL", "note": note})
+
+    clean = {k: v for k, v in data.items() if not k.startswith("_")}
+    try:
+        jsonschema.validate(clean, OUT_SCHEMA)
+        schema_ok, schema_note = True, ""
+    except jsonschema.ValidationError as exc:
+        schema_ok, schema_note = False, str(exc).splitlines()[0][:180]
+    say("result validates against access-grants-list-output.schema.json", schema_ok, schema_note)
+    say("protocol is access-grants/1 and issuer is this engine's service key",
+        clean.get("protocol") == "access-grants/1" and str(clean.get("issuer", "")).startswith("project-observatory."),
+        f"{clean.get('protocol')} {clean.get('issuer')}")
+    found = access_grants.rules(clean)
+    say("FAC-SEM-185 finds nothing in the answer", not found, "; ".join(f["instancePath"] for f in found)[:180])
+    return a
+
+
 WRITE_ASSESSORS = {"ops-digest-record-needs-a-binding": assess_ops_digest_record}
 
 
@@ -699,6 +723,7 @@ READ_ASSESSORS = {
     "timeline-answers-in-camel-case-with-parsed-payloads": assess_timeline,
     "mcp-inventory-names-and-degrades": assess_mcp_inventory,
     "resolve-names-one-id-or-refuses": assess_resolve,
+    "access-grants-list-synthetic-workspace": assess_access_grants_list,
 }
 
 
