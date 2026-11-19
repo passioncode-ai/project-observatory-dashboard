@@ -734,12 +734,49 @@ def act_doctor(body: dict) -> dict:
     return {"undone": out.get("undone") or [], "refused": out.get("refused") or [], "degraded": out.get("degraded") or []}
 
 
+def _open_terminal(folder: str) -> None:
+    """Terminal in `folder` on this machine: macOS's Terminal through `open`, an argument list with no shell.
+    Elsewhere there is no terminal this server knows how to open, and it says so."""
+    import subprocess
+    if sys.platform != "darwin":
+        raise ValueError("terminal-unsupported")       # a terminal this server opens on macOS only
+    subprocess.run(["open", "-a", "Terminal", folder], check=True, timeout=10,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+#: Opens the terminal; a test replaces it.
+TERMINAL_OPENER = _open_terminal
+
+
+def act_session_terminal(body: dict) -> dict:
+    """A session's Open terminal (fabric-session-links/1, the Agents page and a project's panel): a terminal in the
+    folder a RUNNING coding session works in, found by its runner session id in the runner's own session file on
+    this machine (session_links.folder_of). The folder is never sent to the page or the journal; an unknown or
+    ended session opens nothing. Starting, opening or moving the session itself is Fabric's, through its links.
+    Audited with the session id before it acts."""
+    import session_links
+    sid = body.get("sessionId")
+    if not isinstance(sid, str) or not session_links.SESSION_ID.fullmatch(sid):
+        raise ValueError("invalid-session-id")
+    folder = session_links.folder_of(sid)
+    if folder is None:
+        raise LookupError("session-not-running")       # no live process holds this session on this machine
+    audit("session-terminal", sid, {})
+    try:
+        TERMINAL_OPENER(folder)
+    except ValueError:
+        raise
+    except Exception as exc:  # noqa: BLE001: a refusal the page can show, never the folder
+        raise RuntimeError(f"the terminal did not open: {type(exc).__name__}") from None
+    return {"opened": True, "sessionId": sid}
+
+
 ACTIONS = {"mint": act_mint, "limit": act_limit, "revoke": act_revoke,
            "leak": act_leak, "reveal": act_reveal, "annotate": act_annotate,
            "disable": act_disable, "enable": act_enable, "rotate-key": act_rotate_key,
            "configure": act_configure, "workflow-handoff": act_workflow_handoff,
            "issues-banner": act_issues_banner, "mcp-accept": act_mcp_accept,
-           "assistant": act_assistant, "doctor": act_doctor}
+           "assistant": act_assistant, "doctor": act_doctor, "session-terminal": act_session_terminal}
 
 #: Refused on purpose, with the reason the caller needs rather than a 404.
 REFUSED = {

@@ -157,6 +157,28 @@ def _session_rows(doc: dict, ledger: list[dict] | None) -> list[dict]:
     return [r for r in sessions_view.session_rows(doc, ledger) if r.get("agent")]
 
 
+#: The agent's way to the same acts the session row's controls offer (named when the page cannot act).
+TERMINAL_TOOL = "observatory_sessions"
+TERMINAL_DISABLED = "Opened as a file, this page cannot open a terminal. The session's links work in Fabric."
+
+
+def session_acts(r: dict, t: Translator) -> str:
+    """A running session's acts (fabric-session-links/1): open it and move it into Fabric are `fabric://` links,
+    Fabric asks before it acts; the terminal is the key server's `session-terminal`, built disabled like every
+    page control. A session whose runner id is not known offers none of them: never a guessed id."""
+    sid = r.get("session_id")
+    links = r.get("links") if isinstance(r.get("links"), dict) else None
+    if not sid or not links:
+        return t.mark("no session id", tag="span", attrs=' class="none"')
+    tip = t.attr("title", TERMINAL_DISABLED)
+    return (f'<span class="agents-act session-acts">'
+            f'<a href="{_e(links["open"])}">{t.mark("Open session")}</a> '
+            f'<button type="button" class="chip-btn" data-session-terminal="{_e(sid)}" disabled{tip}>'
+            f'{t.mark("Open terminal")}</button> '
+            f'<a href="{_e(links["continue"])}">{t.mark("Open in Fabric")}</a></span>'
+            f'<span class="machine-hint" data-session-said="{_e(sid)}" role="status" aria-live="polite"></span>')
+
+
 def _machine_sessions(sessions: dict | None, t: Translator, names: dict | None = None,
                       ledger: list[dict] | None = None) -> str:
     """Every coding session running here (sessions_view, CP-02): the three counts with their sources, then the
@@ -180,7 +202,7 @@ def _machine_sessions(sessions: dict | None, t: Translator, names: dict | None =
             if why:
                 parts.append(f'<p class="machine-hint">{t.known(why[0].get("reason"))}</p>')
         return "".join(parts) + "</section>"
-    heads = ("Project", "Folder", "Managed", "Account group", "Last turn", "State")
+    heads = ("Project", "Folder", "Managed", "Account group", "Last turn", "State", "Session")
     th = "".join(f'<th scope="col">{t.mark(h)}</th>' for h in heads)
     by_agent: dict[str, list[dict]] = {}
     for r in rows:
@@ -200,12 +222,14 @@ def _machine_sessions(sessions: dict | None, t: Translator, names: dict | None =
                      _yes(t, r.get("managed") is True),
                      f'<span class="mono">{_e(r.get("account_group"))}</span>' if r.get("account_group") else NOT_READ,
                      t.date(stamp(r.get("last_turn_at"), NO_VALUE)) if r.get("last_turn_at") else NOT_READ,
-                     state)
+                     state, session_acts(r, t))
             tds = "".join(f'<td{t.attr("data-label", h)}>{c}</td>' for h, c in zip(heads, cells))
             body.append(f'<tr data-session="{_e(r.get("pid"))}">{tds}</tr>')
         parts.append(f'<table><thead><tr>{th}</tr></thead><tbody>{"".join(body)}</tbody></table>')
     parts.append(t.mark("A session is working when it runs and recorded a turn in the last hour.",
                         tag="p", attrs=HINT))
+    parts.append(t.mark("Open session and Open in Fabric hand the session to Fabric, which asks before it acts; a new "
+                        "session starts from a project's panel.", tag="p", attrs=HINT))
     return "".join(parts) + "</section>"
 
 
@@ -382,7 +406,8 @@ def signature(a: dict, sessions: dict | None = None) -> str:
         import sessions_view
         f = sessions_view.facets(sessions)
         said["sessionCount"] = (f["running"], f["managed"], f["activeHour"], f["managerState"])
-        said["machineSessions"] = sorted((str(r.get("agent")), str(r.get("pid")), r.get("managed"), r.get("active"))
+        said["machineSessions"] = sorted((str(r.get("agent")), str(r.get("pid")), r.get("managed"), r.get("active"),
+                                          str(r.get("session_id")))
                                          for r in _session_rows(sessions, a.get("sessions")))
     return hashlib.sha256(json.dumps(said, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
@@ -455,7 +480,7 @@ DYNAMIC = (DOT_TITLE, *DOT_TITLES.values(), "Sessions running", "Managed", "Acti
            # `_chip` takes its label as an argument, which the catalog scan does not see.
            "working", "session@@quiet", DISABLED, "answer@@yes", "answer@@no",
            *NEED_WORDS.values(),
-           "Project", "Folder", "Managed", "Account group", "Last turn", "State",
+           "Project", "Folder", "Managed", "Account group", "Last turn", "State", "Session", TERMINAL_DISABLED,
            *(f"handoff@@{r}" for r in ("limit", "plan_route", "operator", "crash", "restart")),
            *(f"step@@{x}" for x in ("in_progress", "done", "blocked", "failed")),
            *(f"key-state@@{x}" for x in ("vault", "env-only", "missing", "unknown")),
