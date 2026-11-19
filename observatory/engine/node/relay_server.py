@@ -1105,6 +1105,21 @@ class _Pending:
         self.ws, self.progress, self.session = None, progress, None
 
 
+# On POSIX, SO_REUSEADDR lets a restarted listener take its port back while the connections it closed sit in
+# TIME_WAIT. On Windows it means something else: the bind succeeds on a port another live socket holds, and
+# connections then reach either one. A relay restarted on its old port answered a stub listening there in another
+# test suite, which refused its hello as another origin (OBS-643, run 44450501545). Windows rebinds over TIME_WAIT
+# without the option, and asyncio leaves it off there for the same reason.
+REUSE_ADDRESS = os.name != 'nt'
+
+
+def listening_socket(family: int, *, reuse: bool = REUSE_ADDRESS) -> socket.socket:
+    listener = socket.socket(family, socket.SOCK_STREAM)
+    if reuse:
+        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    return listener
+
+
 class RelayServer:
     """The listening relay: `start()` binds and serves on threads of its own, `stop()` ends every connection (1001)
     without waiting on any of them. `origin` is what machines sign into `relay-auth/1`: its loopback `http://` address,
@@ -1159,8 +1174,7 @@ class RelayServer:
         self.max_pending = min(self.max_pending, pending)
         self.max_connections = min(self.max_connections, sessions)
         family = socket.AF_INET6 if ':' in self.host else socket.AF_INET
-        listener = socket.socket(family, socket.SOCK_STREAM)
-        listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        listener = listening_socket(family)
         listener.bind((self.host, self.requested_port))
         listener.listen(64)
         self._listener = listener

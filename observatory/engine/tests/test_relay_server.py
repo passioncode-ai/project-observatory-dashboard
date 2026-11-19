@@ -22,6 +22,7 @@ import importlib.util
 import io
 import json
 import os
+import errno
 import socket
 import sys
 import threading
@@ -87,6 +88,10 @@ def eventually(predicate, timeout=WAIT):
             return True
         time.sleep(0.02)
     return predicate()
+
+
+# A bind refused for a port in use: Windows reports its sockets' WSAEADDRINUSE, not the C library's EADDRINUSE.
+ADDRESS_IN_USE = {errno.EADDRINUSE, getattr(errno, 'WSAEADDRINUSE', errno.EADDRINUSE)}
 
 
 def free_port() -> int:
@@ -229,13 +234,22 @@ class Relay(unittest.TestCase):
             return sorted(e.progress for e in self.server._pending.values())
 
     def start(self, limits=None, spool=None, key=None, **server):
-        port = free_port()
-        origin = 'http://127.0.0.1:%d' % port
-        admission = rs.Admission(rs.NodeRecords(self.estate.node).read, log=self.log)
-        mailboxes = rs.Mailboxes(spool, key or b'\x01' * 32, limits, log=self.log)
-        self.server = rs.RelayServer(origin=origin, admission=admission, mailboxes=mailboxes, port=port,
-                                     limits=limits, clock=lambda: time.time() + self.offset[0], log=self.log,
-                                     **server).start()
+        for attempt in range(5):
+            port = free_port()
+            origin = 'http://127.0.0.1:%d' % port
+            admission = rs.Admission(rs.NodeRecords(self.estate.node).read, log=self.log)
+            mailboxes = rs.Mailboxes(spool, key or b'\x01' * 32, limits, log=self.log)
+            try:
+                self.server = rs.RelayServer(origin=origin, admission=admission, mailboxes=mailboxes, port=port,
+                                             limits=limits, clock=lambda: time.time() + self.offset[0],
+                                             log=self.log, **server).start()
+                break
+            except OSError as exc:
+                # free_port() released its port; a suite running beside this one may have bound it before the relay
+                # did. The relay refuses a live port (OBS-643), so pick another.
+                mailboxes.close()
+                if exc.errno not in ADDRESS_IN_USE or attempt == 4:
+                    raise
         self.origin = origin
         return self.server
 
@@ -1232,6 +1246,24 @@ def _answers(port: int) -> bool:
 # ---- `full relay` ---------------------------------------------------------------------------------------------------
 
 @needs_crypto
+class Listener(unittest.TestCase):
+    """OBS-643: SO_REUSEADDR only off Windows, where it lets a bind take a port another live socket holds."""
+
+    def test_reuse_address_is_set_only_off_windows(self):
+        self.assertEqual(rs.REUSE_ADDRESS, os.name != 'nt')
+        for reuse in (True, False):
+            with self.subTest(reuse=reuse), rs.listening_socket(socket.AF_INET, reuse=reuse) as listener:
+                self.assertEqual(bool(listener.getsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR)), reuse)
+
+    def test_a_relay_listener_never_takes_a_port_a_live_socket_holds(self):
+        with socket.socket() as holder:
+            holder.bind(('127.0.0.1', 0))
+            holder.listen()
+            with rs.listening_socket(socket.AF_INET) as listener, self.assertRaises(OSError) as raised:
+                listener.bind(('127.0.0.1', holder.getsockname()[1]))
+        self.assertIn(raised.exception.errno, ADDRESS_IN_USE)
+
+
 class Cli(unittest.TestCase):
     def setUp(self):
         import relay_cli
