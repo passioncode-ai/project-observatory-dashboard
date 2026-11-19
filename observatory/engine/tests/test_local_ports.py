@@ -40,6 +40,44 @@ OTHER = _owner_of_a_new_file()
 FIRST_BLOCK = {"server": 47400, "memory_http": 47402, "relay": 47406, "keyserver": 47407}
 
 
+class RestrictedTable(unittest.TestCase):
+    """OBS-646: on macOS 27 with two accounts, peer_owner answers a free port `unknown` with the bare reason
+    `table-restricted` (this uid's sockets read, none matches; DEC-0155 RT-1). That is a probe's question, not
+    a taken port; a reason with a detail means nothing was read and stays `unknown`."""
+
+    def kind(self, owner, binds):
+        import peer_owner
+        with patch.object(peer_owner, "listener", lambda port: owner), patch.object(lp, "bind_free", lambda port: binds):
+            return lp.listener_kind(47400)
+
+    def test_a_bare_restricted_answer_on_a_port_that_binds_is_free(self):
+        import peer_owner
+        owner = peer_owner.Owner("unknown", method="libproc", reason=peer_owner.TABLE_RESTRICTED)
+        self.assertEqual(self.kind(owner, True), "none")
+
+    def test_a_bare_restricted_answer_on_a_port_that_does_not_bind_stays_unknown(self):
+        import peer_owner
+        owner = peer_owner.Owner("unknown", method="libproc", reason=peer_owner.TABLE_RESTRICTED)
+        self.assertEqual(self.kind(owner, False), "unknown")
+
+    def test_a_restricted_answer_with_a_detail_stays_unknown_even_when_the_port_binds(self):
+        import peer_owner
+        owner = peer_owner.Owner("unknown", method="libproc", reason=peer_owner.TABLE_RESTRICTED + ": no pid list")
+        self.assertEqual(self.kind(owner, True), "unknown")
+
+    def test_a_known_owner_is_returned_as_read(self):
+        import peer_owner
+        for kind in ("this-account", "another-account", "system", "none"):
+            with self.subTest(kind=kind):
+                self.assertEqual(self.kind(peer_owner.Owner(kind, method="libproc"), True), kind)
+
+    def test_a_whole_range_of_bare_restricted_free_ports_leaves_blocks_to_choose(self):
+        import peer_owner
+        owner = peer_owner.Owner("unknown", method="libproc", reason=peer_owner.TABLE_RESTRICTED)
+        with patch.object(peer_owner, "listener", lambda port: owner), patch.object(lp, "bind_free", lambda port: True):
+            self.assertIsNone(lp._taken(47400, set(), set()))
+
+
 class Fixture(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
