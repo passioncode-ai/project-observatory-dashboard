@@ -222,7 +222,7 @@ def test_a_fresh_daily_workspace_snapshot_makes_the_store_copy_not_due() -> None
     first = planted()
     home = first.parent / "home"
     (home / "store").mkdir(parents=True)
-    db = first.rename(home / "store" / "observatory.db")   # the workspace's own store: `due` reads its root
+    db = first.rename(home / "store" / "observatory.db")  # paths-check: allow — a planted workspace's own store, which `due` compares with paths.DB
     backups = first.parent / "backups-root"
     env = {**os.environ, "OBSERVATORY_DB": str(db), "OBSERVATORY_HOME": str(home), "OBSERVATORY_BACKUPS": str(backups)}
     ask = lambda: subprocess.run([PY, str(ROOT / "tools/backup_store.py"), "--due"], cwd=ROOT, env=env,
