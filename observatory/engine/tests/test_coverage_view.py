@@ -1,5 +1,7 @@
 """Bounded saved coverage reads never authorize cleanup or refresh producers."""
 import contextlib
+import importlib
+import unittest
 import io
 import json
 from datetime import datetime, timezone, timedelta
@@ -142,6 +144,34 @@ class CoverageView(Base):
         self.assertIn(('open-unlinked.json', 'visibility-limited'), named)
         self.assertEqual(len(named), len(set(named)), 'each source once')
         self.assertEqual(out['coverage']['degraded'], [d for d in out['degraded'] if d in out['coverage']['degraded']])
+
+class GuardLast(unittest.TestCase):
+    """Task ee70c058: guardRuns is newest first; the last pass is named on its own so nobody reads the list
+    backwards and takes a running guard for a stopped one."""
+
+    def test_the_last_guard_pass_is_named_and_the_order_said(self):
+        import machine_view
+        import memory_snapshot
+        import server
+        server = importlib.reload(server)
+        stamp = '2026-11-19T12:11:40Z'
+        docs = {'machine.json': {'measured_at': stamp, 'memory': {'degraded': []},
+                                 'processes': {'degraded': []}, 'disk': {'degraded': []}},
+                'git-hygiene.json': {'measured_at': stamp, 'checkouts': [], 'degraded': []},
+                'cleanup-plan.json': {'planned_at': stamp}, 'disk-guard.json': {'at': stamp, 'degraded': []}}
+        fresh = {'memory': {'degraded': []}, 'processes': {'degraded': []}}
+        runs = [{'at': '2026-11-19T12:11:40Z', 'kind': 'summary', 'level': 'critical', 'removed': 0, 'freed_mb': 517},
+                {'at': '2026-11-18T18:15:44Z', 'kind': 'summary', 'level': 'low', 'removed': 3, 'freed_mb': 40}]
+        with patch.object(machine_view, '_load', side_effect=lambda name, *_: (docs[name], None)), \
+                patch.object(memory_snapshot, 'read_sources', return_value=fresh), \
+                patch.object(machine_view, 'guard_summaries', return_value=runs), \
+                patch.object(machine_view, 'journal', return_value=[]):
+            out = server.observatory_machine(section='cleanup')
+        cleanup = out['cleanup']
+        self.assertEqual(cleanup['guardRunsOrder'], 'newest-first')
+        self.assertEqual(cleanup['guardLast']['at'], '2026-11-19T12:11:40Z')
+        self.assertEqual(cleanup['guardRuns'][0], cleanup['guardLast'])
+
 
 if __name__ == '__main__':
     import unittest

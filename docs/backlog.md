@@ -1,6 +1,6 @@
 # Local backlog
 
-**Next free ID:** `OBS-654`
+**Next free ID:** `OBS-657`
 
 **Vacant ids:** `OBS-91` (skipped when the OBS register began reserving: #277 wrote OBS-92 and OBS-93, and no row was ever written under 91); `OBS-422` (reserved on 2026-11-08 for the provider-account organization rules, which became OBS-412 part 1 when the organization onboarding rows OBS-411 to OBS-420 were written)
 
@@ -667,3 +667,4 @@ still open and needs nothing, and a reservation older than that with no row must
 | OBS-645 | An OpenRouter key issued without `--limit`, and a rotated row that recorded no ceiling, get USD 100 a month instead of 10: the agent default of 2026-11-07, and the operator's order of 2026-11-19 that no default ceiling is as low as 5 or 10 | done in 0.45.3 (#600) | Fabric board request `12caaa48` (thread `445c6a1c`); `tools/openrouter.py` issued at `--limit` default 10.0 |
 | OBS-646 | On macOS 27 with two accounts a free port reads `unknown` with the bare reason `table-restricted` (this uid's sockets read, none matches); `listener_kind` took it as taken, every block of 47400-47999 looked taken and `full open --serve` stopped with port-range-exhausted. The bind probe now decides that one case | done in 0.45.3 (#601) | board request `c31682e1`: engine 0.42.0, macOS 27.2, two accounts; workaround `full ports set server 47816` |
 | OBS-653 | After OBS-644 made Windows snapshots work, `workspace_upgrade`, `maintenance`, `disk_guard` and `machine_backup` ran further there and timed out part of the way through, which hides their checks; they get 600 s (maintenance 1200 s), and the Windows known list keeps only what that complete run still fails | done — merged (#603), unreleased | run 44470507467: 122, 90, 166 and 113 cases done at 305-486 s; Fabric task f8000966 |
+| OBS-656 | The machine answer names the disk guard's last pass (`cleanup.guardLast`) and the order of `guardRuns` (`guardRunsOrder: newest-first`): its last element was read as the latest pass twice on 2026-11-19 | done — merged (#607), unreleased | Fabric task ee70c058; machine_view.py `guardRuns = runs[:50]` |
