@@ -47,10 +47,31 @@ PREFIX = "observatory.db.backup-"
 COMPANIONS = ("-wal", "-shm", "-journal")
 
 
+#: The plaintext copy `encrypted` takes before it encrypts one: `PREFIX + PARTIAL + stamp`. It is never a backup.
+#: A run stopped at its time limit (the tick stops a step's process group) never reaches the `finally` that
+#: drops it, so it stays beside the database, a plaintext copy of the store, and `existing` read it as a fresh
+#: legacy backup, which made `--due` answer "not due" for a day (OBS-660).
+PARTIAL = "encrypting-"
+
+
 def existing(store: pathlib.Path) -> list[pathlib.Path]:
-    """Newest first, and BACKUPS only — never the files SQLite writes beside one."""
+    """Newest first, and BACKUPS only — never the files SQLite writes beside one, and never a copy that was
+    still being encrypted."""
     return sorted((p for p in store.glob(PREFIX + "*")
-                   if not p.name.endswith(COMPANIONS)), reverse=True)
+                   if not p.name.endswith(COMPANIONS) and not p.name.startswith(PREFIX + PARTIAL)), reverse=True)
+
+
+def sweep_partial(store: pathlib.Path) -> list[str]:
+    """Remove the plaintext copies an earlier run left when it was stopped before it could encrypt them, with
+    their SQLite companions; the names removed. Called before a new copy is taken, by the one writer of these
+    files, so none of them is still being written."""
+    gone = []
+    for p in sorted(store.glob(PREFIX + PARTIAL + "*")):
+        if p.is_file():
+            p.unlink(missing_ok=True)
+            if not p.name.endswith(COMPANIONS):
+                gone.append(p.name)
+    return gone
 
 
 def take(db: pathlib.Path, stamp: str) -> pathlib.Path:
@@ -119,7 +140,10 @@ def encrypted(db: pathlib.Path, secret: str, base: pathlib.Path, at: datetime | 
         print(f"backup_store: --stamp {when} is older than the {backup_vault.KEEP} copies kept; "
               "its copy would be pruned at once, so nothing was copied", file=sys.stderr)
         return 2
-    plain = take(db, "encrypting-" + when)
+    left = sweep_partial(db.parent)
+    if left:
+        print(f"backup_store: removed {len(left)} unencrypted copies an earlier stopped run left", file=sys.stderr)
+    plain = take(db, PARTIAL + when)
     try:
         if plain.stat().st_size == 0:
             print("the copy came out empty; nothing was encrypted or pruned", file=sys.stderr)
@@ -141,7 +165,14 @@ def encrypted(db: pathlib.Path, secret: str, base: pathlib.Path, at: datetime | 
 
 
 def due(db: pathlib.Path, base: pathlib.Path, hours: int = 24) -> bool:
-    """No copy — encrypted in the root, or legacy beside the database — younger than `hours`."""
+    """No copy — encrypted in the root, or legacy beside the database — younger than `hours`.
+
+    A workspace snapshot that satisfies the daily rule (`backup_vault.DAILY_RULE_KINDS`: the maintenance job's
+    `daily`, an update's `before-upgrade`, a person's `snapshot`) is such a copy too: it carries every SQLite
+    database of the workspace, this one included, copied through the same backup API. Without it the tick took a
+    second copy of a store the daily snapshot had just taken, and on a loaded machine that copy ran into its
+    600 s limit tick after tick, ahead of every collector, so the vulnerability watch, the machine view and the
+    findings were never reached (OBS-660)."""
     import backup_vault, time
     newest = [p.stat().st_mtime for p in existing(db.parent)]
     try:
@@ -149,6 +180,8 @@ def due(db: pathlib.Path, base: pathlib.Path, hours: int = 24) -> bool:
             raise ValueError("not this workspace's store")  # its root is not its own
         root = backup_vault.root_info(base)["path"]
         newest += [p.stat().st_mtime for p in backup_vault.artifacts(root, backup_vault.DB_KIND, backup_vault.DB_SUFFIX)]
+        for kind in backup_vault.DAILY_RULE_KINDS:
+            newest += [p.stat().st_mtime for p in backup_vault.artifacts(root, kind, backup_vault.SNAPSHOT_SUFFIX)]
     except Exception:  # noqa: BLE001 — an unreadable root means: take one
         pass
     return not newest or time.time() - max(newest) > hours * 3600

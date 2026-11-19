@@ -194,6 +194,58 @@ def test_the_tick_takes_one_a_day() -> None:
 
 
 
+def test_a_stopped_runs_plaintext_copy_is_not_a_backup_and_the_next_run_removes_it() -> None:
+    """OBS-660: the tick stops a step's process group at its limit, so `encrypted` never reached the `finally`
+    that drops its plaintext copy. That copy is not a backup: `existing` (and so `--due`) must not count it, and
+    the next run removes it with its companion before it takes its own."""
+    bs = load()
+    db = planted()
+    store = db.parent
+    left = store / f"{bs.PREFIX}{bs.PARTIAL}20261119T144551Z"
+    left.write_bytes(b"x")
+    (store / f"{left.name}-journal").write_bytes(b"x")
+    (store / f"{bs.PREFIX}2026-09-12T1000Z").write_bytes(b"x")
+    check("a copy left while encrypting is not counted as a backup",
+          [r.name for r in bs.existing(store)] == [f"{bs.PREFIX}2026-09-12T1000Z"],
+          str([r.name for r in bs.existing(store)]))
+    gone = bs.sweep_partial(store)
+    check("the sweep names the copy it removed, not its companion", gone == [left.name], str(gone))
+    check("and both files are gone", not left.exists() and not (store / f"{left.name}-journal").exists())
+    check("a real copy beside them stays", (store / f"{bs.PREFIX}2026-09-12T1000Z").exists())
+    check("a second sweep finds nothing", bs.sweep_partial(store) == [])
+
+
+def test_a_fresh_daily_workspace_snapshot_makes_the_store_copy_not_due() -> None:
+    """OBS-660: the daily workspace snapshot copies this database through the backup API, so a second copy in the
+    tick is not due while it is younger than a day; a person's `snapshot` and an update's `before-upgrade` count
+    too, and an updater's `before-update` does not."""
+    first = planted()
+    home = first.parent / "home"
+    (home / "store").mkdir(parents=True)
+    db = first.rename(home / "store" / "observatory.db")  # paths-check: allow — a planted workspace's own store, which `due` compares with paths.DB
+    backups = first.parent / "backups-root"
+    env = {**os.environ, "OBSERVATORY_DB": str(db), "OBSERVATORY_HOME": str(home), "OBSERVATORY_BACKUPS": str(backups)}
+    ask = lambda: subprocess.run([PY, str(ROOT / "tools/backup_store.py"), "--due"], cwd=ROOT, env=env,
+                                 capture_output=True, text=True, timeout=120).returncode
+    check("due with no copy and no snapshot", ask() == 0)
+    found = subprocess.run([PY, "-c", "import backup_vault, configuration; "
+                                       "print(backup_vault.root_info(configuration.home())['path'])"],
+                           cwd=ROOT, env=env, capture_output=True, text=True, timeout=60)
+    root = pathlib.Path(found.stdout.strip())
+    check("the test's root is under its own folder", backups in root.parents or root == backups, found.stderr)
+    root.mkdir(parents=True, exist_ok=True)
+    other = root / "before-update-20261119T091926Z-222677a4.obsnap"
+    other.write_bytes(b"x")
+    check("an updater's before-update snapshot does not count", ask() == 0)
+    snap = root / "daily-20261119T091926Z-222677a4.obsnap"
+    snap.write_bytes(b"x")
+    check("a daily snapshot younger than a day makes the copy not due", ask() == 3)
+    old = snap.stat().st_mtime - 25 * 3600
+    os.utime(snap, (old, old))
+    check("and an older one does not", ask() == 0)
+    (root / "snapshot-20261119T101500Z-0000aaaa.obsnap").write_bytes(b"x")
+    check("a person's snapshot counts as well", ask() == 3)
+
 def test_a_crashing_due_question_is_a_failure_not_a_no() -> None:
     """Review of #328, M3: an uncaught exception exits 1, which was the "not due" answer, so a broken
     `--due` read as "a copy exists" for ever. "Not due" is exit 3 (NOT_DUE), and anything that goes
@@ -224,6 +276,8 @@ if __name__ == "__main__":
                test_a_stamp_older_than_the_kept_window_is_refused,
                test_a_missing_store_is_not_a_failure_and_list_names_what_exists,
                test_the_tick_takes_one_a_day,
+               test_a_stopped_runs_plaintext_copy_is_not_a_backup_and_the_next_run_removes_it,
+               test_a_fresh_daily_workspace_snapshot_makes_the_store_copy_not_due,
                test_a_crashing_due_question_is_a_failure_not_a_no):
         fn()
     print()

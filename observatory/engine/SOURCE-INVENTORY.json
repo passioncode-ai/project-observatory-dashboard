@@ -4964,8 +4964,8 @@
       "path": "tests/test_backup_store.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "60dc58c5b2a995e5f803e82a6172045ff738f42db63c69c4d77324b1a90b17da",
-      "bytes": 11547
+      "export_sha256": "0f71a067055bdbace2ab6115feb85e51964a947bbc073f4cd920a02fb895eb88",
+      "bytes": 15056
     },
     {
       "path": "tests/test_backup_vault.py",
@@ -7497,8 +7497,8 @@
     {
       "path": "tools/backup_store.py",
       "source_sha256": "3983b80ce8e3d08a393d60761724b490c1133e7e0c2cdc0287e00c88aca54060",
-      "export_sha256": "691a7c9a519c1a75c51a9768025e77f27ee331e1e56e8f38fd801e86ba0207d1",
-      "bytes": 13185,
+      "export_sha256": "1db1539107ed0f9a6116ffdb52ea3f6ed361f3ad996f1f0e98f2e9fe83f678c6",
+      "bytes": 15203,
       "python_comments_removed": 16,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
