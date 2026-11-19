@@ -997,6 +997,41 @@ class WorkspaceUpgrade(unittest.TestCase):
         self.assertTrue((snapshot/'data/store/vector-fixture.db').exists())
 
 
+class WindowsSync(unittest.TestCase):
+    """OBS-644: Windows' fsync needs a handle that may write (a read-only one answers EBADF), and a folder cannot be
+    opened for it, so there sync_tree syncs the files through read-write handles and leaves the folders."""
+
+    def setUp(self):
+        import tmp as tmpdir
+        self.root = Path(tmpdir.mkdtemp(prefix='obs-win-sync-'))
+        (self.root / 'a' / 'b').mkdir(parents=True)
+        (self.root / 'a' / 'b' / 'inner.txt').write_text('x')
+        (self.root / 'outer.txt').write_text('y')
+
+    def opened(self, windows):
+        calls, real = [], upgrade.osprivacy.open
+
+        def spy(path, flags, *args, **kwargs):
+            calls.append((Path(path), flags))
+            return real(path, flags, *args, **kwargs)
+        with patch.object(upgrade.osprivacy, 'WINDOWS', windows), patch.object(upgrade.osprivacy, 'open', spy):
+            upgrade.sync_tree(self.root)
+        return calls
+
+    def test_on_windows_files_are_synced_through_handles_that_may_write_and_no_folder_is_opened(self):
+        calls = self.opened(True)
+        self.assertEqual(sorted(path.name for path, _ in calls), ['inner.txt', 'outer.txt'])
+        self.assertTrue(all(flags & (os.O_WRONLY | os.O_RDWR) == os.O_RDWR for _, flags in calls), calls)
+
+    @unittest.skipIf(os.name == 'nt', 'a folder cannot be opened for fsync on Windows')
+    def test_elsewhere_files_keep_read_only_handles_and_every_folder_is_synced(self):
+        calls = self.opened(False)
+        self.assertEqual(sorted(path.name for path, _ in calls if path.is_file()), ['inner.txt', 'outer.txt'])
+        self.assertEqual(sorted(path for path, _ in calls if path.is_dir()),
+                         sorted([self.root, self.root / 'a', self.root / 'a' / 'b']))
+        self.assertTrue(all(flags & (os.O_WRONLY | os.O_RDWR) == 0 for _, flags in calls), calls)
+
+
 class ProportionalStaging(unittest.TestCase):
     """OBS-626: staging an update reads and writes in proportion to what changes.
 

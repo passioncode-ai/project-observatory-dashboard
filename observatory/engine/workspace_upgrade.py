@@ -171,7 +171,12 @@ def managed_layout(base: Path) -> None:
             raise config.ConfigurationError(f"{name} overrides the managed layout; migrate it into OBSERVATORY_HOME before upgrading")
 
 
+# Windows' fsync (`_commit`, FlushFileBuffers) needs a handle that may write: on a read-only one it answers
+# OSError [Errno 9] Bad file descriptor, which stopped every snapshot and update there (OBS-644). A folder cannot be
+# opened for it at all, so there the files are synced one by one, as secret_store_carry does.
 def sync_directory(path: Path) -> None:
+    if osprivacy.WINDOWS:
+        return
     fd = osprivacy.open(path,os.O_RDONLY)
     try:
         os.fsync(fd)
@@ -185,7 +190,7 @@ def sync_tree(base: Path) -> None:
         if file.is_dir():
             directories.append(file)
         else:
-            fd = osprivacy.open(file,os.O_RDONLY|osprivacy.NOFOLLOW)
+            fd = osprivacy.open(file,(os.O_RDWR if osprivacy.WINDOWS else os.O_RDONLY)|osprivacy.NOFOLLOW)
             try:
                 os.fsync(fd)
             finally:
