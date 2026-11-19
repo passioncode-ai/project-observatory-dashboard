@@ -4281,8 +4281,8 @@
       "path": "service_events.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "00b4370705fecbb021f267f25cbb94d0edd5bad7bd65b5344f6e6142e5fd64f0",
-      "bytes": 14672
+      "export_sha256": "8b554a02a15d5854e09c98c0c36b6a8921e937f176311f51ba1bf9238e2b7ff6",
+      "bytes": 14971
     },
     {
       "path": "service_health.py",
@@ -5476,8 +5476,8 @@
       "path": "tests/test_fabric_service.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "f2a2bb05cee3ba4c421329fcf1c8cee15e9d0c9e81669ab7591ae4e30e20a0f4",
-      "bytes": 64342
+      "export_sha256": "888299c6bd11199e88036b7fa8f814d31a2d9ad0e38acbc4352ae06842afb709",
+      "bytes": 65379
     },
     {
       "path": "tests/test_facts_learning.py",
