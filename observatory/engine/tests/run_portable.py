@@ -684,7 +684,10 @@ SUITE_SECONDS = {'ssh_keys': 300, 'credential_doors': 600, 'maintenance': 1500, 
                  # 108 cases over the update with real snapshots, a staged install and rollbacks: 100.5 s
                  # (run 44379342338) and 112.0 s (run 44317200456) on macos-latest, then 122.1 s and a
                  # timeout on the v0.45.0 tag (run 44392489139), which held the release.
-                 'engine_update': 300}
+                 'engine_update': 300,
+                 # 140 s and a timeout on windows-latest under a loaded runner (run 44537071032), where it
+                 # otherwise fails one known check in a few seconds.
+                 'node_repair': 300}
 
 
 def suite_timeout(name: str, timeout: int) -> int:

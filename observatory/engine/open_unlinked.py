@@ -30,6 +30,20 @@ def now():
     return datetime.now(timezone.utc).isoformat()
 
 
+def _stop(process, seconds=1):
+    """Kill an owned child and wait for it a bounded time; never raise. A child that does not go away in time
+    (lsof stuck in the kernel on a loaded Mac) is left to be reaped later, and the caller says the read did not
+    complete (task a578af27: the second wait raised TimeoutExpired out of the collector)."""
+    try:
+        process.kill()
+    except OSError:
+        pass
+    try:
+        return process.wait(timeout=seconds)
+    except subprocess.TimeoutExpired:
+        return None
+
+
 def capture(argv, *, seconds=5, max_bytes=MAX_BYTES, env=None):
     """Stop only this owned observation child on its deadline/output ceiling."""
     out = bytearray()
@@ -61,12 +75,12 @@ def capture(argv, *, seconds=5, max_bytes=MAX_BYTES, env=None):
         if process.poll() is None and (result['reason'] or result['truncated']): process.kill()
         try: result['returncode'] = process.wait(timeout=max(.01, end - time.monotonic()))
         except subprocess.TimeoutExpired:
-            result['reason'] = 'command-timeout'; process.kill(); result['returncode'] = process.wait(timeout=1)
+            result['reason'] = 'command-timeout'; result['returncode'] = _stop(process)
     except (OSError, ValueError, subprocess.SubprocessError):
         result['reason'] = 'command-unavailable'
     finally:
         if process is not None:
-            if process.poll() is None: process.kill(); process.wait(timeout=1)
+            if process.poll() is None and _stop(process) is None: result['reason'] = result['reason'] or 'command-timeout'
             if process.stdout: process.stdout.close()
             if process.stderr: process.stderr.close()
     result['stdout'] = bytes(out)
