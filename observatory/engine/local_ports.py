@@ -98,12 +98,21 @@ def bind_free(port: int) -> bool:
 
 
 def listener_kind(port: int) -> str:
-    """Who listens on the port: peer_owner's `this-account`, `another-account`, `system`, `unknown` or `none`."""
+    """Who listens on the port: peer_owner's `this-account`, `another-account`, `system`, `unknown` or `none`.
+
+    A restricted macOS table (macOS 27 on a Mac with two accounts) answers `unknown` with the bare reason
+    `table-restricted` for a port nobody listens on: this uid's sockets were read and none matches (DEC-0155
+    RT-1). That reason invites a probe, so a port that binds is `none`; one that does not stays `unknown`.
+    Every port read as taken left no free block in 47400-47999 (OBS-646, board request c31682e1).
+    A reason with a detail (`table-restricted: <detail>`) means nothing could be read and stays `unknown`."""
     try:
         import peer_owner
-        return peer_owner.listener(port).kind
+        owner = peer_owner.listener(port)
     except Exception:  # noqa: BLE001 - an unreadable table is `unknown`, never `none`
         return "unknown"
+    if owner.kind == "unknown" and owner.reason == getattr(peer_owner, "TABLE_RESTRICTED", None):
+        return "none" if bind_free(port) else "unknown"
+    return owner.kind
 
 
 def declared_ports() -> set[int]:
