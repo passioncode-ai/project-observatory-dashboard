@@ -1154,6 +1154,32 @@ class UpdateTest(unittest.TestCase):
         last = json.loads((self.home / "store/logs/update.jsonl").read_text().splitlines()[-1])
         self.assertEqual((last["event"], last["outcome"]), ("undo-ended", "rolled-back"))
 
+    def test_failed_retries_of_one_version_keep_no_more_snapshots_than_the_rotation(self):
+        # bee9ce32: each failed automatic retry of one version left one more plaintext copy of the
+        # whole workspace in backups/, outside every rotation. A rolled-back update's snapshot now
+        # goes the way a finished one's does: rotated locally, or encrypted out with a passphrase.
+        import backup_vault
+        self.installer.fail_on = {NEWER}
+        self.gh.publish(NEWER)
+        for _ in range(backup_vault.KEEP + 2):
+            code, doc = self.run_cli("--apply")
+            self.assertEqual(code, self.mod.EXIT_FAILED, doc)
+            self.assertFalse(doc["snapshot"]["encrypted"])
+        left = list((self.home / "backups").glob("before-update-*"))
+        self.assertEqual(len(left), backup_vault.KEEP, left)
+
+    def test_a_rolled_back_update_with_a_passphrase_leaves_no_plaintext_copy(self):
+        import backup_vault
+        backup_vault.set_passphrase(self.home, "synthetic passphrase for a rollback")
+        self.installer.fail_on = {NEWER}
+        self.gh.publish(NEWER)
+        code, doc = self.run_cli("--apply")
+        self.assertEqual(code, self.mod.EXIT_FAILED, doc)
+        self.assertTrue(doc["rolled_back"])
+        self.assertTrue(doc["snapshot"]["encrypted"], doc["snapshot"])
+        self.assertEqual(list((self.home / "backups").glob("before-update-*")), [])
+        self.assertTrue(Path(doc["snapshot"]["snapshot"]).is_file())
+
     def test_missing_dependency_after_install_rolls_back(self):
         self.engine.deps = {}
         self.gh.publish(NEWER)
