@@ -4759,8 +4759,8 @@
     {
       "path": "tests/run_portable.py",
       "source_sha256": "91af29946323164242a665108886f47adee4f6d1a43a6975aa851bc474436edf",
-      "export_sha256": "0280d4c82425076650f796fac8282553f061645ee7e8381c17e462fdf40283d6",
-      "bytes": 61463,
+      "export_sha256": "44976b2afd3d16651f7de421391836036d2256081b627767a2640f8275ab665e",
+      "bytes": 62289,
       "python_comments_removed": 3,
       "python_docstrings_removed": 2,
       "tool_descriptions_retained": 0,
@@ -5040,8 +5040,8 @@
     {
       "path": "tests/test_cli_compatibility.py",
       "source_sha256": "59111d8bce5d3eebd62232099c022bc49611e0dfb875fb5a3514c499b4851324",
-      "export_sha256": "71c74a2d5c2e55a9fc1d059df883d6427af56f4c7df19949fafd95ff97504c06",
-      "bytes": 17559,
+      "export_sha256": "57b3128f83158052e8d5000a37927b809434ab94ef2c95b3ca821a3a649eb765",
+      "bytes": 17916,
       "python_comments_removed": 0,
       "python_docstrings_removed": 1,
       "tool_descriptions_retained": 0,
