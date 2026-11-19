@@ -431,6 +431,71 @@ def test_a_branch_without_upstream_commits_locally() -> None:
     check("on the local branch", g("log", "-1", "--format=%s", cwd=wiki).startswith("Projection refresh"))
 
 
+
+def test_foreign_edits_on_a_tracked_branch_do_not_hold_the_projection() -> None:
+    # Fabric task e0bd0bb6: an edit outside inventory/ refused the whole commit, so the projection waited on the
+    # operator's own unsaved page. On a branch with an upstream the commit is built in a temporary index on top of
+    # origin and never touches the edit, so it goes ahead and the edit is reported by path instead.
+    d, wiki, _ = wiki_pair()
+    (wiki / "note.md").write_text("the operator is still writing this\n", encoding="utf-8")
+    (wiki / "projects-vault/inventory/projects.json").write_text('{"_generated": true, "n": 6}',
+                                                                  encoding="utf-8")
+    doc = commit_projection(d, wiki)
+    check("the projection is pushed", doc.get("outcome") == "pushed", str(doc))
+    check("the foreign path is named", doc.get("outside") == ["note.md"], str(doc))
+    check("with when it was first seen", bool(doc.get("outside_since")), str(doc))
+    tip = g("rev-parse", "origin/master", cwd=wiki)
+    check("the commit holds only the projection",
+          g("show", "--name-only", "--format=", tip, cwd=wiki) == "projects-vault/inventory/projects.json")
+    check("the operator's edit is untouched",
+          (wiki / "note.md").read_text(encoding="utf-8") == "the operator is still writing this\n")
+    first = doc.get("outside_since")
+    (wiki / "projects-vault/inventory/projects.json").write_text('{"_generated": true, "n": 7}',
+                                                                  encoding="utf-8")
+    again = commit_projection(d, wiki)
+    check("a second run keeps the first sighting", again.get("outside_since") == first, str(again))
+
+
+def test_a_branch_without_upstream_still_refuses_foreign_edits() -> None:
+    d, wiki, _ = wiki_pair()
+    g("branch", "-q", "--unset-upstream", cwd=wiki)
+    (wiki / "note.md").write_text("work in progress\n", encoding="utf-8")
+    (wiki / "projects-vault/inventory/projects.json").write_text('{"_generated": true, "n": 8}',
+                                                                  encoding="utf-8")
+    doc = commit_projection(d, wiki)
+    check("refused: a local commit would sweep up the edit", doc.get("outcome") == "refused-foreign-changes",
+          str(doc))
+
+
+def test_standing_foreign_edits_are_a_finding() -> None:
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    fresh = (now - timedelta(hours=2)).isoformat()
+    stale = (now - timedelta(hours=100)).isoformat()
+
+    def wiki_findings(doc: dict) -> list[dict]:
+        d = pathlib.Path(tmpdir.mkdtemp(prefix="observatory-projfind-"))
+        (d / "registry").mkdir()
+        (d / "scratch").mkdir()
+        (d / "scratch/commit-projection.json").write_text(json.dumps(doc), encoding="utf-8")
+        p = subprocess.run([PY, "tools/build_findings.py", "--json"], cwd=ROOT,
+                           env=dict(os.environ, OBSERVATORY_REGISTRY=str(d / "registry"),
+                                    OBSERVATORY_SCRATCH=str(d / "scratch"),
+                                    OBSERVATORY_DB=str(d / "absent.db")),
+                           capture_output=True, text=True, timeout=600)
+        return [f for f in json.loads(p.stdout)["findings"] if f["type"] == "wiki.uncommitted_edits"]
+    check("fresh edits raise nothing",
+          not wiki_findings({"outcome": "pushed", "outside": ["note.md"], "outside_since": fresh,
+                             "wiki_last_commit": fresh}))
+    got = wiki_findings({"outcome": "pushed", "outside": ["note.md", "pages/x.md"], "outside_since": stale,
+                         "wiki_last_commit": fresh})
+    check("standing edits do", len(got) == 1, str(got))
+    if got:
+        check("naming the paths", "note.md" in got[0]["detail"] and "pages/x.md" in got[0]["detail"],
+              got[0]["detail"])
+        check("not a projection fault", not findings_for({"outcome": "pushed", "outside": ["note.md"],
+                                                          "outside_since": stale, "wiki_last_commit": fresh}))
+
 if __name__ == "__main__":
     print("the wiki's mirror — every document, written atomically, and a refusal that speaks\n")
     for fn in (test_the_projection_is_opt_in,
@@ -445,7 +510,10 @@ if __name__ == "__main__":
                test_the_projection_is_pushed_on_top_of_origin,
                test_a_local_commit_keeps_the_branch_where_it_is,
                test_a_read_mirror_is_not_written,
-               test_a_branch_without_upstream_commits_locally):
+               test_a_branch_without_upstream_commits_locally,
+               test_foreign_edits_on_a_tracked_branch_do_not_hold_the_projection,
+               test_a_branch_without_upstream_still_refuses_foreign_edits,
+               test_standing_foreign_edits_are_a_finding):
         fn()
     print()
     if FAILURES:

@@ -250,6 +250,7 @@ LABELS: dict[str, str] = {
     "wallet.shared_key": "Wallet key shared",
     "wiki.broken_link": "Broken wiki links",
     "wiki.links_unchecked": "Wiki links not checked",
+    "wiki.uncommitted_edits": "Wiki edits left uncommitted",
     "work.unattributed": "Work attributed to no project",
     "work.unverifiable": "Recorded work contradicted by git",
     "work.unwitnessed": "Recorded work no clone can witness",
