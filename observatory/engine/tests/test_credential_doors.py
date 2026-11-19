@@ -1832,6 +1832,8 @@ def test_cf_email_presets_grant_exactly_what_the_email_service_needs() -> None:
     cases = [
         ("email-send", "account", ("Email Sending Write", "Email Sending Read"),
          "/accounts/a1/email/sending/suppressions", "send-value-"),
+        ("turnstile-edit", "account", ("Turnstile Sites Write",),
+         "/accounts/a1/challenges/widgets", "ts-value-"),
         ("workers-edit", "account", ("Workers Scripts Write", "Workers KV Storage Write"),
          "/accounts/a1/workers/scripts", "wk-value-"),
         ("access-app", "account", ("Access: Apps and Policies Write",
@@ -1886,6 +1888,7 @@ def test_cf_email_presets_refuse_what_they_do_not_grant() -> None:
     that cannot do its read. Every attempt is refused, and none mints or
     delivers anything."""
     groups = {"email-send": ("Email Sending Write", "Email Sending Read"),
+              "turnstile-edit": ("Turnstile Sites Write",),
               "workers-edit": ("Workers Scripts Write", "Workers KV Storage Write"),
               "access-app": ("Access: Apps and Policies Write",
                              "Access: Organizations, Identity Providers, and Groups Read"),
@@ -1896,7 +1899,7 @@ def test_cf_email_presets_refuse_what_they_do_not_grant() -> None:
               "zone-edge-rules": ("Zone Read", "Cache Settings Write", "Config Settings Write",
                                   "Bot Management Write"),
               "zaraz-edit": ("Zone Read", "Zaraz Edit")}
-    level = {"email-send": "account", "workers-edit": "account", "access-app": "account",
+    level = {"email-send": "account", "turnstile-edit": "account", "workers-edit": "account", "access-app": "account",
              "email-routing": "zone",
              "redirect-rules": "zone", "workers-routes": "zone", "cache-purge": "zone",
              "zone-edge-rules": "zone", "zaraz-edit": "zone"}

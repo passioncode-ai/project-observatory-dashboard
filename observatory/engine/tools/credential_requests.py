@@ -497,7 +497,7 @@ class CloudflareDoor(Door):
     #: Fabric Inbox ones and `zone-create`, which reach every zone of the account.
     OFFERED = ("email-routing", "email-routing-setup", "redirect-rules", "workers-routes", "email-sending-domain", "cache-purge",
                "zone-edge-rules", "zaraz-edit", "d1-edit", "email-send", "workers-edit", "workers-observability-read",
-               "access-app")
+               "access-app", "turnstile-edit")
 
     def presets(self) -> dict[str, dict]:
         out = {}
