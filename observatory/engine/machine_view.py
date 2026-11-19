@@ -294,7 +294,11 @@ def summary(explain_pid: int | None = None) -> dict:
     runs = guard_summaries()
     if runs:
         out.setdefault("cleanup", {"journal": journal()})
+        # Newest first, as guard_summaries returns them; the last pass is named on its own because the list was
+        # read backwards twice on 2026-11-19 and a running guard taken for a stopped one (task ee70c058).
         out["cleanup"]["guardRuns"] = runs[:50]
+        out["cleanup"]["guardRunsOrder"] = "newest-first"
+        out["cleanup"]["guardLast"] = runs[0]
         out["cleanup"]["guardTotals"] = {"runs": len(runs), "removed": sum(r.get("removed") or 0 for r in runs),
                                          "freedMb": sum(max(0, r.get("freed_mb") or 0) for r in runs)}
     if guard:
