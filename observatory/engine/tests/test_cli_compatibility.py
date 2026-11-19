@@ -204,6 +204,8 @@ class PortableRunnerTests(unittest.TestCase):
         self.assertGreaterEqual(runner.suite_timeout("maintenance", 120), 300)
         self.assertEqual(runner.suite_timeout("maintenance", 900), 900)
         self.assertEqual(runner.suite_timeout("pages", 120), 120)
+        # engine_update ran 100-112 s on macos-latest and timed out at 122 s on the v0.45.0 tag.
+        self.assertGreaterEqual(runner.suite_timeout("engine_update", 120), 300)
         for name in runner.SUITE_SECONDS:
             self.assertIn(name, runner.SUITES, f"{name} is not a suite the runner knows")
 
