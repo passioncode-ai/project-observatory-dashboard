@@ -4,7 +4,7 @@
     T="$(project-observatory full-path)/tools"            # the installed engine's tools
     python "$T/openrouter.py" stash --as main < key-file   # provisioning key, labeled; a protected file
     python "$T/openrouter.py" adopt --as main               # take the legacy file in
-    python "$T/openrouter.py" issue --name my-agent --limit 10 [--reset daily] [--expire-days 90 | --no-expiry] --to vault:PROJECT/prod/OPENROUTER_API_KEY
+    python "$T/openrouter.py" issue --name my-agent --limit 100 [--reset daily] [--expire-days 90 | --no-expiry] --to vault:PROJECT/prod/OPENROUTER_API_KEY
     python "$T/openrouter.py" issue-for-policy --policy FILE [--limit USD | --split REF=USD,…] [--dry-run]
     python "$T/openrouter.py" list | ping
     python "$T/openrouter.py" limit my-agent --set 25 [--reset daily]
@@ -54,7 +54,7 @@ a `vault:` slot's metadata records it too, and `list` shows it; a claimed key
 records what the provider lists for it.
 
 Limits are part of issue, not an afterthought: every issued key carries a USD
-ceiling (`--limit`, default 10), `limit <name> --set` moves it, and `ping`
+ceiling (`--limit`, default 100 a month, OBS-645), `limit <name> --set` moves it, and `ping`
 reports usage against it. A key without a ceiling is an unbounded liability
 attached to a file on disk.
 """
@@ -100,6 +100,9 @@ import key_expiry  # noqa: E402  every minted key carries an expiry, recorded, O
 API = "https://openrouter.ai/api/v1"
 #: How a key minted with no expiry was asked for, named in its record.
 NO_EXPIRY_FLAG = "--no-expiry"
+# A key issued without --limit gets the agent default of USD 100 a month (the operator, 2026-11-07, and his order of
+# 2026-11-19 that no default ceiling is as low as 5 or 10; OBS-645). A lower one is set by hand.
+DEFAULT_LIMIT_USD = 100.0
 ADMIN_STORE = paths.source_path("secret_store", paths.SECRETS) / 'openrouter-admin'
 LEGACY = paths.source_path("secret_store", paths.SECRETS) / 'openrouter-provisioning'
 #: name -> where it was delivered and from which account it was minted. Names
@@ -249,7 +252,7 @@ def stash_value(value: str, label: str, origin: str) -> int:
         ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"{'replaced' if existed else 'stashed'}: provisioning key as {label!r}")
     print(f"issue a working key with:\n"
-          f"  python \"$(project-observatory full-path)/tools/openrouter.py\" issue --name <consumer> --limit 10 "
+          f"  python \"$(project-observatory full-path)/tools/openrouter.py\" issue --name <consumer> --limit {DEFAULT_LIMIT_USD:g} "
           f"--account {label} --to <destination>")
     return 0
 
@@ -1784,7 +1787,7 @@ def _rotate_fresh(doc: dict, name: str, rec: dict, label: str, admin: str, force
         raise key_consumers.ConsumersHeld(f"{name}: held before anything was minted; the current key stays alive",
                                           early)
     rotations = rec.get("rotations", 0)
-    limit = rec.get("limit_usd") or 10
+    limit = rec.get("limit_usd") or DEFAULT_LIMIT_USD
     previous_hash = rec.get("hash")
     previous_rotated_on = rec.get("rotated_on")
     previous_status = rec.get("rotation_status")
@@ -1898,7 +1901,7 @@ def rotate_one(name: str, doc: dict | None = None, force: bool = False) -> dict:
     rotations = rec.get("rotations", 0)
     if type(rotations) is not int or rotations < 0:
         raise RuntimeError("Invalid rotation count; repair ledger before rotating")
-    limit = rec.get("limit_usd") or 10
+    limit = rec.get("limit_usd") or DEFAULT_LIMIT_USD
     if not isinstance(limit, (int, float)) or not math.isfinite(limit) or limit <= 0:
         raise ValueError("A finite positive ceiling is required")
     private_io.check(LEDGER)
@@ -2558,7 +2561,8 @@ def main() -> int:
     p_ad.add_argument("--as", dest="label", required=True)
     p_is = sub.add_parser("issue", help="mint a working key and deliver it")
     p_is.add_argument("--name", required=True, help="the consumer, e.g. fabric-agent")
-    p_is.add_argument("--limit", type=float, default=10.0, help="USD ceiling (default 10)")
+    p_is.add_argument("--limit", type=float, default=DEFAULT_LIMIT_USD,
+                      help=f"USD ceiling (default {DEFAULT_LIMIT_USD:g})")
     p_is.add_argument("--account", help="which stashed account to mint from")
     p_is.add_argument("--to", required=True,
                       help="observatory | claude-mem | vault:<project>/<env>/<NAME>")
