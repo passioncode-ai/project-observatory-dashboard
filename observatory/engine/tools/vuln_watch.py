@@ -46,6 +46,12 @@ BATCH = 1000
 #: Pages of one query followed at most; a package with more advisories than this is named.
 MAX_PAGES = 20
 TIMEOUT = 30
+#: Seconds kept before the step's deadline (`step_budget`, the tick's watchdog) to read the KEV catalogue and write
+#: the answer. A pass that runs out of time writes what it read, `complete: false`, instead of being killed with
+#: nothing written: on a 14,000-package estate every pass was stopped at its limit and the watch never wrote (OBS-661).
+RESERVE = 15.0
+#: Advisory records read at once.
+WORKERS = 8
 #: Ecosystems whose names OSV knows (research.md, "Vulnerability data").
 ECOSYSTEMS = frozenset({"npm", "PyPI", "Go", "crates.io", "RubyGems", "Packagist", "Maven", "NuGet"})
 #: Severity words an advisory database writes, to one scale.
@@ -97,15 +103,32 @@ def due(state: dict | None, queries, today: str) -> bool:
 
 # ---- OSV ------------------------------------------------------------------------------------------------
 
-def query_batch(fetch, queries) -> tuple[dict, list[dict]]:
-    """{(eco, name, version): {id: modified}} and the degraded rows. Raises OSError/ValueError when OSV
-    cannot be read at all."""
-    found: dict[tuple, dict[str, str]] = {q: {} for q in queries}
+def _left() -> float:
+    import step_budget
+    return step_budget.remaining()
+
+
+def query_batch(fetch, queries, left=_left) -> tuple[dict, list[dict]]:
+    """{(eco, name, version): {id: modified}} for every package asked, and the degraded rows. A package the step's
+    time did not reach is NOT in the map, so it is never read as clean; the rows name how many. Raises
+    OSError/ValueError when OSV cannot be read at all."""
+    found: dict[tuple, dict[str, str]] = {}
     pending: list[tuple[tuple, str | None]] = [(q, None) for q in queries]
     degraded: list[dict] = []
     pages: dict[tuple, int] = {}
     while pending:
+        if found and left() < RESERVE + TIMEOUT:
+            unasked = {q for q, _token in pending} - set(found)
+            degraded.append({"source": "osv", "reason": f"{len(unasked)} package(s) not asked before the step's "
+                                                        f"limit; the next pass asks them"})
+            paged = sum(1 for q, _token in pending if q in found)
+            if paged:
+                degraded.append({"source": "osv", "reason": f"{paged} package(s) had more pages of advisories than "
+                                                            f"the step's time allowed; the rest were not read"})
+            break
         chunk, pending = pending[:BATCH], pending[BATCH:]
+        for q, _token in chunk:
+            found.setdefault(q, {})
         body = {"queries": [{"package": {"ecosystem": q[0], "name": q[1]}, "version": q[2],
                              **({"page_token": token} if token else {})} for q, token in chunk]}
         answer = json.loads(fetch("POST", f"{OSV}/v1/querybatch", json.dumps(body).encode(), TIMEOUT))
@@ -131,10 +154,15 @@ def _cache_file(cache_dir: pathlib.Path, vid: str) -> pathlib.Path:
     return cache_dir / (re.sub(r"[^A-Za-z0-9._-]", "_", vid) + ".json")
 
 
-def details(fetch, wanted: dict[str, str], cache_dir: pathlib.Path) -> tuple[dict[str, dict], list[dict]]:
-    """Each advisory's record, from the cache unless OSV lists a newer `modified` than the cached one."""
+def details(fetch, wanted: dict[str, str], cache_dir: pathlib.Path, left=_left) -> tuple[dict[str, dict], list[dict]]:
+    """Each advisory's record, from the cache unless OSV lists a newer `modified` than the cached one. The records to
+    fetch are read WORKERS at a time and each is cached as it arrives, so a pass the step's time cuts short leaves
+    the next one less to read; a record not read in time is named (its cached copy, if any, is used)."""
     import atomic
+    import concurrent.futures as cf
     out, degraded = {}, []
+    cached_of: dict[str, dict | None] = {}
+    to_fetch: list[str] = []
     for vid, modified in sorted(wanted.items()):
         path = _cache_file(cache_dir, vid)
         cached = None
@@ -146,8 +174,22 @@ def details(fetch, wanted: dict[str, str], cache_dir: pathlib.Path) -> tuple[dic
         if cached and str(cached.get("modified") or "") >= str(modified or ""):
             out[vid] = cached
             continue
+        cached_of[vid] = cached
+        to_fetch.append(vid)
+    if not to_fetch:
+        return out, degraded
+
+    def one(vid: str):
+        return json.loads(fetch("GET", f"{OSV}/v1/vulns/{vid}", None, max(1.0, min(TIMEOUT, left() - RESERVE))))
+    pool = cf.ThreadPoolExecutor(max_workers=WORKERS, thread_name_prefix="osv")
+    futures = {pool.submit(one, vid): vid for vid in to_fetch}
+    budget = left() - RESERVE
+    done, late = cf.wait(futures, timeout=None if budget == float("inf") else max(0.0, budget))
+    pool.shutdown(wait=False, cancel_futures=True)
+    for future in sorted(done, key=lambda f: futures[f]):
+        vid, cached = futures[future], cached_of[futures[future]]
         try:
-            rec = json.loads(fetch("GET", f"{OSV}/v1/vulns/{vid}", None, TIMEOUT))
+            rec = future.result()
         except (OSError, ValueError) as exc:
             if cached:
                 out[vid] = cached
@@ -158,7 +200,16 @@ def details(fetch, wanted: dict[str, str], cache_dir: pathlib.Path) -> tuple[dic
         if isinstance(rec, dict) and rec.get("id"):
             out[vid] = rec
             cache_dir.mkdir(parents=True, exist_ok=True)
-            atomic.write_json(path, rec)
+            atomic.write_json(_cache_file(cache_dir, vid), rec)
+    if late:
+        stale = 0
+        for future in late:
+            cached = cached_of[futures[future]]
+            if cached:
+                out[futures[future]] = cached
+                stale += 1
+        degraded.append({"source": "osv", "reason": f"{len(late)} advisory record(s) not read before the step's "
+                                                    f"limit ({stale} used from the cache); the next pass reads them"})
     return out, degraded
 
 
@@ -303,7 +354,7 @@ def run(queries, fetch, cache_dir: pathlib.Path, today: str, previous: dict | No
                for q, ids in sorted(found.items()) if ids]
     matches = [m for m in matches if m["advisories"]]
     return {"schema": SCHEMA, "checked_at": now(), "checked_on": today, "enabled": True,
-            "complete": not degraded, "queried": len(queries), "matches": matches,
+            "complete": not degraded, "queried": len(found), "matches": matches,
             "advisories": {k: advisories[k] for k in sorted(advisories)},
             "kev": {"fetched_on": kev_on, "count": len(cves)}, "degraded": degraded}
 
