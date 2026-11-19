@@ -1052,8 +1052,8 @@
     {
       "path": "docs/COMPATIBILITY.md",
       "source_sha256": "70f6b5a2e54c5205f145ba07549c23d28ba8407be99c4098cd467ae8ee9f9280",
-      "export_sha256": "071084ed24cc4e75e7028e79a25cdc8a368bf9a5ba8b39af5799717df75ba2d1",
-      "bytes": 159319,
+      "export_sha256": "e614fc6e61c076e9d4cbc77366c1385b7e33d49bef7bb0bcff377abcabc4d373",
+      "bytes": 159281,
       "upstream_modified": true
     },
     {
