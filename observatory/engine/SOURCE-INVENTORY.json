@@ -3531,8 +3531,8 @@
       "path": "machine_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "0fc5e03b775e909656f5cea76fed81cfd22ffcc30c5fedbb02b51548c7e38dac",
-      "bytes": 20733
+      "export_sha256": "ce023dba1d0ebfa92a4b93eef26989255b8adf17d0bb3f97d0cd77d0eb44b902",
+      "bytes": 21055
     },
     {
       "path": "maintenance.py",
@@ -5142,8 +5142,8 @@
       "path": "tests/test_coverage_view.py",
       "source_sha256": null,
       "upstream_modified": true,
-      "export_sha256": "6b04b3ad6c0f434ceeb4f0fdd9a4a7a337ed7d73b4ed7ee29fc895a58d4dc484",
-      "bytes": 8278
+      "export_sha256": "36c547c3d5403b7809e3d05e9674c950b5890d8309c8e0a626fc2df958363ef7",
+      "bytes": 10091
     },
     {
       "path": "tests/test_credential_bindings.py",
