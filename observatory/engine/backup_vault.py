@@ -974,6 +974,8 @@ def stamp() -> str:
 
 
 def _sync_dir(path: Path) -> None:
+    if osprivacy.WINDOWS:
+        return  # a folder cannot be opened for fsync there; the file is synced before its rename (OBS-644)
     fd = osprivacy.open(path, os.O_RDONLY)
     try:
         os.fsync(fd)

@@ -837,6 +837,15 @@ class RotationOrder(Base):
         self.assertEqual(vault.artifacts(root, vault.DB_KIND, vault.DB_SUFFIX), dbs[::-1])
 
 
+class WindowsFolderSync(unittest.TestCase):
+    """OBS-644: a folder cannot be opened for fsync on Windows; publishing syncs the file before its rename."""
+
+    def test_on_windows_no_folder_is_opened_for_fsync(self):
+        with patch.object(vault.osprivacy, 'WINDOWS', True), patch.object(vault.osprivacy, 'open') as opened:
+            vault._sync_dir(Path(tempfile.gettempdir()))
+        opened.assert_not_called()
+
+
 class FakeStore:
     """The OS credential store, in memory: what a restore reads, and proof it never writes."""
 
